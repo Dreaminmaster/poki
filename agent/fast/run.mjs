@@ -2,13 +2,14 @@
 // Source: poki-mcp/client/fast/run.mjs. The plan loop is retained; App owns model handoff.
 import { FastSession } from './session.mjs';
 import { candidatesFor, succeeded, conditionsMatch } from './task.mjs';
+import { reusableActionObservation } from '../post-action-observation.mjs';
 
 const reasons = new Set(['device_unavailable', 'tool_failed', 'tool_protocol', 'unknown_outcome', 'scope_unavailable', 'outside_scope', 'structure_unavailable', 'stale_observation', 'ambiguous_target', 'no_candidates', 'step_precondition_failed', 'step_not_completed', 'final_condition_failed', 'task_changed']);
 export async function runFast({ task, alternatives = [], onSelect = () => {}, call, releaseLease = true, signal = new AbortController().signal }) {
   const mode = 'plan';
   const started = performance.now();
   const stats = { mode, provider: null, model: null, model_calls: 0, model_ms: 0, tool_calls: 0, tool_ms: 0, scope_ms: 0, action_count: 0, scope_launch_count: 0, total_ms: 0 };
-  let session, lease, observation, lastAction, pending = false, reason = null, status = 'handoff';
+  let session, lease, observation, nextObservation, lastAction, pending = false, reason = null, status = 'handoff';
   const history = [], observedIds = new Set();
   let scopePid;
   const checkpoint = () => ({
@@ -49,7 +50,8 @@ export async function runFast({ task, alternatives = [], onSelect = () => {}, ca
     for (;;) {
       signal.throwIfAborted();
       await session.call('renew_device', { lease_id: lease.lease_id, ttl_seconds: 300 });
-      const current = await session.call('observe_device', { device: task.device, source: 'auto', max_elements: 400, include_offscreen: false });
+      const current = nextObservation ?? await session.call('observe_device', { device: task.device, source: 'auto', max_elements: 400, include_offscreen: false, include_image: false });
+      nextObservation = null;
       if (!current.observation?.id || current.observation.device !== lease.device || observedIds.has(current.observation.id)
         || !Array.isArray(current.elements) || !current.elements.length || current.truncated
         || !['accessibility', 'ocr'].includes(current.source)
@@ -74,12 +76,13 @@ export async function runFast({ task, alternatives = [], onSelect = () => {}, ca
       if (candidates.length !== 1) throw new Error('no_candidates');
       const action = candidates[0];
       fresh(); signal.throwIfAborted();
-      const args = { ...action.arguments, device: task.device, ...(action.op === 'scroll' ? { direction: action.direction } : {}),
+      const args = { ...action.arguments, device: task.device, return_observation: true, ...(action.op === 'scroll' ? { direction: action.direction } : {}),
         ...(action.ref ? { ref: action.ref } : {}), ...(action.text_id ? { text: task.texts[action.text_id] } : {}) };
       lastAction = action.id; pending = true; stats.action_count++;
       const receipt = await session.call(action.op, args);
       if (receipt.sent !== true) throw new Error('unknown_outcome');
       pending = false; history.push(action.id);
+      nextObservation = reusableActionObservation(receipt, task.device, task.bundle_id);
     }
   } catch (error) {
     reason = signal.aborted ? 'cancelled'

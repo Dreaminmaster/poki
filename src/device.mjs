@@ -39,7 +39,7 @@ export function hidPoint(x, y, width, height) {
 }
 
 export class Devices {
-  selected; requested; frame; size; seen; elements = []; elementsAt = 0; lastInputAt = -Infinity; inBatch = false;
+  selected; requested; frame; size; seen; elements = []; elementsAt = 0; lastInputAt = -Infinity; lastInputCompletedAt; inBatch = false;
   scales = new Map(); physicalNames = new Map(); backgroundDevices = new Map(); nextRef = 0;
   constructor(coordinator = new Coordination()) { this.coordinator = coordinator; }
   async run(file, args, timeout = 45000, input) {
@@ -257,7 +257,7 @@ export class Devices {
     const elements = (tree.elements ?? []).filter(onScreen(this.size?.device === target.id ? this.size : await this.capture()));
     // A tree that leaves a state out compares equal to one that gives its default.
     const signature = JSON.stringify(elements.map(e => { const box = e.frame ?? e; return [e.type ?? e.role, e.label, e.text, e.value, e.focused, Boolean(e.selected), flagOn(e.enabled), box.x, box.y, box.width, box.height]; }));
-    return this.seen = { device: target.id, foreground: tree.foreground, elements, signature, at: performance.now() };
+    return this.seen = { device: target.id, foreground: tree.foreground, elements, signature, at: performance.now(), structure_completed_at: new Date().toISOString() };
   }
   // A simulator's size only changes when it rotates. A physical device maps touches through its
   // current orientation, so it keeps taking a fresh frame.
@@ -269,9 +269,13 @@ export class Devices {
   // so a failed read only loses the report; a stop request still surfaces as a stop.
   async readback(before, options) {
     try {
-      const { signature, screen } = await deadline(readbackMs, () => readScreen(this, options));
+      const { signature, screen, structuredObservation } = await deadline(options?.structured ? readbackMs + 3000 : readbackMs, () => readScreen(this, options));
       const compared = before !== undefined && signature !== undefined;
-      return { screen, screen_change_verified: compared, ...(compared ? { screen_changed: signature !== before } : {}) };
+      const reusable = structuredObservation && this.lastInputCompletedAt;
+      const receiptId = reusable ? randomUUID() : undefined;
+      return { screen, screen_change_verified: compared, ...(compared ? { screen_changed: signature !== before } : {}),
+        ...(reusable ? { receipt_id: receiptId, input_completed_at: this.lastInputCompletedAt,
+          post_action_observation: { version: 1, action_receipt_id: receiptId, ...structuredObservation } } : {}) };
     } catch (error) {
       try { checkWork(); } catch (stop) { return { stopped: true, stop_reason: stoppingReason(stop) }; }
       return { screen_change_verified: false, screen: { unavailable: error.message } };
@@ -323,6 +327,7 @@ export class Devices {
     catch (error) { result = { outcome: 'unknown', error: error.message, stopped: Boolean(stopped(error)), stop_reason: stopped(error) ? stoppingReason(error) : 'unknown', instruction: 'Input may have been delivered. Inspect the screen before retrying.', isError: true }; }
     if (result.reason === 'display_service_missing') result = { ...result, instruction: `No input was sent. This iPhone does not provide com.apple.coredevice.displayservice, which touch and text input need. Screenshots and accessibility work without it, so they do not show whether input is available. Run node bin/prepare-device.mjs ${target.id} from the Poki checkout to install a developer disk image that provides it. See docs/physical-iphone.md#touch-and-text-input-fail.` };
     this.lastInputAt = performance.now();
+    this.lastInputCompletedAt = new Date().toISOString();
     if (target.kind === 'physical') {
       try { await phase('recording_recovery', () => resumeRecordings(this, target)); }
       catch (error) { result = { ...result, recording: { resumed: false, error: error.message }, stopped: Boolean(stopped(error)), ...(stopped(error) ? { stop_reason: stoppingReason(error) } : {}) }; }
@@ -411,8 +416,12 @@ export class Devices {
           const result = await this.recognize(args), frame = this.frame;
           let prompt;
           try { prompt = { status: 'checked', source: 'ocr', warning: promptWarning(await this.ocr(frame)) }; }
-          catch (error) { if (stopped(error)) throw error; prompt = { status: 'unavailable', instruction: 'Inspect the image for system prompts before continuing.' }; }
-          return { content: [...text({ ...result, prompt }).content, { type: 'image', data: frame.data.toString('base64'), mimeType: 'image/png' }] };
+          catch (error) { if (stopped(error)) throw error; prompt = { status: 'unavailable', instruction: args.include_image === false
+            ? 'Prompt check unavailable. Take a screenshot and inspect it before continuing.'
+            : 'Inspect the image for system prompts before continuing.' }; }
+          // Structured-only output still captures a frame, reads AX/OCR and checks prompts.
+          return { content: [...text({ ...result, prompt }).content,
+            ...(args.include_image === false ? [] : [{ type: 'image', data: frame.data.toString('base64'), mimeType: 'image/png' }])] };
         }
         case 'get_foreground_app': {
           const tree = await this.bridge({ op:'ax', include_offscreen:false });
@@ -446,7 +455,7 @@ export class Devices {
           const delivered = result.sent === true && !result.isError && !result.stopped;
           // A target that had to be waited for is compared with the screen it was found on, not the one before the wait.
           const sentTo = this.beforeInput ?? before, signature = sentTo?.elements.length ? sentTo.signature : undefined;
-          if (looks && delivered) result = { ...result, ...await this.readback(signature) };
+          if (looks && delivered) result = { ...result, ...await this.readback(signature, { structured: args.return_observation === true }) };
           else if (touches && delivered && signature !== undefined) result = { ...result, ...await this.changedSince(signature) };
           if (!verify) result = { ...result, verified: false };
           const unchanged = touches && result.screen_changed === false && !result.stopped;

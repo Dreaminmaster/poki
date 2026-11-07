@@ -34,7 +34,19 @@ Arguments of common steps: launch_app {bundle_id or name}; tap_text {text}; tap 
   press_key: 'Use key=return to submit existing text after it has been checked; do not re-enter the text. A sent result only confirms key dispatch, so verify the app result before reporting delivery.',
   launch_app: 'On a simulator it returns once the app shows readable elements, with their text in screen, so there is no need to look again or wait. If launch fails with CoreDeviceError 4016, inspect the current screen and use the observed Home Screen or app switcher controls. Avoid repeating the same failing launch until device conditions change.',
 };
-export const definitions = catalog.tools.map(tool => [tool.name, [tool.description, guidance[tool.name]].filter(Boolean).join('\n\n'), z.fromJSONSchema(tool.inputSchema), readOnly.has(tool.name)]);
+const actionObservationTools = new Set(['tap', 'double_tap', 'long_press', 'tap_text', 'swipe',
+  'drag', 'scroll', 'pinch', 'type_text', 'fill', 'press_key', 'press_button', 'go_back', 'handle_alert']);
+export const definitions = catalog.tools.map(tool => {
+  // Opt-in: existing clients keep their original responses.
+  const schema = actionObservationTools.has(tool.name)
+    ? { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
+      return_observation: { type: 'boolean', description: 'Request a ref-bearing post-input observation when available.' } } }
+    : tool.name === 'observe_device'
+      ? { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
+        include_image: { type: 'boolean', description: 'Attach PNG (default true); false retains capture and prompt checks.' } } }
+      : tool.inputSchema;
+  return [tool.name, [tool.description, guidance[tool.name]].filter(Boolean).join('\n\n'), z.fromJSONSchema(schema), readOnly.has(tool.name)];
+});
 definitions.push(['disconnect_device', 'Close the selected remote device connection and its local helper. Cellular reconnection may require returning the iPhone to Wi-Fi. Does not undo input.', z.object({ device: z.string().optional() }), false]);
 definitions.push(['reconnect_device', 'Re-establish the selected RemotePairing tunnel. Does not replay input. A new session may require Wi-Fi when iOS closes its remote pairing listener.', z.object({ device: z.string().optional() }), false]);
 definitions.push(['poki_mcp_status', 'Report Poki MCP version, current Git commit, native bridge build time, tool count, connected-device count, selected device, approval mode for this session, and any available Poki update with release notes and the update command.', z.object({}), true]);

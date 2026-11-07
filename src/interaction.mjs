@@ -161,24 +161,58 @@ const describeElement = element => {
 // What the screen shows once it has stopped changing: a list still coasting after a scroll would
 // otherwise report a position it is about to leave. `compared` is false when accessibility could not
 // read it, because OCR text alone cannot say whether anything moved.
-export async function readScreen(ctx, { once = false } = {}) {
+export async function readScreen(ctx, { once = false, structured = false } = {}) {
   await ctx.settle();
+  // Opt-in only: use a truly post-input frame for the stable AX read.
+  // Existing MCP requests retain their existing readback response.
+  let postInputFrame = false;
+  if (structured && ctx.lastInputCompletedAt) {
+    try { await ctx.capture(); postInputFrame = true; }
+    catch (error) {
+      // A missing optional image must not turn an otherwise usable AX readback into an error.
+      if (stopped(error)) throw error;
+    }
+  }
   const started = performance.now();
   // A batch that ends on a touch has just read the screen to see whether it changed.
   let seen = await readStructure(ctx, once ? 0 : justReadMs);
+  let stabilized = once;
   while (!once && performance.now() - started < stableWithinMs) {
     await pause(pollMs);
     const next = await readStructure(ctx, 0);
     const same = next.signature === seen.signature;
     seen = next;
-    if (same) break;
+    if (same) { stabilized = true; break; }
   }
   const compared = seen.elements.length > 0;
   const elements = compared ? seen.elements : (await ctx.recognize({ source: 'ocr', max_elements: Number.MAX_SAFE_INTEGER })).elements;
   const text = [...new Set(elements.filter(visible).map(describeElement).filter(Boolean))];
-  const warning = promptWarning(elements);
+  let warning = promptWarning(elements);
+  let structuredObservation;
+  const frame = ctx.frame;
+  if (structured && postInputFrame && stabilized && compared && frame && seen.device === frame.device && elements.length <= 400 &&
+      seen.structure_completed_at && Date.parse(frame.capture_started_at) >= Date.parse(ctx.lastInputCompletedAt)) {
+    // Image and AX are non-atomic. Retain actual timestamps; never re-stamp old data.
+    let prompt = { status: 'checked', source: 'ocr', warning: null };
+    try { prompt.warning = promptWarning(await ctx.ocr(frame)); }
+    catch (error) {
+      if (stopped(error)) throw error;
+      prompt = { status: 'unavailable', source: 'ocr' };
+    }
+    warning ??= prompt.warning;
+    frame.structure_completed_at = seen.structure_completed_at;
+    frame.source = 'accessibility';
+    ctx.elements = elements.map(element => ({ ...element, ref: 'e' + ++ctx.nextRef }));
+    ctx.elementsAt = Date.now();
+    structuredObservation = {
+      observation: ctx.observation(frame), source: 'accessibility',
+      foreground: seen.foreground, elements: ctx.elements,
+      total: ctx.elements.length, truncated: false, prompt: { ...prompt, warning: warning ?? null },
+    };
+  }
   return {
     signature: compared ? seen.signature : undefined,
+    ...(structuredObservation ? { structuredObservation } : {}),
     screen: {
       foreground: seen.foreground?.bundle_id ?? seen.foreground?.name ?? null,
       source: compared ? 'accessibility' : 'ocr',

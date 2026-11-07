@@ -14,13 +14,15 @@ import { openingSentence, openingFromPrompt } from './opening.mjs';
 import { unlockDevice } from './unlock-device.mjs';
 import { StepDeadline } from './step-deadline.mjs';
 import { checkDeviceTools } from './device-preflight.mjs';
+import { reusableActionObservation } from './post-action-observation.mjs';
 
 const terminal = new Set(['completed', 'failed', 'stopped']);
 const allowedTools = new Set(['poki_mcp_status', 'get_foreground_app', 'list_apps', 'launch_app', 'take_screenshot', 'observe_device', 'list_elements', 'tap', 'tap_text', 'fill', 'type_text', 'press_key', 'hide_keyboard', 'scroll', 'swipe', 'go_back', 'handle_alert', 'batch_commands']);
 const object = (properties, required) => ({ type: 'object', properties, required, additionalProperties: false });
 const string = { type: 'string' };
 const textResult = text => ({ success: true, contentItems: [{ type: 'inputText', text }] });
-const structuredObservations = new Set(['observe_device', 'list_elements']);
+const structuredObservations = new Set(['observe_device', 'list_elements', 'post_action_observation']);
+const reusableInputTools = new Set(['tap', 'double_tap', 'long_press', 'tap_text', 'swipe', 'drag', 'scroll', 'pinch', 'type_text', 'fill', 'press_key', 'press_button', 'go_back', 'handle_alert']);
 const tracePassive = new Set(['poki_mcp_status', 'list_apps', 'get_foreground_app', 'take_screenshot', 'acquire_device', 'renew_device', 'release_device']);
 const observations = new Set(['take_screenshot', 'observe_device', 'list_elements', 'get_foreground_app', 'list_apps', 'poki_mcp_status']);
 
@@ -421,7 +423,7 @@ export class PhoneTask extends EventEmitter {
     if (this.observedAfterAction && ['batch_commands', 'take_screenshot', 'observe_device', 'list_elements'].includes(name)) this.completionEvidence = result.content;
     this.#record(name, args, result);
     if (!observing && !result.isError) {
-      const observed = await this.#completeObservation();
+      const observed = await this.#completeObservation(result);
       if (observed) {
         result = { ...result, content: [...result.content, ...observed.content] };
         if (!observed.isError) { this.observedAfterAction = true; this.completionEvidence = observed.content; }
@@ -434,9 +436,18 @@ export class PhoneTask extends EventEmitter {
     };
   }
 
-  async #completeObservation() {
+  async #completeObservation(actionResult) {
     const last = this.trace.findLast(entry => !tracePassive.has(entry.tool));
     if (!last || structuredObservations.has(last.tool)) return;
+    const receipt = actionResult && resultData(actionResult);
+    const reused = reusableActionObservation(receipt, this.device, this.targetBundle ?? null);
+    if (reused) {
+      // Reused receipt evidence is not a new MCP call.
+      this.trace.push({ tool: 'post_action_observation', args: { source: 'action_receipt', receipt_id: receipt.receipt_id },
+        result: reused, error: false, reused: true, elapsedMilliseconds: 0, at: new Date().toISOString() });
+      this.#mark({ kind: 'observation_reused', source: 'action_receipt', observationId: reused.observation.id });
+      return { content: [{ type: 'text', text: JSON.stringify(reused) }] };
+    }
     const args = { device: this.device };
     const result = await this.#call('list_elements', args);
     this.#record('list_elements', args, result);
@@ -506,7 +517,8 @@ export class PhoneTask extends EventEmitter {
       if (tool === 'list_apps') throw new Error('Call list_apps separately with a specific query.');
       return { tool, arguments: this.#validate(tool, command.arguments ?? {}) };
     }), stop_on_error: true };
-    return name === 'poki_mcp_status' ? {} : { ...args, device: this.device };
+    return name === 'poki_mcp_status' ? {} : { ...args, device: this.device,
+      ...(reusableInputTools.has(name) ? { return_observation: true } : {}) };
   }
 
   #say(role, text, state = null) {
