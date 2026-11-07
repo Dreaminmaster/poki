@@ -39,7 +39,7 @@ test('an AX-only ref remains usable without a redundant capture until input inva
   const receipt = value(result);
   const ref = receipt.post_action_observation?.elements?.find(e => e.role === 'Button')?.ref
     ?? receipt.post_action_observation?.elements?.[0]?.ref;
-  assert.match(ref, /^e\\d+$/);
+  assert.match(ref, /^e\d+$/);
   const tapped = await f.call('tap', { ref });
   assert.ok(!tapped.isError, 'Current action-bound AX refs must remain valid without an extra list_elements read');
 });
