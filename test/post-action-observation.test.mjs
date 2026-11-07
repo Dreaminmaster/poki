@@ -35,6 +35,11 @@ test('optional image OCR captures AFTER the stable AX read', async t => {
 
 test('an AX-only ref remains usable without a redundant capture until input invalidates it', async t => {
   const f = await fixture(t);
+  // A full-screen AX root makes orientation verifiable without a screenshot.
+  await f.set({ elements: [
+    { role: 'Application', label: 'Fixture', frame: { x: 0, y: 0, width: 100, height: 200 } },
+    { role: 'Button', label: 'Continue', frame: { x: 10, y: 10, width: 40, height: 20 } },
+  ] });
   const result = await f.call('press_key', { key: 'return', return_observation: true });
   const receipt = value(result);
   const ref = receipt.post_action_observation?.elements?.find(e => e.role === 'Button')?.ref
@@ -57,4 +62,44 @@ test('a changed post-input image does not invalidate stable AX simply because th
   assert.ok(after, 'Expected post-input image changes must not masquerade as an intervening input');
   assert.ok(after.observation.revision > before.observation.revision);
   assert.ok(after.observation.structure_completed_at <= after.observation.capture_started_at);
+});
+
+test('rotation between coordinate taps refreshes viewport before HID conversion', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  const ax = (width, height) => ({ elements: [
+    { role: 'Application', label: 'Fixture', frame: { x: 0, y: 0, width, height } },
+    { role: 'Button', label: 'Go', frame: { x: 10, y: 10, width: 40, height: 20 } },
+  ] });
+  await f.set(ax(100, 200));
+  const first = await f.call('tap', { x: 80, y: 170, return_observation: true });
+  assert.ok(!first.isError, 'Portrait tap is sent successfully');
+
+  // Rotate outside Poki. The previous AX-only observation is still bound
+  // to the portrait frame, but the next pre-input AX root is landscape.
+  await sharp({ create: { width: 200, height: 100, channels: 3, background: 'white' } })
+    .png().toFile(f.image);
+  await f.set(ax(200, 100));
+  const second = await f.call('tap', { x: 180, y: 60, return_observation: true });
+  assert.ok(!second.isError, 'A landscape tap must not use stale portrait dimensions');
+
+  const taps = (await f.events()).filter(e => e.op === 'tap');
+  assert.equal(taps.length, 2);
+  const actual = taps[1].request;
+  const expected = [Math.round(180 / 199 * 65535), Math.round(60 / 99 * 65535)];
+  assert.deepEqual([actual.x, actual.y], expected,
+    'Coordinate conversion must use the newly captured 200×100 viewport');
+});
+
+test('unverifiable AX root safely falls back to capture for coordinate taps', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  // No full-screen root means the AX-only observation cannot establish orientation.
+  await f.set({ elements: [{ role: 'Button', label: 'Go', frame: { x: 10, y: 10, width: 40, height: 20 } }] });
+  assert.ok(!(await f.call('tap', { x: 80, y: 170, return_observation: true })).isError);
+  await sharp({ create: { width: 200, height: 100, channels: 3, background: 'white' } })
+    .png().toFile(f.image);
+  assert.ok(!(await f.call('tap', { x: 180, y: 60, return_observation: true })).isError,
+    'Do not trust an AX-only viewport when there is no verifiable root frame');
+  const taps = (await f.events()).filter(e => e.op === 'tap');
+  assert.deepEqual([taps.at(-1).request.x, taps.at(-1).request.y],
+    [Math.round(180 / 199 * 65535), Math.round(60 / 99 * 65535)]);
 });
