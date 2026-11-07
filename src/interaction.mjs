@@ -186,14 +186,15 @@ export async function readScreen(ctx, { once = false, structured = false, struct
       ctx.size?.device === seen.device && elements.length <= 400) {
     // A route may opt into image/OCR verification. The screenshot is taken
     // AFTER the AX structure stabilizes; neither source is claimed atomic.
+    const axViewport = { ...ctx.size };
     let frame;
     if (structuredVisual) {
       try { frame = await ctx.capture(); }
       catch (error) { if (stopped(error)) throw error; }
     }
-    const sameViewport = ctx.size?.width === frame?.width && ctx.size?.height === frame?.height;
+    const sameViewport = axViewport.device === frame?.device && axViewport.width === frame?.width && axViewport.height === frame?.height;
     if (!structuredVisual || frame && frame.device === seen.device && sameViewport &&
-        frame.revision === seen.revision &&
+        (frame.revision === seen.revision || frame.revision === seen.revision + 1) &&
         Date.parse(frame.capture_started_at) >= Date.parse(seen.structure_completed_at)) {
       let prompt = { status: 'checked', source: 'accessibility', warning: warning ?? null };
       if (structuredVisual) {
