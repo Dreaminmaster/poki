@@ -152,3 +152,19 @@ for (const [name, command] of [
     [Math.round(90 / 199 * 65535), Math.round(60 / 99 * 65535)],
     'The first batch step must use the landscape 200×100 viewport');
 });
+
+// Regression for the upstream unchanged-screen confirmation: a delayed AX
+// read can be a different object with the same structure. It should not
+// disable the opt-in receipt even if screen_stable reporting stays conservative.
+test('unchanged screen after delayed confirmation still has a reusable AX receipt', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  await f.set({ label: 'Unchanged', afterInput: null });
+  const response = await f.call('press_key', { key: 'return', return_observation: true });
+  assert.ok(!response.isError, 'The input was delivered');
+  const result = value(response);
+  assert.equal(result.screen_change, 'unchanged');
+  assert.equal(result.post_action_observation?.version, 1,
+    'A matching confirmation read must not drop the structured observation');
+  assert.ok(result.post_action_observation?.elements.length);
+  assert.ok(result.post_action_observation?.observation.structure_started_at >= result.input_completed_at);
+});

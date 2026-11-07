@@ -228,6 +228,8 @@ export async function readScreen(ctx, { once = false, before, confirmation, stru
   const cost = () => ctx.readCost?.() ?? 0;
   // A batch that ends on a touch has just read the screen to see whether it changed.
   let seen = await readStructure(ctx, once ? 0 : justReadMs), stable = false;
+  // A delayed confirming read may be a new object yet represent the same stable AX tree.
+  let reuseStable = false;
   // A read that began before the last input shows the screen the input was sent to, never the current one.
   if (seen.startedAt < ctx.lastInputAt) seen = await readStructure(ctx, 0);
   const window = Math.max(stableWithinMs, 2 * cost() + pollMs);
@@ -239,15 +241,22 @@ export async function readScreen(ctx, { once = false, before, confirmation, stru
     seen = next;
     if (same) { stable = true; break; }
   }
+  reuseStable = stable;
   if (before !== undefined && seen.elements.length && seen.signature === before) {
     const confirmed = await confirmUnchanged(ctx, before, seen, confirmation);
-    if (confirmed !== seen) { seen = confirmed; stable = false; }
+    if (confirmed !== seen) {
+      // A later AX read with an unchanged signature can be reused; keep
+      // the original screen_stable reporting independent of this receipt gate.
+      reuseStable = confirmed.elements?.length > 0 && confirmed.signature === seen.signature &&
+        Number.isFinite(confirmed.startedAt) && confirmed.startedAt >= seen.startedAt;
+      seen = confirmed; stable = false;
+    }
   }
   const compared = seen.elements.length > 0;
   const elements = compared ? seen.elements : (await ctx.recognize({ source: 'ocr', max_elements: Number.MAX_SAFE_INTEGER })).elements;
   let warning = promptWarning(elements);
   let structuredObservation;
-  if (structured && stable && compared && seen.structure_started_at && seen.structure_completed_at &&
+  if (structured && reuseStable && compared && seen.structure_started_at && seen.structure_completed_at &&
       Date.parse(seen.structure_started_at) >= Date.parse(ctx.lastInputCompletedAt) &&
       seen.revision === ctx.coordinator.revision(seen.device) &&
       ctx.size?.device === seen.device && elements.length <= 400) {

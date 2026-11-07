@@ -470,6 +470,12 @@ export class Devices {
     const def = definitions.find(d => d[0] === name);
     if (!def) throw new Error(`Unknown tool: ${name}`);
     const args = def[2].parse(original);
+    // Invalidate a previous call's AX-only viewport BEFORE dispatching any
+    // tool. In particular CUA look/do and batch_commands bypass the default
+    // input branch; without this they could reuse portrait size after rotation.
+    // The default input branch may renew it only after its own fresh AX read.
+    const previousViewport = this.structureViewport;
+    this.structureViewport = undefined;
     const previous = this.requested, previousResolved = this.resolved;
     // Steps of one batch share a lookup, which runs a Python process and simctl each time.
     const sharesTarget = this.inBatch && args.device === undefined;
@@ -605,8 +611,6 @@ export class Devices {
           // The AX-only binding is valid only when this same call has just
           // performed a fresh root-verified AX read. Unverified or first-step
           // batch gestures fall back to image capture for coordinate sizing.
-          const previousViewport = this.structureViewport;
-          this.structureViewport = undefined;
           const before = looks || touches
             ? await this.readBefore(previousViewport ? 0 : this.inBatch ? this.reuseMs() : 0)
             : undefined;
