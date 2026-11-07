@@ -72,8 +72,12 @@ export class TelegramSource {
           const seconds = result.parameters?.retry_after;
           if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0 || seconds > 30) throw new TelegramError(code, 'rate limited; retry later');
           delay = seconds * 1000;
-        } else if (code >= 500 && (read || result.ok === false)) delay = 2 ** attempt * 1000;
-        else throw new TelegramError(code);
+        } else if (code >= 500) {
+          // A server error does not prove a message was not delivered. Retrying a write can
+          // duplicate user-visible replies; only the read-only Bot API methods are safe to retry.
+          if (!read) throw new TelegramError(code, 'failed; delivery may be uncertain');
+          delay = 2 ** attempt * 1000;
+        } else throw new TelegramError(code);
       }
       if (delay > 0) await setTimeout(delay, undefined, { signal });
     }
