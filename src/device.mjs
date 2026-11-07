@@ -511,14 +511,28 @@ export class Devices {
         case 'batch_commands': return await runBatch(this, args);
         default: {
           const verify = args.verify !== false;
-          // Without verification there is no pre-input AX read to detect a
-          // rotation. Never reuse an AX-only viewport for coordinate input:
-          // force screenSize()/viewport() to capture the current dimensions.
-          if (!verify) this.structureViewport = undefined;
           const looks = verify && reportsScreen.has(name) && !this.inBatch, touches = verify && touchesControl.has(name);
           this.beforeInput = undefined;
-          // A batch step may reuse the read its predecessor just took of the same screen.
-          const before = looks || touches ? await this.readBefore(this.inBatch ? justReadMs : 0) : undefined;
+          // A viewport learned from a previous action is never evidence for
+          // THIS input. Only a fresh pre-input AX read with a validated
+          // full-screen root can renew the binding. Paths that skip that read
+          // (verify:false, first-step batch swipes/drags/pinches, etc.) must
+          // capture before normalizing coordinates, as they did on main.
+          const previousViewport = this.structureViewport;
+          this.structureViewport = undefined;
+          // Do not accept the 500 ms cache if we need to renew an AX-only
+          // binding: the orientation might have changed since that read.
+          const before = looks || touches
+            ? await this.readBefore(previousViewport ? 0 : this.inBatch ? justReadMs : 0)
+            : undefined;
+          if (previousViewport && before?.rootVerified === true &&
+              before.device === previousViewport.device &&
+              before.revision === this.coordinator.revision(before.device) &&
+              this.size?.device === before.device &&
+              this.size.width === previousViewport.width && this.size.height === previousViewport.height &&
+              this.elements.length && Date.now() - this.elementsAt <= 30000) {
+            this.structureViewport = { ...previousViewport, revision: before.revision };
+          }
           let result = await interaction(this,name,args);
           if(result===undefined) throw new Error(`No implementation for ${name}`);
           const delivered = result.sent === true && !result.isError && !result.stopped;
