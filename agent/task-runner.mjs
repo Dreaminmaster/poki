@@ -150,10 +150,6 @@ export class PhoneTask extends EventEmitter {
         this.initialForeground = resultData(foreground);
       } catch (error) { this.#restoreWarning(error); }
       if (this.finished) return;
-      const modelStarted = performance.now();
-      await this.codex.open();
-      if (this.finished) { this.codex.close(); return; }
-      this.snapshot.metrics.modelSetupMilliseconds = performance.now() - modelStarted;
       let route = this.options.images?.length ? null : await this.routes.find(this.snapshot.prompt, this.snapshot.context);
       if (route) {
         await this.#announce(this.routes.render(route.opening, route.plan.texts));
@@ -161,7 +157,6 @@ export class PhoneTask extends EventEmitter {
         this.snapshot.execution = { mode: 'route', routeId: route.id, learned: null };
         this.publish({ phase: 'running', title: 'Running learned steps', planTitle: this.routes.render(route.planTitle, route.plan.texts), plan: route.plan.steps.map((_, index) => `Step ${index + 1}`), currentStep: 1 });
         if (this.finished) return;
-        await this.#tool('launch_app', { bundle_id: this.bundleId });
         const choices = [route, ...(route.alternatives ?? [])];
         const outcome = await runFast({ releaseLease: false, task: { ...route.plan, device: this.device, bundle_id: this.bundleId, goal: this.snapshot.prompt, launch_for_scope: true }, signal: this.abort.signal,
           alternatives: choices.slice(1).map(choice => ({ ...choice.plan, device: this.device, bundle_id: this.bundleId, goal: this.snapshot.prompt })),
@@ -175,6 +170,7 @@ export class PhoneTask extends EventEmitter {
             if (this.snapshot.conversation.some(entry => entry.state === 'queued') && name !== 'release_device') throw new Error('task_changed');
             const result = await this.#call(name, args);
             this.#record(name, args, result);
+            if (name === 'launch_app' && !result.isError) this.#noteTarget(result, args);
             if (name === 'observe_device') this.observedAfterAction = !result.isError;
             this.publish();
             return result;
@@ -205,9 +201,16 @@ export class PhoneTask extends EventEmitter {
         outcome.handoff_reason ??= 'result_unverified';
         this.snapshot.execution.mode = 'recovery';
         this.snapshot.execution.recovery = { reason: outcome.handoff_reason, checkpoint: outcome.checkpoint };
-        this.recovery = `Route stopped: ${outcome.handoff_reason}. Completed actions: ${outcome.checkpoint.completed_action_ids.join(', ')}. Do not relaunch the app or replay completed actions. Observe the current screen and continue. Last action outcome: ${outcome.checkpoint.action_outcome}. Observe before deciding.`;
+        const returned = outcome.stats?.return_count ? ` Before it stopped, the route went back ${outcome.stats.return_count} screen${outcome.stats.return_count === 1 ? '' : 's'} looking for its start page.` : '';
+        this.recovery = `Route stopped: ${outcome.handoff_reason}.${returned} Completed actions: ${outcome.checkpoint.completed_action_ids.join(', ')}. Do not relaunch the app or replay completed actions. Observe the current screen and continue. Last action outcome: ${outcome.checkpoint.action_outcome}. Observe before deciding.`;
         this.publish({ title: 'Page changed. Continuing from the current screen.' });
       }
+      const modelStarted = performance.now();
+      // A learned route can hand off on a Mac with no model access; say so now instead of at the step deadline.
+      try { await this.codex.open(); }
+      catch (error) { this.fail(Object.assign(error, { code: 'model_setup' })); return; }
+      if (this.finished) { this.codex.close(); return; }
+      this.snapshot.metrics.modelSetupMilliseconds = performance.now() - modelStarted;
       await this.#startModel(definitions);
     } catch (error) {
       if (error.code === 'device_setup') this.fail(error);
