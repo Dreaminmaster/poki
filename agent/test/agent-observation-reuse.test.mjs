@@ -32,7 +32,7 @@ async function scenario(t, postActionObservation) {
   void task.start(); await closed;
   assert.equal(task.snapshot.failure, null, 'The synthetic task must complete verification');
   return { listCalls: services.deviceCalls.filter(c => c.name === 'list_elements').length,
-    trace: task.trace, deviceCalls: services.deviceCalls };
+    trace: task.trace, deviceCalls: services.deviceCalls, modelRequests: services.modelRequests };
 }
 
 test('Agent reuses eligible receipt and omits the second explicit list_elements read', { timeout: 60000 }, async t => {
@@ -40,6 +40,14 @@ test('Agent reuses eligible receipt and omits the second explicit list_elements 
   assert.equal(reused.listCalls, 1);
   assert.ok(reused.trace.some(e => e.tool === 'post_action_observation' && e.reused && e.args.source === 'action_receipt'));
   assert.equal(reused.deviceCalls.find(c => c.name === 'fill').args.return_observation, true);
+  assert.equal(reused.deviceCalls.find(c => c.name === 'fill').args.post_action_ocr, undefined,
+    'Ordinary Agent must not add image/OCR work by default');
+  const toolOutputs = reused.modelRequests
+    .filter(request => !request.tools?.some(tool => tool.name === 'report_verification'))
+    .flatMap(request => request.input.filter(item => item.type === 'function_call_output'));
+  assert.ok(toolOutputs.length, 'The Agent sent execution tool outputs to the model');
+  assert.ok(toolOutputs.every(item => !JSON.stringify(item.output).includes('post_action_observation')),
+    'The model must receive one trimmed element list, not the nested receipt and a duplicate');
 });
 test('Agent retains list_elements fallback for a legacy receipt', { timeout: 60000 }, async t => {
   const legacy = await scenario(t, false);
