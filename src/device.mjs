@@ -33,6 +33,26 @@ const onScreen = ({ width, height }) => element => {
   return box.x < width && box.y < height && box.x + box.width > 0 && box.y + box.height > 0;
 };
 
+// AX root/window frames offer an orientation check without an extra screenshot.
+// Accept only near-screen-sized roots; app content and floating windows are not
+// reliable evidence of screen geometry. Missing/ambiguous roots fail closed.
+function axRootOrientation(elements, viewport) {
+  if (!viewport || viewport.width <= 0 || viewport.height <= 0) return null;
+  const near = (actual, expected) => Number.isFinite(actual) &&
+    Math.abs(actual - expected) <= Math.max(8, expected * 0.25);
+  let same = false, rotated = false;
+  for (const element of elements) {
+    if (!/^(?:XCUIElementType)?(?:Application|Window)$/i.test(element.role ?? element.type ?? '')) continue;
+    const frame = element.frame ?? element;
+    if (!frame || frame.x < -8 || frame.y < -8) continue;
+    const match = near(frame.width, viewport.width) && near(frame.height, viewport.height);
+    const swapped = near(frame.width, viewport.height) && near(frame.height, viewport.width);
+    if (match && !swapped) same = true;
+    if (swapped && !match) rotated = true;
+  }
+  return same === rotated ? null : rotated ? 'rotated' : 'same';
+}
+
 export function hidPoint(x, y, width, height) {
   if (![x,y,width,height].every(Number.isFinite) || width < 2 || height < 2 || x < 0 || y < 0 || x >= width || y >= height) throw new Error(`Coordinates must be inside the screen (${width} × ${height} points).`);
   return [Math.round(x / (width - 1) * 65535), Math.round(y / (height - 1) * 65535)];
@@ -204,7 +224,8 @@ export class Devices {
       // it never masquerades as a captured frame. Known input or capture
       // invalidates this binding; old refs still expire after 30 seconds.
       const bound = this.structureViewport;
-      if (bound?.device === target.id && bound.revision === this.coordinator.revision(target.id) &&
+      if (bound?.rootVerified === true && bound.device === target.id &&
+          bound.revision === this.coordinator.revision(target.id) &&
           this.size?.device === target.id && this.size.width === bound.width && this.size.height === bound.height &&
           this.elements.length && Date.now() - this.elementsAt <= 30000) return this.size;
       return this.capture();
@@ -267,10 +288,25 @@ export class Devices {
     if (this.seen?.device === target.id && performance.now() - this.seen.at <= maxAge) return this.seen;
     const structure_started_at = new Date().toISOString();
     const tree = await phase('accessibility', () => this.bridge({ op: 'ax', include_offscreen: false }));
-    const elements = (tree.elements ?? []).filter(onScreen(this.size?.device === target.id ? this.size : await this.capture()));
+    // A rotation can occur between two coordinate taps even if no Poki action
+    // triggered it. Compare a full-screen AX root against the last measured
+    // viewport *before* filtering or converting any coordinates.
+    const rawElements = tree.elements ?? [];
+    const previousSize = this.size?.device === target.id ? this.size : undefined;
+    if (axRootOrientation(rawElements, previousSize) === 'rotated') {
+      this.structureViewport = undefined;
+      this.elements = [];
+      this.elementsAt = 0;
+      this.frame = undefined;
+      await this.capture();
+    }
+    const viewport = this.size?.device === target.id ? this.size : await this.capture();
+    const rootVerified = axRootOrientation(rawElements, viewport) === 'same';
+    if (!rootVerified) this.structureViewport = undefined;
+    const elements = rawElements.filter(onScreen(viewport));
     // A tree that leaves a state out compares equal to one that gives its default.
     const signature = JSON.stringify(elements.map(e => { const box = e.frame ?? e; return [e.type ?? e.role, e.label, e.text, e.value, e.focused, Boolean(e.selected), flagOn(e.enabled), box.x, box.y, box.width, box.height]; }));
-    return this.seen = { device: target.id, revision: this.coordinator.revision(target.id), foreground: tree.foreground, elements, signature, at: performance.now(), structure_started_at, structure_completed_at: new Date().toISOString() };
+    return this.seen = { device: target.id, revision: this.coordinator.revision(target.id), foreground: tree.foreground, elements, signature, rootVerified, at: performance.now(), structure_started_at, structure_completed_at: new Date().toISOString() };
   }
   // A simulator's size only changes when it rotates. A physical device maps touches through its
   // current orientation, so it keeps taking a fresh frame.
