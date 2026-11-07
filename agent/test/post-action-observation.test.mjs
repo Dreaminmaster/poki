@@ -10,9 +10,9 @@ function receipt() {
     post_action_observation: {
       version: 1, action_receipt_id: 'sent-1',
       observation: { id: 'obs-1', device: 'fixture-phone', revision: 7,
-        atomic: false, capture_started_at: iso(-400), capture_completed_at: iso(-300), structure_completed_at: iso(-200) },
+        atomic: false, structure_started_at: iso(-400), structure_completed_at: iso(-300) },
       source: 'accessibility', foreground: { bundle_id: 'org.example' },
-      total: 1, truncated: false, prompt: { status: 'checked', warning: null },
+      total: 1, truncated: false, prompt: { status: 'checked', source: 'accessibility', warning: null },
       elements: [{ ref: 'e17', role: 'Button', label: 'Open' }],
     },
   };
@@ -31,7 +31,7 @@ test('rejects uncertain input, missing identity and observations captured before
     r => { r.outcome = 'unknown'; },
     r => { r.receipt_id = 'other-receipt'; },
     r => { r.input_completed_at = new Date(Date.now() + 300).toISOString(); },
-    r => { r.post_action_observation.observation.capture_started_at = 'not-a-date'; },
+    r => { r.post_action_observation.observation.structure_started_at = 'not-a-date'; },
     r => { r.post_action_observation.observation.atomic = true; },
     r => { r.post_action_observation.observation.revision = -1; },
   ]) {
@@ -49,9 +49,31 @@ test('rejects incomplete refs, prompt warnings, inaccessible sources and stale d
     r => { r.post_action_observation.prompt.status = 'unavailable'; },
     r => { r.post_action_observation.prompt.warning = { kind: 'alert' }; },
     r => { r.post_action_observation.source = 'ocr'; },
-    r => { r.post_action_observation.observation.capture_started_at = new Date(Date.now() - 40000).toISOString(); },
+    r => { r.post_action_observation.observation.structure_started_at = new Date(Date.now() - 40000).toISOString(); },
   ]) {
     const r = receipt(); mutate(r);
     assert.equal(usable(r), false);
   }
+});
+
+test('accepts optional screenshot only AFTER stable AX and rejects reversed order', () => {
+  const r = receipt(), observation = r.post_action_observation.observation;
+  const now = Date.now(), iso = offset => new Date(now + offset).toISOString();
+  observation.capture_started_at = iso(-200);
+  observation.capture_completed_at = iso(-100);
+  r.post_action_observation.prompt.source = 'ocr';
+  assert.ok(usable(r));
+  observation.capture_started_at = iso(-350);
+  assert.equal(usable(r), false, 'A pre-stabilization screenshot cannot authenticate a later AX tree');
+});
+
+test('model-facing action receipts exclude nested AX while retaining actual receipt fields', async () => {
+  const { receiptForModel } = await import('../post-action-observation.mjs');
+  const r = receipt();
+  const result = receiptForModel([{ type: 'text', text: JSON.stringify(r) }]);
+  const modelValue = JSON.parse(result[0].text);
+  assert.equal(modelValue.post_action_observation, undefined);
+  assert.equal(modelValue.sent, true);
+  assert.equal(modelValue.receipt_id, r.receipt_id);
+  assert.ok(r.post_action_observation.elements.length, 'The original evidence remains intact');
 });
