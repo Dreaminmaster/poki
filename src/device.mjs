@@ -511,6 +511,10 @@ export class Devices {
         case 'batch_commands': return await runBatch(this, args);
         default: {
           const verify = args.verify !== false;
+          // Without verification there is no pre-input AX read to detect a
+          // rotation. Never reuse an AX-only viewport for coordinate input:
+          // force screenSize()/viewport() to capture the current dimensions.
+          if (!verify) this.structureViewport = undefined;
           const looks = verify && reportsScreen.has(name) && !this.inBatch, touches = verify && touchesControl.has(name);
           this.beforeInput = undefined;
           // A batch step may reuse the read its predecessor just took of the same screen.
