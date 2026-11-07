@@ -15,13 +15,15 @@ test('A failed ledger write does not poison later operations or record a phantom
   const ledger = await fixture(t);
   // A directory at the target file path makes the atomic rename fail reliably,
   // including when tests run with elevated filesystem privileges.
+  await ledger.record('previously saved');
+  await rm(ledger.path);
   await mkdir(ledger.path);
   await assert.rejects(ledger.record('not saved'));
-  assert.deepEqual(ledger.entries, [], 'A rejected update must roll back in-memory state');
+  assert.deepEqual(ledger.entries.map(row => row.text), ['previously saved'], 'A rejected update must roll back in-memory state');
   await rm(ledger.path, { recursive: true });
   await ledger.record('saved after recovery');
   const rows = JSON.parse(await readFile(ledger.path, 'utf8'));
-  assert.deepEqual(rows.map(row => row.text), ['saved after recovery']);
+  assert.deepEqual(rows.map(row => row.text), ['previously saved', 'saved after recovery']);
 });
 
 test('Failed echo consumption rolls back mutations to existing entries', async t => {
