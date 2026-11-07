@@ -213,6 +213,9 @@ export async function readScreen(ctx, { once = false, structured = false, struct
         if (!frame) ctx.structureViewport = {
           device: seen.device, revision: seen.revision,
           width: observation.width, height: observation.height,
+          // If AX did not identify an unambiguous full-screen root,
+          // the next coordinate/ref action must capture to verify size.
+          rootVerified: seen.rootVerified === true,
         };
         structuredObservation = { observation, source: 'accessibility', foreground: seen.foreground,
           elements: ctx.elements, total: ctx.elements.length, truncated: false, prompt };
