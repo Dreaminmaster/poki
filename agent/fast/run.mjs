@@ -38,7 +38,7 @@ export async function runFast({ task, alternatives = [], onSelect = () => {}, ca
     scopePid = receipt.pid;
   };
   const fresh = () => {
-    const age = Date.now() - Date.parse(observation.observation.capture_started_at);
+    const age = Date.now() - Date.parse(observation.observation.structure_started_at ?? observation.observation.capture_started_at);
     if (!Number.isFinite(age) || age < -1000 || age > 25000) throw new Error('stale_observation');
   };
   try {
@@ -76,7 +76,7 @@ export async function runFast({ task, alternatives = [], onSelect = () => {}, ca
       if (candidates.length !== 1) throw new Error('no_candidates');
       const action = candidates[0];
       fresh(); signal.throwIfAborted();
-      const args = { ...action.arguments, device: task.device, return_observation: true, ...(action.op === 'scroll' ? { direction: action.direction } : {}),
+      const args = { ...action.arguments, device: task.device, return_observation: true, post_action_ocr: true, ...(action.op === 'scroll' ? { direction: action.direction } : {}),
         ...(action.ref ? { ref: action.ref } : {}), ...(action.text_id ? { text: task.texts[action.text_id] } : {}) };
       lastAction = action.id; pending = true; stats.action_count++;
       const receipt = await session.call(action.op, args);
