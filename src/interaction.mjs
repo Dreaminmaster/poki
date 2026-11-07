@@ -161,20 +161,11 @@ const describeElement = element => {
 // What the screen shows once it has stopped changing: a list still coasting after a scroll would
 // otherwise report a position it is about to leave. `compared` is false when accessibility could not
 // read it, because OCR text alone cannot say whether anything moved.
-export async function readScreen(ctx, { once = false, structured = false } = {}) {
+export async function readScreen(ctx, { once = false, structured = false, structuredVisual = false } = {}) {
   await ctx.settle();
-  // Opt-in only: use a truly post-input frame for the stable AX read.
-  // Existing MCP requests retain their existing readback response.
-  let postInputFrame = false;
-  if (structured && ctx.lastInputCompletedAt) {
-    try { await ctx.capture(); postInputFrame = true; }
-    catch (error) {
-      // A missing optional image must not turn an otherwise usable AX readback into an error.
-      if (stopped(error)) throw error;
-    }
-  }
+  // Default readback remains summary-only. Opt-in actions can reuse stable
+  // post-input AX state without an additional screenshot or OCR pass.
   const started = performance.now();
-  // A batch that ends on a touch has just read the screen to see whether it changed.
   let seen = await readStructure(ctx, once ? 0 : justReadMs);
   let stabilized = once;
   while (!once && performance.now() - started < stableWithinMs) {
@@ -189,26 +180,43 @@ export async function readScreen(ctx, { once = false, structured = false } = {})
   const text = [...new Set(elements.filter(visible).map(describeElement).filter(Boolean))];
   let warning = promptWarning(elements);
   let structuredObservation;
-  const frame = ctx.frame;
-  if (structured && postInputFrame && stabilized && compared && frame && seen.device === frame.device && elements.length <= 400 &&
-      seen.structure_completed_at && Date.parse(frame.capture_started_at) >= Date.parse(ctx.lastInputCompletedAt)) {
-    // Image and AX are non-atomic. Retain actual timestamps; never re-stamp old data.
-    let prompt = { status: 'checked', source: 'ocr', warning: null };
-    try { prompt.warning = promptWarning(await ctx.ocr(frame)); }
-    catch (error) {
-      if (stopped(error)) throw error;
-      prompt = { status: 'unavailable', source: 'ocr' };
+  if (structured && stabilized && compared && seen.structure_started_at && seen.structure_completed_at &&
+      Date.parse(seen.structure_started_at) >= Date.parse(ctx.lastInputCompletedAt) &&
+      seen.revision === ctx.coordinator.revision(seen.device) &&
+      ctx.size?.device === seen.device && elements.length <= 400) {
+    // A route may opt into image/OCR verification. The screenshot is taken
+    // AFTER the AX structure stabilizes; neither source is claimed atomic.
+    let frame;
+    if (structuredVisual) {
+      try { frame = await ctx.capture(); }
+      catch (error) { if (stopped(error)) throw error; }
     }
-    warning ??= prompt.warning;
-    frame.structure_completed_at = seen.structure_completed_at;
-    frame.source = 'accessibility';
-    ctx.elements = elements.map(element => ({ ...element, ref: 'e' + ++ctx.nextRef }));
-    ctx.elementsAt = Date.now();
-    structuredObservation = {
-      observation: ctx.observation(frame), source: 'accessibility',
-      foreground: seen.foreground, elements: ctx.elements,
-      total: ctx.elements.length, truncated: false, prompt: { ...prompt, warning: warning ?? null },
-    };
+    const sameViewport = ctx.size?.width === frame?.width && ctx.size?.height === frame?.height;
+    if (!structuredVisual || frame && frame.device === seen.device && sameViewport &&
+        frame.revision === seen.revision &&
+        Date.parse(frame.capture_started_at) >= Date.parse(seen.structure_completed_at)) {
+      let prompt = { status: 'checked', source: 'accessibility', warning: warning ?? null };
+      if (structuredVisual) {
+        prompt.source = 'ocr';
+        try { prompt.warning ??= promptWarning(await ctx.ocr(frame)); }
+        catch (error) {
+          if (stopped(error)) throw error;
+          prompt = { status: 'unavailable', source: 'ocr' };
+        }
+      }
+      warning ??= prompt.warning;
+      const observation = ctx.observationFromStructure(seen, frame);
+      if (observation) {
+        ctx.elements = elements.map(element => ({ ...element, ref: `e${++ctx.nextRef}` }));
+        ctx.elementsAt = Date.now();
+        if (!frame) ctx.structureViewport = {
+          device: seen.device, revision: seen.revision,
+          width: observation.width, height: observation.height,
+        };
+        structuredObservation = { observation, source: 'accessibility', foreground: seen.foreground,
+          elements: ctx.elements, total: ctx.elements.length, truncated: false, prompt };
+      }
+    }
   }
   return {
     signature: compared ? seen.signature : undefined,
