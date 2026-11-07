@@ -16,7 +16,7 @@ export class ReplyLedger {
   }
 
   update(change) {
-    this.queue = this.queue.then(async () => {
+    const operation = this.queue.then(async () => {
       if (!this.entries) {
         try { this.entries = entriesSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))); }
         catch (error) {
@@ -24,19 +24,31 @@ export class ReplyLedger {
           this.entries = [];
         }
       }
-      const before = JSON.stringify(this.entries);
-      this.entries = this.entries.filter(entry => entry.receivedId !== null || entry.expiresAt > Date.now());
-      const result = change();
-      const after = JSON.stringify(this.entries);
-      if (before !== after) {
-        await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-        const temporary = `${this.path}.${process.pid}.tmp`;
-        await writeFile(temporary, after, { mode: 0o600 });
-        await rename(temporary, this.path);
+      // Work on copies: a failed disk write must not mark an outgoing reply as recorded
+      // or an incoming echo as consumed only in memory.
+      const original = this.entries;
+      const before = JSON.stringify(original);
+      this.entries = original
+        .filter(entry => entry.receivedId !== null || entry.expiresAt > Date.now())
+        .map(entry => ({ ...entry }));
+      try {
+        const result = change();
+        const after = JSON.stringify(this.entries);
+        if (before !== after) {
+          await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+          const temporary = `${this.path}.${process.pid}.tmp`;
+          await writeFile(temporary, after, { mode: 0o600 });
+          await rename(temporary, this.path);
+        }
+        return result;
+      } catch (error) {
+        this.entries = original;
+        throw error;
       }
-      return result;
     });
-    return this.queue;
+    // Return the actual rejection to the caller, but do not poison later queued updates.
+    this.queue = operation.catch(() => {});
+    return operation;
   }
 
   record(text) {
