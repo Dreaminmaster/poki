@@ -318,8 +318,13 @@ export class Devices {
   }
   observationFromStructure(seen, frame) {
     const size = this.size;
-    if (!size || size.device !== seen.device || seen.revision !== this.coordinator.revision(seen.device)) return null;
-    return { id: randomUUID(), device: seen.device, revision: seen.revision,
+    const revision = this.coordinator.revision(seen.device);
+    // The first post-input screenshot may advance the revision because it
+    // differs from the old pre-input picture. This is not a second input.
+    if (!size || size.device !== seen.device ||
+        (frame ? frame.revision !== revision || (frame.revision !== seen.revision && frame.revision !== seen.revision + 1)
+          : seen.revision !== revision)) return null;
+    return { id: randomUUID(), device: seen.device, revision,
       width: size.width, height: size.height, units: 'points', atomic: false,
       structure_source: 'accessibility',
       structure_started_at: seen.structure_started_at, structure_completed_at: seen.structure_completed_at,
