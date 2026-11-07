@@ -14,7 +14,7 @@ import { openingSentence, openingFromPrompt } from './opening.mjs';
 import { unlockDevice } from './unlock-device.mjs';
 import { StepDeadline } from './step-deadline.mjs';
 import { checkDeviceTools } from './device-preflight.mjs';
-import { reusableActionObservation } from './post-action-observation.mjs';
+import { reusableActionObservation, receiptForModel } from './post-action-observation.mjs';
 
 const terminal = new Set(['completed', 'failed', 'stopped']);
 const allowedTools = new Set(['poki_mcp_status', 'get_foreground_app', 'list_apps', 'launch_app', 'take_screenshot', 'observe_device', 'list_elements', 'tap', 'tap_text', 'fill', 'type_text', 'press_key', 'hide_keyboard', 'scroll', 'swipe', 'go_back', 'handle_alert', 'batch_commands']);
@@ -429,6 +429,10 @@ export class PhoneTask extends EventEmitter {
         if (!observed.isError) { this.observedAfterAction = true; this.completionEvidence = observed.content; }
       }
     }
+    // Record the unabridged action evidence before changing model-facing text.
+    // An eligible reuse adds one top-level trimmed observation; the action's
+    // nested copy must not be sent to the model again.
+    if (!observing) result = { ...result, content: receiptForModel(result.content) };
     this.publish();
     return {
       success: !result.isError,
