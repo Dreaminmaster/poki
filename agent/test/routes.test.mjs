@@ -56,3 +56,28 @@ test('Learned route search must not disguise filesystem failures as cache corrup
   const store = new RouteStore(directory);
   await assert.rejects(store.find('Open Settings'), { code: 'ENOENT' });
 });
+
+test('An oversized matching task never mislabels a healthy route as a broken cache file', async t => {
+  const sample = JSON.parse(await readFile(new URL('./fixtures/luma-route.json', import.meta.url), 'utf8'));
+  sample.details = sample.details.slice(1).map(detail => ({ label: detail.value, value: '' }));
+  const directory = await mkdtemp(join(tmpdir(), 'poki-route-long-prompt-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new RouteStore(directory);
+  const context = 'Read only. Do not register, sign in, send messages, or change settings.';
+  const answer = { kind: 'list', start_ref: 'e51', end_ref: 'e55', items: ['e52', 'e53', 'e54'].map(ref => ({ ref, field: 'label' })) };
+  assert.ok(await store.learn({ ...sample, answer, context, id: 'learned-route', device: 'fixture-device', verify: async () => true }));
+  assert.ok(await store.find(sample.prompt, context), 'The cached route is valid for the original task');
+
+  const messages = [], originalError = console.error;
+  console.error = message => messages.push(String(message));
+  try {
+    // bind() trims the task for matching, but planSchema limits goal to 2,000 characters.
+    assert.equal(await store.find(sample.prompt + ' '.repeat(2001), context), null);
+  } finally {
+    console.error = originalError;
+  }
+  assert.ok(messages.some(message => message.includes('could not be reused for this task')),
+    'An incompatible bound prompt should not be reported as corrupt stored data');
+  assert.ok(messages.every(message => !message.includes('invalid learned-route cache')));
+  assert.ok(await store.find(sample.prompt, context), 'Skipping a long prompt must not alter the healthy route');
+});
