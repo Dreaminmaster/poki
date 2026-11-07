@@ -112,9 +112,9 @@ export async function taskServices(directory, { route = false, appSearch = false
           result = { ...result, receipt_id: 'fixture-fill-receipt', input_completed_at: at(-350),
             post_action_observation: { version: 1, action_receipt_id: 'fixture-fill-receipt',
               observation: { id: 'fixture-after-fill', device: 'synthetic-device', revision: 2, atomic: false,
-                capture_started_at: at(-300), capture_completed_at: at(-200), structure_completed_at: at(-150) },
+                structure_started_at: at(-300), structure_completed_at: at(-200) },
               source: 'accessibility', foreground: fixture.foreground, truncated: false,
-              prompt: { status: 'checked', source: 'ocr', warning: null }, total: 2,
+              prompt: { status: 'checked', source: 'accessibility', warning: null }, total: 2,
               elements: [
                 { ref: 'e3', identifier: 'fixture-value', label: 'Value', value: fixture.value, role: 'TextField', visible: true },
                 { ref: 'e4', identifier: 'fixture-saved', label: 'Saved: ' + fixture.value, role: 'StaticText', visible: true },
