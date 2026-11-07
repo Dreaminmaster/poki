@@ -223,10 +223,12 @@ function compile(trace) {
 }
 
 const warnedRouteFiles = new Set();
-function ignoreInvalidRoute(path) {
+function ignoreInvalidRoute(path, reason = 'invalid') {
   if (warnedRouteFiles.has(path)) return;
   warnedRouteFiles.add(path);
-  console.warn('Poki Agent: ignoring an invalid learned-route cache file; the original was preserved.');
+  console.error(reason === 'incompatible'
+    ? 'Poki Agent: a cached learned route could not be reused for this task; the cache file was preserved.'
+    : 'Poki Agent: an invalid learned-route cache entry was skipped; the cache file was preserved.');
 }
 
 function validStoredRoute(route) {
@@ -265,7 +267,8 @@ export class RouteStore {
       const plan = substitute(route.plan, bindings);
       const texts = { ...route.texts, ...bindings };
       if (!planSchema.safeParse({ device: 'cached-route', bundle_id: route.bundle_id, goal: prompt, texts, ...plan }).success) {
-        ignoreInvalidRoute(path);
+        // The bound task can exceed schema limits even when the stored route is healthy.
+        ignoreInvalidRoute(path, 'incompatible');
         continue;
       }
       if (plan.steps.some(({ action }) => action.op === 'fill' && !action.identifier && !action.element_id)) continue;
