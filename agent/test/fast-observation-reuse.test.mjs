@@ -20,7 +20,7 @@ function initialObservation() {
 }
 function finalObservation() {
   return { observation: { id: 'after', revision: 2, device: 'fixture-phone', atomic: false,
-    capture_started_at: stamp(-250), capture_completed_at: stamp(-150), structure_completed_at: stamp(-100) },
+    structure_started_at: stamp(-250), structure_completed_at: stamp(-200), capture_started_at: stamp(-150), capture_completed_at: stamp(-100) },
     foreground: { bundle_id: 'org.example' }, source: 'accessibility', total: 1, truncated: false,
     prompt: { status: 'checked', source: 'ocr', warning: null },
     elements: [{ ref: 'e2', label: 'Done', role: 'StaticText', enabled: true, visible: true }] };
@@ -35,9 +35,9 @@ async function execute(allowReuse) {
     if (name === 'get_foreground_app') return text({ bundle_id: 'org.example' });
     if (name === 'observe_device') return text(calls.filter(c => c.name === 'observe_device').length === 1
       ? initialObservation() : finalObservation());
-    if (name === 'tap') return text({ sent: true, receipt_id: 'receipt-1', input_completed_at: stamp(-300),
+    if (name === 'tap') return text({ sent: true, receipt_id: 'receipt-1', input_completed_at: stamp(-350),
       post_action_observation: { version: 1, action_receipt_id: 'receipt-1', ...finalObservation(),
-        prompt: { status: allowReuse ? 'checked' : 'unavailable', warning: null } } });
+        prompt: { status: allowReuse ? 'checked' : 'unavailable', source: 'ocr', warning: null } } });
     throw new Error('Unexpected fixture call ' + name);
   };
   return { outcome: await runFast({ task: task(), call }), calls };
@@ -48,6 +48,7 @@ test('fast route reuses one eligible post-action observation for its next step',
   assert.equal(outcome.stats.action_count, 1);
   assert.equal(calls.filter(c => c.name === 'observe_device').length, 1);
   assert.equal(calls.find(c => c.name === 'tap').args.return_observation, true);
+  assert.equal(calls.find(c => c.name === 'tap').args.post_action_ocr, true);
 });
 test('fast route falls back to real observation when a prompt check is unavailable', async () => {
   const { outcome, calls } = await execute(false);
