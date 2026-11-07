@@ -39,7 +39,7 @@ export function hidPoint(x, y, width, height) {
 }
 
 export class Devices {
-  selected; requested; frame; size; seen; elements = []; elementsAt = 0; lastInputAt = -Infinity; lastInputCompletedAt; inBatch = false;
+  selected; requested; frame; size; seen; structureViewport; elements = []; elementsAt = 0; lastInputAt = -Infinity; lastInputCompletedAt; inBatch = false;
   scales = new Map(); physicalNames = new Map(); backgroundDevices = new Map(); nextRef = 0;
   constructor(coordinator = new Coordination()) { this.coordinator = coordinator; }
   async run(file, args, timeout = 45000, input) {
@@ -50,7 +50,7 @@ export class Devices {
     const result = await closePlatform(this, onlyDevices);
     if (onlyDevices) for (const id of onlyDevices) this.backgroundDevices.delete(id);
     else this.backgroundDevices.clear();
-    if (!onlyDevices || onlyDevices.has(this.frame?.device)) { this.frame = undefined; this.elements = []; }
+    if (!onlyDevices || onlyDevices.has(this.frame?.device) || onlyDevices.has(this.structureViewport?.device)) { this.frame = undefined; this.elements = []; this.structureViewport = undefined; }
     return result;
   }
   close() { return this.coordinator.end(this, 'session_closed'); }
@@ -69,7 +69,7 @@ export class Devices {
   ownBackground(id, type) { if (!this.backgroundDevices.has(id)) this.backgroundDevices.set(id, new Set()); this.backgroundDevices.get(id).add(type); }
   unownBackground(id, type) { const owned = this.backgroundDevices.get(id); owned?.delete(type); if (!owned?.size) this.backgroundDevices.delete(id); }
   access(target) { this.coordinator.access(this, target); }
-  changed(target) { this.coordinator.changed(target.id); this.elements = []; this.elementsAt = 0; this.frame = undefined; this.seen = undefined; }
+  changed(target) { this.coordinator.changed(target.id); this.elements = []; this.elementsAt = 0; this.frame = undefined; this.seen = undefined; this.structureViewport = undefined; }
   async inventory(all = false) {
     const { stdout } = await this.run('python3', [join(root, 'native/devices.py')], 8000);
     const physical = new Map();
@@ -189,6 +189,9 @@ export class Devices {
       if (this.frame?.revision !== this.coordinator.revision(target.id) || this.frame?.device !== target.id || this.frame?.width !== width || this.frame?.height !== height || !this.frame.data.equals(data)) { this.elements=[]; this.elementsAt=0; }
       checkWork();
       this.frame = { id: randomUUID(), device: target.id, revision: this.coordinator.revision(target.id), width, height, scale, data, original, at: Date.now(), capture_started_at: started, capture_completed_at: new Date().toISOString() };
+      // An explicit later screenshot invalidates AX-only refs rather than
+      // silently preserving coordinates after a potentially changed image.
+      this.structureViewport = undefined;
       this.size = { device: target.id, width, height };
       return this.frame;
     } finally { await unlink(path).catch(() => {}); }
@@ -196,7 +199,16 @@ export class Devices {
   async viewport() {
     const target = await this.target();
     if (this.frame && this.frame.revision !== this.coordinator.revision(target.id)) { this.frame = undefined; this.elements = []; }
-    if (!this.frame || this.frame.device !== target.id) return this.capture();
+    if (!this.frame || this.frame.device !== target.id) {
+      // An AX-only post-action read can reuse a freshly measured viewport;
+      // it never masquerades as a captured frame. Known input or capture
+      // invalidates this binding; old refs still expire after 30 seconds.
+      const bound = this.structureViewport;
+      if (bound?.device === target.id && bound.revision === this.coordinator.revision(target.id) &&
+          this.size?.device === target.id && this.size.width === bound.width && this.size.height === bound.height &&
+          this.elements.length && Date.now() - this.elementsAt <= 30000) return this.size;
+      return this.capture();
+    }
     return this.frame;
   }
   async ocr(frame) {
@@ -253,11 +265,12 @@ export class Devices {
   async structure(maxAge = 0) {
     const target = await this.target();
     if (this.seen?.device === target.id && performance.now() - this.seen.at <= maxAge) return this.seen;
+    const structure_started_at = new Date().toISOString();
     const tree = await phase('accessibility', () => this.bridge({ op: 'ax', include_offscreen: false }));
     const elements = (tree.elements ?? []).filter(onScreen(this.size?.device === target.id ? this.size : await this.capture()));
     // A tree that leaves a state out compares equal to one that gives its default.
     const signature = JSON.stringify(elements.map(e => { const box = e.frame ?? e; return [e.type ?? e.role, e.label, e.text, e.value, e.focused, Boolean(e.selected), flagOn(e.enabled), box.x, box.y, box.width, box.height]; }));
-    return this.seen = { device: target.id, foreground: tree.foreground, elements, signature, at: performance.now(), structure_completed_at: new Date().toISOString() };
+    return this.seen = { device: target.id, revision: this.coordinator.revision(target.id), foreground: tree.foreground, elements, signature, at: performance.now(), structure_started_at, structure_completed_at: new Date().toISOString() };
   }
   // A simulator's size only changes when it rotates. A physical device maps touches through its
   // current orientation, so it keeps taking a fresh frame.
@@ -302,6 +315,17 @@ export class Devices {
   }
   observation(frame = this.frame) {
     return { id: frame.id, device: frame.device, width: frame.width, height: frame.height, units: 'points', capture_started_at: frame.capture_started_at, capture_completed_at: frame.capture_completed_at, structure_completed_at: frame.structure_completed_at, structure_source: frame.source ?? null, atomic: false, revision: frame.revision };
+  }
+  observationFromStructure(seen, frame) {
+    const size = this.size;
+    if (!size || size.device !== seen.device || seen.revision !== this.coordinator.revision(seen.device)) return null;
+    return { id: randomUUID(), device: seen.device, revision: seen.revision,
+      width: size.width, height: size.height, units: 'points', atomic: false,
+      structure_source: 'accessibility',
+      structure_started_at: seen.structure_started_at, structure_completed_at: seen.structure_completed_at,
+      ...(frame ? { capture_started_at: frame.capture_started_at,
+        capture_completed_at: frame.capture_completed_at } : {}),
+    };
   }
   async input(request) {
     const target = await this.target();
@@ -455,7 +479,7 @@ export class Devices {
           const delivered = result.sent === true && !result.isError && !result.stopped;
           // A target that had to be waited for is compared with the screen it was found on, not the one before the wait.
           const sentTo = this.beforeInput ?? before, signature = sentTo?.elements.length ? sentTo.signature : undefined;
-          if (looks && delivered) result = { ...result, ...await this.readback(signature, { structured: args.return_observation === true }) };
+          if (looks && delivered) result = { ...result, ...await this.readback(signature, { structured: args.return_observation === true, structuredVisual: args.post_action_ocr === true }) };
           else if (touches && delivered && signature !== undefined) result = { ...result, ...await this.changedSince(signature) };
           if (!verify) result = { ...result, verified: false };
           const unchanged = touches && result.screen_changed === false && !result.stopped;
