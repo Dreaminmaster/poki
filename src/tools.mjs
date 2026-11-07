@@ -40,7 +40,8 @@ export const definitions = catalog.tools.map(tool => {
   // Opt-in: existing clients keep their original responses.
   const schema = actionObservationTools.has(tool.name)
     ? { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
-      return_observation: { type: 'boolean', description: 'Request a ref-bearing post-input observation when available.' } } }
+      return_observation: { type: 'boolean', description: 'Request a ref-bearing post-input observation when available.' },
+      post_action_ocr: { type: 'boolean', description: 'Capture after stable AX and check image OCR prompts (default false).' } } }
     : tool.name === 'observe_device'
       ? { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
         include_image: { type: 'boolean', description: 'Attach PNG (default true); false retains capture and prompt checks.' } } }
