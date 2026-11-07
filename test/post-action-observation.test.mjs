@@ -11,22 +11,34 @@ test('opted-in input supplies post-action refs without an extra observation requ
   assert.equal(receipt.sent, true);
   assert.equal(receipt.post_action_observation?.version, 1);
   assert.equal(receipt.post_action_observation?.action_receipt_id, receipt.receipt_id);
-  assert.ok(receipt.post_action_observation.observation.capture_started_at >= receipt.input_completed_at);
+  assert.ok(receipt.post_action_observation.observation.structure_started_at >= receipt.input_completed_at);
+  assert.equal(receipt.post_action_observation.observation.capture_started_at, undefined,
+    'AX-only reuse must not fabricate image capture timestamps');
+  assert.equal(receipt.post_action_observation.prompt.source, 'accessibility');
   assert.ok(receipt.post_action_observation.elements.every(e => /^e\d+$/.test(e.ref)));
   assert.equal(receipt.post_action_observation.prompt.status, 'checked');
 });
 
-test('failure of optional post-input capture preserves ordinary AX text readback', async () => {
-  const observed = { device: 'fixture-phone', signature: 'steady',
-    foreground: { bundle_id: 'org.example' },
-    elements: [{ role: 'Button', label: 'Continue', visible: true }],
-    structure_completed_at: new Date().toISOString() };
-  let captures = 0;
-  const ctx = { lastInputCompletedAt: new Date().toISOString(),
-    settle: async () => {}, capture: async () => { captures++; throw new Error('Optional screenshot unavailable'); },
-    structure: async () => observed };
-  const result = await readScreen(ctx, { structured: true });
-  assert.equal(captures, 1);
-  assert.equal(result.structuredObservation, undefined);
-  assert.ok(result.screen.text.some(item => item.includes('Continue')));
+test('optional image OCR captures AFTER the stable AX read', async t => {
+  const f = await fixture(t);
+  const result = await f.call('press_key', { key: 'return', return_observation: true, post_action_ocr: true });
+  assert.ok(!result.isError);
+  const value = JSON.parse(result.content.find(item => item.type === 'text').text);
+  const data = value.post_action_observation;
+  assert.equal(data.prompt.status, 'checked');
+  assert.equal(data.prompt.source, 'ocr');
+  assert.ok(data.observation.structure_completed_at <= data.observation.capture_started_at,
+    'The screenshot must follow AX stabilization');
+  assert.ok(data.observation.capture_started_at <= data.observation.capture_completed_at);
+});
+
+test('an AX-only ref remains usable without a redundant capture until input invalidates it', async t => {
+  const f = await fixture(t);
+  const result = await f.call('press_key', { key: 'return', return_observation: true });
+  const receipt = value(result);
+  const ref = receipt.post_action_observation?.elements?.find(e => e.role === 'Button')?.ref
+    ?? receipt.post_action_observation?.elements?.[0]?.ref;
+  assert.match(ref, /^e\\d+$/);
+  const tapped = await f.call('tap', { ref });
+  assert.ok(!tapped.isError, 'Current action-bound AX refs must remain valid without an extra list_elements read');
 });
