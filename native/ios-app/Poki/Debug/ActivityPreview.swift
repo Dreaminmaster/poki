@@ -2,51 +2,87 @@ import ActivityKit
 import SwiftUI
 
 /// The Live Activity in every phase, drawn with the widget's own views at the system's sizes (Lock
-/// Screen 371 x up to 160, expanded island 371 wide, compact island), so it can be checked without a
-/// session. Debug > Live Activity.
+/// Screen 371 x up to 160, expanded island 371 wide, compact island, minimal island, top banner), so it
+/// can be checked without a session. Debug > Live Activity.
 ///
 /// For the build's screenshots: `-pokiScreen activity -pokiActivityState approval` shows one phase on
-/// its own, and `-pokiActivityDemo approval` also starts a real Live Activity in that phase and, six
-/// seconds later, sends it an alert, so the simulator draws the real Lock Screen and Dynamic Island.
+/// its own, and `-pokiActivityDemo approval` also starts a real Live Activity in that phase and sends
+/// it an alert, so the simulator draws the real Lock Screen and Dynamic Island.
 struct ActivityPreview: View {
-    private let only = UserDefaults.standard.string(forKey: "pokiActivityState")
+    @State private var only = UserDefaults.standard.string(forKey: "pokiActivityState")
     private let demo = UserDefaults.standard.string(forKey: "pokiActivityDemo")
 
     init() { if Thumbnail.previewImage == nil { Thumbnail.previewImage = Self.sampleScreen() } }
 
     var body: some View {
-        // A list of the Live Activity's states; each row starts the real one on this iPhone, which iOS
-        // draws on the Lock Screen and in the Dynamic Island.
-        List {
-            Section {
-                ForEach(Self.samples.filter { only == nil || $0.0 == only }, id: \.0) { name, state in
-                    Button { Task.detached { await DemoActivity.run(state) } } label: {
-                        LabeledContent {
-                            Image(systemName: "play.circle.fill").foregroundStyle(.blue).imageScale(.large)
-                        } label: {
-                            Label { Text(verbatim: Self.title(name)) } icon: { Image(systemName: state.face.symbol) }
+        let samples = Self.makeSamples()
+        Group {
+            if let only, let state = samples.first(where: { $0.0 == only })?.1 {
+                VStack(alignment: .center, spacing: 24) {
+                    LockScreenFrame(state: state)
+                    IslandExpandedFrame(state: state)
+                    IslandCompactFrame(state: state)
+                    TopBannerFrame(state: state)
+                }
+                .padding(.top, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(Color(white: 0.94).ignoresSafeArea())
+                .toolbar(.hidden, for: .navigationBar)
+                .toolbar(.hidden, for: .tabBar)
+            } else {
+                // A list of the Live Activity's states; each row starts the real one on this iPhone, which iOS
+                // draws on the Lock Screen and in the Dynamic Island.
+                List {
+                    Section {
+                        ForEach(samples, id: \.0) { name, state in
+                            Button { Task.detached { await DemoActivity.run(state) } } label: {
+                                LabeledContent {
+                                    Image(systemName: "play.circle.fill").foregroundStyle(.blue).imageScale(.large)
+                                } label: {
+                                    Label { Text(verbatim: Self.title(name)) } icon: { Image(systemName: state.face.symbol) }
+                                }
+                            }
+                            .foregroundStyle(Color(.label))
+                        }
+                    } footer: {
+                        Text("Starts that Live Activity on this iPhone. Lock the phone or go to the Home Screen to see it; the next one replaces it.")
+                    }
+                    Section {
+                        Button("End Live Activity", systemImage: "stop.circle", role: .destructive) {
+                            Task.detached { for old in Activity<PokiActivityAttributes>.activities { await old.end(nil, dismissalPolicy: .immediate) } }
                         }
                     }
-                    .foregroundStyle(Color(.label))
                 }
-            } footer: {
-                Text("Starts that Live Activity on this iPhone. Lock the phone or go to the Home Screen to see it; the next one replaces it.")
-            }
-            Section {
-                Button("End Live Activity", systemImage: "stop.circle", role: .destructive) {
-                    Task.detached { for old in Activity<PokiActivityAttributes>.activities { await old.end(nil, dismissalPolicy: .immediate) } }
-                }
+                .listStyle(.insetGrouped)
             }
         }
-        .listStyle(.insetGrouped)
         .navigationTitle("Live Activity")
         .navigationBarTitleDisplayMode(.inline)
+        .onReceive(NotificationCenter.default.publisher(for: Self.stateChangedNotification)) { _ in
+            if let next = UserDefaults.standard.string(forKey: "pokiActivityState") {
+                only = next
+            }
+        }
         .task {
-            if let demo, let state = Self.samples.first(where: { $0.0 == demo })?.1 {
+            Self.registerPreviewObserver()
+            if let demo, let state = Self.makeSamples().first(where: { $0.0 == demo })?.1 {
                 // Detached: going to the background must not cancel the demo's wait for its alert.
                 Task.detached { await DemoActivity.run(state) }
             }
         }
+    }
+
+    private static let stateChangedNotification = Notification.Name("PokiActivityPreviewStateChanged")
+    @MainActor private static var observerRegistered = false
+    @MainActor private static func registerPreviewObserver() {
+        guard !observerRegistered else { return }
+        observerRegistered = true
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterAddObserver(center, UnsafeRawPointer(bitPattern: 0x5052), { _, _, _, _, _ in
+            Task { @MainActor in
+                NotificationCenter.default.post(name: ActivityPreview.stateChangedNotification, object: nil)
+            }
+        }, "nz.zheha.poki.preview-state" as CFString, nil, .deliverImmediately)
     }
 
     private static func title(_ name: String) -> String {
@@ -65,34 +101,37 @@ struct ActivityPreview: View {
         case "pairing": String(localized: "Pairing")
         case "code": String(localized: "Pairing Code")
         case "setup": String(localized: "Setup")
+        case "voice": String(localized: "Voice")
         default: name.capitalized
         }
     }
 
     /// Sample states, one per thing the Live Activity can show.
-    static let samples: [(String, PokiState)] = {
+    static var samples: [(String, PokiState)] { makeSamples() }
+
+    static func makeSamples() -> [(String, PokiState)] {
         let now = Date()
+        let messages = String(localized: "Messages")
         var start = PokiState(phase: .working, headline: "Open WeChat", thumbnailVersion: 0)
         start.since = now.addingTimeInterval(-3)
         start.event = .init(kind: .started, text: "Started")
 
-        var working = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 1)
-        working.app = "Messages"
+        var working = PokiState(phase: .working, headline: String(localized: "Tap “Send”"), thumbnailVersion: 1)
+        working.app = messages
         working.since = now.addingTimeInterval(-42)
         working.stepCount = 6; working.failedCount = 1
-        working.outcomes = [true, true, false, true, true, true]
-        working.event = .init(kind: .app, text: "Now in Messages")
+        working.outcomes = [true, true, true, true, false, true]
 
         var step = working
-        step.event = nil
+        step.event = .init(kind: .app, text: "Now in Messages")
         step.headline = "Tap “Search”, then type “Mom”"
         step.stepCount = 7
         step.outcomes.append(true)
 
         var approval = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 1)
-        approval.app = "Messages"
+        approval.app = messages
         // What PokiCore asks for when the agent taps Send in Messages.
-        approval.approval = PendingApproval(id: "a", app: "Messages", summary: "Tap “Send”", reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))
+        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))
         approval.since = now.addingTimeInterval(-61)
         approval.stepCount = 4; approval.outcomes = [true, true, true, true]
 
@@ -128,25 +167,34 @@ struct ActivityPreview: View {
         pairCode.pin = "482913"
 
         var setup = PokiState(phase: .setup, headline: "Setting up Poki", thumbnailVersion: 0)
-        setup.guide = .init(number: 2, count: SetupStep.shown.count, title: SetupStep.developerMode.activityTitle)
+        setup.guide = .init(number: 2, count: 6, title: SetupStep.developerMode.activityTitle)
+
+        var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
+        voice.voice = .listening
 
         return [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
-                ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup)]
-    }()
+                ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
+    }
 
     /// A stand-in screenshot (a chat screen) for the thumbnail, drawn here so the preview needs no files.
     @MainActor static func sampleScreen() -> UIImage? {
-        let view = VStack(alignment: .leading, spacing: 10) {
-            Capsule().fill(.gray.opacity(0.4)).frame(width: 70, height: 10)
-            ForEach(0..<5) { i in
+        let blue = Color(red: 0x0A / 255, green: 0x7C / 255, blue: 1)
+        let grey = Color(red: 0xE5 / 255, green: 0xE5 / 255, blue: 0xEA / 255)
+        let view = VStack(alignment: .leading, spacing: 12) {
+            Capsule().fill(.gray.opacity(0.35)).frame(width: 70, height: 10)
+            ForEach(0..<4) { i in
                 HStack {
-                    if i % 2 == 0 { Spacer() }
-                    RoundedRectangle(cornerRadius: 10).fill(i % 2 == 0 ? Color.green : Color(white: 0.85)).frame(width: 90, height: 26)
                     if i % 2 == 1 { Spacer() }
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(i % 2 == 1 ? blue : grey)
+                        .frame(width: i % 2 == 1 ? 108 : 114, height: 28)
+                    if i % 2 == 0 { Spacer() }
                 }
             }
             Spacer()
-            RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.9)).frame(height: 28)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color(red: 0xC7 / 255, green: 0xC7 / 255, blue: 0xCC / 255), lineWidth: 2)
+                .frame(height: 30)
         }
         .padding(14).frame(width: 196, height: 426).background(.white)
         let renderer = ImageRenderer(content: view)
@@ -165,7 +213,41 @@ private struct LockScreenFrame: View {
             .background(ActivityTheme.current.lockBackground ?? Color(.secondarySystemGroupedBackground), in: card)
             .containerShape(card)
             .clipShape(card)
-            .overlay(alignment: .bottomTrailing) { HeightBadge() }
+    }
+}
+
+/// Non-Dynamic Island models (iPhone SE and older): the same Live Activity card slides down from the top as a banner.
+private struct TopBannerFrame: View {
+    var state: PokiState
+    var body: some View {
+        let card = RoundedRectangle(cornerRadius: ActivityMetrics.lockCorner, style: .continuous)
+        VStack(spacing: 0) {
+            HStack {
+                Text(verbatim: "9:41").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                HStack(spacing: 4) {
+                    Image(systemName: "cellularbars")
+                    Image(systemName: "wifi")
+                    Image(systemName: "battery.100")
+                }
+                .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(.black)
+            .padding(.horizontal, 24)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            LockScreenCard(face: state.face)
+                .frame(maxWidth: 371)
+                .background(ActivityTheme.current.lockBackground ?? Site.boardBlue, in: card)
+                .containerShape(card)
+                .clipShape(card)
+                .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+                .padding(.horizontal, 11)
+                .padding(.bottom, 14)
+        }
+        .frame(width: 393)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 }
 
@@ -176,13 +258,11 @@ private struct IslandExpandedFrame: View {
     var body: some View {
         let insets = ActivityMetrics.islandInsets
         let shape = RoundedRectangle(cornerRadius: ActivityMetrics.islandCorner, style: .continuous)
-        // The row beside the camera and the gap under it as iOS lays them out (measured on the
-        // iPhone 17 Pro simulator), so the height badge matches the real island.
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             HStack(spacing: 0) {
-                IslandLeading(face: state.face).frame(width: 110, height: 25)
+                IslandLeading(face: state.face).frame(width: 110, height: 36, alignment: .leading)
                 Spacer(minLength: 120)
-                IslandTrailing(face: state.face).frame(width: 110, height: 25)
+                IslandTrailing(face: state.face).frame(width: 110, height: 36, alignment: .trailing)
             }
             IslandBottom(face: state.face)
         }
@@ -190,8 +270,18 @@ private struct IslandExpandedFrame: View {
         .frame(maxWidth: 371)
         .background(.black, in: shape)
         .overlay { if state.face.outlined { shape.strokeBorder(ActivityTheme.current.approvalOutline, lineWidth: 1.5) } }
-        .overlay(alignment: .top) { Capsule().fill(Color(white: 0.08)).frame(width: 120, height: 36).padding(.top, insets.top) }
-        .overlay(alignment: .bottomTrailing) { HeightBadge() }
+        .overlay(alignment: .top) {
+            Capsule()
+                .fill(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255))
+                .overlay(alignment: .trailing) {
+                    Circle()
+                        .fill(Color(red: 0x1E / 255, green: 0x26 / 255, blue: 0x33 / 255))
+                        .frame(width: 10, height: 10)
+                        .padding(.trailing, 12)
+                }
+                .frame(width: 120, height: 36)
+                .padding(.top, insets.top)
+        }
         .environment(\.colorScheme, .dark)
     }
 }
@@ -203,30 +293,19 @@ private struct IslandCompactFrame: View {
         HStack(spacing: 12) {
             HStack(spacing: 0) {
                 CompactLeading(face: state.face).frame(width: 44, alignment: .leading)
-                Color.clear.frame(width: 120)
-                CompactTrailing(face: state.face).frame(width: 60, alignment: .trailing)
+                Spacer(minLength: 70)
+                CompactTrailing(face: state.face).frame(width: 97, alignment: .trailing)
             }
-            .padding(.horizontal, 8).frame(height: 37)
+            .padding(.leading, 8).padding(.trailing, 12)
+            .frame(width: 231, height: 37)
             .background(.black, in: .capsule)
             .overlay { if state.face.outlined { Capsule().strokeBorder(ActivityTheme.current.approvalOutline, lineWidth: 1.5) } }
-            MinimalView(face: state.face).frame(width: 37, height: 37).background(.black, in: .circle)
+            MinimalView(face: state.face)
+                .frame(width: 37, height: 37)
+                .background(.black, in: .circle)
+                .overlay { if state.face.outlined { Circle().strokeBorder(ActivityTheme.current.approvalOutline, lineWidth: 1.5) } }
         }
         .environment(\.colorScheme, .dark)
-    }
-}
-
-/// Shows the Lock Screen view's height, red over the system's 160 point limit.
-private struct HeightBadge: View {
-    var body: some View {
-        GeometryReader { proxy in
-            let height = Int(proxy.size.height.rounded())
-            Text("\(height) pt").font(.caption2.monospacedDigit().bold())
-                .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(height > 160 ? Color.red : Color.white.opacity(0.15), in: .capsule)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .offset(x: 0, y: 22)
-        }
     }
 }
 

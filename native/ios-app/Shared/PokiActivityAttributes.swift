@@ -19,6 +19,10 @@ struct PokiActivityAttributes: ActivityAttributes {
             /// The phases a person has to answer: a step from the agent never replaces them.
             var holdsApproval: Bool { self == .approval || self == .deciding }
         }
+        /// Live voice session state when Poki's voice mode is active.
+        enum Voice: String, Codable, Hashable {
+            case listening, thinking, speaking
+        }
         var phase: Phase
         /// What the agent is doing, in a few words ("Tap “Send”"), or the phase's line, in English: the
         /// face words it in the system's language (ActivityWords).
@@ -46,6 +50,8 @@ struct PokiActivityAttributes: ActivityAttributes {
         var outcomes: [Bool] = []
         /// During setup: which step the person is on ("2/6").
         var guide: Guide?
+        /// Live voice conversation state, when active.
+        var voice: Voice? = nil
         /// When the agent's current run of steps began.
         var since: Date?
         /// Steps in the current run, and how many of them did not go through. Kept by ActivityController.

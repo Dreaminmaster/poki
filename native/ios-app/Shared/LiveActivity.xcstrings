@@ -243,6 +243,61 @@
         }
       }
     },
+    "Don’t Allow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不允许"
+          }
+        }
+      }
+    },
+    "Listening" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在听"
+          }
+        }
+      }
+    },
+    "Speaking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说话中"
+          }
+        }
+      }
+    },
+    "Thinking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考中"
+          }
+        }
+      }
+    },
+    "Voice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音"
+          }
+        }
+      }
+    },
     "Developer Mode" : {
       "extractionState" : "manual",
       "localizations" : {

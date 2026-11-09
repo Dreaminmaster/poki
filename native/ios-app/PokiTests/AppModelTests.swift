@@ -216,6 +216,71 @@ final class ApprovalDefaultTests: XCTestCase {
         let tap = await core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.2)
         XCTAssertEqual(tap, .clear)
     }
+
+    /// Tapping Allow or Don’t Allow on the Live Activity (ApproveActionIntent / DenyActionIntent) sends
+    /// the decision back through the approval channel to PokiCore.
+    func testLiveActivityApprovalButtonsDeliverDecisionToApprovalChannel() async throws {
+        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
+        var pending: [PendingApproval] = []
+        var activityState = PokiActivityAttributes.ContentState(phase: .working, headline: "Working", thumbnailVersion: 0)
+
+        let eventsTask = Task { @MainActor in
+            for await event in core.events {
+                switch event {
+                case .approvalRequested(let approval):
+                    pending.append(approval)
+                    activityState.phase = .approval
+                    activityState.approval = approval
+                    activityState.headline = "Allow this step?"
+                case .approvalEnded(let id, let approved):
+                    pending.removeAll { $0.id == id }
+                    if activityState.approval?.id == id {
+                        activityState.approval = nil
+                        activityState.phase = .working
+                        activityState.headline = approved == true ? "Continuing" : "Step skipped"
+                    }
+                default:
+                    break
+                }
+            }
+        }
+        defer { eventsTask.cancel() }
+
+        ApprovalIntentBridge.install { decision in
+            guard pending.contains(where: { $0.id == decision.approvalID }) else { return false }
+            activityState.phase = .deciding
+            activityState.decision = decision.approved
+            core.resolveApproval(id: decision.approvalID, approved: decision.approved)
+            return true
+        }
+
+        async let allowTap = core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 5.0)
+        let requestedAllow = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)
+        await fulfillment(of: [requestedAllow], timeout: 2.0)
+        let firstID = try XCTUnwrap(pending.first?.id)
+        XCTAssertEqual(activityState.face.bottom, .approval(id: firstID))
+        XCTAssertEqual(activityState.face.minimal, .approval)
+
+        _ = try await ApproveActionIntent(approvalID: firstID).perform()
+        XCTAssertEqual(activityState.phase, .deciding)
+        XCTAssertEqual(activityState.decision, true)
+        let allowVerdict = await allowTap
+        XCTAssertTrue(allowVerdict.mayTap, "\(allowVerdict)")
+        XCTAssertEqual(allowVerdict, .approved("sending a message (\"send\")"))
+
+        async let denyTap = core.clearTap(on: "Delete", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 5.0)
+        let requestedDeny = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)
+        await fulfillment(of: [requestedDeny], timeout: 2.0)
+        let secondID = try XCTUnwrap(pending.first?.id)
+        XCTAssertEqual(activityState.face.bottom, .approval(id: secondID))
+
+        _ = try await DenyActionIntent(approvalID: secondID).perform()
+        XCTAssertEqual(activityState.phase, .deciding)
+        XCTAssertEqual(activityState.decision, false)
+        let denyVerdict = await denyTap
+        XCTAssertFalse(denyVerdict.mayTap, "\(denyVerdict)")
+    }
 }
 
 @MainActor
