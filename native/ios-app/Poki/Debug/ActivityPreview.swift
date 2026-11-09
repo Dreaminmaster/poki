@@ -244,10 +244,10 @@ private struct TopBannerFrame: View {
                 .clipShape(card)
                 .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
                 .padding(.horizontal, 11)
-                .padding(.bottom, 14)
+                .padding(.bottom, 11)
         }
         .frame(width: 393)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 35, style: .continuous))
     }
 }
 

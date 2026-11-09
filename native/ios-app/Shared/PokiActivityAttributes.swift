@@ -101,13 +101,37 @@ struct PendingApproval: Codable, Hashable {
     /// The summary ("Tap “Send”") says how, which the thumbnail shows better.
     var question: String {
         // PokiCore names the app, or says "unknown", or describes the home screen at length.
-        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : app
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
         if reason.hasPrefix("sending") { return place.map { String(activity: "Send in \($0)?") } ?? String(activity: "Send a message?") }
         if reason.hasPrefix("a payment") { return place.map { String(activity: "Pay in \($0)?") } ?? String(activity: "Make a payment?") }
         if reason.hasPrefix("deleting") { return place.map { String(activity: "Delete in \($0)?") } ?? String(activity: "Delete this?") }
         if reason.hasPrefix("typing into a password") { return String(activity: "Type a password?") }
         if reason.hasPrefix("input in"), let place { return String(activity: "Use \(place)?") }
         return String(activity: "Allow this step?")
+    }
+
+    /// The reason as a line under the summary: "Sending a message in Messages".
+    var reasonLine: String {
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
+        if reason.hasPrefix("sending") {
+            return place.map { String(activity: "Sending a message in \($0)") } ?? String(activity: "Sending a message")
+        }
+        if reason.hasPrefix("a payment") {
+            return place.map { String(activity: "Making a payment in \($0)") } ?? String(activity: "Making a payment")
+        }
+        if reason.hasPrefix("deleting") {
+            return place.map { String(activity: "Deleting in \($0)") } ?? String(activity: "Deleting")
+        }
+        if reason.hasPrefix("typing into a password") {
+            return place.map { String(activity: "Typing a password in \($0)") } ?? String(activity: "Typing a password")
+        }
+        var text = reason
+        if let quote = text.range(of: " (\"") { text = String(text[..<quote.lowerBound]) }
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        if let place, !text.contains(" in ") {
+            return "\(text) in \(place)"
+        }
+        return text
     }
 }
 

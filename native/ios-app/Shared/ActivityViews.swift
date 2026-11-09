@@ -8,7 +8,7 @@
 // concentric with the island's corners are from leepokai/Codync (commit 848070d,
 // apps/ios/Widgets/CodyncWidgets.swift), Copyright 2026 Po Kai Lee, Apache License 2.0. Poki adds the
 // step line, the pairing code, the setup steps, the thumbnail and the bear avatar from ESP-139's
-// board 02 and ESP-171's final Dynamic Island / Lock Screen boards, with ESP-162's shorter words.
+// board 02 and ESP-171's final Dynamic Island / Lock Screen boards.
 // See THIRD_PARTY_NOTICES.md.
 import ActivityKit
 import AppIntents
@@ -18,20 +18,16 @@ import WidgetKit
 /// Sizes (HIG, iPhone): the Lock Screen card and the expanded island are 371 points wide and at most
 /// 160 tall; anything taller is cut. Every view here draws one `ActivityFace`, so the four
 /// presentations always say the same thing. The sizes follow ESP-139's final board 02 and ESP-171's
-/// final Dynamic Island / Lock Screen boards, for two lines of words (ESP-162).
+/// final Dynamic Island / Lock Screen boards.
 enum ActivityMetrics {
     /// The Lock Screen card's padding: 14 top and bottom, 20 leading, 14 trailing.
     static let lockInsets = EdgeInsets(top: 14, leading: 20, bottom: 14, trailing: 14)
     /// The card's corner as iOS draws it, for the concentric corners inside it.
     static let lockCorner: CGFloat = 24
-    /// Inside the card's padding, the two cards with a screenshot beside the words: the step line's
-    /// and the approval's. Fixed, so the card does not grow when the first screenshot arrives.
-    static let lockProgressContent: CGFloat = 90
-    static let lockApprovalContent: CGFloat = 108
-    /// The status row's height (the bear's), the content line's, and the gap between them.
-    static let statusRow: CGFloat = 20
-    static let contentLine: CGFloat = 25
-    static let lineGap: CGFloat = 6
+    /// Inside the card's padding: 140 points tall, 156 while an approval or handoff waits. Fixed, so
+    /// the card does not grow or shrink as lines and screenshots come and go within a phase.
+    static let lockContent: CGFloat = 112
+    static let lockApprovalContent: CGFloat = 128
     /// The expanded island's margins inside its 44 point corners.
     static let islandInsets = EdgeInsets(top: 11, leading: 14, bottom: 16, trailing: 14)
     static let islandCorner: CGFloat = 44
@@ -41,8 +37,8 @@ enum ActivityMetrics {
     /// corners cut the bear, the meta's last letters and the ends of the last row, so those move in.
     /// The row beside the camera: extra room on the outer side.
     static let islandRowInset: CGFloat = 14
-    /// The last row: extra room below it, more for the content line alone than for a row under it,
-    /// and the step line and the setup steps narrower as well (the step line's first dot was cut).
+    /// The last row: extra room below it, more for a flat row than for a capsule, and the setup
+    /// steps narrower as well.
     static func islandBottomExtra(_ bottom: ActivityFace.Bottom) -> CGFloat {
         switch bottom {
         case .none: 18
@@ -50,19 +46,22 @@ enum ActivityMetrics {
         }
     }
     static let islandLastRowInset: CGFloat = 10
+    static let islandSegmentsInset: CGFloat = 10
 
     static let avatar: CGFloat = 20
     static let compactAvatar: CGFloat = 22
-    /// A small phone beside the words, as tall as they are.
-    static let thumbnail = CGSize(width: 37, height: lockProgressContent)
-    static let approvalThumbnail = CGSize(width: 50, height: lockApprovalContent)
+    static let thumbnail = CGSize(width: 52, height: 112)
+    static let smallThumbnail = CGSize(width: 34, height: 72)
     /// Concentric with the card: its corner less the inset.
     static let thumbnailCorner = lockCorner - lockInsets.top
+    static let smallThumbnailCorner: CGFloat = 7
 
     static func buttonHeight(_ surface: ActivitySurface) -> CGFloat { surface == .lockScreen ? 44 : 38 }
     static let denyWidth: CGFloat = 96
-    /// Stop at the end of the step line: a round button with the stop symbol.
-    static let stop: CGFloat = 30
+    static func stopWidth(_ surface: ActivitySurface) -> CGFloat { surface == .lockScreen ? 80 : 92 }
+    static let stopHeight: CGFloat = 36
+    static let openWidth: CGFloat = 120
+    static func openHeight(_ surface: ActivitySurface) -> CGFloat { surface == .lockScreen ? 40 : 36 }
 
     static let dot: CGFloat = 8
     static let missedDot: CGFloat = 10
@@ -94,31 +93,58 @@ struct LockScreenCard: View {
     @ViewBuilder
     private func content(_ face: ActivityFace) -> some View {
         switch face.bottom {
-        case .approval, .progress:
-            let approval = face.bottom.isApproval
+        case .approval, .deciding, .handoff:
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        StatusRow(face: face)
+                        Title(face: face, surface: .lockScreen)
+                        Subtitle(face: face, surface: .lockScreen)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if face.thumbnail != .none {
+                        Thumbnail(size: ActivityMetrics.smallThumbnail, corner: ActivityMetrics.smallThumbnailCorner)
+                    }
+                }
+                Spacer(minLength: 8)
+                BottomControl(face: face, surface: .lockScreen)
+            }
+            .frame(height: ActivityMetrics.lockApprovalContent)
+        case .progress:
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
                     StatusRow(face: face)
-                    ContentLine(face: face, surface: .lockScreen)
-                        .padding(.top, ActivityMetrics.lineGap)
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 4)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Title(face: face, surface: .lockScreen)
+                        Subtitle(face: face, surface: .lockScreen)
+                    }
+                    Spacer(minLength: 4)
                     BottomControl(face: face, surface: .lockScreen)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if face.thumbnail {
-                    Thumbnail(size: approval ? ActivityMetrics.approvalThumbnail : ActivityMetrics.thumbnail, corner: ActivityMetrics.thumbnailCorner)
+                if face.thumbnail != .none {
+                    Thumbnail(size: ActivityMetrics.thumbnail, corner: ActivityMetrics.thumbnailCorner)
                 }
             }
-            .frame(height: approval ? ActivityMetrics.lockApprovalContent : ActivityMetrics.lockProgressContent)
+            .frame(height: ActivityMetrics.lockContent)
         default:
-            VStack(alignment: .leading, spacing: ActivityMetrics.lineGap) {
+            VStack(alignment: .leading, spacing: 0) {
                 StatusRow(face: face)
-                ContentLine(face: face, surface: .lockScreen)
+                Spacer(minLength: 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Title(face: face, surface: .lockScreen)
+                    Subtitle(face: face, surface: .lockScreen)
+                }
                 if face.bottom != .none {
-                    BottomControl(face: face, surface: .lockScreen).padding(.top, 6)
+                    Spacer(minLength: 4)
+                    BottomControl(face: face, surface: .lockScreen)
+                } else {
+                    Spacer(minLength: 0)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: ActivityMetrics.lockContent)
             .padding(.trailing, 6)
         }
     }
@@ -156,25 +182,54 @@ private struct StatusRow: View {
     }
 }
 
-/// The content line: the one thing in the large size, on one line.
-private struct ContentLine: View {
+private struct Title: View {
     var face: ActivityFace
     var surface: ActivitySurface
     private let theme = ActivityTheme.current
     var body: some View {
-        Text(face.content)
-            .font(face.contentIsCode ? theme.content.monospacedDigit() : theme.content)
-            .tracking(theme.contentTracking)
-            .foregroundStyle(theme.palette(surface).text.opacity(face.stale ? 0.72 : 1))
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
-            .frame(height: ActivityMetrics.contentLine)
-            .contentTransition(face.contentIsCode ? .numericText() : .interpolate)
+        if face.contentIsCode {
+            Text(face.content)
+                .font(theme.code)
+                .tracking(theme.codeTracking)
+                .foregroundStyle(theme.palette(surface).text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(height: 52)
+                .contentTransition(.numericText())
+        } else {
+            Text(face.content)
+                .font(theme.title)
+                .tracking(theme.titleTracking)
+                .foregroundStyle(theme.palette(surface).text.opacity(face.stale ? 0.72 : 1))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(height: 25)
+                .contentTransition(.interpolate)
+        }
+    }
+}
+
+private struct Subtitle: View {
+    var face: ActivityFace
+    var surface: ActivitySurface
+    private let theme = ActivityTheme.current
+    var body: some View {
+        if let subtitle = face.subtitle {
+            // Setup hints may take two lines; everything else keeps to one.
+            let twoLines = face.bottom.isSegments
+            Text(subtitle)
+                .font(theme.subtitle)
+                .foregroundStyle(theme.palette(surface).color(face.subtitleTone))
+                .lineLimit(twoLines ? 2 : 1)
+                .lineSpacing(twoLines ? 2 : 0)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentTransition(.interpolate)
+        }
     }
 }
 
 extension ActivityFace.Bottom {
-    var isApproval: Bool { if case .approval = self { true } else { false } }
+    var isSegments: Bool { if case .segments = self { true } else { false } }
 }
 
 // MARK: Dynamic Island, expanded
@@ -201,13 +256,13 @@ struct IslandLeading: View {
     }
 }
 
-/// Beside the camera, right: the meta value (and caller badge when an outside agent drives the phone).
+/// Beside the camera, right: the short meta value (and caller badge when an outside agent drives the phone).
 struct IslandTrailing: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
         HStack(spacing: 6) {
-            MetaView(meta: face.meta, surface: .island)
+            MetaView(meta: face.shortMeta, surface: .island)
             if let caller = face.caller { CallerBadge(name: caller, size: 18) }
         }
         .padding(.trailing, ActivityMetrics.islandRowInset)
@@ -217,13 +272,16 @@ struct IslandTrailing: View {
     }
 }
 
-/// Under the camera: the content line and the step line, the setup steps, Handoff Done, or the approval's buttons.
+/// Under the camera: the title, the subtitle and the phase's control.
 struct IslandBottom: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
         VStack(alignment: .leading, spacing: ActivityMetrics.islandGap) {
-            ContentLine(face: face, surface: .island)
+            VStack(alignment: .leading, spacing: face.bottom.isSegments ? 2 : 0) {
+                Title(face: face, surface: .island)
+                Subtitle(face: face, surface: .island)
+            }
             BottomControl(face: face, surface: .island)
         }
         .padding(.bottom, ActivityMetrics.islandBottomExtra(face.bottom))
@@ -259,6 +317,8 @@ struct CompactTrailing: View {
             case .code(let code):
                 Text(code).font(theme.compactCode).foregroundStyle(palette.accent)
                     .lineLimit(1).minimumScaleFactor(0.8)
+            case .mark(let mark, let tone):
+                Text(mark).font(theme.compactMark).foregroundStyle(palette.color(tone))
             case .countdown(let until):
                 CountdownText(until: until, color: palette.approval, width: 42)
             case .elapsed(let since):
@@ -300,9 +360,7 @@ struct MinimalView: View {
                 }
                 .frame(width: 24, height: 24)
             case .problem:
-                Image(systemName: "exclamationmark")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(theme.island.problem)
+                Text("!").font(theme.compactMark).foregroundStyle(theme.island.problem)
             }
         }
         .environment(\.colorScheme, .dark)
@@ -336,7 +394,8 @@ private struct MetaView: View {
     }
 }
 
-/// What sits at the bottom of a card: the step line, the approval's buttons, Handoff Done, or the setup steps.
+/// What sits at the bottom of a card: the step line and Stop, the approval's buttons, Open Poki,
+/// Handoff Done, or the setup steps.
 private struct BottomControl: View {
     var face: ActivityFace
     var surface: ActivitySurface
@@ -349,22 +408,41 @@ private struct BottomControl: View {
             EmptyView()
         case .progress(let outcomes, let current, let finished, let stop):
             HStack(spacing: 8) {
-                // As many dots as fit beside the Lock Screen's thumbnail, or across the island.
                 StepLine(outcomes: outcomes, current: current, finished: finished,
-                         capacity: (surface == .lockScreen ? 12 : 14) - (stop ? 2 : 0), palette: palette)
+                         capacity: capacity(stop: stop), palette: palette)
                 Spacer(minLength: 0)
                 if stop { StopButton(surface: surface).transition(.opacity) }
             }
-            // Stop's height whether or not it shows, so the card keeps its size when the run ends.
-            .frame(height: ActivityMetrics.stop)
+            // The island keeps Stop's height when the run ends, so it does not shrink at Done.
+            .frame(height: stop || surface == .island ? ActivityMetrics.stopHeight : 16)
             .padding(.horizontal, surface == .island ? ActivityMetrics.islandLastRowInset : 0)
             .transition(.activityRow)
         case .approval(let id):
             ApprovalButtons(approvalID: id, surface: surface)
                 .transition(.activityRow)
+        case .deciding(let text):
+            Text(text)
+                .font(theme.button)
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.buttonHeight(surface), maxHeight: ActivityMetrics.buttonHeight(surface))
+                .background(palette.buttonFill, in: .capsule)
+                .contentTransition(.interpolate)
         case .handoff(let id):
             HandoffDoneButton(handoffID: id, surface: surface)
                 .transition(.activityRow)
+        case .openPoki:
+            HStack {
+                Spacer(minLength: 0)
+                Link(destination: face.link) {
+                    Text(String(activity: "Open Poki"))
+                        .font(theme.button)
+                        .foregroundStyle(palette.primaryText)
+                        .frame(width: ActivityMetrics.openWidth, height: ActivityMetrics.openHeight(surface))
+                        .background(palette.primaryFill, in: .capsule)
+                }
+            }
+            .transition(.activityRow)
         case .segments(let number, let count):
             HStack(spacing: 4) {
                 ForEach(1...max(1, count), id: \.self) { index in
@@ -373,8 +451,18 @@ private struct BottomControl: View {
                         .frame(height: 4)
                 }
             }
-            .padding(.horizontal, surface == .island ? ActivityMetrics.islandLastRowInset : 0)
+            .padding(.horizontal, surface == .island ? ActivityMetrics.islandSegmentsInset : 0)
             .transition(.activityRow)
+        }
+    }
+
+    /// How many dots fit beside Stop (or without it) on this surface, the current step included.
+    private func capacity(stop: Bool) -> Int {
+        switch (surface, stop) {
+        case (.lockScreen, true): 8
+        case (.lockScreen, false): 12
+        case (.island, true): 11
+        case (.island, false): 15
         }
     }
 }
@@ -489,21 +577,19 @@ struct HandoffDoneButton: View {
 }
 
 /// Stop runner: stops the runner, and with it iOS's automation banner, until the agent's next request.
-/// The stop symbol, no word; VoiceOver reads "Stop".
 struct StopButton: View {
     var surface: ActivitySurface
     private let theme = ActivityTheme.current
     var body: some View {
         let palette = theme.palette(surface)
         Button(intent: StopRunnerIntent()) {
-            Image(systemName: "stop.fill")
-                .font(.system(size: 12, weight: .bold))
+            Text(String(activity: "Stop"))
+                .font(theme.button)
                 .foregroundStyle(palette.text)
-                .frame(width: ActivityMetrics.stop, height: ActivityMetrics.stop)
-                .background(palette.buttonFill, in: .circle)
+                .frame(width: ActivityMetrics.stopWidth(surface), height: ActivityMetrics.stopHeight)
+                .background(palette.buttonFill, in: .capsule)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(String(activity: "Stop"))
     }
 }
 
