@@ -35,6 +35,17 @@ struct DiagnosticsView: View {
             ApprovalTestingSection()
             // The in-process path's switch and probes (ESP-173, ESP-175).
             InProcessSection()
+            if model.automationPath == .runner {
+                @Bindable var model = model
+                Section {
+                    LabeledContent("Runner", value: Health.runner(model).word)
+                    Picker("Stop When Idle For", selection: $model.idleStopSeconds) {
+                        ForEach(SettingsHome.idleChoices, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                } header: {
+                    Text("Poki Runner")
+                }
+            }
             Section {
                 if let loop = loopbackInterface(addresses) {
                     Text(verbatim: "\(loop.interface)  \(loop.address)").font(.body.monospaced().weight(.semibold))

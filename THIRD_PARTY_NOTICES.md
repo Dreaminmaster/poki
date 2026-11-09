@@ -74,9 +74,9 @@ The app and the Live Activity draw their Latin text in [Geist](https://github.co
 
 ## iPhone app chat
 
-The iPhone app's chat, Poki details and model pages ([native/ios-app/Poki/Chat](native/ios-app/Poki/Chat)) port code from four projects. Each file names its source in its header.
+The iPhone app's sessions list, chat, Poki details and model pages ([native/ios-app/Poki/Sessions](native/ios-app/Poki/Sessions), [native/ios-app/Poki/Chat](native/ios-app/Poki/Chat)) port code from four projects. Each file names its source in its header.
 
-- [GetStream/swiftui-iMessage-clone](https://github.com/GetStream/swiftui-iMessage-clone/tree/df114b4) at commit `df114b4`, by Stefan Blos: the header with the picture and name that opens the details (`MessageListHeader.swift`, `MessageListHeaderModifier.swift`) and the message field with its send button (`ComposerInputView.swift`). The repository has no license file.
+- [GetStream/swiftui-iMessage-clone](https://github.com/GetStream/swiftui-iMessage-clone/tree/df114b4) at commit `df114b4`, by Stefan Blos: the pinned conversation row and session row (`PinnedChannelsView.swift`, `iMessageChannelListItemView.swift`), the header with the picture and name that opens the details (`MessageListHeader.swift`, `MessageListHeaderModifier.swift`) and the message field with its send button (`ComposerInputView.swift`). The repository has no license file.
 - [Mackarous/ConversationUI](https://github.com/Mackarous/ConversationUI/tree/e77c69e) at commit `e77c69e`, copyright 2024 Andrew Mackarous, under the [MIT license](third_party/LICENSE.conversationui): the message bubble (`Sources/ConversationUI/MessageBubble.swift`).
 - [exyte/Chat](https://github.com/exyte/Chat/tree/f382a14) at commit `f382a14`, copyright 2019 exyte, under the [MIT license](third_party/LICENSE.exyte-chat): the plus button in front of the field (`Sources/ExyteChat/Views/InputView/InputView.swift`) and the waveform bars (`Sources/ExyteChat/Views/Recording/RecordWaveform.swift`).
 - [lhuanyu/OllamaMessage](https://github.com/lhuanyu/OllamaMessage/tree/c857a02) at commit `c857a02`, copyright 2023 Huanyu Luo, under the [MIT license](third_party/LICENSE.ollamamessage): the model row and the provider list (`DialogueSettingsView.swift`, `OllamaModelSelectionView.swift`).

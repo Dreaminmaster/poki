@@ -552,6 +552,15 @@ final class ChatModel {
                                         PlanStep(String(localized: "Type “On my way”"), state: .done),
                                         PlanStep(String(localized: "Tap Send"), state: .waiting)])),
                        ChatEntry(.note(.waiting))]
+        } else if scene == "approval" || scene == "setupHint" {
+            entries = [ChatEntry(.time(start)),
+                       ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
+                       ChatEntry(.you(you, delivered: true)),
+                       ChatEntry(.poki(String(localized: "On it. Opening Messages."))),
+                       ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
+                                        PlanStep(String(localized: "Open the chat with Mom"), state: .done),
+                                        PlanStep(String(localized: "Type “On my way”"), state: .done),
+                                        PlanStep(String(localized: "Tap Send"), state: .current)]))]
         } else {
             entries = [ChatEntry(.time(start)),
                        ChatEntry(.you(you, delivered: true)),

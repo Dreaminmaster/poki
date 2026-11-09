@@ -61,6 +61,16 @@
         }
       }
     },
+    "%@ · Poki acts only if you allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，仅在你允许时 Poki 才会执行"
+          }
+        }
+      }
+    },
     "%@%@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -131,6 +141,26 @@
         }
       }
     },
+    "%lld connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接 %lld 个"
+          }
+        }
+      }
+    },
+    "%lld left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还剩 %lld 项"
+          }
+        }
+      }
+    },
     "%lld lines" : {
       "localizations" : {
         "zh-Hans" : {
@@ -151,12 +181,42 @@
         }
       }
     },
+    "%lld of %lld done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %1$lld / %2$lld"
+          }
+        }
+      }
+    },
+    "%lld of %lld done. Each item ticks itself when the iPhone can check it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %1$lld / %2$lld。此 iPhone 可自动检测的项会自动打勾。"
+          }
+        }
+      }
+    },
     "%lld pt" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 点"
+          }
+        }
+      }
+    },
+    "%lld routines" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条惯例"
           }
         }
       }
@@ -262,6 +322,16 @@
         }
       }
     },
+    "7 days" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 天"
+          }
+        }
+      }
+    },
     "A key is saved. Enter a new one to replace it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -312,12 +382,32 @@
         }
       }
     },
+    "Accounts and Models" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账号与模型"
+          }
+        }
+      }
+    },
     "Add" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加"
+          }
+        }
+      }
+    },
+    "Add Account ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加账号 ›"
           }
         }
       }
@@ -348,6 +438,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请先添加模型密钥：轻点头像，再选择“模型”。"
+          }
+        }
+      }
+    },
+    "Add an Account ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加账号 ›"
+          }
+        }
+      }
+    },
+    "Add an account to chat with Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加账号以与 Poki 对话。"
           }
         }
       }
@@ -444,6 +554,16 @@
         }
       }
     },
+    "Agents and Relay" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体与中继"
+          }
+        }
+      }
+    },
     "Agents can reach this iPhone, but Poki can’t tap until Loopback is on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -484,6 +604,16 @@
         }
       }
     },
+    "All done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部完成"
+          }
+        }
+      }
+    },
     "Allow" : {
       "localizations" : {
         "zh-Hans" : {
@@ -520,6 +650,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允许操作"
+          }
+        }
+      }
+    },
+    "Allow background mode so Poki stays on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许后台运行以保持 Poki 在线。"
           }
         }
       }
@@ -740,6 +880,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回"
+          }
+        }
+      }
+    },
+    "Background ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保活 ›"
           }
         }
       }
@@ -1008,6 +1158,16 @@
         }
       }
     },
+    "Continue Setup" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续配置"
+          }
+        }
+      }
+    },
     "Conversation" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1179,12 +1339,32 @@
         }
       }
     },
+    "Developer Mode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发者模式"
+          }
+        }
+      }
+    },
     "Developer Mode is on" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已开启开发者模式"
+          }
+        }
+      }
+    },
+    "Developer Mode ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发者模式 ›"
           }
         }
       }
@@ -1543,6 +1723,16 @@
         }
       }
     },
+    "Hold to talk" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住说话"
+          }
+        }
+      }
+    },
     "Hold to talk, slide up to end" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1623,6 +1813,16 @@
         }
       }
     },
+    "In7d" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 天内"
+          }
+        }
+      }
+    },
     "Install **Poki Runner** (poki-runner-unsigned.ipa) with the same tool and Apple ID you used for Poki." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1671,6 +1871,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用与 Poki 相同的签名工具和 Apple ID 安装 Poki Runner（poki-runner-unsigned.ipa），然后在“设置 › 通用 › VPN 与设备管理”中信任它的开发者。"
+          }
+        }
+      }
+    },
+    "Install Poki Runner to tap the screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装 Poki Runner 以操作屏幕。"
+          }
+        }
+      }
+    },
+    "Install Poki Runner ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装 Poki Runner ›"
           }
         }
       }
@@ -1918,6 +2138,26 @@
         }
       }
     },
+    "Local Connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机连接"
+          }
+        }
+      }
+    },
+    "Local Connection ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机连接 ›"
+          }
+        }
+      }
+    },
     "Local VPN connected. The check above confirms developer access." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2029,6 +2269,16 @@
         }
       }
     },
+    "Memory" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记忆"
+          }
+        }
+      }
+    },
     "Message Poki" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2049,6 +2299,16 @@
         }
       }
     },
+    "Messages · Poki taps Send only if you allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信息，仅在你允许时 Poki 才会点发送"
+          }
+        }
+      }
+    },
     "Model" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2065,6 +2325,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更多"
+          }
+        }
+      }
+    },
+    "More Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多设置"
           }
         }
       }
@@ -2202,6 +2472,16 @@
         }
       }
     },
+    "No agents" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无智能体"
+          }
+        }
+      }
+    },
     "No computer required." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2274,12 +2554,32 @@
         }
       }
     },
+    "Not Needed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无需登录"
+          }
+        }
+      }
+    },
     "Not Set" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未设置"
+          }
+        }
+      }
+    },
+    "Not allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不允许"
           }
         }
       }
@@ -2391,6 +2691,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "好的，正在打开“信息”。"
+          }
+        }
+      }
+    },
+    "On-Device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机听写"
           }
         }
       }
@@ -2507,6 +2817,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开设置引导"
+          }
+        }
+      }
+    },
+    "Open Setup ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置引导 ›"
           }
         }
       }
@@ -2715,6 +3035,16 @@
         }
       }
     },
+    "Pair This iPhone ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对此 iPhone ›"
+          }
+        }
+      }
+    },
     "Pair again in Poki's setup." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2827,6 +3157,16 @@
         }
       }
     },
+    "Paused" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
+    },
     "Paused for you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2853,6 +3193,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 已关闭"
+          }
+        }
+      }
+    },
+    "Poki Is On" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已开启"
+          }
+        }
+      }
+    },
+    "Poki Runner" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Runner"
           }
         }
       }
@@ -2889,6 +3249,16 @@
         }
       }
     },
+    "Poki Runner ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Runner ›"
+          }
+        }
+      }
+    },
     "Poki Setup on your Mac renews Poki when this iPhone is connected." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2905,6 +3275,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 版本"
+          }
+        }
+      }
+    },
+    "Poki acts only if you allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅在你允许时 Poki 才会执行"
           }
         }
       }
@@ -2950,12 +3330,72 @@
         }
       }
     },
+    "Poki can’t act yet: Developer Mode is off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 暂无法操作：开发者模式未开启。"
+          }
+        }
+      }
+    },
+    "Poki can’t act yet: Poki Runner isn’t installed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 暂无法操作：尚未安装 Poki Runner。"
+          }
+        }
+      }
+    },
+    "Poki can’t act yet: this iPhone isn’t paired." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 暂无法操作：此 iPhone 尚未配对。"
+          }
+        }
+      }
+    },
+    "Poki can’t connect yet: Local Connection is off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 暂无法连接：本机连接未开启。"
+          }
+        }
+      }
+    },
     "Poki can’t stay on in the background" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 无法在后台保持运行"
+          }
+        }
+      }
+    },
+    "Poki can’t stay on in the background yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 暂无法在后台保活。"
+          }
+        }
+      }
+    },
+    "Poki can’t tap Send yet: UI Automation is off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 暂无法点发送：界面自动化未开启。"
           }
         }
       }
@@ -3026,6 +3466,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 会在 GitHub 上查找所选通道的最新版本。"
+          }
+        }
+      }
+    },
+    "Poki needs a model account before it can reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加模型账号后 Poki 才能回复。"
           }
         }
       }
@@ -3203,6 +3653,16 @@
         }
       }
     },
+    "Realtime" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音"
+          }
+        }
+      }
+    },
     "Reflected RemotePairing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3283,6 +3743,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "松开以结束对话。"
+          }
+        }
+      }
+    },
+    "Release to send" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "松手发送"
           }
         }
       }
@@ -3399,6 +3869,16 @@
         }
       }
     },
+    "SIGNING · OPTIONAL" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "签名（可选）"
+          }
+        }
+      }
+    },
     "STATUS" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3429,6 +3909,16 @@
         }
       }
     },
+    "Say “Allow” or “Cancel”, or tap in the Island" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说“允许”或“取消”，或在灵动岛中轻点"
+          }
+        }
+      }
+    },
     "Send" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3445,6 +3935,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "给妈妈发送“在路上了”"
+          }
+        }
+      }
+    },
+    "Send “On my way” to Mom?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向妈妈发送“On my way”吗？"
           }
         }
       }
@@ -3515,6 +4015,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设置引导"
+          }
+        }
+      }
+    },
+    "Setup, signing, memory, approvals, agents and diagnostics." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配置、签名、记忆、审批、智能体与诊断。"
           }
         }
       }
@@ -3599,6 +4109,16 @@
         }
       }
     },
+    "Signed Until" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "签名有效期至"
+          }
+        }
+      }
+    },
     "Signed in" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3651,6 +4171,26 @@
         }
       }
     },
+    "Slide up to cancel" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上滑取消"
+          }
+        }
+      }
+    },
+    "Speaking…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在说话…"
+          }
+        }
+      }
+    },
     "Start Hold" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3698,6 +4238,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "状态"
+          }
+        }
+      }
+    },
+    "Stay On in Background" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保活"
           }
         }
       }
@@ -4391,12 +4941,42 @@
         }
       }
     },
+    "Turn On Background ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启后台保活 ›"
+          }
+        }
+      }
+    },
     "Turn On Developer Mode" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启开发者模式"
+          }
+        }
+      }
+    },
+    "Turn On Developer Mode ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启开发者模式 ›"
+          }
+        }
+      }
+    },
+    "Turn On Local Connection ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启本机连接 ›"
           }
         }
       }
@@ -4411,6 +4991,26 @@
         }
       }
     },
+    "Turn On UI Automation ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启界面自动化 ›"
+          }
+        }
+      }
+    },
+    "Turn On ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启 ›"
+          }
+        }
+      }
+    },
     "Turn on **Enable UI Automation**." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4418,6 +5018,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启“**启用 UI 自动化**”。"
+          }
+        }
+      }
+    },
+    "Turn on Developer Mode to tap the screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启开发者模式以操作屏幕。"
           }
         }
       }
@@ -4451,6 +5061,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启增强模式（回环仅在增强模式下可用）。"
+          }
+        }
+      }
+    },
+    "Turn on UI Automation to tap the screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启界面自动化以操作屏幕。"
+          }
+        }
+      }
+    },
+    "Turn on local connection to tap the screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启本机连接以操作屏幕。"
+          }
+        }
+      }
+    },
+    "Turn on pairing to tap the screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启配对以操作屏幕。"
           }
         }
       }
@@ -4527,12 +5167,32 @@
         }
       }
     },
+    "UI Automation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "界面自动化"
+          }
+        }
+      }
+    },
     "UI Automation is on" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已开启 UI 自动化"
+          }
+        }
+      }
+    },
+    "UI Automation ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "界面自动化 ›"
           }
         }
       }
@@ -4719,6 +5379,16 @@
         }
       }
     },
+    "Waiting for your OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待你的确认"
+          }
+        }
+      }
+    },
     "Waiting for your approval" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4775,6 +5445,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Mac"
+          }
+        }
+      }
+    },
+    "Your Mac renews Poki’s signature. Sign in here only if you want this iPhone to renew it on its own." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Mac 会自动为 Poki 续签。仅在希望此 iPhone 自行续签时在此登录。"
           }
         }
       }
@@ -4967,6 +5647,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“告诉妈妈我在路上了。”"
+          }
+        }
+      }
+    },
+    "‹ More Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‹ 更多设置"
           }
         }
       }
