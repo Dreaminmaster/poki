@@ -914,6 +914,16 @@
         }
       }
     },
+    "Agents do all of that without asking." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体做这些事都不会问你。"
+          }
+        }
+      }
+    },
     "All Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1364,6 +1374,26 @@
         }
       }
     },
+    "Ask for Everything" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每一步都问"
+          }
+        }
+      }
+    },
+    "Ask for Everything: nothing is approved automatically. Steps that follow straight after your answer in the same app do not ask again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每一步都问：不会自动批准任何步骤。你回答之后，同一个应用里紧接着的步骤不再重复问。"
+          }
+        }
+      }
+    },
     "Asked you to allow: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1570,6 +1600,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "改为“始终允许”"
+          }
+        }
+      }
+    },
+    "Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话"
           }
         }
       }
@@ -4695,6 +4735,16 @@
         }
       }
     },
+    "Notify Me" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知我"
+          }
+        }
+      }
+    },
     "OK" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5627,6 +5677,16 @@
         }
       }
     },
+    "Permissive, Balanced and Strict let your chat model approve steps in Poki’s own chat that fit what you asked for, and only ask you about the rest. The chat and the Activity Log show each decision." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择宽松、均衡或严格时，在 Poki 自己的对话里，符合你要求的步骤由你的聊天模型批准，其余的才问你。每个决定都会显示在对话和活动记录里。"
+          }
+        }
+      }
+    },
     "Permissiveness" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5986,6 +6046,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 会自动关闭，让智能体重新看到屏幕。之后从通知或主屏幕重新打开 Poki，它打开时就会开启。"
+          }
+        }
+      }
+    },
+    "Poki comes back to the front with its reply when a task ends." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务结束后，Poki 带着回复回到前台。"
           }
         }
       }
@@ -6878,6 +6948,16 @@
         }
       }
     },
+    "Return to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到 Poki"
+          }
+        }
+      }
+    },
     "Revoke" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7155,6 +7235,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在 %@ 中发送消息"
+          }
+        }
+      }
+    },
+    "Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "敏感步骤包括付款、删除、发消息、打电话、输入密码，以及在钱包里的任何操作。"
+          }
+        }
+      }
+    },
+    "Sensitivity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "灵敏度"
           }
         }
       }
@@ -8479,6 +8579,16 @@
         }
       }
     },
+    "The phone stays where the task ended. Poki’s reply comes as a notification: touch and hold it to answer and carry on from there." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手机停在任务结束时的页面。Poki 的回复以通知送达：按住通知就能回复，接着往下做。"
+          }
+        }
+      }
+    },
     "The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing." : {
       "localizations" : {
         "zh-Hans" : {
@@ -9013,6 +9123,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开启后可以看到智能体的步骤，并批准敏感操作。"
+          }
+        }
+      }
+    },
+    "Turning asking on or off takes effect the next time Poki opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开或关闭询问，下次打开 Poki 时生效。"
           }
         }
       }
@@ -9615,6 +9735,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这是什么 iOS 版本？"
+          }
+        }
+      }
+    },
+    "When a Task Ends" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务结束后"
+          }
+        }
+      }
+    },
+    "With Confirmation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用按钮确认"
+          }
+        }
+      }
+    },
+    "With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择“用按钮确认”时，你在实时活动、通知或 Poki 里轻点“允许”或“不允许”。"
+          }
+        }
+      }
+    },
+    "With Message Reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用消息回复"
+          }
+        }
+      }
+    },
+    "With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择“用消息回复”时，Poki 会在对话里问你，你回答“可以”这一步才会执行。不在 Poki 里时，可以直接回复通知。外部智能体没有对话，它们的步骤用“允许”和“不允许”来问。"
           }
         }
       }
