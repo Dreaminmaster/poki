@@ -180,6 +180,33 @@ enum PageReader {
     return out;
   }
 
+  // Cookie and privacy banners: a box that floats over the page (or is marked as a consent box) and
+  // talks about cookies, privacy or tracking. Its reject or necessary-only choice is the one Poki taps.
+  const ACCEPT = /\b(accept|agree|allow|ok|okay|got it|continue|understood|i understand|close)\b|同意|接受|允许|知道了|好的|关闭/i;
+  const REJECT = /\b(reject|decline|deny|refuse|disagree|necessary only|only necessary|essential only|only essential|strictly necessary|necessary cookies|continue without accepting)\b|拒绝|仅必要|仅限必要|只接受必要|不同意/i;
+  const CONSENT_TEXT = /cookie|consent|privacy|personal data|tracking|our partners|advertis|隐私|个人信息|跟踪|广告/i;
+  const CONSENT_MARK = /cookie|consent|gdpr|privacy|onetrust|didomi|truste|usercentrics|cookiebot|quantcast|sp_message/i;
+  function consentBox(el) {
+    for (let box = el && el.parentElement, depth = 0; box && box !== document.body && depth < 12; box = box.parentElement, depth++) {
+      const s = box.ownerDocument.defaultView.getComputedStyle(box);
+      const marked = CONSENT_MARK.test((box.id || '') + ' ' + (typeof box.className === 'string' ? box.className : '') + ' ' + (box.getAttribute('aria-label') || ''));
+      const floating = s.position === 'fixed' || s.position === 'sticky' || /^(dialog|alertdialog)$/.test(box.getAttribute('role') || '') || box.tagName === 'DIALOG';
+      if ((marked || floating) && CONSENT_TEXT.test(squash(box.innerText).slice(0, 3000))) return box;
+    }
+    return null;
+  }
+  const rejectIn = (box, except) => [...box.querySelectorAll('button, a[href], [role=button], input[type=button], input[type=submit]')]
+    .find((b) => b !== except && b.getClientRects().length && REJECT.test(name(b)));
+  // For a tap on `ref`: whether it accepts or closes a consent banner that has a reject choice.
+  function consent(ref) {
+    const el = element(ref);
+    const box = el && consentBox(el);
+    if (!box) return { banner: false };
+    const label = name(el);
+    const reject = rejectIn(box, el);
+    return { banner: true, accept: ACCEPT.test(label) && !REJECT.test(label), reject: reject ? refFor(reject) : null, rejectName: reject ? name(reject) : null };
+  }
+
   // What the last read saw, to tell what a tap or typing changed on the same page.
   let seen = new Set();
   const plain = (line) => line.replace(/^\[e\d+\] /, '');
@@ -191,6 +218,10 @@ enum PageReader {
   function read({ find = '', offset = 0, budget = 9000, changes = false } = {}) {
     const started = performance.now();
     const page = collect();
+    // An open consent banner, by the choice that dismisses it: its reject choice, else its accept or close.
+    const choice = (test) => page.lines.find((l) => l.kind === 'item' && test.test(l.name) && !(test === ACCEPT && REJECT.test(l.name)) && consentBox(l.node));
+    const rejecting = choice(REJECT), dismissing = rejecting || choice(ACCEPT);
+    const banners = dismissing ? { choice: '[' + dismissing.ref + '] ' + JSON.stringify(dismissing.name), reject: !!rejecting } : null;
     let lines = page.lines.map(format);
     const before = seen;
     seen = new Set(lines.map(plain));
@@ -199,7 +230,7 @@ enum PageReader {
       if (fresh.length && fresh.length < lines.length * 0.6) {
         const changed = fit(fresh, budget / 2);
         const top = fit(lines, budget - changed.reduce((n, l) => n + l.length + 1, 0));
-        return { url: location.href, title: document.title, changed, lines: top, total: lines.length, from: 0,
+        return { url: location.href, title: document.title, changed, lines: top, total: lines.length, from: 0, consent: banners,
           next: top.length < lines.length ? top.length : null, interactive: page.interactive, humanCheck: humanCheck(page),
           ms: Math.round(performance.now() - started) };
       }
@@ -224,7 +255,7 @@ enum PageReader {
       if (used + lines[i].length > budget && out.length) break;
       out.push(lines[i]); used += lines[i].length + 1;
     }
-    return { url: location.href, title: document.title, lines: out, total: lines.length, from: offset,
+    return { url: location.href, title: document.title, lines: out, total: lines.length, from: offset, consent: banners,
       next: i < lines.length ? i : null, interactive: page.interactive, humanCheck: humanCheck(page),
       ms: Math.round(performance.now() - started) };
   }
@@ -350,7 +381,7 @@ enum PageReader {
     });
   }
 
-  window.__pokiReader = { read, click, type, settle, drive, label: (ref) => { const el = element(ref); return el ? name(el) : null; } };
+  window.__pokiReader = { read, click, type, settle, drive, consent, label: (ref) => { const el = element(ref); return el ? name(el) : null; } };
 })();
 """#
 }

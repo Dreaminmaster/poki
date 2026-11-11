@@ -2,7 +2,8 @@ import Foundation
 
 /// `-pokiInProcess web -pokiProbeModelURL URL -pokiProbeModel ID -pokiProbeTask TEXT`: Poki's own browser
 /// end to end in the app (ESP-145), with no phone automation. The chat is pointed at an
-/// OpenAI-compatible endpoint, gets the task as if the owner had typed it, and the agent works the
+/// OpenAI-compatible endpoint (or, with `-pokiProbeProvider gemini`, at that provider as the owner sets
+/// it up in Accounts & Models), gets the task as if the owner had typed it, and the agent works the
 /// website in Poki's browser on screen. The tool calls, replies and browser steps go to
 /// Documents/web-probe.json. `-pokiProbeTakeOver S` takes the page over S seconds after the task starts
 /// and hands it back `-pokiProbeHold` seconds later; `-pokiProbeStop S` presses Stop S seconds in. Both
@@ -11,9 +12,20 @@ import Foundation
 enum WebDemo {
     static func run() async {
         let defaults = UserDefaults.standard
-        ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
-        ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
-        ModelKeys.selectedProvider = .custom
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let provider = defaults.string(forKey: "pokiProbeProvider").flatMap(ModelProvider.init(rawValue:)) {
+            // A key left in Documents/probe-key by whoever runs the probe goes to the keychain, as pasting
+            // it in Accounts & Models would; the file goes at once.
+            let file = documents.appendingPathComponent("probe-key")
+            if let key = try? String(contentsOf: file, encoding: .utf8) { try? ModelKeys.save(key, for: provider) }
+            try? FileManager.default.removeItem(at: file)
+            ModelKeys.selectedProvider = provider
+            if let model = defaults.string(forKey: "pokiProbeModel") { ModelKeys.selectedModel = model }
+        } else {
+            ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
+            ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
+            ModelKeys.selectedProvider = .custom
+        }
         guard let chat = AskPoki.chat else { write(["error": "no chat"]); return }
         // Time for the screen recording to start on a calm chat.
         try? await Task.sleep(for: .seconds(max(1, defaults.double(forKey: "pokiProbeWait"))))
@@ -47,6 +59,9 @@ enum WebDemo {
             "task": task,
             "seconds": seconds,
             "running": chat.running,
+            "provider": ModelKeys.selectedProvider.rawValue,
+            "model": ModelKeys.selectedModel,
+            "hasKey": ModelKeys.hasUsableKey,
             "events": events,
             "calls": chat.savedCalls.map { ["name": $0.name, "ok": $0.ok, "ms": $0.ms, "arguments": String($0.arguments.prefix(300)), "answer": String($0.answer.prefix(600))] },
             "replies": chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } },

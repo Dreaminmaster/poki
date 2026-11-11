@@ -30,11 +30,15 @@ enum WebTools {
     ]
 
     static let instructions = """
-    Poki has its own browser for websites, apart from Safari and the phone's screen. For a task on a website (showtimes, prices, opening hours, anything read from a site), use web_open, web_read, web_click and web_type instead of opening Safari with look and do: the owner keeps using the phone meanwhile. Start with web_open on the site's main address. Pages answer as lines; act on the refs in brackets from the latest answer, since refs change when the page changes. Prefer find over reading a long page twice. Never sign in, pay, buy, book or submit the owner's personal details: when the site needs a sign-in, shows a human check or captcha, or asks for payment, call web_handoff with a short reason and continue after it returns. If the owner did not name a place and the site needs one, use the place the site suggests and say which one you used. Report only what the pages showed, with the date and place it applies to; when a list was cut short, say so rather than filling it in. Finish with finish_task: for an answer read from a website use answer.kind field or list with the facts in details, and leave answer.items empty.
+    Poki has its own browser for websites, apart from Safari and the phone's screen. For a task on a website (showtimes, prices, opening hours, anything read from a site), use web_open, web_read, web_click and web_type instead of opening Safari with look and do: the owner keeps using the phone meanwhile. Start with web_open on the site's main address. Pages answer as lines; act on the refs in brackets from the latest answer, since refs change when the page changes. Prefer find over reading a long page twice. Never sign in, pay, buy, book or submit the owner's personal details: when the site needs a sign-in, shows a human check or captcha, or asks for payment, call web_handoff with a short reason and continue after it returns. Banners: dismiss a cookie or privacy consent banner yourself with its reject or necessary-only choice (such as Reject all, Decline, Only necessary); only when it has neither, tap its close or accept button. Never tap through a sign-in or sign-up, an agreement to terms of service, a paywall, an age confirmation or a human check for the owner: call web_handoff for those. If the owner did not name a place and the site needs one, use the place the site suggests and say which one you used. Report only what the pages showed, with the date and place it applies to; when a list was cut short, say so rather than filling it in. Finish with finish_task: for an answer read from a website use answer.kind field or list with the facts in details, and leave answer.items empty.
     """
 
     /// A short button or link label that pays or orders.
-    @MainActor private static let paying = try! Regex(#"(?i)\b(pay|purchase|buy|checkout|check out|place order|complete (order|purchase|booking)|confirm (order|purchase|payment)|subscribe)\b|付款|支付|下单|购买|结账|订阅"#)
+    @MainActor private static let paying = try! Regex(#"(?i)\b(pay|purchase|buy|checkout|check out|place order|complete (order|purchase|booking)|confirm (order|purchase|payment)|subscribe|start (a |your )?(free )?trial|free trial)\b|付款|支付|下单|购买|结账|订阅|试用"#)
+
+    /// A short button or link label for a step only the owner takes: signing in or up, an age check,
+    /// agreeing to terms.
+    @MainActor private static let ownersStep = try! Regex(#"(?i)\b(sign ?in|log ?in|sign ?up|register|create (an |your )?account|join (for free|now))\b|\b(i am|i'm|im) (over |at least )?(1[3-9]|2[01])\b|\b(1[3-9]|2[01]) ?(\+|or older|and over|years or older)|\b(verify|confirm) (my |your )?age\b|\b(agree|accept|consent)\b.*\b(terms|conditions|eula|license agreement)\b|登录|登入|注册|年满|同意.*(条款|协议)"#)
 
     @MainActor static func perform(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
         let args = (arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
@@ -62,6 +66,13 @@ enum WebTools {
             let label = await label(browser, ref) ?? (args["element"] as? String) ?? ref
             if label.count <= 40, label.contains(paying) {
                 return answer("“\(label)” looks like paying or ordering. That is the owner's to do: call web_handoff.", error: true)
+            }
+            if label.count <= 60, label.contains(ownersStep) {
+                return answer("“\(label)” is a sign-in, sign-up, age or terms step. That is the owner's to do: call web_handoff with a short reason.", error: true)
+            }
+            if let banner = (try? await browser.call("return window.__pokiReader.consent(ref)", ["ref": ref])) as? [String: Any],
+               banner["accept"] as? Bool == true, let reject = banner["reject"] as? String {
+                return answer("This cookie or privacy banner has “\(banner["rejectName"] as? String ?? "")” [\(reject)]: tap that instead. Accept or close a banner only when it has no reject or necessary-only choice.", error: true)
             }
             let step = browser.begin(String(localized: "Tap “\(short(label))”"))
             let tapped = await browser.act { (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any] }
@@ -142,6 +153,11 @@ enum WebTools {
         if let next = read["next"] as? Int {
             text += "\n(lines \(offset + 1) to \(next) of \(total); call web_read with offset \(next) for more)"
         }
+        if let banner = read["consent"] as? [String: Any], let choice = banner["choice"] as? String {
+            text += banner["reject"] as? Bool == true
+                ? "\nA cookie or privacy banner is open: dismiss it with its reject choice \(choice)."
+                : "\nA cookie or privacy banner is open and has no reject choice: dismiss it with \(choice)."
+        }
         if read["humanCheck"] as? Bool == true {
             text += "\nThis page shows a human check. Do not try to pass it: call web_handoff so the owner can."
         }
@@ -161,7 +177,7 @@ enum WebTools {
             }
         }
         var text = did
-        if let covered = result["covered"] as? String { text += " Something covered it on the page (\(covered)); if nothing changed, close that first." }
+        if let covered = result["covered"] as? String { text += " Something covered it on the page (\(covered)); if nothing changed, dismiss that first as the instructions say." }
         let now = await page(browser, budget: 6000, changes: true)
         return answer(text + "\n" + now.text, error: now.isError)
     }
