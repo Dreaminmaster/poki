@@ -407,7 +407,7 @@ final class FrontendSubtractionTests: XCTestCase {
         }
 
         // Layer 2 routes under More Settings
-        let layer2Details: [DetailsRoute] = [.setup, .signing, .approvals, .settings]
+        let layer2Details: [DetailsRoute] = [.setup, .updates, .approvals, .settings]
         for route in layer2Details {
             var path = NavigationPath()
             path.append(DetailsRoute.moreSettings)

@@ -7,7 +7,7 @@ import SwiftUI
 // behind "More Settings" according to the ESP-174 capability table.
 
 /// Layer 1: Poki's picture, name and what it does; Pause, Voice and History; Accounts and Models;
-/// Poki Is On switch and Voice; and More Settings (which holds Setup, Signing, Memory, Approvals,
+/// Poki Is On switch and Voice; and More Settings (which holds Setup, Updates, Memory, Approvals,
 /// Agents and Relay, Notifications, and Diagnostics).
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
@@ -121,7 +121,7 @@ struct PokiDetailsView: View {
                         .groupCard()
                         .accessibilityIdentifier("details.moreSettings")
 
-                        Text("Setup, signing, memory, approvals, agents and diagnostics.")
+                        Text("Setup, updates, memory, approvals, agents and diagnostics.")
                             .font(.system(size: 13))
                             .foregroundStyle(Color(hex: 0x6D6D72))
                             .padding(.horizontal, 16)
@@ -146,9 +146,9 @@ struct PokiDetailsView: View {
                     AgentsAndRelayView(path: $path).toolbar(.visible, for: .navigationBar)
                 case .setup:
                     SetupLayer2View(path: $path)
-                case .signing:
+                case .updates:
                     Form { SigningSection() }
-                        .navigationTitle("Signing")
+                        .navigationTitle("Updates")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar(.visible, for: .navigationBar)
                 case .approvals:
@@ -241,12 +241,12 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, voice, moreSettings, settings, setup, signing, approvals
+    case model, history, voice, moreSettings, settings, setup, updates, approvals
 }
 
 // MARK: Layer 2 - More Settings
 
-/// Layer 2 ("More Settings"): Setup, Signing, Memory, Approvals, Agents and Relay, Notifications, and Diagnostics.
+/// Layer 2 ("More Settings"): Setup, Updates, Memory, Approvals, Agents and Relay, Notifications, and Diagnostics.
 struct MoreSettingsView: View {
     @Environment(AppModel.self) private var model
     @Binding var path: NavigationPath
@@ -268,15 +268,20 @@ struct MoreSettingsView: View {
                 }
                 .accessibilityIdentifier("moreSettings.setup")
 
-                NavigationLink(value: DetailsRoute.signing) {
+                // Main's "Updates" (the version, a new build, signing until and Signing Options), by its own name.
+                NavigationLink(value: DetailsRoute.updates) {
                     LabeledContent {
-                        Text(model.signer.expiry.map { $0.formatted(.dateTime.month(.abbreviated).day()) } ?? "\(model.signer.installedVersion) (\(model.signer.installedBuild))")
-                            .foregroundStyle(Color.secondary)
+                        if model.signer.updateNotReady || model.signer.next?.kind == "update" {
+                            Text("Update Available").foregroundStyle(Color.orange)
+                        } else {
+                            Text(verbatim: "\(model.signer.installedVersion) (\(model.signer.installedBuild))")
+                                .foregroundStyle(Color.secondary)
+                        }
                     } label: {
-                        Label("Signing", systemImage: "signature")
+                        Label("Updates", systemImage: "arrow.down.circle")
                     }
                 }
-                .accessibilityIdentifier("moreSettings.signing")
+                .accessibilityIdentifier("moreSettings.updates")
             } header: {
                 Text("This iPhone")
             }
@@ -619,7 +624,8 @@ struct SetupLayer2View: View {
                         .padding(.horizontal, 16)
                         .rowDivider()
 
-                        NavigationLink(value: DetailsRoute.signing) {
+                        // The Apple Account lives in Signing Options, under Updates.
+                        NavigationLink { SigningOptionsPage().toolbar(.visible, for: .navigationBar) } label: {
                             HStack {
                                 Text("Apple Account")
                                     .font(.system(size: 17))
