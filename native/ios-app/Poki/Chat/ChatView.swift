@@ -718,7 +718,6 @@ struct ComposerInputView: View {
     @State private var input = ""
     @State private var dictation = FieldDictation()
     @FocusState private var focused: Bool
-    @State private var liveNote: String?
     @State private var sent: (text: String, at: Date)?
 
     private var voice: VoiceModel { model.voice }
@@ -726,11 +725,7 @@ struct ComposerInputView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            if let liveNote, !dictation.on {
-                Text(liveNote).font(.system(size: 12)).foregroundStyle(ChatColor.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20)
-                    .onTapGesture { self.liveNote = nil; openModel() }
-            } else if let problem = dictation.problem, !dictation.on {
+            if let problem = dictation.problem, !dictation.on {
                 Text(problem).font(.system(size: 12)).foregroundStyle(Color(.systemRed))
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20)
             }
