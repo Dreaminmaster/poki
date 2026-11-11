@@ -94,8 +94,8 @@ struct LogView: View {
     }
 }
 
-/// Setup › Advanced › Testing Options: switches being tried, all in one place. Ask Before Sensitive
-/// Steps and the Auto-Classifier are in Agents › Approvals.
+/// Poki › Health › Testing Options: switches being tried, all in one place. Ask Before Sensitive
+/// Steps and the Auto-Classifier are in Poki › Rules.
 struct TestingOptionsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(NativeServicesWDA.inputWithoutScreenSharingKey) private var bareInput = false
@@ -108,7 +108,7 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Agents › Approvals.")
+                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Rules.")
             }
             Section {
                 Toggle("Input Without Screen Sharing", isOn: $bareInput)

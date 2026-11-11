@@ -1047,6 +1047,8 @@ struct ComposerInputView: View {
     /// Bumped when the chosen model changes, so the chip redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
     @State private var sends = 0
+    /// The least room the model's name is worth showing in (about ten letters and the menu arrow).
+    @ScaledMetric(relativeTo: .footnote) private var shortName: CGFloat = 104
 
     private var voice: VoiceModel { model.voice }
     private var hasText: Bool { !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -1071,11 +1073,13 @@ struct ComposerInputView: View {
                 }
                 .padding(.leading, 8)
                 // What gives when the row is too narrow (a long model name, a small phone, large text):
-                // Hands drops its picture, then keeps the picture alone, before the model's name is cut short.
+                // Hands drops its picture; then the model's name is cut short, as a pop-up button's title
+                // is; and where even a short name has no room (the largest text), Hands keeps its picture alone.
                 ViewThatFits(in: .horizontal) {
-                    controls(hands: .full)
-                    controls(hands: .words)
-                    controls(hands: .picture)
+                    controls(.full)
+                    controls(.words)
+                    controls(.shortName)
+                    controls(.picture)
                 }
                 // Controls in a bar stop growing where the system's bars do; the message above grows freely.
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -1117,11 +1121,16 @@ struct ComposerInputView: View {
 
     // MARK: Bottom layer
 
-    private func controls(hands shows: ChipToggleStyle.Shows) -> some View {
+    /// What the row shows of Hands and of the model's name.
+    private enum Fit { case full, words, shortName, picture }
+
+    private func controls(_ fit: Fit) -> some View {
         HStack(spacing: 8) {
             plus
-            modelChip
-            if !running { hands(shows).fixedSize().layoutPriority(1) }
+            // The name takes what the row has left. `shortName` asks for no more than a short name's
+            // width, so it is the row chosen while a long name can still show most of itself.
+            modelChip.frame(idealWidth: fit == .shortName ? shortName : nil).layoutPriority(1)
+            if !running { hands(fit == .full ? .full : fit == .picture ? .picture : .words).fixedSize().layoutPriority(1) }
             Spacer(minLength: 0)
             mainButton
         }
@@ -1184,10 +1193,11 @@ struct ComposerInputView: View {
 
     private func chip(_ title: Text, symbol: String) -> some View {
         HStack(spacing: 4) {
-            title.lineLimit(1)
+            // A name a little too long shrinks before it is cut short (the smallest is caption-sized).
+            title.lineLimit(1).minimumScaleFactor(0.85)
             Image(systemName: symbol).font(.caption2.weight(.bold)).foregroundStyle(Color(.secondaryLabel))
         }
-        .font(.subheadline.weight(.medium)).foregroundStyle(Color(.label))
+        .font(.footnote.weight(.medium)).foregroundStyle(Color(.label))
         .padding(.horizontal, 10).frame(height: 34)
         .background(Color(.tertiarySystemFill), in: .capsule)
         .contentShape(.capsule)
@@ -1296,7 +1306,7 @@ private struct ChipToggleStyle: ToggleStyle {
                 case .picture: configuration.label.labelStyle(.iconOnly)
                 }
             }
-            .font(.subheadline.weight(.medium)).lineLimit(1)
+            .font(.footnote.weight(.medium)).lineLimit(1)
             .foregroundStyle(configuration.isOn ? Tint.blueText : Color(.secondaryLabel))
             .padding(.horizontal, shows == .picture ? 0 : 10).frame(minWidth: 34).frame(height: 34)
             .background(configuration.isOn ? Tint.blueSoft : Color(.tertiarySystemFill), in: .capsule)

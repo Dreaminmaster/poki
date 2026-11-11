@@ -330,7 +330,7 @@ struct SessionsView: View {
                 updated: now,
                 live: true,
                 outcome: nil,
-                entries: [ChatEntry(.poki(String(localized: "Needs your OK: send “On my way” to Mom")))],
+                entries: [ChatEntry(.poki(String(localized: "Needs your OK: send “On my way” to Mom"))), ChatEntry(.note(.waiting))],
                 calls: [],
                 customName: "Claude → Poki"
             ),

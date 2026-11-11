@@ -2741,13 +2741,13 @@
         }
       }
     },
-    "Enter your relay's address first (Settings › Relay). Poki has no default relay." : {
+    "Enter your relay's address first (Poki › Guests › Address). Poki has no default relay." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先在“设置 › 中转”中输入你的中转地址。Poki 没有默认中转。"
+            "value" : "请先在“Poki”›“客人”›“服务地址”中输入你的中转地址。Poki 没有默认中转。"
           }
         }
       }
