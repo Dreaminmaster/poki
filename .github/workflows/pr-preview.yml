@@ -100,7 +100,7 @@ jobs:
             echo "## Preview of PR ${{ github.event.pull_request.number }}: Poki v${{ steps.v.outputs.version }} (${{ steps.v.outputs.build }})"
             echo "Built from ${{ steps.v.outputs.sha }} merged with main. No release, tag or channel was touched."
             echo
-            echo "To install it, sign in to GitHub in Poki (Signing Options, GitHub Account) or in Poki Setup, turn on Preview Builds, then choose PR ${{ github.event.pull_request.number }} under the release channels."
+            echo "To install it, sign in to GitHub in Poki (Build Options, GitHub Account) or in Poki Setup, turn on Preview Builds, then choose PR ${{ github.event.pull_request.number }} under the release channels."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Saved in the pull request's own cache scope: they speed up its next push and reach no
