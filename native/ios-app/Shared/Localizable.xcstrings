@@ -1594,6 +1594,26 @@
         }
       }
     },
+    "Chat Plan" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话计划"
+          }
+        }
+      }
+    },
+    "Chat Plan Done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话计划完成"
+          }
+        }
+      }
+    },
     "Check that Developer Mode is on (Settings → Privacy & Security → Developer Mode) and that iOS is 17.4 or later." : {
       "extractionState" : "manual",
       "localizations" : {

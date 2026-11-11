@@ -98,6 +98,8 @@ struct ActivityPreview: View {
         case "yourturn": String(localized: "Your Turn")
         case "passcode": String(localized: "Passcode")
         case "done": String(localized: "Done")
+        case "plan": String(localized: "Chat Plan")
+        case "plandone": String(localized: "Chat Plan Done")
         case "ready": String(localized: "Ready")
         case "idle": String(localized: "Runner Asleep")
         case "problem": String(localized: "Problem")
@@ -155,6 +157,12 @@ struct ActivityPreview: View {
         done.stepCount = 12; done.failedCount = 1
         done.outcomes = [true, true, false, true, true, true, true, true, true, true, true, true]
 
+        // A task from Poki's own chat counts its plan's steps ("2/5"), not the taps under them (main #150).
+        var plan = working
+        plan.plan = .init(total: 5, current: 2)
+        var planDone = done
+        planDone.plan = .init(total: 5, current: 5)
+
         var ready = PokiState(phase: .idle, headline: "Waiting for agent", thumbnailVersion: 0)
         var idle = PokiState(phase: .idle, headline: "Runner asleep", thumbnailVersion: 0)
         idle.runnerPaused = true
@@ -176,6 +184,7 @@ struct ActivityPreview: View {
         voice.voice = .listening
 
         return [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
+                ("plan", plan), ("plandone", planDone),
                 ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
     }
 
