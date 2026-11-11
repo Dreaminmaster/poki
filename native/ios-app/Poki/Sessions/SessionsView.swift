@@ -473,6 +473,7 @@ private enum GuestSample {
     static let entries: [ChatEntry] = {
         var steps = ChatEntry(.plan([PlanStep(plan[0], state: .done), PlanStep(plan[1])]))
         steps.at = Date().addingTimeInterval(-42)
+        steps.title = String(localized: "Install the newest build")
         return [ChatEntry(.request(String(localized: "Open TestFlight and install the newest Poki build."), from: "Claude Code")), steps]
     }()
 }

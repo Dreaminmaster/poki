@@ -21,6 +21,9 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     let id: UUID
     var kind: Kind
     var at: Date = Date()
+    /// A task's short name from the model ("Text Mom"), on its plan entry. Absent in conversations
+    /// saved before it existed and when the model gave none: the card then shows what was asked.
+    var title: String?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
     var isPoki: Bool { switch kind { case .poki, .plan: true; default: false } }
@@ -496,6 +499,7 @@ final class ChatModel {
                 return PokiCore.ToolAnswer(text: Harness.invalidPlan, jpeg: nil, isError: true)
             }
             showPlan(steps, current: current)
+            if let title = Self.shortTitle(args["title"]) { nameTask(title) }
             return PokiCore.ToolAnswer(text: Harness.planPublished, jpeg: nil, isError: false)
         case "finish_task":
             guard let result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
@@ -525,6 +529,20 @@ final class ChatModel {
                 if steps.indices.contains(i) { steps[i].text = plan[i]; steps[i].state = state } else { steps.append(PlanStep(plan[i], state: state)) }
             }
         }
+    }
+
+    /// The model's name for the task, kept on the task's plan entry: the card's title.
+    private func nameTask(_ title: String) {
+        guard let id = planID, let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[i].title = title
+    }
+
+    /// A title is a few words on one line. A sentence is not one (over 40 characters): the card
+    /// keeps what was asked.
+    static func shortTitle(_ value: Any?) -> String? {
+        guard let line = (value as? String)?.split(whereSeparator: \.isNewline).first else { return nil }
+        let title = line.trimmingCharacters(in: .whitespaces)
+        return title.isEmpty || title.count > 40 ? nil : title
     }
 
     // MARK: Steps and approvals from PokiCore
@@ -651,6 +669,9 @@ final class ChatModel {
              String(localized: "Type “Running 10 min late. Save me a seat!”"), String(localized: "Send it")]
         }
         static var coffee: String { String(localized: "Order my usual coffee") }
+        /// The tasks' short names, as the model gives them with its plan.
+        static var momTitle: String { String(localized: "Text Mom") }
+        static var coffeeTitle: String { String(localized: "Order the usual") }
         static var coffeeSteps: [String] {
             [String(localized: "Open Blue Door Coffee"), String(localized: "Reorder “Oat flat white, large”"),
              String(localized: "Pay $5.40"), String(localized: "Confirm pickup at 9:55")]
@@ -691,6 +712,7 @@ final class ChatModel {
             if let state, texts.count > done { steps.append(PlanStep(texts[done], state: state)) }
             var plan = ChatEntry(.plan(steps))
             plan.at = Date().addingTimeInterval(-42)
+            plan.title = texts == Sample.coffeeSteps ? Sample.coffeeTitle : Sample.momTitle
             return plan
         }
         let onIt = ChatEntry(.poki(String(localized: "On it.")))
@@ -708,9 +730,10 @@ final class ChatModel {
             modelPlan = Sample.coffeeSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.coffee, delivered: true)), onIt, steps(Sample.coffeeSteps, done: 2, then: .waiting)]
         case "failed":
-            entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Clear my notifications"), delivered: true)), onIt,
-                       ChatEntry(.plan([PlanStep(String(localized: "Open Notification Center"), state: .done),
-                                        PlanStep(String(localized: "Tap Clear All"), state: .failed)])),
+            var plan = ChatEntry(.plan([PlanStep(String(localized: "Open Notification Center"), state: .done),
+                                        PlanStep(String(localized: "Tap Clear All"), state: .failed)]))
+            plan.title = String(localized: "Clear notifications")
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Clear my notifications"), delivered: true)), onIt, plan,
                        ChatEntry(.note(.problem(String(localized: "I tripped. I lost my grip on your phone at step 2, so I stopped before touching anything else."))))]
         default:
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 4, then: nil),
@@ -747,6 +770,7 @@ final class ChatModel {
             self.modelPlan = Sample.demoSteps
             guard await wait(0.7) else { return }
             self.updatePlan { $0.append(PlanStep(Sample.demoSteps[0])) }
+            self.nameTask(Sample.momTitle)
             for i in 1..<3 {
                 guard await wait(1.5) else { return }
                 self.updatePlan { steps in

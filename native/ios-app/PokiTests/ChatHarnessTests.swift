@@ -86,6 +86,26 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.details, [TaskResult.Detail(label: "Battery", value: "81%")])
     }
 
+    /// The model's name for the task comes with its plan and is kept on the task's plan entry, where
+    /// the task card reads its title ("Book a class", not the whole sentence that was asked). A
+    /// sentence sent as the title is not taken.
+    func testThePlansTitleNamesTheTask() async throws {
+        let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the gym app", "Book the class"], "currentStep": 1, "title": "Book a class"]),
+            done, FakeCompletions.text("Booked."),
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1, "title": "Open the Settings app and read out what the battery page says first"]),
+            done, FakeCompletions.text("81%."),
+        ])
+        let chat = chat(on: server)
+
+        _ = await chat.runDelegated("Book a class at my gym for tomorrow morning, the early one")
+        _ = await chat.runDelegated("What is the battery level?")
+
+        let titles = chat.entries.compactMap { entry in if case .plan = entry.kind { Optional(entry.title) } else { nil } }
+        XCTAssertEqual(titles, ["Book a class", nil])
+    }
+
     /// Stop ends the phone step under way at its next action, instead of letting the rest of a long
     /// `do` run on the phone (seen on the owner's phone: 16 to 22 s of typing after Stop), and the chat
     /// says Stopping until that step has ended.

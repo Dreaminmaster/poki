@@ -3267,6 +3267,22 @@
         }
       }
     },
+    "Install the newest build" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装最新版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝最新版本"
+          }
+        }
+      }
+    },
     "Install Poki Runner to tap the screen." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5289,6 +5305,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "或者在 Mac 上更新"
+          }
+        }
+      }
+    },
+    "Order the usual" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点常喝的那杯"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點常喝的那杯"
           }
         }
       }
@@ -8141,6 +8173,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文字輸入方式"
+          }
+        }
+      }
+    },
+    "Text Mom" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给妈妈发消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳訊息給媽媽"
           }
         }
       }
@@ -15751,6 +15799,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要清除此 iPhone 上的所有例程和備忘嗎？"
+          }
+        }
+      }
+    },
+    "Clear notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除通知"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除通知"
           }
         }
       }

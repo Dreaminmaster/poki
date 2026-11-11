@@ -643,7 +643,7 @@ struct ChatTranscript<Footer: View>: View {
         case .plan(let steps):
             let ask = asking(at: i)
             let current = live && isLastPlan(i)
-            TaskCard(title: ask.title, steps: steps,
+            TaskCard(title: entry.title ?? ask.title, steps: steps,
                      state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
