@@ -180,16 +180,19 @@ enum PageReader {
     return out;
   }
 
-  // Cookie and privacy banners: a box that floats over the page (or is marked as a consent box) and
-  // talks about cookies, privacy or tracking. Its reject or necessary-only choice is the one Poki taps.
-  // A sign-in, subscription or age prompt floats too and often mentions privacy, but it is the owner's:
-  // it is never taken for a consent banner, and its go-ahead buttons are not Poki's to tap.
+  // Two kinds of box float over a page. A notice only informs and covers the page: a cookie or privacy
+  // banner, or a site's "by continuing to use this site you agree to our terms". Poki dismisses it,
+  // with its reject or necessary-only choice when it has one. A prompt that would give the owner an
+  // obligation or an identity is the owner's: a sign-in or sign-up, a subscription, payment or free
+  // trial, an age or birthday, a human check, a tick for "I agree to the terms", any email or password
+  // field. Such a prompt is never taken for a notice, and its go-ahead buttons are not Poki's to tap.
   const ACCEPT = /\b(accept|agree|allow|ok|okay|got it|continue|understood|i understand|close)\b|同意|接受|允许|知道了|好的|关闭/i;
   const REJECT = /\b(reject|decline|deny|refuse|disagree|necessary only|only necessary|essential only|only essential|strictly necessary|necessary cookies|continue without accepting)\b|拒绝|仅必要|仅限必要|只接受必要|不同意/i;
   const GO = /\b(accept|agree|allow|ok|okay|got it|continue|understood|i understand|yes|next|submit|enter|confirm|proceed|start)\b|同意|接受|允许|知道了|好的|继续|确定|下一步|进入|确认|开始/i;
-  const CONSENT_TEXT = /cookie|consent|privacy|personal data|tracking|our partners|advertis|隐私|个人信息|跟踪|广告/i;
+  const CONSENT_TEXT = /cookie|consent|privacy|personal data|tracking|our partners|advertis|terms of (use|service)|\bby (continuing|using|browsing|staying)\b|隐私|个人信息|跟踪|广告|使用条款|服务条款|继续(使用|浏览)/i;
   const CONSENT_MARK = /cookie|consent|gdpr|privacy|onetrust|didomi|truste|usercentrics|cookiebot|quantcast|sp_message/i;
-  const OWNER_TEXT = /\b(sign ?in to|log ?in to|sign ?in or|log ?in or|sign ?up|create (an |your |a free )?account|subscribe|subscription|free trial|password|date of birth|years old|years of age|verify (your )?age|(must|you are|you're|i am|i'm) (be )?(over |at least )?(1[3-9]|2[01]))\b|\b(1[3-9]|2[01]) ?(\+|or older|and over)|登录|登入|注册|订阅|密码|年满|出生日期/i;
+  const OWNER_TEXT = /\b(sign ?in to|log ?in to|sign ?in or|log ?in or|sign ?up|create (an |your |a free )?account|subscribe|subscription|free trial|password|payment|checkout|date of birth|birthday|birth date|years old|years of age|verify (your )?age|(must|you are|you're|i am|i'm) (be )?(over |at least )?(1[3-9]|2[01])|captcha|not a robot|verify (that )?you('re| are) (a )?human)\b|\b(1[3-9]|2[01]) ?(\+|or older|and over)|登录|登入|注册|订阅|密码|付款|支付|试用|年满|出生日期|生日|人机验证|验证码/i;
+  const AGREE_TERMS = /\b(agree|accept|consent)\b.*\b(terms|conditions)\b|同意.*(条款|协议)/i;
   const OWNER_FIELDS = 'input[type=password], input[type=email], input[autocomplete~="username"], input[autocomplete~="email"], input[autocomplete~="current-password"]';
   function boxes(el) {
     const out = [];
@@ -201,8 +204,24 @@ enum PageReader {
     }
     return out;
   }
-  const ownersPrompt = (box) => OWNER_TEXT.test(squash(box.innerText).slice(0, 3000)) || !!box.querySelector(OWNER_FIELDS);
+  const ownersPrompt = (box) => OWNER_TEXT.test(squash(box.innerText).slice(0, 3000)) || !!box.querySelector(OWNER_FIELDS)
+    || [...box.querySelectorAll('input[type=checkbox], [role=checkbox]')].some((c) => AGREE_TERMS.test(name(c)));
+  // What a notice is, for the step that dismisses it: read from the boxes around the button up to the
+  // notice's own size, since a consent tool often marks just the row of buttons.
+  const noticeKind = (el) => {
+    const texts = [];
+    for (const { box } of boxes(el)) {
+      const text = squash(box.innerText);
+      if (text.length > 2000 && texts.length) break;
+      texts.push(text.slice(0, 2000));
+    }
+    const text = texts.join(' ');
+    if (/\bby (continuing|using|browsing|staying)\b|继续(使用|浏览)/i.test(text) && /\bterms\b|条款/i.test(text)) return 'terms';
+    return /cookie/i.test(text) ? 'cookie' : 'privacy';
+  };
+  // A prompt anywhere around the button that is the owner's wins: when unsure, it is the owner's.
   function consentBox(el) {
+    if (ownerBox(el)) return null;
     for (const { box } of boxes(el)) {
       if (ownersPrompt(box)) return null;
       if (CONSENT_TEXT.test(squash(box.innerText).slice(0, 3000))) return box;
@@ -212,8 +231,9 @@ enum PageReader {
   const ownerBox = (el) => (boxes(el).find(({ box, floating }) => floating && ownersPrompt(box)) || {}).box || null;
   const rejectIn = (box, except) => [...box.querySelectorAll('button, a[href], [role=button], input[type=button], input[type=submit]')]
     .find((b) => b !== except && b.getClientRects().length && REJECT.test(name(b)));
-  // For a tap on `ref`: whether it goes ahead in a sign-in, subscription or age prompt (owner), and
-  // whether it accepts or closes a consent banner that has a reject choice.
+  // For a tap on `ref`: whether it goes ahead in a prompt that is the owner's (owner); whether it
+  // dismisses a notice (dismiss, with the notice's kind); whether it accepts or closes a notice that
+  // has a reject choice (accept and reject).
   function consent(ref) {
     const el = element(ref);
     if (!el) return { banner: false, owner: false };
@@ -222,7 +242,8 @@ enum PageReader {
     const box = consentBox(el);
     if (!box) return { banner: false, owner };
     const reject = rejectIn(box, el);
-    return { banner: true, owner, accept: ACCEPT.test(label) && !REJECT.test(label), reject: reject ? refFor(reject) : null, rejectName: reject ? name(reject) : null };
+    return { banner: true, owner, kind: noticeKind(el), dismiss: ACCEPT.test(label) || REJECT.test(label),
+      accept: ACCEPT.test(label) && !REJECT.test(label), reject: reject ? refFor(reject) : null, rejectName: reject ? name(reject) : null };
   }
 
   // What the last read saw, to tell what a tap or typing changed on the same page.

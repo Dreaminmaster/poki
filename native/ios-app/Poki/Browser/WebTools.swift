@@ -30,7 +30,7 @@ enum WebTools {
     ]
 
     static let instructions = """
-    Poki has its own browser for websites, apart from Safari and the phone's screen. For a task on a website (showtimes, prices, opening hours, anything read from a site), use web_open, web_read, web_click and web_type instead of opening Safari with look and do: the owner keeps using the phone meanwhile. Start with web_open on the site's main address. Pages answer as lines; act on the refs in brackets from the latest answer, since refs change when the page changes. Prefer find over reading a long page twice. Never sign in, pay, buy, book or submit the owner's personal details: when the site needs a sign-in, shows a human check or captcha, or asks for payment, call web_handoff with a short reason and continue after it returns. Banners: dismiss a cookie or privacy consent banner yourself with its reject or necessary-only choice (such as Reject all, Decline, Only necessary); only when it has neither, tap its close or accept button. Never tap through a sign-in or sign-up, an agreement to terms of service, a paywall, an age confirmation or a human check for the owner: call web_handoff for those. If the owner did not name a place and the site needs one, use the place the site suggests and say which one you used. Report only what the pages showed, with the date and place it applies to; when a list was cut short, say so rather than filling it in. Finish with finish_task: for an answer read from a website use answer.kind field or list with the facts in details, and leave answer.items empty.
+    Poki has its own browser for websites, apart from Safari and the phone's screen. For a task on a website (showtimes, prices, opening hours, anything read from a site), use web_open, web_read, web_click and web_type instead of opening Safari with look and do: the owner keeps using the phone meanwhile. Start with web_open on the site's main address. Pages answer as lines; act on the refs in brackets from the latest answer, since refs change when the page changes. Prefer find over reading a long page twice. Never sign in, pay, buy, book or submit the owner's personal details: when the site needs a sign-in, shows a human check or captcha, or asks for payment, call web_handoff with a short reason and continue after it returns. Banners and pop-ups come in two kinds. A notice that only informs and covers the page (a cookie or privacy banner, or a site-use notice such as "by continuing to use this site you agree to our terms") is yours to dismiss: tap its reject or necessary-only choice (such as Reject all, Decline, Only necessary) when it has one, otherwise Continue, Close or Accept. Anything that would give the owner an obligation or an identity is the owner's, so call web_handoff: signing up or in, subscribing or paying, a free trial, entering an age or birthday, a human check, a form that needs "I agree to the terms" ticked before it can be sent, and any pop-up with an email or password field. When unsure which kind it is, treat it as the owner's. A notice you dismiss shows as its own step; you need not mention it in your answer. If the owner did not name a place and the site needs one, use the place the site suggests and say which one you used. Report only what the pages showed, with the date and place it applies to; when a list was cut short, say so rather than filling it in. Finish with finish_task: for an answer read from a website use answer.kind field or list with the facts in details, and leave answer.items empty.
     """
 
     /// A short button or link label that pays or orders.
@@ -72,14 +72,23 @@ enum WebTools {
             }
             let banner = (try? await browser.call("return window.__pokiReader.consent(ref)", ["ref": ref])) as? [String: Any] ?? [:]
             if banner["owner"] as? Bool == true {
-                return answer("“\(label)” goes ahead in a sign-in, subscription or age prompt. That is the owner's to do: call web_handoff with a short reason.", error: true)
+                return answer("“\(label)” goes ahead in a sign-in, subscription, age or terms prompt. That is the owner's to do: call web_handoff with a short reason.", error: true)
             }
             if banner["accept"] as? Bool == true, let reject = banner["reject"] as? String {
-                return answer("This cookie or privacy banner has “\(banner["rejectName"] as? String ?? "")” [\(reject)]: tap that instead. Accept or close a banner only when it has no reject or necessary-only choice.", error: true)
+                return answer("This notice has “\(banner["rejectName"] as? String ?? "")” [\(reject)]: tap that instead. Accept, continue or close a notice only when it has no reject or necessary-only choice.", error: true)
             }
-            let step = browser.begin(String(localized: "Tap “\(short(label))”"))
+            // A notice Poki dismisses is named in its step, so the owner sees what Poki closed.
+            let notice = banner["banner"] as? Bool == true && banner["dismiss"] as? Bool == true ? banner["kind"] as? String ?? "" : ""
+            let site = browser.host, button = short(label)
+            let title = switch notice {
+            case "cookie": String(localized: "Dismissed \(site)’s cookie banner: “\(button)”")
+            case "terms": String(localized: "Dismissed \(site)’s terms notice: “\(button)”")
+            case "privacy": String(localized: "Dismissed \(site)’s privacy notice: “\(button)”")
+            default: String(localized: "Tap “\(button)”")
+            }
+            let step = browser.begin(title)
             let tapped = await browser.act { (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any] }
-            result = await after(browser, tapped, ref: ref, did: "Tapped “\(label)”.")
+            result = await after(browser, tapped, ref: ref, did: notice.isEmpty ? "Tapped “\(label)”." : "Dismissed the notice with “\(label)”.")
             browser.end(step, ok: !result.isError, started: started)
         case "web_type":
             guard let ref = args["ref"] as? String, let text = args["text"] as? String else {
@@ -158,8 +167,8 @@ enum WebTools {
         }
         if let banner = read["consent"] as? [String: Any], let choice = banner["choice"] as? String {
             text += banner["reject"] as? Bool == true
-                ? "\nA cookie or privacy banner is open: dismiss it with its reject choice \(choice)."
-                : "\nA cookie or privacy banner is open and has no reject choice: dismiss it with \(choice)."
+                ? "\nA notice banner is open (cookie, privacy or site terms): dismiss it with its reject choice \(choice)."
+                : "\nA notice banner is open (cookie, privacy or site terms) and has no reject choice: dismiss it with \(choice)."
         }
         if read["humanCheck"] as? Bool == true {
             text += "\nThis page shows a human check. Do not try to pass it: call web_handoff so the owner can."

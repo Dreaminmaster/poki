@@ -1259,6 +1259,36 @@
         }
       }
     },
+    "Dismissed %@’s cookie banner: “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关掉了 %1$@ 的 Cookie 横幅：“%2$@”"
+          }
+        }
+      }
+    },
+    "Dismissed %@’s privacy notice: “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关掉了 %1$@ 的隐私告知：“%2$@”"
+          }
+        }
+      }
+    },
+    "Dismissed %@’s terms notice: “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关掉了 %1$@ 的条款告知：“%2$@”"
+          }
+        }
+      }
+    },
     "Done" : {
       "localizations" : {
         "zh-Hans" : {
