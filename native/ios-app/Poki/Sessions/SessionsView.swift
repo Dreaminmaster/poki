@@ -499,7 +499,7 @@ struct SessionView: View {
         ChatTranscript(entries: sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? [],
                        typing: running?.awaitingModel ?? false, canRetry: false, retry: {}, session: id,
                        live: live, waiting: live && !model.approvals.isEmpty, handedOver: live && model.handoffText != nil,
-                       plan: sample ? GuestSample.plan : running?.planSteps, app: sample ? "TestFlight" : model.currentApp, shot: shot) { EmptyView() }
+                       plan: sample ? GuestSample.plan : running?.planSteps, app: sample ? "TestFlight" : running.map(\.taskApp) ?? model.currentApp, shot: shot) { EmptyView() }
         // The step that waits for you and Stop sit on the bottom edge, so the conversation scrolls under
         // them and the bars keep their scroll-edge behaviour (as in the chat).
         .bottomBar {

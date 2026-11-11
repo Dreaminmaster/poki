@@ -127,6 +127,9 @@ final class ChatModel {
     private var lastTyped: String?
     private var typedAtDo = 0
     private var doCalls = 0
+    /// The app this task's last phone step was in, for its card. A task that has taken no step has
+    /// none: its card never shows the app the task before it ended in.
+    private(set) var taskApp: String?
     /// The whole plan the model published, for the task card's steps still to come.
     var planSteps: [String]? { modelPlan }
     private var task: Task<Void, Never>?
@@ -292,7 +295,7 @@ final class ChatModel {
         awaitingModel = true
         stopAsked = false
         planID = nil; noteID = nil; modelPlan = nil
-        sendTo = nil; lastTyped = nil; typedAtDo = 0; doCalls = 0; askWords = [:]
+        sendTo = nil; lastTyped = nil; typedAtDo = 0; doCalls = 0; askWords = [:]; taskApp = nil
         let instructions = Harness.instructions(for: text)
         if Self.direct, provider == .anthropic || provider == .openai {
             // Another model starts a new conversation on the model's side; the chat on screen stays.
@@ -582,6 +585,9 @@ final class ChatModel {
     /// it (an older text, typed somewhere else, is never shown as the message) and who the plan says
     /// they go to. nil for any other step: its card names the step itself.
     private func sendingWords(_ approval: PendingApproval) -> AskWords? {
+        // Another session's step (an agent on the phone itself) is not this chat's message.
+        let active = SessionStore.shared.activeSessionID
+        guard active == nil || active == sessionID else { return nil }
         guard approval.reason.hasPrefix("sending"), let text = lastTyped, doCalls - typedAtDo <= 1 else { return nil }
         return Self.sendingWords(approval, typed: text, to: sendTo)
     }
@@ -599,16 +605,19 @@ final class ChatModel {
         guard running else { return }
         switch event {
         case .toolStarted(let name, let summary, let session):
-            guard session == nil else { return }
-            // Typed into a password field (PokiCore's label hides it): not words for any card.
+            // Typed into a password field (PokiCore's label hides it): not words for any card,
+            // whichever session typed it.
             if name == "do", summary.contains("hidden characters") { lastTyped = nil }
+            guard session == nil else { return }
             guard name == "do", modelPlan == nil else { return }
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .current { steps[i].state = .done }
                 steps.append(PlanStep(ActivityWords.label(summary)))
             }
-        case .toolFinished(let summary, let delivery, _, _, _, let session):
-            guard session == nil, summary != "Look at the screen", modelPlan == nil else { return }
+        case .toolFinished(let summary, let delivery, let stepApp, _, _, let session):
+            guard session == nil else { return }
+            if let stepApp { taskApp = stepApp }
+            guard summary != "Look at the screen", modelPlan == nil else { return }
             let failed = delivery.hasPrefix("failed")
             let waiting = delivery.contains("approval_required")
             updatePlan { steps in
@@ -679,7 +688,7 @@ final class ChatModel {
         updatePlan { steps in for i in steps.indices where steps[i].state == .current { steps[i].state = .done } }
         guard let id = planID, let i = entries.firstIndex(where: { $0.id == id }), entries[i].ended == nil else { return }
         entries[i].ended = Date()
-        entries[i].app = isDemo ? Sample.app("demo") : app.currentApp
+        entries[i].app = taskApp
         entries[i].total = modelPlan?.count
     }
 
@@ -824,6 +833,7 @@ final class ChatModel {
         running = true
         awaitingModel = true
         planID = nil
+        taskApp = Sample.app("demo")
         demoTask = Task { [weak self] in
             func wait(_ seconds: Double) async -> Bool {
                 try? await Task.sleep(for: .seconds(seconds))

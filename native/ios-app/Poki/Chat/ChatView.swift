@@ -105,7 +105,7 @@ struct ChatView: View {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
-                           plan: chat.planSteps, app: sampleScene == nil ? model.currentApp : ChatModel.Sample.app(sampleScene),
+                           plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
                            shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
                 if !home, let hint = currentSetupHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
