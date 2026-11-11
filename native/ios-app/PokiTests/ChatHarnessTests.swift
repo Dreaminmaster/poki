@@ -88,7 +88,7 @@ final class ChatHarnessTests: XCTestCase {
 
     /// The model's name for the task comes with its plan and is kept on the task's plan entry, where
     /// the task card reads its title ("Book a class", not the whole sentence that was asked). A
-    /// sentence sent as the title is not taken.
+    /// sentence sent as the title is not taken. When the task ends, its entry also keeps how it ended.
     func testThePlansTitleNamesTheTask() async throws {
         let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
         let server = try FakeCompletions(replies: [
@@ -102,8 +102,11 @@ final class ChatHarnessTests: XCTestCase {
         _ = await chat.runDelegated("Book a class at my gym for tomorrow morning, the early one")
         _ = await chat.runDelegated("What is the battery level?")
 
-        let titles = chat.entries.compactMap { entry in if case .plan = entry.kind { Optional(entry.title) } else { nil } }
-        XCTAssertEqual(titles, ["Book a class", nil])
+        let plans = chat.entries.filter { if case .plan = $0.kind { true } else { false } }
+        XCTAssertEqual(plans.map(\.title), ["Book a class", nil])
+        // How each task ended stays with it, for the folded card: when, and out of how many planned steps.
+        XCTAssertEqual(plans.map(\.total), [2, 1])
+        XCTAssertTrue(plans.allSatisfy { $0.ended != nil })
     }
 
     /// Stop ends the phone step under way at its next action, instead of letting the rest of a long

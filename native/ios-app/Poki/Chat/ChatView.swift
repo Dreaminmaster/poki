@@ -651,7 +651,8 @@ struct ChatTranscript<Footer: View>: View {
                      state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
-                     asker: ask.from, app: current ? app : nil, started: entry.at, shot: current ? shot : nil)
+                     asker: ask.from, app: current ? app : entry.app, started: entry.at, shot: current ? shot : nil,
+                     ended: current ? nil : entry.ended, plannedTotal: entry.total)
                 .contentShape(.contextMenuPreview, .rect(cornerRadius: 26, style: .continuous))
                 .contextMenu { menu(at: i) }
                 .padding(.vertical, 6)

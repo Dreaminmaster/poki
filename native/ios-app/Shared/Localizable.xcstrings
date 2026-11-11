@@ -22978,6 +22978,70 @@
           }
         }
       }
+    },
+    "%@, done in %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，用时 %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，用時 %2$@"
+          }
+        }
+      }
+    },
+    "Done in %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用时 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用時 %@"
+          }
+        }
+      }
+    },
+    "Tripped at step %lld of %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在第 %1$lld 步绊倒，共 %2$lld 步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在第 %1$lld 步絆倒，共 %2$lld 步"
+          }
+        }
+      }
+    },
+    "Stopped at step %lld of %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停在第 %1$lld 步，共 %2$lld 步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停在第 %1$lld 步，共 %2$lld 步"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

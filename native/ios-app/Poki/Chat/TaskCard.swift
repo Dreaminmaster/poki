@@ -44,6 +44,10 @@ struct TaskCard: View {
     var started: Date
     /// What the core last saw of the screen, for the task under way. Never stored with the conversation.
     var shot: Image? = nil
+    /// When the task ended and how many steps its plan had, where the conversation kept them: the
+    /// second line then says how long it took and out of how many steps it stopped.
+    var ended: Date? = nil
+    var plannedTotal: Int? = nil
     /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
     /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
     @State private var open: Bool?
@@ -130,9 +134,17 @@ struct TaskCard: View {
     @ViewBuilder private var subline: some View {
         let at = min(finished + 1, max(total, 1))
         switch state {
-        case .done: Text("Done in ^[\(steps.count) step](inflect: true)")
-        case .failed: Text("Tripped at step \(at)")
-        case .stopped: Text("Stopped at step \(at)")
+        case .done:
+            if let ended {
+                let took = Duration.seconds(max(0, ended.timeIntervalSince(started).rounded())).formatted(.time(pattern: .minuteSecond))
+                if let app, !app.isEmpty { Text("\(app), done in \(took)") } else { Text("Done in \(took)") }
+            } else {
+                Text("Done in ^[\(steps.count) step](inflect: true)")
+            }
+        case .failed:
+            if let plannedTotal, plannedTotal > 1 { Text("Tripped at step \(min(at, plannedTotal)) of \(plannedTotal)") } else { Text("Tripped at step \(at)") }
+        case .stopped:
+            if let plannedTotal, plannedTotal > 1 { Text("Stopped at step \(min(at, plannedTotal)) of \(plannedTotal)") } else { Text("Stopped at step \(at)") }
         case .running, .needsYou, .yourTurn:
             if isOpen {
                 HStack(spacing: 0) {

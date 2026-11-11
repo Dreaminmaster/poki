@@ -24,6 +24,12 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     /// A task's short name from the model ("Text Mom"), on its plan entry. Absent in conversations
     /// saved before it existed and when the model gave none: the card then shows what was asked.
     var title: String?
+    /// How a task ended, on its plan entry, for the folded card's second line: the app it was in,
+    /// when it ended and how many steps the model had planned. Absent while it runs and in
+    /// conversations saved before these existed: the card then counts the steps, as it did.
+    var app: String?
+    var ended: Date?
+    var total: Int?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
     var isPoki: Bool { switch kind { case .poki, .plan: true; default: false } }
@@ -671,6 +677,10 @@ final class ChatModel {
     /// The task ended: a step still marked current was the last one done.
     private func finishPlan() {
         updatePlan { steps in for i in steps.indices where steps[i].state == .current { steps[i].state = .done } }
+        guard let id = planID, let i = entries.firstIndex(where: { $0.id == id }), entries[i].ended == nil else { return }
+        entries[i].ended = Date()
+        entries[i].app = isDemo ? Sample.app("demo") : app.currentApp
+        entries[i].total = modelPlan?.count
     }
 
     /// The approval the chat is showing as asked, until its answer comes.
@@ -766,6 +776,8 @@ final class ChatModel {
             var plan = ChatEntry(.plan(steps))
             plan.at = Date().addingTimeInterval(-42)
             plan.title = texts == Sample.coffeeSteps ? Sample.coffeeTitle : Sample.momTitle
+            // A finished one took the boards' 58 seconds in the scene's app.
+            if state == nil { plan.at = Date().addingTimeInterval(-58); plan.ended = Date(); plan.app = Sample.app(scene); plan.total = texts.count }
             return plan
         }
         let onIt = ChatEntry(.poki(String(localized: "On it.")))
@@ -786,6 +798,7 @@ final class ChatModel {
             var plan = ChatEntry(.plan([PlanStep(String(localized: "Open Notification Center"), state: .done),
                                         PlanStep(String(localized: "Tap Clear All"), state: .failed)]))
             plan.title = String(localized: "Clear notifications")
+            plan.ended = Date(); plan.total = 3
             entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Clear my notifications"), delivered: true)), onIt, plan,
                        ChatEntry(.note(.problem(String(localized: "I tripped. I lost my grip on your phone at step 2, so I stopped before touching anything else."))))]
         default:
