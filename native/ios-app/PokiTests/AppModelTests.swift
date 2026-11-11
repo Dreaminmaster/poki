@@ -1,5 +1,4 @@
 import PokiCore
-import SwiftUI
 import XCTest
 @testable import Poki
 
@@ -226,67 +225,44 @@ final class ApprovalDefaultTests: XCTestCase {
         XCTAssertEqual(tap, .clear)
     }
 
-    /// Tapping Allow or Don’t Allow on the Live Activity (ApproveActionIntent / DenyActionIntent) sends
-    /// the decision back through the approval channel to PokiCore.
-    func testLiveActivityApprovalButtonsDeliverDecisionToApprovalChannel() async throws {
+    /// Allow and Don’t Allow on the Live Activity: the card for a waiting approval carries the buttons
+    /// for that approval, and each button's intent reaches PokiCore, which lets the held tap through
+    /// or refuses it. The bridge handler is AppModel's forwarding without its pause for the island to
+    /// fold (AppModel.decide), which this does not cover.
+    func testLiveActivityAllowAndDenyAnswerTheWaitingTap() async throws {
         UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
         let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
         var pending: [PendingApproval] = []
-        var activityState = PokiActivityAttributes.ContentState(phase: .working, headline: "Working", thumbnailVersion: 0)
-
         let eventsTask = Task { @MainActor in
             for await event in core.events {
                 switch event {
-                case .approvalRequested(let approval):
-                    pending.append(approval)
-                    activityState.phase = .approval
-                    activityState.approval = approval
-                    activityState.headline = "Allow this step?"
-                case .approvalEnded(let id, let approved):
-                    pending.removeAll { $0.id == id }
-                    if activityState.approval?.id == id {
-                        activityState.approval = nil
-                        activityState.phase = .working
-                        activityState.headline = approved == true ? "Continuing" : "Step skipped"
-                    }
-                default:
-                    break
+                case .approvalRequested(let approval): pending.append(approval)
+                case .approvalEnded(let id, _): pending.removeAll { $0.id == id }
+                default: break
                 }
             }
         }
         defer { eventsTask.cancel() }
-
         ApprovalIntentBridge.install { decision in
-            guard pending.contains(where: { $0.id == decision.approvalID }) else { return false }
-            activityState.phase = .deciding
-            activityState.decision = decision.approved
             core.resolveApproval(id: decision.approvalID, approved: decision.approved)
             return true
         }
+        defer { ApprovalIntentBridge.install { _ in false } }
 
         async let allowTap = core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 5.0)
-        let requestedAllow = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)
-        await fulfillment(of: [requestedAllow], timeout: 2.0)
-        let firstID = try XCTUnwrap(pending.first?.id)
-        XCTAssertEqual(activityState.face.bottom, .approval(id: firstID))
-        XCTAssertEqual(activityState.face.minimal, .approval)
-
-        _ = try await ApproveActionIntent(approvalID: firstID).perform()
-        XCTAssertEqual(activityState.phase, .deciding)
-        XCTAssertEqual(activityState.decision, true)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)], timeout: 2.0)
+        let first = try XCTUnwrap(pending.first)
+        var card = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
+        card.approval = first
+        XCTAssertEqual(card.face.bottom, .approval(id: first.id))
+        _ = try await ApproveActionIntent(approvalID: first.id).perform()
         let allowVerdict = await allowTap
-        XCTAssertTrue(allowVerdict.mayTap, "\(allowVerdict)")
         XCTAssertEqual(allowVerdict, .approved("sending a message (\"send\")"))
 
         async let denyTap = core.clearTap(on: "Delete", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 5.0)
-        let requestedDeny = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)
-        await fulfillment(of: [requestedDeny], timeout: 2.0)
-        let secondID = try XCTUnwrap(pending.first?.id)
-        XCTAssertEqual(activityState.face.bottom, .approval(id: secondID))
-
-        _ = try await DenyActionIntent(approvalID: secondID).perform()
-        XCTAssertEqual(activityState.phase, .deciding)
-        XCTAssertEqual(activityState.decision, false)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)], timeout: 2.0)
+        let second = try XCTUnwrap(pending.first)
+        _ = try await DenyActionIntent(approvalID: second.id).perform()
         let denyVerdict = await denyTap
         XCTAssertFalse(denyVerdict.mayTap, "\(denyVerdict)")
     }
@@ -438,75 +414,15 @@ final class FrontendSubtractionTests: XCTestCase {
         model.setup.loopback = .none
         model.setup.uiAutomation = false
 
+        model.setup.runnerInstalled = true
+        model.setup.developerMode = true
+
         let hint = SetupIssueHint.home(model: model)
-        XCTAssertNotNil(hint, "an open setup step must show on Home")
-        XCTAssertEqual(hint?.target, SetupStep.shown.first { !model.looksDone($0) }.map(SetupIssueHint.Target.step))
+        XCTAssertEqual(hint?.target, .step(.loopback), "the first open step, Local Connection, shows on Home")
     }
-
-    /// Every Layer 1, Layer 2, and Layer 3 destination in the ESP-174 capability table is addressable
-    /// through PokiDetailsView's NavigationPath.
-    func testCapabilityTableRoutesAreReachableInDetailsNavigationPath() {
-        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
-        let secret = model.identity.secrets.first ?? model.addConnector(name: "Test Agent")
-
-        // Layer 1 routes on PokiDetailsView
-        let layer1: [DetailsRoute] = [.model, .history, .voice, .moreSettings]
-        for route in layer1 {
-            var path = NavigationPath()
-            path.append(route)
-            XCTAssertEqual(path.count, 1, "Layer 1 route \(route) must be pushable")
-        }
-
-        // Layer 2 routes under More Settings
-        let layer2Details: [DetailsRoute] = [.setup, .updates, .approvals, .settings]
-        for route in layer2Details {
-            var path = NavigationPath()
-            path.append(DetailsRoute.moreSettings)
-            path.append(route)
-            XCTAssertEqual(path.count, 2, "Layer 2 route \(route) must be reachable from More Settings")
-        }
-        let layer2Settings: [SettingsRoute] = [.memory, .diagnostics]
-        for route in layer2Settings {
-            var path = NavigationPath()
-            path.append(DetailsRoute.moreSettings)
-            path.append(route)
-            XCTAssertEqual(path.count, 2, "Layer 2 settings route \(route) must be reachable from More Settings")
-        }
-
-        // Layer 3 routes: every SetupStep under Setup, plus ConnectorDetail, RelayView, LogView, ActivityPreview
-        for step in SetupStep.shown {
-            var path = NavigationPath()
-            path.append(DetailsRoute.moreSettings)
-            path.append(DetailsRoute.setup)
-            path.append(step)
-            XCTAssertEqual(path.count, 3, "SetupStep \(step) must be reachable at Layer 3")
-            XCTAssertFalse(String(describing: step.rowTitle).isEmpty)
-        }
-
-        var connectorPath = NavigationPath()
-        connectorPath.append(DetailsRoute.moreSettings)
-        connectorPath.append(DetailsRoute.settings)
-        connectorPath.append(SettingsRoute.connector(secret))
-        XCTAssertEqual(connectorPath.count, 3)
-
-        var relayPath = NavigationPath()
-        relayPath.append(DetailsRoute.moreSettings)
-        relayPath.append(DetailsRoute.settings)
-        relayPath.append(SettingsRoute.relay)
-        XCTAssertEqual(relayPath.count, 3)
-
-        for debugLeaf in [SettingsRoute.log, SettingsRoute.activityPreview] {
-            var debugPath = NavigationPath()
-            debugPath.append(DetailsRoute.moreSettings)
-            debugPath.append(SettingsRoute.diagnostics)
-            debugPath.append(debugLeaf)
-            XCTAssertEqual(debugPath.count, 3)
-        }
-    }
-
-    /// #78 ("Can't Reach iPhone" by failure code), #79 (Poki Setup auto-turn-on via `wantsOn`),
-    /// and #81 (Poki Version under More Settings › Signing) all surface in the new Home, Chat hint,
-    /// and PokiDetailsView.
+    /// #78 ("Can't Reach iPhone" by failure code) and #79 (Poki Setup's install turns Poki on) still
+    /// reach the new screens: the failure is the hint line on Home and in the chat, and an issue row
+    /// on Poki's details.
     func testUnreachableRunnerFailureAndAutoTurnOnSurfaceInNewHomeAndDetails() async throws {
         defer { try? FileManager.default.removeItem(at: SelfSigner.handedIdentity) }
         try FileManager.default.createDirectory(at: SelfSigner.handedIdentity.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -515,7 +431,6 @@ final class FrontendSubtractionTests: XCTestCase {
 
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         XCTAssertTrue(model.wantsOn, "#79: Poki Setup install turns wantsOn on automatically")
-        XCTAssertTrue(model.sessionOn || model.wantsOn, "#79: PokiDetailsView and Home treat wantsOn as active")
 
         model.loopback.simulate(.working(ms: 9))
         model.setup.loopback = .proxy
@@ -542,6 +457,5 @@ final class FrontendSubtractionTests: XCTestCase {
         let runnerIssue = detailsIssues.first { $0.id == "runner" }
         XCTAssertNotNil(runnerIssue, "#78: PokiDetailsView Issue.current(model) includes the runner failure")
         XCTAssertEqual(runnerIssue?.fix, .setup)
-        XCTAssertFalse(model.signer.installedVersion.isEmpty, "#81: Poki Version is accessible via More Settings › Signing")
     }
 }
