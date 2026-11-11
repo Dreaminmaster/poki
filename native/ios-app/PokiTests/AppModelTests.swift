@@ -392,6 +392,20 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(secondHint?.target, .step(.loopback))
     }
 
+    /// ESP-321: Home has no tab bar, so main's Setup dot is Home's hint line. An open setup step shows
+    /// there and links to that step; before, Home showed only runner failures and said nothing.
+    func testHomeHintShowsOpenSetupStepWithoutTabBar() {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.setup.runnerInstalled = false
+        model.setup.developerMode = false
+        model.setup.loopback = .none
+        model.setup.uiAutomation = false
+
+        let hint = SetupIssueHint.home(model: model)
+        XCTAssertNotNil(hint, "an open setup step must show on Home")
+        XCTAssertEqual(hint?.target, SetupStep.shown.first { !model.looksDone($0) }.map(SetupIssueHint.Target.step))
+    }
+
     /// Every Layer 1, Layer 2, and Layer 3 destination in the ESP-174 capability table is addressable
     /// through PokiDetailsView's NavigationPath.
     func testCapabilityTableRoutesAreReachableInDetailsNavigationPath() {

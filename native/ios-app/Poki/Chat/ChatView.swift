@@ -83,6 +83,8 @@ struct SetupIssueHint: Equatable {
         case step(SetupStep)
         case model
         case setup
+        /// Agents and Relay (Home only).
+        case agents
     }
     var message: String
     var link: String
@@ -150,12 +152,15 @@ struct SetupIssueHint: Equatable {
         return nil
     }
 
-    @MainActor static func first(model: AppModel) -> SetupIssueHint? {
+    /// `looks` counts a step as Home shows it (`AppModel.looksDone`), so the loopback's first check after
+    /// launch doesn't flash a hint.
+    @MainActor static func first(model: AppModel, looks: Bool = false) -> SetupIssueHint? {
         if let runnerHint = runnerIssue(model: model) {
             return runnerHint
         }
-        if !model.setupComplete {
-            for step in SetupStep.shown where !model.isDone(step) {
+        let done: (SetupStep) -> Bool = looks ? model.looksDone : model.isDone
+        if !SetupStep.shown.allSatisfy(done) {
+            for step in SetupStep.shown where !done(step) {
                 switch step {
                 case .runner:
                     return SetupIssueHint(
@@ -207,12 +212,30 @@ struct SetupIssueHint: Equatable {
     }
 }
 
+extension SetupIssueHint {
+    /// Home's one line (ESP-321): what main's two tab dots said, one problem at a time. A runner or
+    /// pairing failure, then an open setup step (Setup's dot), then no chat account, then the relay
+    /// offline (the Agents dot). The chat doesn't show the relay: it needs no relay to reply.
+    @MainActor static func home(model: AppModel) -> SetupIssueHint? {
+        if let hint = first(model: model, looks: true) { return hint }
+        if case .offline = model.relayStatus {
+            return SetupIssueHint(
+                message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
+                link: String(localized: "Agents and Relay ›"),
+                target: .agents
+            )
+        }
+        return nil
+    }
+}
+
 /// One grey line and a blue direct link under the bubbles (ESP-174 board "C1 Chat setup hint").
 struct SetupHintLine: View {
     var hint: SetupIssueHint
     var openSetupStep: (SetupStep) -> Void
     var openSetup: () -> Void
     var openModel: () -> Void
+    var openAgents: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 2) {
@@ -225,6 +248,7 @@ struct SetupHintLine: View {
                 case .step(let step): openSetupStep(step)
                 case .model: openModel()
                 case .setup: openSetup()
+                case .agents: openAgents()
                 }
             } label: {
                 Text(verbatim: hint.link)

@@ -42,10 +42,11 @@ struct SessionsView: View {
         return !(model.sessionOn || model.wantsOn) || setupIncomplete || runnerFailed
     }
 
-    /// Runtime connection/runner failure hint (#78 "Can't Reach iPhone", pairing refusal, etc.) on the home page.
-    private var homeRunnerHint: SetupIssueHint? {
+    /// Home's hint line: a runner or pairing failure (#78 "Can't Reach iPhone", pairing refusal, etc.),
+    /// an open setup step, no chat account, or the relay offline (see `SetupIssueHint.home`).
+    private var homeHint: SetupIssueHint? {
         guard sampleHome == nil else { return nil }
-        return SetupIssueHint.runnerIssue(model: model)
+        return SetupIssueHint.home(model: model)
     }
 
     var body: some View {
@@ -55,8 +56,8 @@ struct SessionsView: View {
                 titleBar
                 searchBar
                 PinnedChannelsView(items: pinnedItems, openChat: openChat, openSession: openSession)
-                if let hint = homeRunnerHint {
-                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
+                if let hint = homeHint {
+                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel, openAgents: openConnectors)
                 }
                 sessionList
             }
