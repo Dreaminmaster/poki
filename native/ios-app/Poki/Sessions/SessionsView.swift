@@ -526,7 +526,7 @@ struct SessionView: View {
         // The chat's own page colour, so Poki's white bubbles stand on it as they do there.
         .background(Tint.page.ignoresSafeArea())
         // The session's name is the title; its menu renames it (the system title menu).
-        .navigationTitle(Text(verbatim: session?.name ?? ""))
+        .navigationTitle(Text(verbatim: session?.name ?? (sample ? "Claude Code" : "")))
         .navigationBarTitleDisplayMode(.inline)
         .sessionSubtitle(caption(session))
         .toolbarTitleMenu {

@@ -68,20 +68,23 @@ struct PokiDetailsView: View {
 
                 Section {
                     NavigationLink(value: DetailsRoute.approvals) {
-                        ProfileRow(title: "Rules", caption: "What Poki asks about first", symbol: "checkmark.shield.fill", value: model.approvalMode.title)
+                        ProfileRow(title: "Rules", caption: "What Poki asks about first", symbol: "checkmark.shield.fill", value: model.approvalMode.title, tile: Tint.amber)
                     }
                     .accessibilityIdentifier("moreSettings.approvals")
                     NavigationLink(value: DetailsRoute.settings) {
-                        ProfileRow(title: "Guests", caption: "Agents that use Poki’s hands", symbol: "person.2.fill", value: isSample ? nil : Health.relay(model).word)
+                        ProfileRow(title: "Guests", caption: "Agents that use Poki’s hands", symbol: "person.2.fill", value: isSample ? nil : Health.relay(model).word,
+                                   tile: Color(light: 0x11191C, dark: 0x2F3336))
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                     NavigationLink(value: DetailsRoute.health) {
-                        ProfileRow(title: "Health", caption: "Updates, notifications, diagnostics", symbol: "heart.text.square.fill", value: healthValue, warns: updateWaits)
+                        ProfileRow(title: "Health", caption: "Updates, notifications, diagnostics", symbol: "heart.text.square.fill", value: healthValue, warns: updateWaits, tile: Tint.green)
                     }
                     .accessibilityIdentifier("details.health")
                 }
             }
             .listStyle(.insetGrouped)
+            // The design sets its groups 16 points apart, the tiles from the first group too.
+            .listSectionSpacing(16)
             .contentMargins(.top, 4, for: .scrollContent)
             .navigationTitle("Poki")
             .navigationBarTitleDisplayMode(.inline)
@@ -260,8 +263,9 @@ struct PressedDimStyle: ButtonStyle {
     }
 }
 
-/// A part of Poki as a list row: its icon on Poki's blue, its name with where it stands beside it,
-/// and under them what is in there.
+/// A part of Poki as a list row: its icon on a tile of the design's colour (Poki's blue for what
+/// Poki is made of; amber, ink and green for its rules, its guests and its health), its name with
+/// where it stands beside it, and under them what is in there.
 private struct ProfileRow: View {
     var title: LocalizedStringKey
     var caption: LocalizedStringKey
@@ -269,19 +273,20 @@ private struct ProfileRow: View {
     var value: String? = nil
     /// The value needs you (no model, setup not finished, an update waiting): amber.
     var warns = false
+    var tile: Color = Tint.blue
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                 .frame(width: 32, height: 32)
-                .background(Tint.blue, in: .rect(cornerRadius: 9, style: .continuous))
+                .background(tile, in: .rect(cornerRadius: 9, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 // The value shares the name's line, so the caption keeps the row's width. At the
                 // accessibility sizes it goes under the caption, as in Settings.
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(title).font(.body).foregroundStyle(Color(.label))
+                    Text(title).font(.body.weight(.medium)).foregroundStyle(Color(.label))
                     Spacer(minLength: 0)
                     if !typeSize.isAccessibilitySize, let value { valueText(value).lineLimit(1) }
                 }
