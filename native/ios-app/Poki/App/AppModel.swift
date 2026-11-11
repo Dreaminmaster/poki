@@ -1410,7 +1410,7 @@ final class AppModel {
     /// stays away and sends its reply as a notification the owner can answer; the Live Activity shows
     /// the run as finished at once.
     func chatTaskEnded(reply: String?, session: String, acted: Bool) {
-        guard acted else { finishTask(); return }
+        guard acted else { activity.update { $0.plan = nil }; finishTask(); return }
         let stays = !Self.returnsAfterTask
         let bundle = Bundle.main.bundleIdentifier
         Task { [core, log] in

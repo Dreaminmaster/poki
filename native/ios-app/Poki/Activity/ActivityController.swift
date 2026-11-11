@@ -56,6 +56,15 @@ final class ActivityController {
     private var eventTimer: Task<Void, Never>?
     private var inStep = false
     private var runAnnounced = false
+    /// The plan on the activity belongs to a run that has finished: a new run starts without it.
+    private var planFinished = false
+    /// What this run's updates did, logged when it finishes: on the owner's phone the island kept a
+    /// run's first step while the run went on (ESP-328, not seen on a simulator).
+    private var tally = Tally()
+    private struct Tally { var sent = 0, answered = 0, reported = 0, withoutActivity = 0, longestWait = 0.0 }
+    /// The phase and step iOS last reported holding for the activity.
+    private var held: (phase: PokiState.Phase, step: Int)?
+    private static let runPhases: Set<PokiState.Phase> = [.working, .approval, .deciding, .handoff]
     private var justRecorded = false
 
     var enabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
@@ -85,6 +94,11 @@ final class ActivityController {
             activity = started
             budget = UpdateBudget()
             lastError = nil
+            Task { [weak self] in
+                for await content in started.contentUpdates {
+                    await MainActor.run { self?.tally.reported += 1; self?.held = (content.state.phase, content.state.stepCount) }
+                }
+            }
             // Dismissed by the person (swiped away) or ended by iOS: start again next time.
             Task { [weak self] in
                 for await state in started.activityStateUpdates where state == .dismissed || state == .ended {
@@ -109,6 +123,7 @@ final class ActivityController {
     /// the Lock Screen or in the island.
     func end() {
         finishTimer?.cancel(); foldTimer?.cancel(); eventTimer?.cancel()
+        if Self.runPhases.contains(state.phase) { logRun("cut off by ending the Live Activity") }
         worker?.cancel(); worker = nil; plainWaiting = false
         guard let activity else { return }
         self.activity = nil
@@ -157,11 +172,16 @@ final class ActivityController {
         // A problem's own word goes with it.
         if state.phase != .problem { state.label = nil }
 
+        // The chat publishes its plan just before its first step, so a plan set since the last run
+        // finished is the next run's.
+        if state.plan != nil, state.plan != old.plan { planFinished = false }
         // A new run of steps: from anything that is not already a run.
-        let runPhases: Set<PokiState.Phase> = [.working, .approval, .deciding, .handoff]
+        let runPhases = Self.runPhases
         if state.phase == .working, !runPhases.contains(old.phase) {
             state.stepCount = 0; state.failedCount = 0; state.endedAt = nil; state.outcomes = []
-            if old.phase == .done || old.phase == .idle { state.plan = nil }
+            tally = Tally()
+            if planFinished { state.plan = nil; planFinished = false }
+            AppLog.shared.add("activity", "run started from \(old.phase.rawValue)\(activity == nil ? " with no Live Activity" : "")")
             if state.since == nil { state.since = now }
             // The runner's start and the agent's first step are one start.
             if !runAnnounced {
@@ -172,6 +192,7 @@ final class ActivityController {
         if state.phase == .done || state.phase == .idle && state.runnerPaused || state.phase == .pairing || state.phase == .setup {
             runAnnounced = false
         }
+        if runPhases.contains(old.phase), !runPhases.contains(state.phase) { logRun("left for \(state.phase.rawValue)") }
         if state.phase != .done { foldTimer?.cancel() }
         // Into another app mid-run.
         if runPhases.contains(state.phase), let app = state.app, let before = old.app, app != before {
@@ -241,7 +262,10 @@ final class ActivityController {
     /// the chat tells the owner itself (its reply notification).
     func finishNow(alert: Bool) {
         finishTimer?.cancel()
-        guard state.phase == .working, state.approval == nil, state.handoff == nil else { return }
+        guard state.phase == .working, state.approval == nil, state.handoff == nil else {
+            if Self.runPhases.contains(state.phase) { AppLog.shared.add("activity", "the run was not marked finished: the activity shows \(state.phase.rawValue)") }
+            return
+        }
         inStep = false
         finish(alert: alert)
     }
@@ -253,6 +277,8 @@ final class ActivityController {
 
     private func finish(alert: Bool) {
         state.phase = .done
+        planFinished = true
+        logRun("finished")
         runAnnounced = false
         state.endedAt = Date()
         state.headline = "Finished"
@@ -260,6 +286,17 @@ final class ActivityController {
         let summary = state.runSummary
         send(alert: alert ? ordinary(String(activity: "Agent finished"), summary) : nil, critical: true)
         armFold()
+    }
+
+    /// What a run's updates did, once iOS has had time to take the last one.
+    private func logRun(_ how: String) {
+        let steps = state.stepCount
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self else { return }
+            let t = self.tally, held = self.held.map { "\($0.phase.rawValue) step \($0.step)" } ?? "nothing reported"
+            AppLog.shared.add("activity", "run \(how) at step \(steps): \(t.sent) updates sent, \(t.answered) answered, iOS reported \(t.reported) and holds \(held); \(t.withoutActivity) with no Live Activity; longest wait for the update budget \(String(format: "%.1f", t.longestWait)) s; \(self.activity.map { "\($0.activityState)" } ?? "no activity"), \(Activity<PokiActivityAttributes>.activities.count) Poki activities")
+        }
     }
 
     /// The finished run stays a while, then the activity folds back to Ready: no old run is left
@@ -305,7 +342,7 @@ final class ActivityController {
     // MARK: Sending
 
     private func send(alert: AlertConfiguration?, critical: Bool) {
-        guard activity != nil else { return }
+        guard activity != nil else { tally.withoutActivity += 1; return }
         if critical || alert != nil {
             // Ahead of any plain progress still waiting, which this state replaces.
             plainWaiting = false
@@ -320,6 +357,7 @@ final class ActivityController {
             try? await Task.sleep(for: ActivityController.coalescing)
             guard let self, !Task.isCancelled else { return }
             let wait = self.budget.wait(at: Self.now())
+            self.tally.longestWait = max(self.tally.longestWait, wait)
             if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
             guard !Task.isCancelled else { return }
             self.worker = nil
@@ -335,9 +373,15 @@ final class ActivityController {
     private func enqueue(_ content: ActivityContent<PokiState>, alert: AlertConfiguration?) {
         guard let activity else { return }
         let previous = tail
+        tally.sent += 1
         tail = Task {
             await previous?.value
+            let began = Date()
             if let alert { await activity.update(content, alertConfiguration: alert) } else { await activity.update(content) }
+            self.tally.answered += 1
+            let seconds = Date().timeIntervalSince(began)
+            guard seconds > 2 else { return }
+            AppLog.shared.add("activity", "the update to \(content.state.phase.rawValue) step \(content.state.stepCount) took \(String(format: "%.1f", seconds)) s; \(activity.activityState)")
         }
     }
 
