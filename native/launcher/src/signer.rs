@@ -107,7 +107,8 @@ async fn signer(state: &mut State) -> std::result::Result<&mut Signer, Failure> 
 }
 
 fn channels() -> Value {
-    Value::Array(Channel::ALL.iter().map(|c| json!({"id": c.id(), "title": c.title()})).collect())
+    // Pre-alpha is offered only while GitHub is signed in.
+    Value::Array(release::offered_channels().iter().map(|c| json!({"id": c.id(), "title": c.title()})).collect())
 }
 
 /// Runs one request. `emit` gets progress events while it runs.
@@ -147,6 +148,10 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
                 "anisette": source,
                 "channel": release::channel().id(),
                 "channels": channels(),
+                "previews_enabled": release::previews_enabled(),
+                "github_signed_in": release::github_token().is_some(),
+                "github_login": release::github_login(),
+                "preview": release::preview(),
             }))
         }
         "sign_in" => {
@@ -196,11 +201,35 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
             release::set_channel(channel)?;
             Ok(json!({"channel": channel.id()}))
         }
-        "import_identity" => import_identity(&request).await,
-        "check_update" => {
-            let r = release::latest().await?;
-            Ok(json!({"tag": r.tag, "version": r.version, "build": r.build, "channel": r.channel.id(), "published_at": r.published_at, "notes": r.notes}))
+        // Preview builds of pull requests (the Preview Builds switch on the GitHub Account page): on or off, the
+        // chosen one, and those on offer. They are on no channel.
+        "set_preview_switch" => {
+            release::set_preview_switch(request["on"].as_bool().unwrap_or(false))?;
+            Ok(json!({}))
         }
+        // GitHub's device sign-in, for preview builds: start answers with the code to show, finish
+        // waits until the person has entered it on github.com and keeps the token in the Keychain.
+        "github_sign_in_start" => Ok(serde_json::to_value(release::github_sign_in_start().await?).unwrap_or_default()),
+        "github_sign_in_finish" => {
+            let pending: release::GithubSignIn = serde_json::from_value(request["pending"].clone()).map_err(|e| fail(e.to_string(), "config"))?;
+            let login = release::github_sign_in_finish(&pending).await?;
+            Ok(json!({"login": login}))
+        }
+        // Signing out forgets the token and turns preview builds off.
+        "github_sign_out" => {
+            release::set_github_token("")?;
+            Ok(json!({}))
+        }
+        "set_preview" => {
+            release::set_preview(request["pr"].as_u64())?;
+            Ok(json!({}))
+        }
+        "previews" => {
+            let state = release::previews().await?;
+            Ok(json!({"enabled": state.enabled, "selected": state.selected, "builds": state.builds.iter().map(release_json).collect::<Vec<_>>()}))
+        }
+        "import_identity" => import_identity(&request).await,
+        "check_update" => Ok(release_json(&release::latest().await?)),
         "udid" => {
             let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;
             let mut device = phone.open().await?;
@@ -210,6 +239,17 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "install" => install(&request, &reporter).await,
         other => Err(fail(format!("unknown request {other:?}"), "config")),
     }
+}
+
+/// A release for the app: a preview build also says its pull request, commit and title.
+fn release_json(r: &release::Release) -> Value {
+    let mut v = json!({"tag": r.tag, "version": r.version, "build": r.build, "channel": r.channel.id(), "published_at": r.published_at, "notes": r.notes});
+    if let Some(p) = &r.preview {
+        v["preview_pr"] = json!(p.pr);
+        v["sha"] = json!(p.sha);
+        v["title"] = json!(p.title);
+    }
+    v
 }
 
 async fn udid(device: &mut Device) -> std::result::Result<String, Failure> {
@@ -263,7 +303,7 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
     };
     reporter.done("phone", Some(udid.clone()));
 
-    let (ipa, signing_zip, tag) = match kind {
+    let (ipa, signing_zip, tag, preview) = match kind {
         "refresh" => {
             reporter.step("release", "Packing the installed Poki");
             let app = PathBuf::from(str_of(request, "app_path")?);
@@ -271,14 +311,14 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
             let (a, i) = (app.clone(), ipa.clone());
             tokio::task::spawn_blocking(move || sign::package_app(&a, &i)).await.map_err(|e| fail(e.to_string(), "io"))??;
             reporter.done("release", None);
-            (ipa, None, "installed".to_string())
+            (ipa, None, "installed".to_string(), None)
         }
         "update" => {
             reporter.step("release", "Getting the newest Poki");
             let rel = release::latest().await?;
             let (ipa, zip) = release::fetch(&rel, reporter).await?;
             reporter.done("release", Some(rel.tag.clone()));
-            (ipa, zip, rel.tag)
+            (ipa, zip, rel.tag, rel.preview)
         }
         other => return Err(fail(format!("unknown kind {other:?}"), "config")),
     };
@@ -301,7 +341,7 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
         std::fs::write(&path, p)?;
         profiles.push(path.to_string_lossy().to_string());
     }
-    let manifest = json!({
+    let mut manifest = json!({
         "kind": kind,
         "ipa": built.ipa.to_string_lossy(),
         "profiles": profiles,
@@ -316,6 +356,10 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
         "prepared_at": core::keeper::now(),
         "notes": built.notes,
     });
+    if let Some(p) = &preview {
+        manifest["preview_pr"] = json!(p.pr);
+        manifest["sha"] = json!(p.sha);
+    }
     std::fs::write(out_dir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap_or_default())?;
     Ok(manifest)
 }

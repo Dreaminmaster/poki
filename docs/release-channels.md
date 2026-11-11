@@ -65,17 +65,47 @@ deploys) and `SHA256SUMS`, plus Poki Setup's `PokiSetup-*` installers and `SHA25
   and X.Y.Z hotfixes.
 - `promote/<channel>-<version>`: the bot's promotion PRs.
 
+## Preview builds of pull requests
+
+A pull request can be built into an installable preview without merging it, so an unfinished change
+is tried on a phone before it reaches any channel.
+
+- **Commission it.** A maintainer adds the `preview` label to the pull request. `pr-preview.yml`
+  builds the branch merged with `main`, and builds again on every push while the label stays. Only
+  branches in this repository are built, never forks. Removing the label or closing the pull request
+  deletes its builds.
+- **Where it lives.** A preview is a workflow artifact named
+  `Poki-preview-pr<N>-<version>-<build>-<commit>`, kept 14 days. It is not a release, has no tag and is
+  on no channel, so nobody on Stable, Beta, Alpha or Pre-alpha receives it. The app shows it as
+  `0.3.0 (712) PR 180`.
+- **Who can install it.** GitHub hands artifacts only to signed-in users. In Poki, open Build
+  Options › GitHub Account, sign in, and turn on Preview Builds. A Preview Build list then appears
+  under the release channels. Poki Setup has the same GitHub Account section under the Apple Account
+  and the same list under its channel. From the command line: `poki-setup preview sign-in`,
+  `poki-setup preview on`, `poki-setup preview 180`, `poki-setup preview none`.
+- **Pre-alpha needs the same sign-in.** The Pre-alpha channel is offered only to signed-in GitHub
+  users. Without a sign-in, a saved Pre-alpha choice behaves as Alpha.
+- **Going back.** Choose None. The next update check follows the release channel again.
+
+The sign-in uses GitHub's device flow with no scopes. The OAuth App's client ID is the
+`GITHUB_CLIENT_ID` constant in `desktop/core/src/release.rs` (`POKI_GITHUB_CLIENT_ID` overrides it
+for development). It is public, not a secret.
+
 ## Checks
 
 `pr-checks.yml` runs on every PR into `main` or `release/**`, on Linux only so it never takes one of
-the 5 macOS runners: Poki Setup's core tests, the Rust lockfiles, and the workflows (actionlint).
+the 5 macOS runners: Poki Setup's core tests, the Rust lockfiles, and the workflows (actionlint). Each job runs only when the PR touches what it
+checks: a PR with no change under `desktop/` skips the Poki Setup tests, and the Windows sign-in
+check runs only for `desktop/core` and its Cargo files. A skipped job counts as passed.
 
 ## Setup (once)
 
 - A GitHub App for the bot (Contents, Pull requests and Workflows read and write; Actions and Checks
   read), installed on this repository, with its id and private key in the Actions secrets
   `POKI_BOT_APP_ID` and `POKI_BOT_PRIVATE_KEY`.
-- Labels `promotion`, `soak-override` and `blocker`.
+- Labels `promotion`, `soak-override`, `blocker` and `preview`.
+- A GitHub OAuth App with device flow enabled, for the GitHub sign-in of preview builds. Its client
+  ID goes into `GITHUB_CLIENT_ID` in `desktop/core/src/release.rs`.
 - The `alpha`, `beta`, and `stable` environments are configured with `JosssphZhou` as the only
   required reviewer and administrator bypass disabled. Self-review prevention is off so the owner
   can approve a run they started. Agents must not approve on the owner's behalf.

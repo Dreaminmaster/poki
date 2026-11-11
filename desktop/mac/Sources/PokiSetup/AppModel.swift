@@ -47,6 +47,11 @@ final class AppModel: ObservableObject {
     private var askedAbout: String?
     @Published var latestError: String?
     @Published var channels: [ChannelInfo] = []
+    /// The GitHub sign-in and the preview builds of pull requests (Account page, Setup page).
+    @Published var previews = PreviewState()
+    /// The code GitHub is waiting for, while a GitHub sign-in is under way.
+    @Published var githubCode: GithubSignIn?
+    @Published var githubError: String?
 
     // Sign-in
     @Published var needsCode = false
@@ -94,6 +99,7 @@ final class AppModel: ObservableObject {
             await refreshRecords()
             await refreshLatest()
             await refreshChannels()
+            await refreshPreviews()
             relay = try? await bridge.call("relay_state", as: Deployed?.self) ?? nil
         }
         pollTask = Task { [weak self] in
@@ -202,6 +208,59 @@ final class AppModel: ObservableObject {
     func setChannel(_ id: String) async throws {
         channels = try await bridge.call("set_channel", ["channel": id])
         await refreshLatest()
+    }
+
+    // MARK: GitHub and preview builds
+
+    func refreshPreviews() async {
+        if demo { return }
+        do {
+            previews = try await bridge.call("previews")
+        } catch {
+            // GitHub could not be read: the sign-in and the switch still show, with no builds.
+            githubError = error.localizedDescription
+        }
+    }
+
+    /// What Install uses and which channels are offered both follow the GitHub sign-in.
+    private func previewsChanged(_ state: PreviewState) async {
+        previews = state
+        await refreshChannels()
+        await refreshLatest()
+    }
+
+    /// GitHub's device sign-in: shows a code to enter on github.com, then waits until GitHub says
+    /// it was entered. The sign-in asks for no permissions.
+    func signInToGitHub() async {
+        githubError = nil
+        do {
+            let code: GithubSignIn = try await bridge.call("github_sign_in_start")
+            githubCode = code
+            let state: PreviewState = try await bridge.call("github_sign_in_finish", ["pending": code.wire])
+            // A sign-in that was cancelled meanwhile is not taken.
+            if githubCode == code {
+                await previewsChanged(state)
+            } else if let out: PreviewState = try? await bridge.call("github_sign_out") {
+                await previewsChanged(out)
+            }
+        } catch {
+            if githubCode != nil { githubError = error.localizedDescription }
+        }
+        githubCode = nil
+    }
+
+    func signOutOfGitHub() async {
+        githubCode = nil
+        do { await previewsChanged(try await bridge.call("github_sign_out")) } catch { githubError = error.localizedDescription }
+    }
+
+    func setPreviewBuilds(_ on: Bool) async {
+        do { await previewsChanged(try await bridge.call("set_preview_switch", ["on": on])) } catch { githubError = error.localizedDescription }
+    }
+
+    /// Installs and renewals use this pull request's preview build, or the channel again with nil.
+    func setPreview(_ pr: Int?) async {
+        do { await previewsChanged(try await bridge.call("set_preview", ["pr": pr])) } catch { githubError = error.localizedDescription }
     }
 
     // MARK: Account

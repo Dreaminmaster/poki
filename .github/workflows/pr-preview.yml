@@ -1,0 +1,151 @@
+# Preview builds: a real Poki build of one pull request, for trying a change on a phone before it
+# is merged. Opt-in per pull request: add the `preview` label (people with triage rights can). The
+# pull request is then built as it would be once merged (its branch merged with main), again on
+# every push, and the build is kept as an Actions artifact of this run, named
+# Poki-preview-pr<number>-<version>-<build>-<commit>. Nothing is released: no tag, no GitHub
+# Release, no channel, and nothing touches main. Poki and Poki Setup list these artifacts by pull
+# request number once someone has signed in to GitHub there and turned Preview Builds on
+# (desktop/core/src/release.rs); GitHub hands artifacts only to signed-in accounts. Removing the
+# label, or closing or merging the pull request, deletes its builds; otherwise they expire 14 days
+# after the last one.
+#
+# Only pull requests from a branch of this repository are built, and Poki and Poki Setup only
+# accept artifacts of such runs: a fork's pull request could otherwise put its own build under a
+# preview's name. To preview a fork's pull request, a maintainer pushes its commits to a dev/
+# branch here and opens a pull request from that.
+#
+# The build is one macOS job (GitHub runs at most 5 at once for this repository), so label only
+# the pull requests someone is going to test.
+name: PR preview
+
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+
+# One run per pull request at a time, the newest wins: a push replaces the build of the push
+# before it, and closing stops a build under way. Events that are not about previews (another
+# label, a push to a pull request without the label) get a group of their own, so they never
+# cancel a preview build.
+concurrency:
+  group: >-
+    ${{ (github.event.action == 'closed'
+      || ((github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name == 'preview')
+      || ((github.event.action == 'synchronize' || github.event.action == 'reopened') && contains(github.event.pull_request.labels.*.name, 'preview')))
+      && format('pr-preview-{0}', github.event.pull_request.number)
+      || format('pr-preview-none-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.state == 'open'
+      && contains(github.event.pull_request.labels.*.name, 'preview')
+      && (github.event.action == 'synchronize' || github.event.action == 'reopened'
+        || (github.event.action == 'labeled' && github.event.label.name == 'preview'))
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      # The pull request merged with main (the default for this event): every commit, for the
+      # count, but no file contents beyond this one.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, filter: 'tree:0' }
+
+      # The build number is the commit count of that merge: main's count, plus the pull request's
+      # commits, plus one. It is above the pre-alpha it was built on, and Poki shows it with the
+      # pull request number, which is what tells a preview from a channel build.
+      - id: v
+        name: Version and build number
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d ' \n' < native/ios-app/VERSION)"
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::native/ios-app/VERSION is not X.Y.Z"; exit 1; }
+          BUILD="$(git rev-list --count HEAD)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          SHA="${{ github.event.pull_request.head.sha }}"
+          echo "sha=${SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "Poki $VERSION ($BUILD), preview of pull request ${{ github.event.pull_request.number }}"
+
+      - id: ipa
+        uses: ./.github/actions/build-ipa
+        with:
+          version: ${{ steps.v.outputs.version }}
+          build: ${{ steps.v.outputs.build }}
+          editions: external
+          preview-pr: ${{ github.event.pull_request.number }}
+          preview-sha: ${{ steps.v.outputs.sha }}
+
+      - name: Check the preview marks
+        run: |
+          set -euo pipefail
+          unzip -p out/Poki-external-unsigned.ipa Payload/Poki.app/Info.plist > build/preview-Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :PokiPreviewPR' build/preview-Info.plist)" = "${{ github.event.pull_request.number }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :PokiPreviewCommit' build/preview-Info.plist)" = "${{ steps.v.outputs.sha }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Poki-preview-pr${{ github.event.pull_request.number }}-${{ steps.v.outputs.version }}-${{ steps.v.outputs.build }}-${{ steps.v.outputs.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summary
+        run: |
+          {
+            echo "## Preview of PR ${{ github.event.pull_request.number }}: Poki v${{ steps.v.outputs.version }} (${{ steps.v.outputs.build }})"
+            echo "Built from ${{ steps.v.outputs.sha }} merged with main. No release, tag or channel was touched."
+            echo
+            echo "To install it, sign in to GitHub in Poki (Signing Options, GitHub Account) or in Poki Setup, turn on Preview Builds, then choose PR ${{ github.event.pull_request.number }} under the release channels."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Saved in the pull request's own cache scope: they speed up its next push and reach no
+      # other branch. The first build of a pull request starts from main's caches.
+      - if: steps.ipa.outputs.rust-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            native/launcher/target
+          key: ${{ steps.ipa.outputs.rust-key }}
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            build/app-external
+            build/app-local
+            ~/Library/Developer/Xcode/DerivedData/ModuleCache.noindex
+          key: ipa-fast-${{ github.sha }}
+
+  # After a build, the pull request's earlier builds go, so each pull request offers one. When the
+  # label comes off, or the pull request is merged or closed, all of them go: a merged change is in
+  # the next pre-alpha, and Poki and Poki Setup return to their channel by themselves.
+  tidy:
+    name: tidy
+    needs: build
+    if: >-
+      always() && github.event.pull_request.head.repo.full_name == github.repository
+      && (needs.build.result == 'success' || github.event.action == 'closed'
+        || (github.event.action == 'unlabeled' && github.event.label.name == 'preview'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the builds this one replaces
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PREFIX: Poki-preview-pr${{ github.event.pull_request.number }}-
+          # After a build, this run's own artifact stays.
+          KEEP_RUN: ${{ needs.build.result == 'success' && github.run_id || '0' }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/artifacts?per_page=100" --paginate \
+            --jq ".artifacts[] | select(.name | startswith(\"$PREFIX\")) | select((.workflow_run.id | tostring) != \"$KEEP_RUN\") | .id" \
+          | while read -r id; do
+              gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id" && echo "Deleted preview artifact $id"
+            done

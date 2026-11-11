@@ -95,6 +95,13 @@ pub fn run() {
             commands::install_update,
             commands::channels,
             commands::set_channel,
+            commands::previews,
+            commands::set_preview_switch,
+            commands::set_preview,
+            commands::set_github_token,
+            commands::github_sign_in_start,
+            commands::github_sign_in_finish,
+            commands::github_sign_out,
             commands::qr_svg,
         ])
         .run(tauri::generate_context!())

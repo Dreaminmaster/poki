@@ -28,6 +28,20 @@ final class SelfSigner {
         var anisette: String
         var channel: String
         var channels: [Channel]
+        /// The Preview Builds switch (GitHub Account page), and the pull request chosen.
+        var previews_enabled: Bool?
+        var preview: Int?
+        var github_signed_in: Bool?
+        var github_login: String?
+    }
+
+    /// GitHub's device sign-in under way: the code to enter at the address.
+    struct GitHubCode: Decodable, Equatable {
+        let device_code: String
+        let user_code: String
+        let verification_uri: String
+        let interval: Int
+        let expires_in: Int
     }
 
     struct Team: Decodable, Identifiable, Hashable {
@@ -49,6 +63,9 @@ final class SelfSigner {
         let team_is_free: Bool
         let profile_expires_at: Int64
         let prepared_at: Int64
+        /// Set when the build is a pull request's preview.
+        var preview_pr: Int?
+        var sha: String?
         var expires: Date { Date(timeIntervalSince1970: TimeInterval(profile_expires_at)) }
         var title: String { kind == "update" ? "Poki \(version) (\(build))" : "Refreshed Poki \(version) (\(build))" }
     }
@@ -58,6 +75,10 @@ final class SelfSigner {
         let version: String
         let build: String
         let channel: String
+        /// Set on a pull request's preview build, which is on no channel.
+        var preview_pr: Int?
+        var sha: String?
+        var title: String?
     }
 
     /// Prepare a fresh build when the installed profile has this many days left or fewer.
@@ -78,6 +99,14 @@ final class SelfSigner {
     let expiry: Date? = SelfSigner.installedProfileExpiry() ?? SelfSigner.screenshotExpiry
     let installedVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     let installedBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+    /// The pull request this Poki is a preview build of, and its commit. Nil on a channel build.
+    let installedPreviewPR = Bundle.main.object(forInfoDictionaryKey: "PokiPreviewPR") as? Int
+    let installedPreviewCommit = Bundle.main.object(forInfoDictionaryKey: "PokiPreviewCommit") as? String ?? ""
+    /// Preview builds on offer, while Preview Builds is on.
+    private(set) var previews: [Release] = []
+    /// The code GitHub is waiting for, while a GitHub sign-in is under way.
+    private(set) var githubCode: GitHubCode?
+    private(set) var githubError: String?
 
     /// The phone's own services (10.7.0.1 and the pairing file), when the loopback answers.
     var phone: () -> [String: Any]? = { nil }
@@ -106,12 +135,21 @@ final class SelfSigner {
     var updateNotReady: Bool {
         guard updateAvailable, let latest else { return false }
         guard let u = ready["update"] else { return true }
-        return u.version != latest.version || u.build != latest.build
+        return u.version != latest.version || u.build != latest.build || u.preview_pr != latest.preview_pr || (u.sha ?? "") != (latest.sha ?? "")
+    }
+    var previewsEnabled: Bool { status?.previews_enabled == true }
+    var githubSignedIn: Bool { status?.github_signed_in == true }
+    /// The installed version, with the pull request when it is a preview build.
+    var installedTitle: String { Self.title(version: installedVersion, build: installedBuild, pr: installedPreviewPR) }
+
+    static func title(version: String, build: String, pr: Int?) -> String {
+        guard let pr else { return "\(version) (\(build))" }
+        return String(localized: "\(version) (\(build)) PR \(pr)")
     }
     /// Why Poki cannot download the update by itself, when it cannot. Nil when it can.
     var updateBlocker: String? {
         guard updateNotReady else { return nil }
-        if !signedIn { return String(localized: "To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac.") }
+        if !signedIn { return String(localized: "To download updates by itself, Poki needs your Apple Account. Sign in under Build Options, or update Poki from Poki Setup on your Mac.") }
         if phone() == nil { return String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.") }
         return nil
     }
@@ -197,6 +235,70 @@ final class SelfSigner {
         maintain()
     }
 
+    /// GitHub's device sign-in, for preview builds: shows a code to enter on github.com, then waits
+    /// until GitHub says it was entered. The sign-in asks for no permissions.
+    func signInToGitHub() async {
+        githubError = nil
+        do {
+            let code = try await SignerBridge.decode(GitHubCode.self, ["op": "github_sign_in_start"])
+            githubCode = code
+            let pending: [String: Any] = ["device_code": code.device_code, "user_code": code.user_code, "verification_uri": code.verification_uri, "interval": code.interval, "expires_in": code.expires_in]
+            _ = try await SignerBridge.call(["op": "github_sign_in_finish", "pending": pending])
+            // A sign-in that was cancelled meanwhile is not taken.
+            guard githubCode == code else { _ = try? await SignerBridge.call(["op": "github_sign_out"]); return }
+            log.add("signing", "signed in to GitHub for preview builds")
+        } catch {
+            if githubCode != nil { githubError = error.localizedDescription }
+        }
+        githubCode = nil
+        await reload()
+    }
+
+    func cancelGitHubSignIn() { githubCode = nil }
+
+    /// Signing out forgets the GitHub sign-in and turns Preview Builds off.
+    func signOutOfGitHub() async {
+        githubCode = nil
+        _ = try? await SignerBridge.call(["op": "github_sign_out"])
+        previews = []
+        await reload()
+        latest = nil
+        maintain()
+    }
+
+    /// The Preview Builds switch on the GitHub Account page. Off drops the chosen preview, so
+    /// updates follow the channel.
+    func setPreviewsEnabled(_ on: Bool) async {
+        do { _ = try await SignerBridge.call(["op": "set_preview_switch", "on": on]) } catch { githubError = error.localizedDescription }
+        await reload()
+        if !on { previews = [] }
+        latest = nil
+        maintain()
+    }
+
+    /// Follows a pull request's preview build, or the channel again with nil.
+    func setPreview(_ pr: Int?) async {
+        await run(nil) { _ = try await SignerBridge.call(["op": "set_preview", "pr": pr.map { $0 as Any } ?? NSNull()]) }
+        await reload()
+        latest = nil
+        maintain()
+    }
+
+    private struct PreviewList: Decodable {
+        let enabled: Bool
+        let selected: Int?
+        let builds: [Release]
+    }
+
+    /// Looks up the preview builds on offer. A chosen one that is gone (its pull request was merged
+    /// or closed) is dropped by the signer, so the status is read again.
+    func loadPreviews() async {
+        guard previewsEnabled else { previews = []; return }
+        guard let list = try? await SignerBridge.decode(PreviewList.self, ["op": "previews"]) else { return }
+        previews = list.builds
+        if list.selected != status?.preview { await reload() }
+    }
+
     func setAnisette(_ url: String) async {
         await run(nil) { _ = try await SignerBridge.call(["op": "set_anisette", "url": url]) }
         await reload()
@@ -214,7 +316,7 @@ final class SelfSigner {
         }
         // A build that is already on, or older than what is on (Poki Setup installed a newer one
         // meanwhile), has nothing left to give.
-        if let u = found["update"], !isNewer(version: u.version, build: u.build) { found["update"] = nil }
+        if let u = found["update"], !differs(version: u.version, build: u.build, pr: u.preview_pr, sha: u.sha) { found["update"] = nil }
         if let r = found["refresh"], let expiry, r.expires <= expiry.addingTimeInterval(3600) { found["refresh"] = nil }
         ready = found
     }
@@ -227,7 +329,9 @@ final class SelfSigner {
             lastCheck = Date()
             if let rel = try? await SignerBridge.decode(Release.self, ["op": "check_update"]) {
                 latest = rel
-                if updateNotReady {
+                // Going back from a preview build to a channel build with a lower number is for the
+                // owner to start, so that one is offered but not downloaded ahead of time.
+                if updateNotReady, rel.preview_pr != nil || isNewer(version: rel.version, build: rel.build) {
                     await prepare(kind: "update")
                     return
                 }
@@ -261,7 +365,17 @@ final class SelfSigner {
         await install()
     }
 
-    func isNewer(_ rel: Release) -> Bool { isNewer(version: rel.version, build: rel.build) }
+    /// The release is one to offer: a preview build other than the installed one, any channel build
+    /// while a preview build is installed (the way back to the channel), else a newer channel build.
+    func isNewer(_ rel: Release) -> Bool { differs(version: rel.version, build: rel.build, pr: rel.preview_pr, sha: rel.sha) }
+
+    private func differs(version: String, build: String, pr: Int?, sha: String?) -> Bool {
+        if let pr {
+            return pr != installedPreviewPR || (sha ?? "") != installedPreviewCommit || version != installedVersion || build != installedBuild
+        }
+        if installedPreviewPR != nil { return true }
+        return isNewer(version: version, build: build)
+    }
 
     func isNewer(version: String, build: String) -> Bool {
         let installed = (installedVersion, Int(installedBuild) ?? 0)

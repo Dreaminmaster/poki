@@ -17,6 +17,7 @@ struct AccountView: View {
             } else {
                 signInForm
             }
+            GitHubAccountSection()
         }
         .pokiPage()
         .sheet(isPresented: $model.needsCode) { codeSheet }
@@ -156,6 +157,57 @@ struct AccountView: View {
         } catch {
             self.error = error.localizedDescription
             code = ""
+        }
+    }
+}
+
+/// The GitHub Account, under the Apple Account: GitHub's device sign-in, and the Preview Builds
+/// switch, which is there only while signed in. Signed in, the Pre-alpha channel is offered, and
+/// with the switch on the Setup page lists preview builds of pull requests under the channel.
+struct GitHubAccountSection: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Section {
+            if model.previews.hasToken {
+                LabeledContent("GitHub Account") {
+                    HStack {
+                        Text(model.previews.githubLogin ?? "Signed In").foregroundStyle(.secondary)
+                        Button("Sign Out") { Task { await model.signOutOfGitHub() } }
+                    }
+                }
+                Toggle("Preview Builds", isOn: Binding(get: { model.previews.enabled }, set: { on in Task { await model.setPreviewBuilds(on) } }))
+            } else if let code = model.githubCode {
+                LabeledContent("Code") {
+                    Text(code.userCode).font(.system(.title3, design: .monospaced).weight(.semibold)).textSelection(.enabled)
+                }
+                LabeledContent("Enter this code on GitHub") {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Button("Copy Code and Open GitHub") {
+                            copyToPasteboard(code.userCode)
+                            if let url = URL(string: code.verificationUri) { NSWorkspace.shared.open(url) }
+                        }
+                        Button("Cancel") { model.githubCode = nil }
+                    }
+                }
+            } else {
+                LabeledContent("GitHub Account") {
+                    Button("Sign In with GitHub") { Task { await model.signInToGitHub() } }
+                        .disabled(!model.previews.canSignIn)
+                }
+            }
+            if let error = model.githubError {
+                Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            }
+        } header: {
+            Text("GitHub")
+        } footer: {
+            // Signed out, nothing names what the sign-in unlocks.
+            Text(model.previews.hasToken
+                 ? "The Pre-alpha channel is now offered. With Preview Builds on, the Setup page lists builds of pull requests under the channel."
+                 : "Optional, for people developing Poki. Poki Setup asks GitHub for no permissions.")
+                .font(.footnote).foregroundStyle(.secondary)
         }
     }
 }

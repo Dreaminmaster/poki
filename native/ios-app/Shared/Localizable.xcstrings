@@ -33,6 +33,22 @@
         }
       }
     },
+    "%@ (%@) PR %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (%2$@) PR %3$lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ (%2$@) PR %3$lld"
+          }
+        }
+      }
+    },
     "%@ in %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -484,6 +500,22 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "A preview build comes from a pull request that is not merged. It is not on any channel and it can break. Choose None to go back to your release channel." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览版本来自尚未合并的拉取请求。它不属于任何通道，可能出问题。选择“无”可回到你的发布通道。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽版本來自尚未合併的拉取請求。它不屬於任何通道，可能出問題。選擇「無」可回到你的釋出通道。"
+          }
+        }
+      }
     },
     "ADDRESSES" : {
       "localizations" : {
@@ -1717,6 +1749,22 @@
         }
       }
     },
+    "Build Options" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "构建选项"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "構建選項"
+          }
+        }
+      }
+    },
     "BUILT-IN CONNECTION" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2177,6 +2225,22 @@
         }
       }
     },
+    "Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證碼"
+          }
+        }
+      }
+    },
     "Collapsed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2467,6 +2531,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "複製地址"
+          }
+        }
+      }
+    },
+    "Copy Code and Open GitHub" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝验证码并打开 GitHub"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷貝驗證碼並打開 GitHub"
           }
         }
       }
@@ -3261,6 +3341,22 @@
         }
       }
     },
+    "Enter this code on GitHub, then come back to Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上输入此验证码，然后回到 Poki。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上輸入此驗證碼，然後回到 Poki。"
+          }
+        }
+      }
+    },
     "Enter your relay's address first (Settings › Relay). Poki has no default relay." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3557,6 +3653,22 @@
         }
       }
     },
+    "For people developing Poki. Poki asks GitHub for no permissions, and the sign-in stays in this iPhone’s Keychain." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供参与开发 Poki 的人使用。Poki 不向 GitHub 申请任何权限，登录信息只保存在这台 iPhone 的钥匙串中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供參與開發 Poki 的人使用。Poki 不向 GitHub 申請任何權限，登入資訊只儲存在這台 iPhone 的鑰匙圈中。"
+          }
+        }
+      }
+    },
     "Forget" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3602,6 +3714,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 App Store 獲取 LocalDevVPN"
+          }
+        }
+      }
+    },
+    "GitHub Account" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 账号"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 賬號"
           }
         }
       }
@@ -5366,6 +5494,22 @@
       },
       "extractionState" : "manual"
     },
+    "Newest Preview Build" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新预览版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新預覽版本"
+          }
+        }
+      }
+    },
     "Newest on This Channel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5498,6 +5642,22 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "No Preview Builds" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有预览版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有預覽版本"
+          }
+        }
+      }
     },
     "No Profile" : {
       "localizations" : {
@@ -5998,6 +6158,22 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Optional. To renew Poki without a Mac, sign in to your Apple Account here. A GitHub Account is only for people developing Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选。不连 Mac 也想续签时，可以在这里登录 Apple 账号，让 Poki 自己续签。GitHub 账号只供参与开发 Poki 的人使用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可選。不連 Mac 也想續簽時，可以在這裡登入 Apple 賬號，讓 Poki 自己續簽。GitHub 賬號只供參與開發 Poki 的人使用。"
+          }
+        }
+      }
     },
     "OR USE AN AGENT YOU ALREADY RUN" : {
       "localizations" : {
@@ -6877,22 +7053,6 @@
         }
       }
     },
-    "Optional. To renew Poki without a Mac, sign in to your Apple Account here." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可选。不连 Mac 也想续签时，可以在这里登录 Apple 账号，让 Poki 自己续签。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可選。不連 Mac 也想續簽時，可以在這裡登入 Apple 賬號，讓 Poki 自己續簽。"
-          }
-        }
-      }
-    },
     "Other Ways" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6926,6 +7086,54 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta and Alpha get earlier builds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会提前从这个通道下载并签名更新，和 Poki Setup 的做法一样。稳定版只有正式版本，Beta 和 Alpha 会收到更早的版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會提前從這個通道下載並簽名更新，和 Poki Setup 的做法一樣。穩定版只有正式版本，Beta 和 Alpha 會收到更早的版本。"
+          }
+        }
+      }
+    },
+    "Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta, Alpha and Pre-alpha get earlier builds." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会提前从这个通道下载并签名更新，和 Poki Setup 的做法一样。稳定版只有正式版本，Beta、Alpha 和 Pre-alpha 会收到更早的版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會提前從這個通道下載並簽名更新，和 Poki Setup 的做法一樣。穩定版只有正式版本，Beta、Alpha 和 Pre-alpha 會收到更早的版本。"
+          }
+        }
+      }
+    },
+    "Preview builds come from pull requests that are not merged, for testing a change before it reaches any channel. Choose one under the release channels in Build Options." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览版本来自尚未合并的拉取请求，用于在改动进入任何通道之前进行测试。请在“构建选项”的发布通道下方选择。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽版本來自尚未合併的拉取請求，用於在變更進入任何通道之前進行測試。請在「構建選項」的釋出通道下方選擇。"
+          }
+        }
+      }
     },
     "PROXY LOOPBACK INTERFACE" : {
       "localizations" : {
@@ -8300,6 +8508,38 @@
       },
       "extractionState" : "manual"
     },
+    "Preview Build" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽版本"
+          }
+        }
+      }
+    },
+    "Preview Builds" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽版本"
+          }
+        }
+      }
+    },
     "Proxy Loopback Interface" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9508,6 +9748,22 @@
         }
       }
     },
+    "Sign In with GitHub" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过 GitHub 登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "透過 GitHub 登入"
+          }
+        }
+      }
+    },
     "Sign Out" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9605,6 +9861,22 @@
         }
       }
     },
+    "Signed In" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已登入"
+          }
+        }
+      }
+    },
     "Signed Until" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9650,22 +9922,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "簽名"
-          }
-        }
-      }
-    },
-    "Signing Options" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "签名选项"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "簽名選項"
           }
         }
       }
@@ -11481,6 +11737,22 @@
         }
       }
     },
+    "To download updates by itself, Poki needs your Apple Account. Sign in under Build Options, or update Poki from Poki Setup on your Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要自行下载更新，Poki 需要你的 Apple 账号。请在“构建选项”中登录，或在 Mac 上用 Poki Setup 更新 Poki。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要自行下載更新，Poki 需要你的 Apple 賬號。請在「構建選項」中登入，或在 Mac 上用 Poki Setup 更新 Poki。"
+          }
+        }
+      }
+    },
     "Today" : {
       "localizations" : {
         "zh-Hans" : {
@@ -12370,6 +12642,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待批准"
+          }
+        }
+      }
+    },
+    "Waiting for GitHub" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待 GitHub"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在等待 GitHub"
           }
         }
       }
