@@ -249,6 +249,22 @@
         }
       }
     },
+    "%@, " : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，"
+          }
+        }
+      }
+    },
     "%lld lines" : {
       "localizations" : {
         "zh-Hans" : {
@@ -13765,18 +13781,18 @@
         }
       }
     },
-    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Agents › Approvals." : {
+    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Rules." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "默认关闭。ask_poki 让外部智能体把重复性任务交给 Poki 自己的智能体。更改在下次打开 Poki 时生效。自动分类器位于“智能体 › 批准”。"
+            "value" : "默认关闭。ask_poki 让外部智能体把重复性任务交给 Poki 自己的智能体。更改在下次打开 Poki 时生效。自动分类器位于“Poki › 规则”。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "預設關閉。ask_poki 讓外部AI 代理把重複性任務交給 Poki 自己的AI 代理。更改在下次開啟 Poki 時生效。自動分類器位於「AI 代理 › 批准」。"
+            "value" : "預設關閉。ask_poki 讓外部AI 代理把重複性任務交給 Poki 自己的AI 代理。更改在下次開啟 Poki 時生效。自動分類器位於「Poki › 規則」。"
           }
         }
       }
