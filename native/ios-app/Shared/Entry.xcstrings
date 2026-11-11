@@ -1,0 +1,176 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Action Button" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作按钮"
+          }
+        }
+      }
+    },
+    "One press opens Poki and starts talking. To type a task instead, choose Shortcut there, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按一下就打开 Poki 并开始说话。想改成输入任务，就在那里选「快捷指令」，再选「发任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
+          }
+        }
+      }
+    },
+    "Opens Poki and starts talking." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Poki 并开始说话。"
+          }
+        }
+      }
+    },
+    "Opens Poki and starts talking. If Poki is doing a task, it shows that task and leaves it running." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Poki 并开始说话。Poki 正在做任务时，显示这个任务，任务继续进行。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t start the task. The chat says why." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 没能开始这个任务，原因在聊天里。"
+          }
+        }
+      }
+    },
+    "Poki is on it. It tells you when it’s done." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 开始做了，做完后会告诉你。"
+          }
+        }
+      }
+    },
+    "Poki is still busy, so this task didn’t start. Here is what Poki is doing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 还在忙，这个任务没有开始。这里是 Poki 正在做的事。"
+          }
+        }
+      }
+    },
+    "Poki started the task and opens to turn on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已开始这个任务，正在打开以便开启。"
+          }
+        }
+      }
+    },
+    "Poki starts the task on this iPhone and tells you when it is done." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 在这台 iPhone 上开始做这个任务，做完后告诉你。"
+          }
+        }
+      }
+    },
+    "Poki wasn’t ready. Try again in a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 还没准备好，请稍后再试。"
+          }
+        }
+      }
+    },
+    "Send ${task} to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把 ${task} 发给 Poki"
+          }
+        }
+      }
+    },
+    "Send Task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发任务"
+          }
+        }
+      }
+    },
+    "Send Task to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给 Poki 发任务"
+          }
+        }
+      }
+    },
+    "Settings › Action Button › Controls › Talk to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置 › 操作按钮 › 控制 › 和 Poki 说话"
+          }
+        }
+      }
+    },
+    "Talk to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 说话"
+          }
+        }
+      }
+    },
+    "Task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务"
+          }
+        }
+      }
+    },
+    "What should Poki do?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要 Poki 做什么？"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

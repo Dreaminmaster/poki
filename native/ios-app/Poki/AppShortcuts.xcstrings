@@ -1,0 +1,46 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Give ${applicationName} a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让${applicationName}做件事"
+          }
+        }
+      }
+    },
+    "Send a task to ${applicationName}" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给${applicationName}发任务"
+          }
+        }
+      }
+    },
+    "Start talking to ${applicationName}" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始和${applicationName}说话"
+          }
+        }
+      }
+    },
+    "Talk to ${applicationName}" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和${applicationName}说话"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
