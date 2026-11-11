@@ -491,8 +491,8 @@ struct SessionView: View {
     var body: some View {
         let session = SessionStore.shared.session(id)
         let running = AskPoki.live(id)
-        let live = running?.running ?? (session?.live ?? false)
         let sample = GuestSample.isOn && id == "sample-1"
+        let live = sample || (running?.running ?? (session?.live ?? false))
         // The live task's card shows what Poki last saw of the screen, as in the chat.
         let shot: Image? = sample ? SampleShot.image(dark: scheme == .dark) : live ? model.lastShot.map { Image(uiImage: $0) } : nil
         ChatTranscript(entries: sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? [],
@@ -503,7 +503,7 @@ struct SessionView: View {
         // them and the bars keep their scroll-edge behaviour (as in the chat).
         .bottomBar {
             let asking = session?.live == true && (!model.approvals.isEmpty || model.handoffText != nil)
-            if asking || running != nil {
+            if asking || running != nil || sample {
                 VStack(spacing: 8) {
                     if session?.live == true, let approval = model.approvals.first {
                         ApprovalAskCard(title: approval.question, detail: approval.reasonLine, quote: approval.summary, expires: approval.expires,
@@ -511,7 +511,7 @@ struct SessionView: View {
                     } else if session?.live == true, let text = model.handoffText {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
                     }
-                    if running != nil {
+                    if running != nil || sample {
                         // Said where Stop is, and only there: the words promise what the button does.
                         Text("A guest is borrowing Poki’s hands. You can tap Stop anytime.")
                             .font(.footnote).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)

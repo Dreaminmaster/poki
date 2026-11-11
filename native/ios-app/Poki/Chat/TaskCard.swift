@@ -470,6 +470,12 @@ struct TurnCard: View {
     var text: String
     var done: () -> Void
 
+    /// `text` with a full stop if it ends on a letter or a digit (a full-width one after Chinese).
+    static func sentence(_ text: String) -> String {
+        guard let last = text.unicodeScalars.last, CharacterSet.alphanumerics.contains(last) else { return text }
+        return text + (last.value >= 0x2E80 ? "。" : ".")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
@@ -479,7 +485,8 @@ struct TurnCard: View {
                         Image(systemName: "lock").font(.subheadline.weight(.semibold)).accessibilityHidden(true)
                         Text("Your turn").font(.headline)
                     }
-                    Text(verbatim: text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    // The reason comes as a phrase with no stop; a sentence follows it.
+                    Text(verbatim: Self.sentence(text)).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                     // What the core keeps to while a step is handed over: no input is sent. It still reads
                     // the screen (that is how it sees the step is over), so the card does not say it looks away.
                     Text("I’m not tapping or typing while it’s your turn.").font(.subheadline).fixedSize(horizontal: false, vertical: true)

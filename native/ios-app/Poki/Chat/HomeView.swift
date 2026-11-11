@@ -441,7 +441,7 @@ struct HomePage<Footer: View>: View {
     /// Asleep or in trouble, the page says so under the bear; otherwise the bear's face is the status.
     private var note: String? {
         switch status.mood {
-        // In Poki's own voice; waits for the copy pass.
+        // In Poki's own voice.
         case .paused: String(localized: "I’m resting. Tap me and I’ll carry on.")
         case .cantReach, .tripped: status.word
         default: nil
