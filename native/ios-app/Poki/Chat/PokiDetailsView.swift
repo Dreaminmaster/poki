@@ -49,8 +49,8 @@ struct PokiDetailsView: View {
                         .padding(.bottom, 20)
                         .accessibilityIdentifier("details.accountsAndModels")
 
-                    // On and off is the Turn On / Pause tile above (ESP-321): the Poki Is On switch here did
-                    // the same, minus stopping the task and standing by.
+                    // On and off is the Turn On / Pause tile above (ESP-321), which replaced the Poki Is On
+                    // switch here: it also stops the task and stands by first.
                     VStack(spacing: 0) {
                         NavigationLink(value: DetailsRoute.voice) {
                             HStack {
@@ -171,7 +171,9 @@ struct PokiDetailsView: View {
             if isSample || active || chat.running {
                 ActionTile(title: "Pause", symbol: "pause.fill") {
                     chat.stop()
-                    if model.sessionOn && !model.runnerPaused {
+                    // Stand by first; turned off when already standing by, or while an approval waits
+                    // (pauseRunner refuses then, and the Poki Is On switch this tile replaced turned off).
+                    if model.sessionOn && !model.runnerPaused && model.approvals.isEmpty {
                         model.pauseRunner()
                     } else {
                         model.stopSession()
