@@ -386,9 +386,10 @@ final class ChatModel {
         if case .stopped = outcome { app.finishTask() } else { app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0) }
     }
 
-    /// Ends the task now, as far as the chat goes: it says Stopped and takes the next message at once.
-    /// Nothing more is sent to the model, and no new step starts; a step already on its way to the phone
-    /// ends on its own, out of sight, and the next task waits for it.
+    /// Ends the task now, as far as the chat goes: it takes the next message at once, and nothing more
+    /// is sent to the model or the phone. A step under way stops before its next action; the action
+    /// the phone is doing finishes, and until then the chat says Stopping, not Stopped. The next task
+    /// waits for it.
     func stop() {
         guard running else { return }
         stopAsked = true
@@ -398,10 +399,23 @@ final class ChatModel {
         if kind == .poki, ChatModel.delegatedBusy == nil { for approval in app.approvals { app.resolve(approval, approved: false) } }
         finishPlan()
         runToken += 1
-        add(.poki(String(localized: "Stopped.")))
         running = false
         awaitingModel = false
+        guard phoneStepUnderWay else { add(.poki(String(localized: "Stopped."))); return }
+        let stopping = ChatEntry(.poki(String(localized: "Stopping…")))
+        entries.append(stopping)
+        let stopped = task
+        Task { [weak self] in
+            await stopped?.value
+            _ = await self?.app.phoneSettles(within: 30)
+            guard let self, let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
+            self.entries[i].kind = .poki(String(localized: "Stopped."))
+            self.persist()
+        }
     }
+
+    /// A look or do of this chat is on its way to the phone.
+    private var phoneStepUnderWay = false
 
     private func run(_ client: ModelClient, instructions: String, delivered youID: UUID, token: Int) async {
         // Stop has moved the token on (and said Stopped): this task writes nothing more.
@@ -480,6 +494,8 @@ final class ChatModel {
             }
             return PokiCore.ToolAnswer(text: Harness.resultRecorded, jpeg: nil, isError: false)
         default:
+            phoneStepUnderWay = true
+            defer { phoneStepUnderWay = false }
             return await app.runTool(call.name, arguments: call.arguments)
         }
     }

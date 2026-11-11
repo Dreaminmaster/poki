@@ -30,10 +30,15 @@ final class PiLoop {
         self.model = model
         let gate = self.gate
         let agentTools = tools.map { spec in
-            AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, _, _ in
+            AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
                 if gate.stopped { return Self.result(PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true)) }
                 let arguments = (try? JSONEncoder().encode(params)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-                return Self.result(await perform(ToolCall(id: id, name: spec.name, arguments: arguments)))
+                // pi runs its loop in tasks of its own, so stop() reaches the call under way only through
+                // `signal`: cancelling the call stops a `do` before its next action.
+                let call = Task { @MainActor in await perform(ToolCall(id: id, name: spec.name, arguments: arguments)) }
+                let forget = signal?.onCancel { call.cancel() }
+                defer { forget?() }
+                return Self.result(await call.value)
             }
         }
         // agent/pi-session.mjs: low thinking, one tool call at a time.

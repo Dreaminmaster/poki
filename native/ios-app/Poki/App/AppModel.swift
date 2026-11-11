@@ -1424,6 +1424,9 @@ final class AppModel {
         return await core.callTool(name, arguments: arguments)
     }
 
+    /// After Stop: waits until the phone has finished the action a stopped call had already sent.
+    func phoneSettles(within seconds: Double) async -> Bool { await core.settle(timeout: seconds) }
+
     // MARK: Approvals
 
     /// Approvals from the app's own screen (the same path as the Live Activity's buttons).

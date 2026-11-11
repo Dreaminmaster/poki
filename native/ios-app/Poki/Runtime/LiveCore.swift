@@ -52,6 +52,7 @@ final class LiveCore: CoreSession {
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
     func callTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer { await core.callTool(name, arguments: arguments) }
+    func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
     func finishTask(switching: Bool = true, returnTo: String? = nil, stay: Bool = false) async -> String? {

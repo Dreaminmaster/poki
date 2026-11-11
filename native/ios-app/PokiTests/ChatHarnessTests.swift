@@ -86,6 +86,28 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.details, [TaskResult.Detail(label: "Battery", value: "81%")])
     }
 
+    /// Stop ends the phone step under way at its next action, instead of letting the rest of a long
+    /// `do` run on the phone (seen on the owner's phone: 16 to 22 s of typing after Stop), and the chat
+    /// says Stopping until that step has ended.
+    func testStopEndsTheStepUnderWayAtItsNextAction() async throws {
+        let waits = Array(repeating: ["wait": 1000], count: 15)
+        let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["actions": waits]), FakeCompletions.text("Done.")])
+        let chat = chat(on: server)
+        func said() -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
+
+        chat.send("Wait on the phone")
+        while chat.awaitingModel { try await Task.sleep(for: .milliseconds(50)) }
+        let stopped = ContinuousClock.now
+        chat.stop()
+        XCTAssertEqual(said().last, "Stopping…")
+        while chat.savedCalls.isEmpty, ContinuousClock.now - stopped < .seconds(20) { try await Task.sleep(for: .milliseconds(100)) }
+        let after = ContinuousClock.now - stopped
+        XCTAssertLessThan(after, .seconds(3), "the do call ended \(after) after Stop")
+        while said().last != "Stopped.", ContinuousClock.now - stopped < .seconds(10) { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(said().last, "Stopped.")
+        XCTAssertFalse(said().contains("Stopping…"))
+    }
+
     /// The system prompt names no tool the model does not have (the app has no unlock_device or
     /// handle_alert).
     func testThePromptNamesOnlyToolsTheModelHas() throws {
