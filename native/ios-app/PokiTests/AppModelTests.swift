@@ -280,6 +280,15 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.signer.updateAvailable)
     }
 
+    /// The Signing page's next step under Status (ESP-387): signed in it is one tap, without an Apple
+    /// Account the way to sign in or to Poki Setup, a signed copy is installed, and up to date it is nothing.
+    func testSigningPageOffersTheWayToTheUpdate() {
+        XCTAssertEqual(UpdateStep(updateAvailable: true, copyReady: false, signedIn: false), .signIn)
+        XCTAssertEqual(UpdateStep(updateAvailable: true, copyReady: false, signedIn: true), .download)
+        XCTAssertEqual(UpdateStep(updateAvailable: true, copyReady: true, signedIn: false), .install)
+        XCTAssertNil(UpdateStep(updateAvailable: false, copyReady: false, signedIn: true), "up to date")
+    }
+
     /// Idle stop setting round-trips and never goes below the floor the picker offers.
     func testIdleStopSetting() {
         let (model, _) = model()
