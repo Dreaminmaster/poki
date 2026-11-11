@@ -400,6 +400,35 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(secondHint?.target, .step(.loopback))
     }
 
+    /// ESP-321: standing by (right after Turn On, or after the idle minute) Poki's details offer
+    /// Resume, as main's Pause and Resume pair does. Before, the one tile still said Pause there, and
+    /// Pause turned Poki off.
+    func testDetailsOffersResumeWhileStandingBy() {
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(PowerTile(model: model, running: false), .turnOn)
+
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+            UserDefaults.standard.removeObject(forKey: "wantsOn")
+        }
+        model.startSession()
+        XCTAssertTrue(model.sessionOn && model.runnerPaused, "Turn On stands by until an agent asks")
+        XCTAssertEqual(PowerTile(model: model, running: false), .resume)
+        XCTAssertEqual(PowerTile(model: model, running: true), .pause, "a chat task under way is paused, not resumed")
+
+        model.wakeRunner()
+        XCTAssertEqual(PowerTile(model: model, running: false), .pause)
+        model.pauseRunner()
+        XCTAssertEqual(PowerTile(model: model, running: false), .resume)
+        XCTAssertTrue(model.sessionOn, "Pause stands by; it does not turn Poki off")
+    }
+
     /// ESP-321: Home has no tab bar, so main's Setup dot is Home's hint line. An open setup step shows
     /// there and links to that step; before, Home showed only runner failures and said nothing.
     func testHomeHintShowsOpenSetupStepWithoutTabBar() {

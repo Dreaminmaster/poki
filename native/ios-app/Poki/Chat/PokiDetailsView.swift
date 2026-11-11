@@ -49,8 +49,8 @@ struct PokiDetailsView: View {
                         .padding(.bottom, 20)
                         .accessibilityIdentifier("details.accountsAndModels")
 
-                    // On and off is the Turn On / Pause tile above (ESP-321), which replaced the Poki Is On
-                    // switch here: it also stops the task and stands by first.
+                    // On and off are the first tile above and Turn Off Poki below (ESP-321), which replaced
+                    // the Poki Is On switch here.
                     VStack(spacing: 0) {
                         NavigationLink(value: DetailsRoute.voice) {
                             HStack {
@@ -115,6 +115,26 @@ struct PokiDetailsView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 20)
+
+                    // The off side of main's Poki switch: Pause only stands by, this ends the session and the relay.
+                    if !isSample && model.sessionOn {
+                        Button(role: .destructive) { chat.stop(); model.stopSession() } label: {
+                            HStack {
+                                Text("Turn Off Poki")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(Color(.systemRed))
+                                Spacer()
+                            }
+                            .padding(.vertical, 11)
+                            .padding(.horizontal, 16)
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .groupCard()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
+                        .accessibilityIdentifier("details.turnOff")
+                    }
                 }
             }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
@@ -166,23 +186,17 @@ struct PokiDetailsView: View {
     }
 
     private var actions: some View {
-        let active = model.sessionOn || model.wantsOn
-        return HStack(spacing: 8) {
-            if isSample || active || chat.running {
-                ActionTile(title: "Pause", symbol: "pause.fill") {
-                    chat.stop()
-                    // Stand by first; turned off when already standing by, or while an approval waits
-                    // (pauseRunner refuses then, and the Poki Is On switch this tile replaced turned off).
-                    if model.sessionOn && !model.runnerPaused && model.approvals.isEmpty {
-                        model.pauseRunner()
-                    } else {
-                        model.stopSession()
-                    }
-                }
-            } else {
-                ActionTile(title: "Turn On", symbol: "play.fill") {
-                    model.startSession()
-                }
+        HStack(spacing: 8) {
+            switch isSample ? PowerTile.pause : PowerTile(model: model, running: chat.running) {
+            case .pause:
+                ActionTile(title: "Pause", symbol: "pause.fill") { chat.stop(); model.pauseRunner() }
+                    .accessibilityIdentifier("details.pause")
+            case .resume:
+                ActionTile(title: "Resume", symbol: "play.fill") { model.wakeRunner() }
+                    .accessibilityIdentifier("details.resume")
+            case .turnOn:
+                ActionTile(title: "Turn On", symbol: "play.fill") { model.startSession() }
+                    .accessibilityIdentifier("details.turnOn")
             }
             ActionTile(title: "Voice", symbol: "mic.fill") { dismiss(); openVoice() }
             ActionTile(title: "History", symbol: "clock") { path.append(DetailsRoute.history) }
@@ -806,6 +820,18 @@ private struct DetailsIssueRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The first tile on Poki's details: main's Pause and Resume pair, and Turn On while Poki is off.
+/// Standing by (right after Turn On, or after the idle minute) is Resume, as on main.
+enum PowerTile: Equatable {
+    case pause, resume, turnOn
+
+    @MainActor init(model: AppModel, running: Bool) {
+        if model.sessionOn && !model.runnerPaused || running { self = .pause }
+        else if model.sessionOn { self = .resume }
+        else { self = .turnOn }
     }
 }
 

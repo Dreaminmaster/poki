@@ -8771,6 +8771,16 @@
         }
       }
     },
+    "Turn Off Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭 Poki"
+          }
+        }
+      }
+    },
     "Turn On" : {
       "localizations" : {
         "zh-Hans" : {
