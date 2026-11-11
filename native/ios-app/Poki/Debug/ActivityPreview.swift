@@ -182,9 +182,12 @@ struct ActivityPreview: View {
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
 
-        return [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
-                ("plan", plan), ("plandone", planDone),
-                ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
+        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
+                   ("plan", plan), ("plandone", planDone),
+                   ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
+        // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
+        guard let caller = UserDefaults.standard.string(forKey: "pokiActivityCaller") else { return all }
+        return all.map { name, state in var state = state; state.caller = caller; return (name, state) }
     }
 
     /// A stand-in screenshot (a chat screen) for the thumbnail, drawn here so the preview needs no files.
@@ -319,6 +322,16 @@ private struct IslandCompactFrame: View {
             MinimalView(face: face)
                 .background(.black, in: .circle)
                 .overlay { Circle().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
+            // Short of room (the phone on its side, a second Live Activity): each block in a 28-point circle.
+            HStack(spacing: 4) {
+                CompactLeading(face: face)
+                CompactTrailing(face: face)
+            }
+            .environment(\.narrowIslandPreview, true)
+            .padding(.horizontal, 4)
+            .frame(height: ActivityMetrics.compactHeight)
+            .background(.black, in: .capsule)
+            .overlay { Capsule().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
         }
         .environment(\.colorScheme, .dark)
     }

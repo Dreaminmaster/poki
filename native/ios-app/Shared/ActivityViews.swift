@@ -40,7 +40,12 @@ enum ActivityMetrics {
     static let compactHeight: CGFloat = 36.67
     /// The compact island's left block, and how wide the bear's head is in it.
     static let compactBlock: CGFloat = 51
-    static let compactHead: CGFloat = 38
+    /// 34 and 5 down: at 38 and 6 the system's line along the bottom cut through the mouth.
+    static let compactHead: CGFloat = 34
+    static let compactHeadTop: CGFloat = 5
+    /// Short of room, every block fits a circle this wide; the bear's whole picture is then this long a side.
+    static let narrowCircle: CGFloat = 28
+    static let narrowBear: CGFloat = 31.6
     /// The minimal circle's bear: the whole picture's side, the same for every pose, so the bear
     /// does not grow or shrink when the state changes.
     static let minimalBear: CGFloat = 36.7
@@ -89,6 +94,19 @@ extension ActivityFace.Bottom {
     var hasLine: Bool { if case .progress(_, let total, _) = self { total != nil } else { false } }
     var isProgress: Bool { if case .progress = self { true } else { false } }
     var isHandoff: Bool { if case .handoff = self { true } else { false } }
+    var isApproval: Bool { switch self { case .approval, .deciding: true; default: false } }
+}
+
+extension ActivityFace {
+    /// Where the outside agent's badge goes (ESP-344 定稿规格, section 14): after the app's name while
+    /// Poki works; after the reason while it waits for an answer on the island (on the card the reason
+    /// may take two lines, so there it stays left of the countdown); beside the small value otherwise.
+    enum BadgePlace { case afterPlace, afterReason, besideValue }
+    func badgePlace(_ surface: ActivitySurface) -> BadgePlace {
+        if bottom.isProgress { return .afterPlace }
+        if bottom.isApproval, surface == .island { return .afterReason }
+        return .besideValue
+    }
 }
 
 // MARK: Lock Screen & Non-Dynamic Island Top Banner
@@ -98,11 +116,16 @@ extension ActivityFace.Bottom {
 struct LockScreenCard: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
+    /// The system's appearance. The card sets its own content to dark below and the widget sets the
+    /// whole card to dark, so where the widget draws it the real one comes in from outside (`cardDark`).
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.cardDark) private var outside
     private let theme = ActivityTheme.current
 
     var body: some View {
         let sizes = ActivityMetrics.sizes(face)
-        let palette = theme.lock
+        let skin = CardSkin.skin(dark: outside ?? (scheme == .dark || dimmed))
+        let palette = theme.lock(on: skin)
         ZStack(alignment: .bottomLeading) {
             RisingBear(bear: face.bear, side: sizes.lockBear, rim: 26, colour: palette.rim)
                 .padding(.leading, sizes.lockBearInset)
@@ -114,6 +137,10 @@ struct LockScreenCard: View {
         .frame(maxWidth: .infinity)
         .foregroundStyle(palette.text)
         .environment(\.colorScheme, .dark)
+        .background {
+            CardArt(skin: skin, bearSide: sizes.lockBear, bearInset: sizes.lockBearInset,
+                    bearMiddle: CGPoint(x: face.bear.middle.x, y: face.bear.middle.y))
+        }
         .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
         .animation(dimmed ? nil : ActivityMotion.step, value: face.content)
         .accessibilityElement(children: .contain)
@@ -125,14 +152,15 @@ struct LockScreenCard: View {
         let hasKicker = face.kicker != nil || face.event != nil
         // The screenshot stands in the top right corner, over the words' column and outside its
         // flow: the words keep clear of it, and it never pushes the control off the card.
-        let thumbnail = ActivityMetrics.thumbnail(face)
+        let shot = Thumbnail.picture
+        let thumbnail = shot == nil ? nil : ActivityMetrics.thumbnail(face)
         let reserved = thumbnail.map { $0.width + 12 } ?? 0
         // The value (time, countdown) sits on the first line that has room for it: beside the
         // control where the control leaves room, and always there when the screenshot takes the
         // top line's end.
         let metaBesideControl = face.bottom.isHandoff || thumbnail != nil && face.bottom.isProgress
         // Beside the screenshot the countdown keeps to its digits, to leave the reason its room.
-        let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
+        let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta, badge: face.badgePlace(.lockScreen) == .besideValue,
                                timer: thumbnail != nil && !metaBesideControl ? 38 : 46)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
@@ -175,12 +203,12 @@ struct LockScreenCard: View {
                 Control(face: face, surface: .lockScreen)
                 if metaBesideControl { meta }
             }
-            .padding(.trailing, face.thumbnail == .large ? reserved : 0)
+            .padding(.trailing, thumbnail != nil && face.thumbnail == .large ? reserved : 0)
         }
         .padding(.top, top).padding(.bottom, bottom)
         .overlay(alignment: .topTrailing) {
-            if let thumbnail {
-                Thumbnail(size: thumbnail, corner: face.thumbnail == .small ? ActivityMetrics.smallThumbnailCorner : 10)
+            if let thumbnail, let shot {
+                Thumbnail(image: shot, size: thumbnail, corner: face.thumbnail == .small ? ActivityMetrics.smallThumbnailCorner : 10)
                     .padding(.top, 14)
             }
         }
@@ -234,7 +262,7 @@ struct IslandBottom: View {
         // beside the camera: its middle 26 points under the island's top edge and 30 in from the
         // right, where the corner of the system's clip no longer reaches it.
         .overlay(alignment: .topTrailing) {
-            MetaCluster(face: face, palette: palette, meta: face.meta)
+            MetaCluster(face: face, palette: palette, meta: face.meta, badge: face.badgePlace(.island) == .besideValue)
                 .frame(height: 24)
                 .padding(.trailing, 30)
                 .offset(y: -(ActivityMetrics.systemCameraRow - 14))
@@ -281,7 +309,11 @@ struct IslandBottom: View {
             VStack(alignment: .leading, spacing: 0) {
                 if hasKicker { Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1) }
                 Title(face: face, palette: palette).padding(.top, hasKicker ? 2 : top)
-                Subtitle(face: face, palette: palette).padding(.top, face.size == .tall ? 2 : 3)
+                HStack(spacing: 6) {
+                    Subtitle(face: face, palette: palette)
+                    if face.badgePlace(.island) == .afterReason, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
+                }
+                .padding(.top, face.size == .tall ? 2 : 3)
                 Spacer(minLength: 0)
                 Control(face: face, surface: .island)
             }
@@ -293,25 +325,32 @@ struct IslandBottom: View {
 
 // MARK: Dynamic Island, compact and minimal
 
-/// The bear's face looking out over the bottom edge of the island: its head 38 points wide, the chin
-/// a little under the edge. A new state sinks the old bear and raises the new one.
+/// The bear's face looking out over the bottom edge of the island: its head 34 points wide, the chin
+/// a little under the edge. A new state sinks the old bear and raises the new one. Short of room, the
+/// bear in a circle 28 points across.
 struct CompactLeading: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
         let head = face.bear.head
         let side = ActivityMetrics.compactHead / (head.right - head.left)
-        ZStack {
-            Image(face.bear.image).resizable().interpolation(.high)
-                .frame(width: side, height: side)
-                .offset(x: 8 - head.left * side, y: 6 - head.top * side)
-                .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
-                .id(face.bear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        LimitedWidth { narrow in
+            if narrow {
+                NarrowBear(bear: face.bear)
+            } else {
+                ZStack {
+                    Image(face.bear.image).resizable().interpolation(.high)
+                        .frame(width: side, height: side)
+                        .offset(x: 8 - head.left * side, y: ActivityMetrics.compactHeadTop - head.top * side)
+                        .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
+                        .id(face.bear)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 7).padding(.bottom, ActivityMetrics.compactClip) }
+                .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
+                .clipped()
+            }
         }
-        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 7).padding(.bottom, ActivityMetrics.compactClip) }
-        .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
-        .clipped()
         .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
         .accessibilityHidden(true)
     }
@@ -324,6 +363,36 @@ struct CompactTrailing: View {
     private let theme = ActivityTheme.current
     var body: some View {
         let palette = theme.island
+        LimitedWidth { narrow in
+            if narrow { self.narrow(palette) } else { wide(palette) }
+        }
+        .environment(\.colorScheme, .dark)
+        .animation(dimmed ? nil : ActivityMotion.step, value: face.compact)
+    }
+
+    /// Short of room: a count, the countdown or a symbol, inside a circle 28 points across. A run
+    /// without a plan, and a count too long to fit, leave the block empty: the system then closes it.
+    @ViewBuilder private func narrow(_ palette: ActivityPalette) -> some View {
+        let side = ActivityMetrics.narrowCircle
+        switch face.compact {
+        case .steps(_, let count) where count.contains("/") && count.count <= 5:
+            Text(count).font(theme.narrowCount).foregroundStyle(palette.text)
+                .lineLimit(1).minimumScaleFactor(0.75)
+                .frame(maxWidth: 26).frame(width: side, height: side)
+        case .countdown(let until):
+            Text(timerInterval: Countdown.range(until), countsDown: true)
+                .font(theme.narrowTimer).foregroundStyle(palette.approval)
+                .multilineTextAlignment(.center)
+                .frame(width: 26).frame(width: side, height: side)
+        case .symbol(let name, let tone):
+            StateSymbol(name: name, tone: tone, palette: palette, size: name == "checkmark" ? 15.5 : name.hasPrefix("exclamationmark") ? 16 : 15)
+                .frame(width: side, height: side)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func wide(_ palette: ActivityPalette) -> some View {
         ZStack {
             switch face.compact {
             case .steps(let verb, let count):
@@ -354,8 +423,28 @@ struct CompactTrailing: View {
         .frame(maxWidth: 52, alignment: .trailing)
         .clipped()
         .padding(.trailing, 4)
-        .environment(\.colorScheme, .dark)
-        .animation(dimmed ? nil : ActivityMotion.step, value: face.compact)
+    }
+}
+
+/// The bear where the island is short of room, and the minimal circle there: in a circle 28 points
+/// across, set by the middle of its head and hand, its body cut by the lower edge.
+private struct NarrowBear: View {
+    var bear: ActivityBear
+    var body: some View {
+        let side = ActivityMetrics.narrowBear
+        let middle = bear.middle
+        let radius = ActivityMetrics.narrowCircle / 2
+        ZStack {
+            Image(bear.image).resizable().interpolation(.high)
+                .frame(width: side, height: side)
+                .offset(x: radius - middle.x * side, y: radius - middle.y * side)
+                .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                .id(bear)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 5) }
+        .frame(width: radius * 2, height: radius * 2)
+        .clipShape(.circle)
     }
 }
 
@@ -368,17 +457,23 @@ struct MinimalView: View {
         let side = ActivityMetrics.minimalBear
         let middle = face.bear.middle
         let radius = ActivityMetrics.compactHeight / 2
-        ZStack {
-            Image(face.bear.image).resizable().interpolation(.high)
-                .frame(width: side, height: side)
-                .offset(x: radius - middle.x * side, y: radius - middle.y * side)
-                .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
-                .id(face.bear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        LimitedWidth { narrow in
+            if narrow {
+                NarrowBear(bear: face.bear)
+            } else {
+                ZStack {
+                    Image(face.bear.image).resizable().interpolation(.high)
+                        .frame(width: side, height: side)
+                        .offset(x: radius - middle.x * side, y: radius - middle.y * side)
+                        .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                        .id(face.bear)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
+                .frame(width: radius * 2, height: radius * 2)
+                .clipShape(.circle)
+            }
         }
-        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
-        .frame(width: radius * 2, height: radius * 2)
-        .clipShape(.circle)
         .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
         .accessibilityHidden(true)
     }
@@ -402,7 +497,12 @@ private struct RisingBear: View {
                 .id(bear)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .overlay(alignment: .bottom) { Rim(colour: colour, height: rim).padding(.bottom, lift) }
+        // The shade covers the bear alone: over a gradient a whole strip would show as a rectangle
+        // beside it. While one bear sinks and the next rises, it follows the next one's outline.
+        .overlay(alignment: .bottom) {
+            Rim(colour: colour, height: rim).padding(.bottom, lift)
+                .mask(alignment: .bottom) { Image(bear.image).resizable().interpolation(.high).frame(width: side, height: side) }
+        }
         .accessibilityHidden(true)
     }
 }
@@ -435,6 +535,8 @@ private struct Kicker: View {
                     .foregroundStyle(face.event == nil ? palette.quiet : palette.color(face.eventTone))
                     .contentTransition(.interpolate)
             }
+            // An outside agent's run: its badge follows the app's name and never gives way to it.
+            if face.bottom.isProgress, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
         }
         .lineLimit(1).minimumScaleFactor(0.8)
     }
@@ -495,12 +597,14 @@ private struct MetaCluster: View {
     var face: ActivityFace
     var palette: ActivityPalette
     var meta: ActivityFace.Meta
+    /// The badge stands here; elsewhere it follows the app's name or the reason.
+    var badge = true
     /// The room a running time keeps, so the words beside it do not shift as its digits change.
     var timer: CGFloat = 46
     private let theme = ActivityTheme.current
     var body: some View {
         HStack(spacing: 6) {
-            if let caller = face.caller { CallerBadge(name: caller, size: 18) }
+            if badge, let caller = face.caller { CallerBadge(name: caller, size: 18) }
             switch meta {
             case .none:
                 EmptyView()
@@ -712,24 +816,20 @@ enum Countdown {
 }
 
 /// The latest screenshot, read from the App Group container and drawn like a small phone. The view is
-/// drawn again with every update, so a new file shows in place, without a fade. Without a file it
-/// draws a white tile of the same size, so the layout never jumps.
+/// drawn again with every update, so a new file shows in place, without a fade. A file that cannot
+/// be read is no screenshot: the card then lays its words out to the right edge.
 struct Thumbnail: View {
     /// The app's own previews draw this when there is no file (the widget never sets it).
     @MainActor static var previewImage: UIImage?
+    @MainActor static var picture: UIImage? { (SharedContainer.thumbnailURL.flatMap { UIImage(contentsOfFile: $0.path) }) ?? previewImage }
+    var image: UIImage
     var size: CGSize
     var corner: CGFloat
     private let theme = ActivityTheme.current
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-        Group {
-            if let image = (SharedContainer.thumbnailURL.flatMap { UIImage(contentsOfFile: $0.path) }) ?? Self.previewImage {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Color.white
-            }
-        }
-        .frame(width: size.width, height: size.height)
+        Image(uiImage: image).resizable().scaledToFill()
+            .frame(width: size.width, height: size.height)
         .clipShape(shape)
         .overlay(shape.strokeBorder(theme.glassEdge, lineWidth: 1))
     }

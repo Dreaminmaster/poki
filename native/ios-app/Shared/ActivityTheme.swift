@@ -137,7 +137,14 @@ struct ActivityTheme {
     /// The system's secondary label on black, and its red in dark.
     static let secondary = Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6)
     static let red = Color(hex: 0xFF453A)
+    /// The flat blue the card had before its gradient: what the app's previews lay under the card.
     var lockBackground: Color? = Site.boardBlue
+    /// The card's palette on its gradient: the fade the bear rises out of takes the gradient's colour.
+    func lock(on skin: CardSkin) -> ActivityPalette {
+        var palette = lock
+        palette.rim = Color(hex: skin.rim).opacity(0.55)
+        return palette
+    }
     /// The edge of the screenshot on the blue card.
     var glassEdge = Color.white.opacity(0.28)
     /// The island's outline, always: the system draws it only over a dark background.
@@ -168,6 +175,9 @@ struct ActivityTheme {
     /// Under the verb: the count ("2/5", "Step 7").
     var compactCount: Font { Self.font("Geist-Medium", .medium, 11).monospacedDigit() }
     /// The pairing code in the compact island, with tabular digits.
+    /// Short of room: the count and the countdown inside the 28-point circle.
+    var narrowCount: Font { Self.font("Geist-SemiBold", .semibold, 12).monospacedDigit() }
+    var narrowTimer: Font { Self.font("Geist-SemiBold", .semibold, 11).monospacedDigit() }
     var compactCode: Font { Self.font("Geist-Bold", .bold, 13).monospacedDigit() }
     /// Times and countdowns: the text face with tabular digits, as the system writes its timers.
     var value: Font { Self.font("Geist-SemiBold", .semibold, 15).monospacedDigit() }

@@ -20,7 +20,9 @@ struct PokiLiveActivity: Widget {
             let face = context.face
             LockScreenCard(face: face)
                 .environment(\.colorScheme, .dark)
-                .activityBackgroundTint(ActivityTheme.current.lockBackground)
+                // Outside the line above, where the system's own appearance can still be read: the flat
+                // colour that goes with the card's gradient, and light or dark handed down to the card.
+                .modifier(CardTint())
                 .activitySystemActionForegroundColor(.white)
                 .widgetURL(face.link)
         } dynamicIsland: { context in
