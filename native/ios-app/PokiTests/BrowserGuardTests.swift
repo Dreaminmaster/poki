@@ -7,7 +7,8 @@ import XCTest
 /// Poki's browser tools on a real page served from 127.0.0.1: what Poki must not tap for the owner. A
 /// cookie banner with a reject choice is dismissed with that choice, not with Accept; sign-in, sign-up,
 /// age and terms buttons go to the owner (web_handoff). Each button on the page writes what was tapped
-/// into the page, so the test reads the page to see whether a tap happened.
+/// into the page, so the test reads the page to see whether a tap happened. A sign-in prompt that
+/// mentions privacy is not taken for a cookie banner.
 @MainActor
 final class BrowserGuardTests: XCTestCase {
     override func tearDown() async throws {
@@ -38,6 +39,23 @@ final class BrowserGuardTests: XCTestCase {
         XCTAssertTrue(rejected.text.contains("Tapped: Reject all"), rejected.text)
     }
 
+    /// A sign-in prompt also floats over the page and mentions privacy, and its button says Continue:
+    /// it is not a consent banner, so Poki is neither pointed at Continue nor allowed to tap it.
+    func testASignInPromptIsNotTakenForACookieBanner() async throws {
+        let server = try PageServer(html: Self.signIn)
+        let opened = await WebTools.perform("web_open", arguments: Self.json(["url": "http://127.0.0.1:\(server.port)/"]))
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertFalse(opened.text.contains("banner is open"), "no banner hint on a sign-in prompt: \(opened.text)")
+
+        for label in ["Continue", "Continue with Google"] {
+            let tapped = await WebTools.perform("web_click", arguments: Self.json(["ref": try Self.ref(label, in: opened.text)]))
+            XCTAssertTrue(tapped.isError, "\(label): \(tapped.text)")
+            XCTAssertTrue(tapped.text.contains("web_handoff"), "\(label): \(tapped.text)")
+        }
+        let page = await WebTools.perform("web_read", arguments: "{}")
+        XCTAssertFalse(page.text.contains("Tapped:"), "nothing on the page was tapped: \(page.text)")
+    }
+
     private static let page = """
     <!doctype html>
     <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Showtimes</title></head>
@@ -56,6 +74,27 @@ final class BrowserGuardTests: XCTestCase {
     <script>
     for (const b of document.querySelectorAll('button, [role=button]')) {
       b.addEventListener('click', (e) => { e.preventDefault(); document.getElementById('log').textContent = 'Tapped: ' + b.textContent; });
+    }
+    </script>
+    </body></html>
+    """
+
+    private static let signIn = """
+    <!doctype html>
+    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>News</title></head>
+    <body>
+    <h1>Today's story</h1>
+    <p id="log"></p>
+    <div role="dialog" style="position:fixed;inset:0;background:#fff;padding:24px">
+      <h2>Sign in to keep reading</h2>
+      <input type="email" placeholder="Email address">
+      <button>Continue</button>
+      <button>Continue with Google</button>
+      <p>By continuing you agree to our Terms of Use and Privacy Policy.</p>
+    </div>
+    <script>
+    for (const b of document.querySelectorAll('button')) {
+      b.addEventListener('click', () => { document.getElementById('log').textContent = 'Tapped: ' + b.textContent; });
     }
     </script>
     </body></html>

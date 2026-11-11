@@ -38,7 +38,7 @@ enum WebTools {
 
     /// A short button or link label for a step only the owner takes: signing in or up, an age check,
     /// agreeing to terms.
-    @MainActor private static let ownersStep = try! Regex(#"(?i)\b(sign ?in|log ?in|sign ?up|register|create (an |your )?account|join (for free|now))\b|\b(i am|i'm|im) (over |at least )?(1[3-9]|2[01])\b|\b(1[3-9]|2[01]) ?(\+|or older|and over|years or older)|\b(verify|confirm) (my |your )?age\b|\b(agree|accept|consent)\b.*\b(terms|conditions|eula|license agreement)\b|登录|登入|注册|年满|同意.*(条款|协议)"#)
+    @MainActor private static let ownersStep = try! Regex(#"(?i)\b(sign ?in|log ?in|sign ?up|register|create (an |your )?account|join (for free|now)|continue with (google|apple|facebook|microsoft|email|phone))\b|\b(i am|i'm|im) (over |at least )?(1[3-9]|2[01])\b|\b(1[3-9]|2[01]) ?(\+|or older|and over|years or older)|\b(verify|confirm) (my |your )?age\b|\b(agree|accept|consent)\b.*\b(terms|conditions|eula|license agreement)\b|登录|登入|注册|年满|同意.*(条款|协议)"#)
 
     @MainActor static func perform(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
         let args = (arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
@@ -70,8 +70,11 @@ enum WebTools {
             if label.count <= 60, label.contains(ownersStep) {
                 return answer("“\(label)” is a sign-in, sign-up, age or terms step. That is the owner's to do: call web_handoff with a short reason.", error: true)
             }
-            if let banner = (try? await browser.call("return window.__pokiReader.consent(ref)", ["ref": ref])) as? [String: Any],
-               banner["accept"] as? Bool == true, let reject = banner["reject"] as? String {
+            let banner = (try? await browser.call("return window.__pokiReader.consent(ref)", ["ref": ref])) as? [String: Any] ?? [:]
+            if banner["owner"] as? Bool == true {
+                return answer("“\(label)” goes ahead in a sign-in, subscription or age prompt. That is the owner's to do: call web_handoff with a short reason.", error: true)
+            }
+            if banner["accept"] as? Bool == true, let reject = banner["reject"] as? String {
                 return answer("This cookie or privacy banner has “\(banner["rejectName"] as? String ?? "")” [\(reject)]: tap that instead. Accept or close a banner only when it has no reject or necessary-only choice.", error: true)
             }
             let step = browser.begin(String(localized: "Tap “\(short(label))”"))

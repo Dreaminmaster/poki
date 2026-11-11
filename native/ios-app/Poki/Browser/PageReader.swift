@@ -182,29 +182,47 @@ enum PageReader {
 
   // Cookie and privacy banners: a box that floats over the page (or is marked as a consent box) and
   // talks about cookies, privacy or tracking. Its reject or necessary-only choice is the one Poki taps.
+  // A sign-in, subscription or age prompt floats too and often mentions privacy, but it is the owner's:
+  // it is never taken for a consent banner, and its go-ahead buttons are not Poki's to tap.
   const ACCEPT = /\b(accept|agree|allow|ok|okay|got it|continue|understood|i understand|close)\b|同意|接受|允许|知道了|好的|关闭/i;
   const REJECT = /\b(reject|decline|deny|refuse|disagree|necessary only|only necessary|essential only|only essential|strictly necessary|necessary cookies|continue without accepting)\b|拒绝|仅必要|仅限必要|只接受必要|不同意/i;
+  const GO = /\b(accept|agree|allow|ok|okay|got it|continue|understood|i understand|yes|next|submit|enter|confirm|proceed|start)\b|同意|接受|允许|知道了|好的|继续|确定|下一步|进入|确认|开始/i;
   const CONSENT_TEXT = /cookie|consent|privacy|personal data|tracking|our partners|advertis|隐私|个人信息|跟踪|广告/i;
   const CONSENT_MARK = /cookie|consent|gdpr|privacy|onetrust|didomi|truste|usercentrics|cookiebot|quantcast|sp_message/i;
-  function consentBox(el) {
+  const OWNER_TEXT = /\b(sign ?in to|log ?in to|sign ?in or|log ?in or|sign ?up|create (an |your |a free )?account|subscribe|subscription|free trial|password|date of birth|years old|years of age|verify (your )?age|(must|you are|you're|i am|i'm) (be )?(over |at least )?(1[3-9]|2[01]))\b|\b(1[3-9]|2[01]) ?(\+|or older|and over)|登录|登入|注册|订阅|密码|年满|出生日期/i;
+  const OWNER_FIELDS = 'input[type=password], input[type=email], input[autocomplete~="username"], input[autocomplete~="email"], input[autocomplete~="current-password"]';
+  function boxes(el) {
+    const out = [];
     for (let box = el && el.parentElement, depth = 0; box && box !== document.body && depth < 12; box = box.parentElement, depth++) {
       const s = box.ownerDocument.defaultView.getComputedStyle(box);
-      const marked = CONSENT_MARK.test((box.id || '') + ' ' + (typeof box.className === 'string' ? box.className : '') + ' ' + (box.getAttribute('aria-label') || ''));
       const floating = s.position === 'fixed' || s.position === 'sticky' || /^(dialog|alertdialog)$/.test(box.getAttribute('role') || '') || box.tagName === 'DIALOG';
-      if ((marked || floating) && CONSENT_TEXT.test(squash(box.innerText).slice(0, 3000))) return box;
+      const marked = CONSENT_MARK.test((box.id || '') + ' ' + (typeof box.className === 'string' ? box.className : '') + ' ' + (box.getAttribute('aria-label') || ''));
+      if (floating || marked) out.push({ box, floating });
+    }
+    return out;
+  }
+  const ownersPrompt = (box) => OWNER_TEXT.test(squash(box.innerText).slice(0, 3000)) || !!box.querySelector(OWNER_FIELDS);
+  function consentBox(el) {
+    for (const { box } of boxes(el)) {
+      if (ownersPrompt(box)) return null;
+      if (CONSENT_TEXT.test(squash(box.innerText).slice(0, 3000))) return box;
     }
     return null;
   }
+  const ownerBox = (el) => (boxes(el).find(({ box, floating }) => floating && ownersPrompt(box)) || {}).box || null;
   const rejectIn = (box, except) => [...box.querySelectorAll('button, a[href], [role=button], input[type=button], input[type=submit]')]
     .find((b) => b !== except && b.getClientRects().length && REJECT.test(name(b)));
-  // For a tap on `ref`: whether it accepts or closes a consent banner that has a reject choice.
+  // For a tap on `ref`: whether it goes ahead in a sign-in, subscription or age prompt (owner), and
+  // whether it accepts or closes a consent banner that has a reject choice.
   function consent(ref) {
     const el = element(ref);
-    const box = el && consentBox(el);
-    if (!box) return { banner: false };
+    if (!el) return { banner: false, owner: false };
     const label = name(el);
+    const owner = GO.test(label) && !REJECT.test(label) && !!ownerBox(el);
+    const box = consentBox(el);
+    if (!box) return { banner: false, owner };
     const reject = rejectIn(box, el);
-    return { banner: true, accept: ACCEPT.test(label) && !REJECT.test(label), reject: reject ? refFor(reject) : null, rejectName: reject ? name(reject) : null };
+    return { banner: true, owner, accept: ACCEPT.test(label) && !REJECT.test(label), reject: reject ? refFor(reject) : null, rejectName: reject ? name(reject) : null };
   }
 
   // What the last read saw, to tell what a tap or typing changed on the same page.

@@ -14,11 +14,14 @@ enum WebDemo {
         let defaults = UserDefaults.standard
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         if let provider = defaults.string(forKey: "pokiProbeProvider").flatMap(ModelProvider.init(rawValue:)) {
-            // A key left in Documents/probe-key by whoever runs the probe goes to the keychain, as pasting
-            // it in Accounts & Models would; the file goes at once.
+            // On a simulator debug build, a key left in Documents/probe-key by whoever runs the probe goes
+            // to the keychain, as pasting it in Accounts & Models would; the file goes at once. Elsewhere
+            // the probe uses the key the owner already saved.
+            #if DEBUG && targetEnvironment(simulator)
             let file = documents.appendingPathComponent("probe-key")
             if let key = try? String(contentsOf: file, encoding: .utf8) { try? ModelKeys.save(key, for: provider) }
             try? FileManager.default.removeItem(at: file)
+            #endif
             ModelKeys.selectedProvider = provider
             if let model = defaults.string(forKey: "pokiProbeModel") { ModelKeys.selectedModel = model }
         } else {
