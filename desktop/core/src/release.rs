@@ -336,12 +336,21 @@ struct GhRun {
     repository_id: Option<u64>,
     #[serde(default)]
     head_repository_id: Option<u64>,
+    /// The branch the run built: for a pull request's run, the pull request's own branch.
+    #[serde(default)]
+    head_branch: Option<String>,
 }
 #[derive(Deserialize)]
 struct GhPull {
     number: u64,
     #[serde(default)]
     title: String,
+    head: GhPullHead,
+}
+#[derive(Deserialize)]
+struct GhPullHead {
+    #[serde(rename = "ref")]
+    branch: String,
 }
 
 /// The pull request, version, build and commit in a preview artifact's name.
@@ -381,21 +390,20 @@ fn preview_release(a: &GhArtifact) -> Option<Release> {
     })
 }
 
-/// The newest preview build of each pull request, newest pull request first. With the list of
-/// open pull requests, only theirs are kept (a closed one's artifact may outlive it for a moment)
-/// and each gets its pull request's title.
-fn preview_list(artifacts: &[GhArtifact], open: Option<&[GhPull]>) -> Vec<Release> {
+/// The newest preview build of each open pull request, newest pull request first. The pull
+/// request number in an artifact's name is believed only when the run that made the artifact built
+/// that pull request's own branch, so a build cannot pass as another pull request's preview. A
+/// closed pull request's artifact, which may outlive it for a moment, is not offered.
+fn preview_list(artifacts: &[GhArtifact], open: &[GhPull]) -> Vec<Release> {
     let mut newest: std::collections::BTreeMap<u64, Release> = Default::default();
-    for r in artifacts.iter().filter_map(preview_release) {
+    for a in artifacts {
+        let Some(r) = preview_release(a) else { continue };
         let Some(p) = r.preview.clone() else { continue };
-        let title = match open {
-            Some(pulls) => match pulls.iter().find(|q| q.number == p.pr) {
-                Some(q) => q.title.clone(),
-                None => continue,
-            },
-            None => String::new(),
-        };
-        let r = Release { preview: Some(PreviewInfo { title, ..p.clone() }), ..r };
+        let Some(pull) = open.iter().find(|q| q.number == p.pr) else { continue };
+        if a.workflow_run.as_ref().and_then(|w| w.head_branch.as_deref()) != Some(pull.head.branch.as_str()) {
+            continue;
+        }
+        let r = Release { preview: Some(PreviewInfo { title: pull.title.clone(), ..p.clone() }), ..r };
         let newer = newest.get(&p.pr).and_then(|o| o.preview.as_ref()).map(|o| p.artifact_id > o.artifact_id).unwrap_or(true);
         if newer {
             newest.insert(p.pr, r);
@@ -539,7 +547,7 @@ fn github(url: String) -> Result<reqwest::RequestBuilder> {
     })
 }
 
-/// Every preview build on offer (two GitHub requests; the token is used when there is one, for
+/// Every preview build on offer (a few GitHub requests; the token is used when there is one, for
 /// its higher request limit, but listing works without).
 async fn list_previews() -> Result<Vec<Release>> {
     let mut artifacts = vec![];
@@ -558,14 +566,24 @@ async fn list_previews() -> Result<Vec<Release>> {
             break;
         }
     }
-    let pulls = async {
-        let res = github(format!("https://api.github.com/repos/{}/pulls?state=open&per_page=100", repo())).ok()?.timeout(std::time::Duration::from_secs(30)).send().await.ok()?;
-        let list = res.error_for_status().ok()?.json::<Vec<GhPull>>().await.ok()?;
-        // A full page may not be every open pull request, so it cannot rule one out.
-        (list.len() < 100).then_some(list)
+    // Without the open pull requests no artifact can be matched to one, so none is offered.
+    let mut pulls: Vec<GhPull> = vec![];
+    for page in 1..=5 {
+        let got: Vec<GhPull> = github(format!("https://api.github.com/repos/{}/pulls?state=open&per_page=100&page={page}", repo()))?
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(|e| Error::msg(format!("Could not read the open pull requests from GitHub ({e}). Check the connection, then try again.")))?
+            .json()
+            .await?;
+        let last = got.len() < 100;
+        pulls.extend(got);
+        if last {
+            break;
+        }
     }
-    .await;
-    Ok(preview_list(&artifacts, pulls.as_deref()))
+    Ok(preview_list(&artifacts, &pulls))
 }
 
 /// What installs and updates use: the chosen pull request's preview build while it exists, else
@@ -1176,7 +1194,7 @@ mod tests {
     }
 
     fn art(id: u64, name: &str, repo: u64, head: u64) -> GhArtifact {
-        GhArtifact { id, name: name.into(), expired: false, created_at: Some("2026-11-12T05:00:00Z".into()), archive_download_url: format!("https://x/artifacts/{id}/zip"), workflow_run: Some(GhRun { repository_id: Some(repo), head_repository_id: Some(head) }) }
+        GhArtifact { id, name: name.into(), expired: false, created_at: Some("2026-11-12T05:00:00Z".into()), archive_download_url: format!("https://x/artifacts/{id}/zip"), workflow_run: Some(GhRun { repository_id: Some(repo), head_repository_id: Some(head), head_branch: Some(format!("dev/pr{}", name.trim_start_matches("Poki-preview-pr").split('-').next().unwrap_or(""))) }) }
     }
 
     #[test]
@@ -1202,18 +1220,22 @@ mod tests {
             art(61, "Poki-unsigned", 1, 1),
             expired,
         ];
-        let found = preview_list(&artifacts, None);
+        let pull = |number: u64, title: &str, branch: &str| GhPull { number, title: title.into(), head: GhPullHead { branch: branch.into() } };
+        let open = vec![pull(177, "Fix a > b", "dev/pr177"), pull(12, "", "dev/pr12"), pull(180, "", "dev/pr180"), pull(200, "", "dev/pr200")];
+        let found = preview_list(&artifacts, &open);
         assert_eq!(found.iter().map(|r| r.preview.as_ref().unwrap().pr).collect::<Vec<_>>(), vec![177, 12]);
         let p = &found[0];
         assert_eq!((p.version.as_str(), p.build.as_str(), p.tag.as_str(), p.ipa_url.as_str()), ("0.3.1", "785", "preview-pr-177", "https://x/artifacts/40/zip"));
-        assert_eq!(p.preview, Some(PreviewInfo { pr: 177, sha: "bbbbbbbbbbbb".into(), title: String::new(), artifact_id: 40 }));
+        assert_eq!(p.preview, Some(PreviewInfo { pr: 177, sha: "bbbbbbbbbbbb".into(), title: "Fix a > b".into(), artifact_id: 40 }));
+        // A build of another branch under pull request 177's name is not believed.
+        let mut forged = art(70, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
+        forged.workflow_run.as_mut().unwrap().head_branch = Some("dev/other".into());
+        assert_eq!(preview_list(&[forged], &open).len(), 0);
+        // A closed pull request's leftover build is not offered, and with no pull requests nothing is.
+        assert_eq!(preview_list(&artifacts, &open[..1]).len(), 1);
+        assert!(preview_list(&artifacts, &[]).is_empty());
 
-        // With the open pull requests: titles, and a closed one's leftover build is not offered.
-        let open = vec![GhPull { number: 177, title: "Fix a > b".into() }];
-        let found = preview_list(&artifacts, Some(&open));
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].preview.as_ref().unwrap().title, "Fix a > b");
-
+        let found = preview_list(&artifacts, &open[..1]);
         let channels = vec![gh("app-prealpha-latest", true, "2026-11-09T06:00:00Z", Some("Poki-external-0.3.1-760.ipa"))];
         let (r, gone) = choose(&channels, Channel::PreAlpha, &found, Some(177));
         assert_eq!((r.unwrap().build.as_str(), gone), ("785", false));
