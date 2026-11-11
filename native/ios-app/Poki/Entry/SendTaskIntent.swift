@@ -3,7 +3,7 @@ import AppIntents
 /// Starts a task in Poki's chat without opening Poki, the way a reply from Poki's notification does.
 /// When Poki has to be in front for it (Poki is off, or the task did not start), or Poki is already
 /// doing something, Poki opens on the chat instead and the task under way keeps running.
-struct SendTaskToPokiIntent: AppIntent {
+struct SendTaskToPokiIntent: ForegroundContinuableIntent {
     static let title = LocalizedStringResource("Send Task to Poki", table: "Entry")
     static let description = IntentDescription(LocalizedStringResource("Poki starts the task on this iPhone and tells you when it is done.", table: "Entry"))
     static let openAppWhenRun = false
@@ -39,12 +39,14 @@ struct SendTaskToPokiIntent: AppIntent {
         return .result(dialog: IntentDialog(LocalizedStringResource("Poki is on it. It tells you when it’s done.", table: "Entry")))
     }
 
-    /// Poki comes to the front on the chat (or the hand-off under way). Before iOS 26 it shows them the
-    /// next time the owner opens Poki.
     @MainActor
     private func showPoki(_ words: LocalizedStringResource) async throws -> IntentResultContainer<Never, Never, Never, IntentDialog> {
         PokiEntry.shared.ask(.show)
-        if #available(iOS 26.0, *) { try await continueInForeground(IntentDialog(words), alwaysConfirm: false) }
+        if #available(iOS 26.0, *) {
+            try await continueInForeground(IntentDialog(words), alwaysConfirm: false)
+        } else {
+            throw needsToContinueInForegroundError(IntentDialog(words), continuation: nil)
+        }
         return .result(dialog: IntentDialog(words))
     }
 }
