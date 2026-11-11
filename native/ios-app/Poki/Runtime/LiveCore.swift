@@ -22,6 +22,7 @@ final class LiveCore: CoreSession {
         // Sensitive steps wait for the owner unless they turned asking off in Agents › Approvals; the
         // way they are asked, and the auto-approval in Poki's own chat, are ApprovalClassifier's.
         config.sensitive.enabled = ApprovalClassifier.mode != .off
+        sensitiveRulesOn = config.sensitive.enabled
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation
@@ -30,6 +31,9 @@ final class LiveCore: CoreSession {
         }
         core.onSession { signal in continuation.yield(.session(signal)) }
     }
+
+    /// Whether PokiCore holds sensitive steps back: what Agents › Approvals said when Poki started.
+    let sensitiveRulesOn: Bool
 
     /// Agents › Approvals › Ask Before Sensitive Steps. Read when Poki starts.
     static let askKey = "approvals.ask"
@@ -52,6 +56,7 @@ final class LiveCore: CoreSession {
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
     func callTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer { await core.callTool(name, arguments: arguments) }
+    func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
     func finishTask(switching: Bool = true, returnTo: String? = nil, stay: Bool = false) async -> String? {

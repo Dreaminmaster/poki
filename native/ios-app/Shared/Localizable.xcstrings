@@ -6978,6 +6978,16 @@
         }
       }
     },
+    "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then More Settings › Approvals." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前我不会在付款、删除、发送等敏感步骤前先问你。要更改，请轻点头像，再选择“更多设置”›“批准”。"
+          }
+        }
+      }
+    },
     "Routines" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7888,6 +7898,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已停止。"
+          }
+        }
+      }
+    },
+    "Stopping…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在停止…"
           }
         }
       }

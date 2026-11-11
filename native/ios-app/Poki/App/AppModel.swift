@@ -61,8 +61,16 @@ final class AppModel {
     /// Agents › Approvals › Ask Before Sensitive Steps: how the owner is asked, or never. PokiCore
     /// reads on or off when Poki starts; the way of asking changes at once.
     var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
-        didSet { UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)") }
+        didSet {
+            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
+            for observer in approvalModeObservers { observer() }
+        }
     }
+    /// Whether a sensitive step waits for the owner now: asking is on, and was on when Poki started
+    /// (PokiCore reads it then; turning it off counts at once).
+    var asksBeforeSensitiveSteps: Bool { approvalMode != .off && core.sensitiveRulesOn }
+    private var approvalModeObservers: [() -> Void] = []
+    func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
         didSet { UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)") }
     }
@@ -1402,7 +1410,7 @@ final class AppModel {
     /// stays away and sends its reply as a notification the owner can answer; the Live Activity shows
     /// the run as finished at once.
     func chatTaskEnded(reply: String?, session: String, acted: Bool) {
-        guard acted else { finishTask(); return }
+        guard acted else { activity.update { $0.plan = nil }; finishTask(); return }
         let stays = !Self.returnsAfterTask
         let bundle = Bundle.main.bundleIdentifier
         Task { [core, log] in
@@ -1423,6 +1431,9 @@ final class AppModel {
         lastAgentActivity = Date(); lastStepAt = Date()
         return await core.callTool(name, arguments: arguments)
     }
+
+    /// After Stop: waits until the phone has finished the action a stopped call had already sent.
+    func phoneSettles(within seconds: Double) async -> Bool { await core.settle(timeout: seconds) }
 
     // MARK: Approvals
 

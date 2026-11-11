@@ -137,6 +137,9 @@ public final class Runner: @unchecked Sendable {
     /// How many actions this side has given up on (sent, and not answered in time). A call compares
     /// it before and after an action to tell a timeout that reached the runner from one that did not.
     let actionsGivenUp = LockedBox(0)
+    /// Queued requests this side is still waiting on. A cancelled one is counted until it has marked
+    /// the stall, so `settle` never looks before that.
+    private let waitingOn = LockedBox(0)
     /// What the runner is still finishing, if anything: "GET /source from 7 s ago (restarted on its
     /// own if it is not through in 15 s)".
     public var busyWith: String? { stall.value.map { "\($0.path) from \(Int((now() - $0.since).rounded())) s ago (the runner is restarted on its own if it is not through in \(Int(wedgedAfter)) s)" } }
@@ -212,6 +215,8 @@ public final class Runner: @unchecked Sendable {
         let target = URL(string: url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)!
         let queued = !Self.standalone.contains("\(method) \(Self.short(path))")
         let busyBefore = queued ? busyWith : nil
+        if queued { waitingOn.update { $0 += 1 } }
+        defer { if queued { waitingOn.update { $0 -= 1 } } }
         func busyNote() -> String { busyBefore.map { "; the runner is still finishing an earlier \($0)" } ?? "" }
         let result: (status: Int, body: Data)
         do {
@@ -334,6 +339,14 @@ public final class Runner: @unchecked Sendable {
             _ = try? await session(timeout: t)
         }
         return busyWith == nil
+    }
+
+    /// After a cancelled call: true once the runner is through with what that call had sent (its
+    /// request has given up and the queue has drained past it), false if not within `timeout`.
+    func settle(timeout: Double) async -> Bool {
+        let until = now() + timeout
+        while waitingOn.value > 0, now() < until { await sleep(seconds: 0.05) }
+        return await waitUntilFree(timeout: until - now())
     }
 
     private let opening = LockedBox<Task<String, Error>?>(nil)

@@ -48,6 +48,17 @@ final class FakeWDA: HTTPTransport, @unchecked Sendable {
         }
     }
 
+    /// The route answers as before once `held` is false, and keeps waiting when its caller gives up
+    /// (a runner serving a request goes on with it).
+    func hold(_ key: String, while held: LockedBox<Bool>) {
+        lock.lock(); let inner = routes[key]; lock.unlock()
+        set(key) { body in
+            await Task.detached { while held.value { usleep(10_000) } }.value
+            guard let inner else { return (404, ["value": ["error": "unknown command"]]) }
+            return try await inner(body)
+        }
+    }
+
     /// The screen as rows of (type, label), 44 points apart.
     func source(_ rows: [(String, String)], app: String = "Settings") {
         let children: [JSON] = rows.enumerated().map { index, row in
