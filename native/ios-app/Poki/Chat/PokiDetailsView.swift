@@ -7,7 +7,7 @@ import SwiftUI
 // behind "More Settings" according to the ESP-174 capability table.
 
 /// Layer 1: Poki's picture, name and what it does; Pause, Voice and History; Accounts and Models;
-/// Poki Is On switch and Voice; and More Settings (which holds Setup, Updates, Memory, Approvals,
+/// Voice; and More Settings (which holds Setup, Updates, Memory, Approvals,
 /// Agents and Relay, Notifications, and Diagnostics).
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
@@ -49,22 +49,9 @@ struct PokiDetailsView: View {
                         .padding(.bottom, 20)
                         .accessibilityIdentifier("details.accountsAndModels")
 
+                    // On and off is the Turn On / Pause tile above (ESP-321): the Poki Is On switch here did
+                    // the same, minus stopping the task and standing by.
                     VStack(spacing: 0) {
-                        Toggle(isOn: Binding(
-                            get: { isSample ? true : (model.sessionOn || model.wantsOn) },
-                            set: { $0 ? model.startSession() : model.stopSession() }
-                        )) {
-                            Text("Poki Is On")
-                                .font(.system(size: 17))
-                                .foregroundStyle(Color(.label))
-                        }
-                        .tint(ChatColor.green)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 44)
-                        .rowDivider()
-                        .accessibilityIdentifier("details.pokiIsOn")
-
                         NavigationLink(value: DetailsRoute.voice) {
                             HStack {
                                 Text("Voice")
