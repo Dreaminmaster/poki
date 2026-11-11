@@ -1,7 +1,7 @@
 import XCTest
 @testable import Poki
 
-/// The chat's opening words say whether Poki asks before a sensitive step, as More Settings › Approvals has it.
+/// The chat's opening words say whether Poki asks before a sensitive step, as Poki’s Rules page has it.
 @MainActor
 final class GreetingTests: XCTestCase {
     private var saved: Any?

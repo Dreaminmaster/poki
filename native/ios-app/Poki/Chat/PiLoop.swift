@@ -145,8 +145,8 @@ final class PiLoop {
     /// The provider's message for the owner. pi never puts the key in it; a sign-in that ran out says so.
     private static func words(_ message: String, provider: ModelProvider) -> String {
         if message.contains("No API key") || message.contains("missingApiKey") || message.isEmpty && !ModelKeys.hasKey(provider) {
-            return provider.signsIn ? String(localized: "Sign in to ChatGPT again: tap my picture, then Accounts and Models.")
-                                    : String(localized: "Add your \(provider.name) key: tap my picture, then Accounts and Models.")
+            return provider.signsIn ? String(localized: "Sign in to ChatGPT again: tap my picture, then Brain.")
+                                    : String(localized: "Add your \(provider.name) key: tap my picture, then Brain.")
         }
         return String(localized: "\(provider.name): \(message.isEmpty ? String(localized: "the request failed.") : message)")
     }

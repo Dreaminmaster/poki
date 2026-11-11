@@ -405,6 +405,43 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertTrue(model.sessionOn, "Pause stands by; it does not turn Poki off")
     }
 
+    /// ESP-340: the bear sleeps and the Hands switch reads "Resting" only after the owner's own pause.
+    /// Standing by right after Turn On, or after the idle time, is not a pause: read from `runnerPaused`
+    /// (what Pause and Resume go by), Poki looked asleep the moment it was turned on.
+    func testOnlyTheOwnersPauseCountsAsResting() {
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+            UserDefaults.standard.removeObject(forKey: "wantsOn")
+        }
+        model.startSession()
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertFalse(model.ownerPaused, "Turn On stands by; nobody paused it")
+
+        // What the idle check does once the idle time has passed.
+        model.wakeRunner()
+        model.pauseRunner(reason: "Stopped after 1 min without agent activity", byOwner: false)
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertFalse(model.ownerPaused, "standing by after the idle time is not the owner's pause")
+
+        // The Hands switch, turned off while Poki stands by: now it rests.
+        model.pauseByOwner()
+        XCTAssertTrue(model.ownerPaused)
+        model.wakeRunner()
+        XCTAssertFalse(model.ownerPaused, "a task, an agent's request or Resume ends the rest")
+
+        model.pauseByOwner()
+        XCTAssertTrue(model.ownerPaused && model.runnerPaused, "from awake, the owner's pause stands by and rests")
+        model.stopSession()
+        XCTAssertFalse(model.ownerPaused, "off is off, not resting")
+    }
+
     /// ESP-321: Home has no tab bar, so main's Setup dot is Home's hint line. An open setup step shows
     /// there and links to that step; before, Home showed only runner failures and said nothing.
     func testHomeHintShowsOpenSetupStepWithoutTabBar() {

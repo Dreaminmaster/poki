@@ -101,6 +101,8 @@ final class ChatModel {
     private var client: ModelClient?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
     private var modelPlan: [String]?
+    /// The whole plan the model published, for the task card's steps still to come.
+    var planSteps: [String]? { modelPlan }
     private var task: Task<Void, Never>?
     private var stopAsked = false
     /// Counts tasks. Stop moves it on, so what a stopped task still does while its last step ends is
@@ -137,7 +139,7 @@ final class ChatModel {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
          ChatEntry(.poki(app.asksBeforeSensitiveSteps ? String(localized: "I’ll ask before anything you can’t undo.")
-                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then More Settings › Approvals.")))]
+                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then Rules.")))]
     }
 
     private func greet() { entries = greeting }
@@ -247,8 +249,8 @@ final class ChatModel {
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
-            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first: tap my picture, then Accounts and Models.")
-                                       : String(localized: "Add a model key first: tap my picture, then Accounts and Models.")))
+            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first: tap my picture, then Brain.")
+                                       : String(localized: "Add a model key first: tap my picture, then Brain.")))
             return
         }
         let model = ModelKeys.selectedModel
@@ -638,7 +640,7 @@ final class ChatModel {
 
     // MARK: Screenshots
 
-    /// `-pokiChat empty|working|approved`: the ESP-171 boards' conversations, for the build's
+    /// `-pokiChat empty|working|approval|handoff|failed|approved`: sample conversations, for the build's
     /// screenshots only. Nothing is sent.
     private func loadSample(_ scene: String) {
         let start = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: Date()) ?? Date()
@@ -646,16 +648,27 @@ final class ChatModel {
         entries[0] = ChatEntry(.time(start))
         guard scene != "empty" else { return }
         let you = String(localized: "Text Mom “On my way”")
-        if scene == "working" {
+        if scene == "working" || scene == "handoff" {
+            // Poki has the phone: two steps done, the third under way, the last still to come. For
+            // "handoff" the phone is back with the owner (the chat shows its "Your turn" card).
+            var plan = ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
+                                        PlanStep(String(localized: "Open the chat with Mom"), state: .done),
+                                        PlanStep(String(localized: "Type “On my way”"), state: .current)]))
+            plan.at = Date().addingTimeInterval(-42)
+            modelPlan = [String(localized: "Open Messages"), String(localized: "Open the chat with Mom"),
+                         String(localized: "Type “On my way”"), String(localized: "Tap Send")]
             entries = [ChatEntry(.time(start)),
                        ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
                        ChatEntry(.you(you, delivered: true)),
                        ChatEntry(.poki(String(localized: "On it. Opening Messages."))),
+                       plan]
+        } else if scene == "failed" {
+            entries = [ChatEntry(.time(start)),
+                       ChatEntry(.you(you, delivered: true)),
+                       ChatEntry(.poki(String(localized: "On it. Opening Messages."))),
                        ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
-                                        PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                        PlanStep(String(localized: "Type “On my way”"), state: .done),
-                                        PlanStep(String(localized: "Tap Send"), state: .waiting)])),
-                       ChatEntry(.note(.waiting))]
+                                        PlanStep(String(localized: "Open the chat with Mom"), state: .failed)])),
+                       ChatEntry(.note(.problem(String(localized: "I couldn’t find a chat with Mom in Messages."))))]
         } else if scene == "approval" || scene == "setupHint" {
             entries = [ChatEntry(.time(start)),
                        ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),

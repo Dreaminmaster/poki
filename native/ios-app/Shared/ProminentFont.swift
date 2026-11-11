@@ -17,14 +17,21 @@ enum Prominent {
         }
     }
 
+    /// A text style's size at the default text size. The preferred font's own size is already scaled
+    /// for the text size in use; scaling from it grew prominent text twice at the larger sizes and
+    /// took it past a view's Dynamic Type limit.
+    private static func baseSize(_ style: UIFont.TextStyle) -> CGFloat {
+        UIFont.preferredFont(forTextStyle: style, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)).pointSize
+    }
+
     /// Geist at a text style's size, scaling with Dynamic Type.
     static func font(_ style: Font.TextStyle, _ weight: Font.Weight = .semibold) -> Font {
         guard usesGeist else { return .system(style, weight: weight) }
-        return .custom(name(weight), size: UIFont.preferredFont(forTextStyle: style.uiKit).pointSize, relativeTo: style)
+        return .custom(name(weight), size: baseSize(style.uiKit), relativeTo: style)
     }
 
     static func uiFont(_ style: UIFont.TextStyle, _ weight: Font.Weight) -> UIFont? {
-        guard usesGeist, let base = UIFont(name: name(weight), size: UIFont.preferredFont(forTextStyle: style).pointSize) else { return nil }
+        guard usesGeist, let base = UIFont(name: name(weight), size: baseSize(style)) else { return nil }
         return UIFontMetrics(forTextStyle: style).scaledFont(for: base)
     }
 }

@@ -50,6 +50,10 @@ final class AppModel {
     private(set) var currentApp: String?
     /// The runner is stopped until the next agent request (idle, or the owner tapped Stop runner).
     private(set) var runnerPaused = false
+    /// The owner paused Poki (Pause, the Hands switch, Stop on the Live Activity), as opposed to the
+    /// runner standing by on its own after the idle time. The bear sleeps and Hands reads off only for
+    /// this one: standing by after a quiet minute is still ready. Cleared when the runner starts again.
+    private(set) var ownerPaused = false
     /// Stop the runner after this long without agent activity; 0 never stops it.
     /// 60 s by default. An agent can think for about a minute between steps of a long task; after a
     /// longer pause the runner stops, and the agent's next request starts it again.
@@ -952,6 +956,7 @@ final class AppModel {
         }
         idleTimer?.invalidate(); idleTimer = nil
         runnerPaused = false; host.setPaused(false)
+        ownerPaused = false
         background.stop()
         activity.end()
         sessionOn = false
@@ -995,7 +1000,7 @@ final class AppModel {
 
     /// Stops the runner, and with it iOS's automation banner, while the relay stays connected; the
     /// next agent request starts it again. From the Stop runner button, the Live Activity, or idle.
-    func pauseRunner(reason: String = "Stopped") {
+    func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
         guard sessionOn, !runnerPaused, approvals.isEmpty else { return }
         // Allow on the Live Activity is followed by its layout changing under the finger: a Stop
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
@@ -1004,6 +1009,7 @@ final class AppModel {
             log.add("runner", "a Stop from the Live Activity right after an approval was ignored")
             return
         }
+        ownerPaused = byOwner
         if automationPath == .inProcess {
             // The in-process session is closed, and with it Automation Mode and iOS's banner; the
             // next agent request opens a new one (a few seconds, no passcode within the same boot).
@@ -1083,6 +1089,13 @@ final class AppModel {
     private static let stuckNotice = "Poki Runner is still running after Stop. Swipe it away in the app switcher; the banner goes with it."
     private func clearStuckNotice() { if problem == Self.stuckNotice { problem = nil } }
 
+    /// The owner rests Poki's hands (the composer's Hands switch): the runner stands by as with Pause,
+    /// and a runner already standing by after the idle time is marked as paused by the owner.
+    func pauseByOwner() {
+        guard sessionOn else { return }
+        if runnerPaused { ownerPaused = true } else { pauseRunner() }
+    }
+
     /// The runner is off and starts on the next agent request.
     private func standBy(reason: String?) {
         runnerPaused = true
@@ -1097,6 +1110,7 @@ final class AppModel {
     func wakeRunner() {
         guard sessionOn, runnerPaused else { return }
         runnerPaused = false
+        ownerPaused = false
         host.setPaused(false)
         lastAgentActivity = Date()
         log.add("runner", automationPath == .inProcess ? "an agent asked: opening the automation session again" : automationPath == .nativeServices ? "an agent asked: opening native services again" : "an agent asked: starting the runner")
@@ -1133,7 +1147,7 @@ final class AppModel {
                 guard let self else { return }
                 if let line { self.log.add("runner", line) }
                 guard self.activityText == "Idle", Date().timeIntervalSince(self.lastAgentActivity) >= Double(self.idleStopSeconds) else { return }
-                self.pauseRunner(reason: reason)
+                self.pauseRunner(reason: reason, byOwner: false)
             }
         }
     }
@@ -1510,6 +1524,16 @@ final class AppModel {
     /// The person tapped "Done, carry on" on the Live Activity's "Your turn" card.
     func handoffDone() {
         guard let id = ApprovalMailbox.drainHandoffDone() else { return }
+        handoffDone(id: id)
+    }
+
+    /// The same answer from the chat's "Your turn" card, while Poki is in front.
+    func handoffDoneInApp() {
+        guard let id = activity.state.handoff?.id else { return }
+        handoffDone(id: id)
+    }
+
+    private func handoffDone(id: String) {
         log.add("handoff", "done by the owner: \(id)")
         if id == Self.runnerPasscodeHandoff {
             // The runner's own launch: the launcher notices by itself when the runner answers.

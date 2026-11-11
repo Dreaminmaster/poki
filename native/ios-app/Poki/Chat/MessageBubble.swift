@@ -1,11 +1,13 @@
 // MessageBubble is from Mackarous/ConversationUI (commit e77c69e,
 // Sources/ConversationUI/MessageBubble.swift), Copyright (c) 2024 Andrew Mackarous, MIT License. See
-// THIRD_PARTY_NOTICES.md. Changed: Poki's message kinds, the ESP-171 board's colours, 17 pt text, the
-// tail corner on the last bubble of a run, and 60 pt kept free on the far side (280 pt at most).
+// THIRD_PARTY_NOTICES.md. Changed: Poki's message kinds, the tail corner on the last bubble of a run,
+// 60 pt kept free on the far side, and for ESP-326 your bubble in grey, an outside agent's in ink, and
+// Poki's words without a bubble, in the system's body text.
 import SwiftUI
 
 struct MessageBubble: View {
-    enum Direction { case incoming, outgoing }
+    /// Poki's words, yours, or an outside agent's request to Poki.
+    enum Direction { case incoming, outgoing, guest }
     var direction: Direction
     var text: String
     /// The last bubble of its run has the small corner on its side.
@@ -13,24 +15,31 @@ struct MessageBubble: View {
 
     var body: some View {
         HStack {
-            if direction == .outgoing {
+            if direction != .incoming {
                 Spacer(minLength: .messageInsetPadding)
             }
-            Text(rendered)
-                .font(.system(size: 17))
-                .tint(direction == .incoming ? Site.blue : .white)
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(foregroundStyle)
-                .padding(.vertical, .messageVerticalPadding)
-                .padding(.horizontal, 14)
-                .background(backgroundStyle, in: shape)
-                .contentShape(.contextMenuPreview, shape)
-                .contextMenu {
-                    copyButton { UIPasteboard.general.string = text }
-                }
-                .frame(maxWidth: 280, alignment: direction == .incoming ? .leading : .trailing)
             if direction == .incoming {
-                Spacer(minLength: .messageInsetPadding)
+                // Poki's words stand on the page without a bubble (ESP-326): blue is kept for what Poki
+                // does on the phone, and a reply reads as text, not as a message from another person.
+                Text(rendered)
+                    .font(.body)
+                    .tint(Tint.blueText)
+                    .foregroundStyle(Color(.label))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 4)
+                    .contextMenu { copyButton { UIPasteboard.general.string = text } }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(rendered)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(direction == .guest ? Tint.onSolid : Color(.label))
+                    .padding(.vertical, .messageVerticalPadding)
+                    .padding(.horizontal, 14)
+                    .background(direction == .guest ? Tint.solid : ChatColor.incoming, in: shape)
+                    .contentShape(.contextMenuPreview, shape)
+                    .contextMenu { copyButton { UIPasteboard.general.string = text } }
+                    .frame(maxWidth: 300, alignment: .trailing)
             }
         }
     }
@@ -45,30 +54,14 @@ struct MessageBubble: View {
     }
 
     private var shape: UnevenRoundedRectangle {
-        let small: CGFloat = tail ? .tailRadius : .cornerRadius
-        return UnevenRoundedRectangle(topLeadingRadius: .cornerRadius,
-                                      bottomLeadingRadius: direction == .incoming ? small : .cornerRadius,
-                                      bottomTrailingRadius: direction == .outgoing ? small : .cornerRadius,
-                                      topTrailingRadius: .cornerRadius, style: .continuous)
+        UnevenRoundedRectangle(topLeadingRadius: .cornerRadius, bottomLeadingRadius: .cornerRadius,
+                               bottomTrailingRadius: tail ? .tailRadius : .cornerRadius,
+                               topTrailingRadius: .cornerRadius, style: .continuous)
     }
 
     private func copyButton(copy: @escaping () -> Void) -> some View {
         Button(action: copy) {
             Label("Copy", systemImage: "doc.on.doc")
-        }
-    }
-
-    private var foregroundStyle: AnyShapeStyle {
-        switch direction {
-        case .incoming: AnyShapeStyle(Color(.label))
-        case .outgoing: AnyShapeStyle(.white)
-        }
-    }
-
-    private var backgroundStyle: AnyShapeStyle {
-        switch direction {
-        case .incoming: AnyShapeStyle(ChatColor.incoming)
-        case .outgoing: AnyShapeStyle(Site.blue)
         }
     }
 }

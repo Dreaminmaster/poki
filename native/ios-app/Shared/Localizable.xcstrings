@@ -512,12 +512,12 @@
         }
       }
     },
-    "A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Accounts and Models. Dictation in the message field works with every model." : {
+    "A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Brain. Dictation in the message field works with every model." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "实时对话使用 OpenAI 的 Realtime 语音，需要在“Poki”›“账号与模型”中添加 OpenAI API 密钥。消息栏里的听写适用于所有模型。"
+            "value" : "实时对话使用 OpenAI 的 Realtime 语音，需要在“Poki”›“大脑”中添加 OpenAI API 密钥。消息栏里的听写适用于所有模型。"
           }
         }
       }
@@ -602,6 +602,16 @@
         }
       }
     },
+    "Activity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活动"
+          }
+        }
+      }
+    },
     "Activity Log" : {
       "localizations" : {
         "zh-Hans" : {
@@ -662,6 +672,16 @@
         }
       }
     },
+    "Add Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加模型"
+          }
+        }
+      }
+    },
     "Add URL" : {
       "localizations" : {
         "zh-Hans" : {
@@ -672,12 +692,12 @@
         }
       }
     },
-    "Add a model key first: tap my picture, then Accounts and Models." : {
+    "Add a model key first: tap my picture, then Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先添加模型密钥：轻点头像，再选择“账号与模型”。"
+            "value" : "请先添加模型密钥：轻点头像，再选择“大脑”。"
           }
         }
       }
@@ -753,12 +773,12 @@
         }
       }
     },
-    "Add your %@ key: tap my picture, then Accounts and Models." : {
+    "Add your %@ key: tap my picture, then Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请添加 %@ 密钥：轻点头像，再选择“账号与模型”。"
+            "value" : "请添加 %@ 密钥：轻点头像，再选择“大脑”。"
           }
         }
       }
@@ -874,16 +894,6 @@
         }
       }
     },
-    "Agents and Relay ›" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体与中继 ›"
-          }
-        }
-      }
-    },
     "Agents can reach this iPhone" : {
       "localizations" : {
         "zh-Hans" : {
@@ -920,6 +930,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "智能体做这些事都不会问你。"
+          }
+        }
+      }
+    },
+    "Agents that use Poki’s hands" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "借用 Poki 双手的智能体"
+          }
+        }
+      }
+    },
+    "All" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部"
           }
         }
       }
@@ -1184,12 +1214,12 @@
         }
       }
     },
-    "Anthropic did not accept the key. Check it in Poki › Accounts and Models." : {
+    "Anthropic did not accept the key. Check it in Poki › Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Anthropic 密钥无效。请前往“Poki”›“账号与模型”检查。"
+            "value" : "Anthropic 密钥无效。请前往“Poki”›“大脑”检查。"
           }
         }
       }
@@ -1494,6 +1524,16 @@
         }
       }
     },
+    "Brain" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大脑"
+          }
+        }
+      }
+    },
     "Built-in" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1570,6 +1610,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取 Poki 的 VPN 配置。请重试，或选择外部连接。"
+          }
+        }
+      }
+    },
+    "Can’t reach this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连不上此 iPhone"
           }
         }
       }
@@ -1686,6 +1736,16 @@
         }
       }
     },
+    "Checking this step" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查这一步"
+          }
+        }
+      }
+    },
     "Checking…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1762,6 +1822,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除此 iPhone 上的所有惯例和备注？"
+          }
+        }
+      }
+    },
+    "Clear my notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把通知清掉"
           }
         }
       }
@@ -1954,6 +2024,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "历史对话"
+          }
+        }
+      }
+    },
+    "Conversations" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话"
           }
         }
       }
@@ -2389,6 +2469,16 @@
         }
       }
     },
+    "Done in ^[%lld step](inflect: true)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 步做完"
+          }
+        }
+      }
+    },
     "Done, carry on" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2566,6 +2656,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "智能体停止后，结束自动化会话，iOS 的横幅也随之消失。测试中：如果之后智能体看不到屏幕，请关闭此项并重新打开 Poki。"
+          }
+        }
+      }
+    },
+    "Ends the session and disconnects agents until you turn Poki on again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束会话并断开智能体连接，直到你再次打开 Poki。"
           }
         }
       }
@@ -2953,12 +3053,42 @@
         }
       }
     },
-    "Handed to Poki · %@" : {
+    "Guests" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已交给 Poki · %@"
+            "value" : "客人"
+          }
+        }
+      }
+    },
+    "Guests ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客人 ›"
+          }
+        }
+      }
+    },
+    "Hand me your phone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把手机交给我。"
+          }
+        }
+      }
+    },
+    "Handed to Poki, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已交给 Poki，%@"
           }
         }
       }
@@ -2973,12 +3103,62 @@
         }
       }
     },
+    "Hands" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手"
+          }
+        }
+      }
+    },
+    "Hands On" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手已就位"
+          }
+        }
+      }
+    },
+    "Hands are on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手开着"
+          }
+        }
+      }
+    },
+    "Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体检"
+          }
+        }
+      }
+    },
     "Hearing you…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在听…"
+          }
+        }
+      }
+    },
+    "Hello" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你好"
           }
         }
       }
@@ -3019,6 +3199,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按住说话。"
+          }
+        }
+      }
+    },
+    "Hold to Allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住允许"
           }
         }
       }
@@ -3093,12 +3283,32 @@
         }
       }
     },
+    "I couldn’t find a chat with Mom in Messages." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我在“信息”里没找到和妈妈的对话。"
+          }
+        }
+      }
+    },
     "I stopped after %lld steps. Tell me how to go on." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已执行 %lld 步并暂停。请指示下一步操作。"
+          }
+        }
+      }
+    },
+    "I tap, type and scroll for you." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我替你点、替你打字、替你滑。"
           }
         }
       }
@@ -3381,6 +3591,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "执行不可撤销的操作前，我会先向你确认。"
+          }
+        }
+      }
+    },
+    "I’m not tapping or typing while it’s your turn." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轮到你的时候，我不点也不打字。"
           }
         }
       }
@@ -3694,6 +3914,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "实时语音"
+          }
+        }
+      }
+    },
+    "Live voice and dictation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音与听写"
           }
         }
       }
@@ -4039,6 +4269,16 @@
         }
       }
     },
+    "Models and accounts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型与账号"
+          }
+        }
+      }
+    },
     "Models to Choose From" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4190,6 +4430,26 @@
         }
       }
     },
+    "Needs You" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要你"
+          }
+        }
+      }
+    },
+    "Needs You (%lld)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要你（%lld）"
+          }
+        }
+      }
+    },
     "Needs attention" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4217,6 +4477,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "需要重做：连续两次停下"
+          }
+        }
+      }
+    },
+    "Needs you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要你"
           }
         }
       }
@@ -4327,6 +4597,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无应答"
+          }
+        }
+      }
+    },
+    "No Conversations Yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有对话"
           }
         }
       }
@@ -4705,6 +4985,16 @@
         }
       }
     },
+    "Nothing Needs You" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有要你处理的事"
+          }
+        }
+      }
+    },
     "Nothing answers at 10.7.0.1. Turn on your proxy app (with the Poki module) or LocalDevVPN." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4851,6 +5141,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在此 iPhone 上"
+          }
+        }
+      }
+    },
+    "On your phone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在操作手机"
           }
         }
       }
@@ -5234,12 +5534,12 @@
         }
       }
     },
-    "OpenAI did not accept the key. Check it in Poki › Accounts and Models." : {
+    "OpenAI did not accept the key. Check it in Poki › Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "OpenAI 密钥无效。请前往“Poki”›“账号与模型”检查。"
+            "value" : "OpenAI 密钥无效。请前往“Poki”›“大脑”检查。"
           }
         }
       }
@@ -5375,6 +5675,16 @@
         }
       }
     },
+    "Order my usual coffee" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点一杯我常喝的咖啡"
+          }
+        }
+      }
+    },
     "Order oat milk again" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5395,12 +5705,12 @@
         }
       }
     },
-    "Over MCP · %@" : {
+    "Over MCP, %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "通过 MCP · %@"
+            "value" : "通过 MCP，%@"
           }
         }
       }
@@ -5697,6 +6007,26 @@
         }
       }
     },
+    "Phone control, pairing, typing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作手机、配对、打字"
+          }
+        }
+      }
+    },
+    "Pinned" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "置顶"
+          }
+        }
+      }
+    },
     "Point the camera at the code Poki Setup shows on your computer." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5919,6 +6249,16 @@
         }
       }
     },
+    "Poki can tap, type and scroll on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 可以在此 iPhone 上点按、打字和滑动。"
+          }
+        }
+      }
+    },
     "Poki can't reach this iPhone. Check in this order: Setup › Loopback (your proxy app or LocalDevVPN is connected, with 10.7.0.1 set), then Setup › Pairing (pair again with the loopback on), then Developer Mode in Settings → Privacy & Security." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6120,6 +6460,26 @@
         }
       }
     },
+    "Poki is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已关闭"
+          }
+        }
+      }
+    },
+    "Poki is off. Agents can’t reach this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已关闭。智能体无法连接此 iPhone。"
+          }
+        }
+      }
+    },
     "Poki is offline. Check that the phone has internet; Poki reconnects by itself." : {
       "localizations" : {
         "zh-Hans" : {
@@ -6146,6 +6506,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 已打开，所以改在这里询问"
+          }
+        }
+      }
+    },
+    "Poki is resting. It starts again when you send a task or an agent asks." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在歇着。你发来任务或有智能体请求时，它会重新开始。"
           }
         }
       }
@@ -6482,6 +6852,16 @@
         }
       }
     },
+    "Poki, %@, details" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki，%@，详细信息"
+          }
+        }
+      }
+    },
     "Poki, details" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6633,6 +7013,16 @@
         }
       }
     },
+    "Puts this in the message field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "填入消息栏"
+          }
+        }
+      }
+    },
     "QR code of the address" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6709,6 +7099,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "实时语音"
+          }
+        }
+      }
+    },
+    "Recent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近"
           }
         }
       }
@@ -6938,6 +7338,16 @@
         }
       }
     },
+    "Resting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "歇着"
+          }
+        }
+      }
+    },
     "Resume" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6978,12 +7388,12 @@
         }
       }
     },
-    "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then More Settings › Approvals." : {
+    "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then Rules." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "目前我不会在付款、删除、发送等敏感步骤前先问你。要更改，请轻点头像，再选择“更多设置”›“批准”。"
+            "value" : "目前我不会在付款、删除、发送等敏感步骤前先问你。要更改，请轻点头像，再选择“规则”。"
           }
         }
       }
@@ -6994,6 +7404,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "惯例"
+          }
+        }
+      }
+    },
+    "Routines and notes I keep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我记着的惯例和备注"
+          }
+        }
+      }
+    },
+    "Rules" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "规则"
           }
         }
       }
@@ -7125,6 +7555,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保存地址"
+          }
+        }
+      }
+    },
+    "Say yes in the chat to let it through." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在对话中说“可以”即可放行。"
           }
         }
       }
@@ -7329,12 +7769,12 @@
         }
       }
     },
-    "Set up Poki’s model first: tap here, or Poki › Accounts and Models." : {
+    "Set up Poki’s model first: tap here, or Poki › Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先设置 Poki 的模型：轻点这里，或前往“Poki”›“账号与模型”。"
+            "value" : "请先设置 Poki 的模型：轻点这里，或前往“Poki”›“大脑”。"
           }
         }
       }
@@ -7449,6 +7889,16 @@
         }
       }
     },
+    "Show" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示"
+          }
+        }
+      }
+    },
     "Sign In" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7499,22 +7949,22 @@
         }
       }
     },
-    "Sign in to ChatGPT again: tap my picture, then Accounts and Models." : {
+    "Sign in to ChatGPT again: tap my picture, then Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请重新登录 ChatGPT：轻点头像，再选择“账号与模型”。"
+            "value" : "请重新登录 ChatGPT：轻点头像，再选择“大脑”。"
           }
         }
       }
     },
-    "Sign in to ChatGPT first: tap my picture, then Accounts and Models." : {
+    "Sign in to ChatGPT first: tap my picture, then Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先登录 ChatGPT：轻点头像，再选择“账号与模型”。"
+            "value" : "请先登录 ChatGPT：轻点头像，再选择“大脑”。"
           }
         }
       }
@@ -7661,6 +8111,16 @@
         }
       }
     },
+    "Standing by" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待命中"
+          }
+        }
+      }
+    },
     "Start Hold" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7782,6 +8242,16 @@
         }
       }
     },
+    "Steps waiting for your answer show up here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你回答的步骤会显示在这里。"
+          }
+        }
+      }
+    },
     "Stop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7888,6 +8358,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已停止"
+          }
+        }
+      }
+    },
+    "Stopped at step %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停在第 %lld 步"
           }
         }
       }
@@ -8175,6 +8655,16 @@
         }
       }
     },
+    "Task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务"
+          }
+        }
+      }
+    },
     "Task Started" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8241,6 +8731,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "告诉妈妈\n我在路上了…"
+          }
+        }
+      }
+    },
+    "Text Mom I’m running 10 min late" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给妈妈发消息说我晚到 10 分钟"
           }
         }
       }
@@ -8850,6 +9350,16 @@
         }
       }
     },
+    "Time left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剩余时间"
+          }
+        }
+      }
+    },
     "Timeout" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8881,12 +9391,42 @@
         }
       }
     },
+    "Touch and hold to allow this step" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住以允许这一步"
+          }
+        }
+      }
+    },
     "Touches and Keys" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "触摸和按键"
+          }
+        }
+      }
+    },
+    "Tripped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绊了一跤"
+          }
+        }
+      }
+    },
+    "Tripped at step %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在第 %lld 步绊倒"
           }
         }
       }
@@ -9398,6 +9938,16 @@
         }
       }
     },
+    "Updates, notifications, diagnostics" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新、通知、诊断"
+          }
+        }
+      }
+    },
     "Use %@?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9628,12 +10178,12 @@
         }
       }
     },
-    "Voice · %@" : {
+    "Voice, %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "语音 · %@"
+            "value" : "语音，%@"
           }
         }
       }
@@ -9745,6 +10295,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按顺序逐项完成。你可以随时关闭，之后从这个列表继续。"
+          }
+        }
+      }
+    },
+    "What I did" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我做过的事"
+          }
+        }
+      }
+    },
+    "What Poki asks about first" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "哪些事先问你"
           }
         }
       }
@@ -9905,6 +10475,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "昨天"
+          }
+        }
+      }
+    },
+    "You" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你"
           }
         }
       }
