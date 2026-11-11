@@ -196,8 +196,16 @@ final class AppModelTests: XCTestCase {
 @MainActor
 final class ApprovalDefaultTests: XCTestCase {
     private var saved: Any?
-    override func setUp() { saved = UserDefaults.standard.object(forKey: LiveCore.askKey) }
-    override func tearDown() { UserDefaults.standard.set(saved, forKey: LiveCore.askKey) }
+    private var savedMode: Any?
+    override func setUp() {
+        saved = UserDefaults.standard.object(forKey: LiveCore.askKey)
+        savedMode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.modeKey)
+    }
+    override func tearDown() {
+        UserDefaults.standard.set(saved, forKey: LiveCore.askKey)
+        UserDefaults.standard.set(savedMode, forKey: ApprovalClassifier.modeKey)
+    }
 
     /// A phone that never chose (a new install, or an alpha tester who left the switch alone) asks the
     /// owner before a sensitive step: the Send tap in Messages waits for an answer instead of going
@@ -207,7 +215,7 @@ final class ApprovalDefaultTests: XCTestCase {
         let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
         let tap = await core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.2)
         XCTAssertFalse(tap.mayTap, "\(tap)")
-        XCTAssertTrue(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).askBeforeSensitiveSteps)
+        XCTAssertNotEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .off)
     }
 
     /// An owner who turned asking off keeps that choice.

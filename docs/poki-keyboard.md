@@ -14,9 +14,13 @@ when the owner has chosen Paste in Advanced.
 
 Poki → Setup lists **Add the Poki Keyboard** with the steps and whether it has answered:
 
-1. Settings → General → Keyboard → Keyboards → Add New Keyboard → **Poki**.
-2. Tap Poki in that list and turn on **Allow Full Access**.
-3. Keep your usual keyboards, and switch to the Poki keyboard once in any text field.
+1. Tap **Open Settings** on that page (the Setup Guide ends on it too).
+2. On Poki's page in Settings, tap **Keyboards**.
+3. Turn on **Poki**, then **Allow Full Access**.
+
+On an iOS version whose app page has no Keyboards row: Settings → General → Keyboard →
+Keyboards → Add New Keyboard → **Poki**, then tap it in that list and turn on Full Access.
+Keep your usual keyboards.
 
 Full Access is what lets the extension reach the App Group folder it shares with Poki.
 The extension has no network code and never touches the clipboard.
@@ -27,21 +31,33 @@ The extension has no network code and never touches the clipboard.
    Darwin notification.
 2. If the panel is the keyboard in use, it takes the request by renaming the file (so
    only one side can ever own it), writes an acknowledgement, and types.
-3. If nothing acknowledges, Poki presses the hardware input-source shortcut (Ctrl+Space)
-   on its simulated keyboard, once per installed keyboard at most, and stops at the first
-   acknowledgement. iOS hides the on-screen keyboard while a hardware keyboard is attached,
-   so after each press the simulated keyboard is also taken away for up to about two
-   seconds, long enough for the extension to start cold. **Nothing on the screen is read
-   to do this**: the acknowledgement is the only signal. The number of presses that worked
-   is remembered and tried in one go next time. A switch that fails is remembered for that
-   app for ten minutes, and one more press completes the circle back to the owner's keyboard.
+3. If nothing acknowledges, Poki switches keyboards the way a person does: it holds the
+   globe key of the keyboard on screen and taps Poki in the list that opens. This reads the
+   screen twice (to find the globe key, then the list) and sends two touches. The keyboard
+   the owner had, ticked in that list, is remembered; at the end of the task Poki goes back
+   to it the same way (hold the globe key, tap that keyboard), or the panel leaves by itself
+   when that keyboard is not known. A switch that fails is remembered for that app for ten
+   minutes.
+
+   The first switch on a keyboard learns where the list's rows are. After that the switch
+   is one touch: down on the globe key, a short hold while the list opens, a slide to the
+   remembered row, and up, with no screen read first. If the panel does not answer within
+   1.6 s the remembered places are dropped and the slow way runs once more. Going back
+   uses the same single touch. While a task is running the app keeps a `hold.json` in the
+   shared folder (renewed on input, 180 s), and the panel does not leave by itself while
+   it is fresh, so the next `type` of the task needs no switch at all.
 4. If there is still no acknowledgement, Poki withdraws the request (the same rename).
    Plain text (what hardware keys can type) is then typed with key presses. Other text,
    such as Chinese or emoji, is **not entered**, and the answer says why the keyboard was
    not used; the same reason shows on the Setup page. Nothing is pasted unless the owner
    chose Paste (below). A request the panel has taken is never typed again by anything else.
 5. The panel types at a person's pace: Latin text a key at a time with longer gaps at
-   word starts, Chinese a word at a time, long text faster. It checks its own work from
+   word starts, long text faster. Chinese is typed the way a pinyin keyboard does it: the
+   word's pinyin appears letter by letter as marked text (`setMarkedText`), then the word
+   replaces it. The first word of a field tests whether the app keeps marked text as its
+   own; where it does not, words go in whole. Hidden text is never composed. The panel
+   shows the whole text while it types: what is in, the letters being composed, and what
+   is still to come. It checks its own work from
    the text around the cursor and reports `matched`, `mismatch` or `unknown`. Poki does
    **not** read the screen before or after: no focus wait, no read-back.
 6. When the action list ends, Poki asks the panel to leave, and it hands the field back
@@ -92,9 +108,11 @@ Hold the **Typing** heading for three seconds to show the experimental
 
 ## Not yet checked on a device
 
-- That Ctrl+Space from the simulated hardware keyboard reaches a third-party keyboard in
-  the rotation on every iOS version. When it does not, the answer says the keyboard did
-  not come up.
+- The globe key switch: that the globe key and its list are in the accessibility tree on
+  every iOS version, and that the list marks the keyboard in use as selected. When they are
+  not, the answer says so and plain text is typed with key presses.
 - That iOS reports the added keyboards to the app (`AppleKeyboards`). When it does not,
   Poki asks the panel only after it has answered once.
 - Floating and split keyboards on iPad, and landscape heights.
+- The one-touch globe switch (the slide to a remembered row), and pinyin composition in
+  apps that handle marked text themselves.

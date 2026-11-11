@@ -181,6 +181,20 @@ extension PokiState {
         switch phase {
         case .working:
             let name = app.map { ActivityWords.local($0) } ?? (voice != nil ? String(activity: "Voice") : String(activity: "Working"))
+            if let plan, plan.total > 0 {
+                // The chat's plan: its steps done, the one under way, and "2/5" as the count.
+                let current = min(plan.current, plan.total)
+                let count = "\(current)/\(plan.total)"
+                return ActivityFace(
+                    symbol: voice != nil ? "waveform" : "hand.tap.fill",
+                    status: name, shortStatus: name, tone: .quiet,
+                    meta: .text(count), shortMeta: .text(count),
+                    content: ActivityWords.step(headline),
+                    bottom: .progress(outcomes: Array(repeating: true, count: max(0, current - 1)), current: true, finished: false, stop: true),
+                    thumbnail: hasThumbnail ? .large : .none,
+                    compact: .text(count, .plain),
+                    minimal: .ring(Double(max(0, current - 1)) / Double(plan.total)))
+            }
             return ActivityFace(
                 symbol: voice != nil ? "waveform" : "hand.tap.fill",
                 status: name, shortStatus: name, tone: .quiet,
@@ -228,7 +242,7 @@ extension PokiState {
                 meta: time, shortMeta: time,
                 content: doneTitle,
                 subtitle: runSummary,
-                bottom: .progress(outcomes: outcomes, current: false, finished: true, stop: false),
+                bottom: .progress(outcomes: plan.map { Array(repeating: true, count: $0.total) } ?? outcomes, current: false, finished: true, stop: false),
                 thumbnail: hasThumbnail ? .large : .none,
                 compact: .symbol("checkmark", .done))
         case .problem:

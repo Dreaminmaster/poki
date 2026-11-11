@@ -29,7 +29,7 @@ struct ChatView: View {
             if voice.isOn {
                 LiveVoiceBar(voice: voice).transition(.move(edge: .top).combined(with: .opacity))
             }
-            ChatTranscript(entries: chat.entries, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry) {
+            ChatTranscript(entries: chat.entries, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID) {
                 if let hint = currentSetupHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
                 }
@@ -39,7 +39,7 @@ struct ChatView: View {
                         subtitle: String(localized: "Messages · Poki taps Send only if you allow"),
                         answer: { _ in }
                     )
-                } else if !ApprovalClassifier.isOn, let approval = model.approvals.first {
+                } else if let approval = model.approvals.first {
                     ForegroundApprovalSection(
                         title: approval.summary,
                         subtitle: model.currentApp.map { String(localized: "\($0) · Poki acts only if you allow") } ?? String(localized: "Poki acts only if you allow"),
@@ -295,7 +295,10 @@ struct ChatTranscript<Footer: View>: View {
     var typing = false
     var canRetry = false
     var retry: () -> Void = {}
+    /// The run these entries belong to, for the details of its steps (the Activity Log's session).
+    var session: String? = nil
     @ViewBuilder var footer: () -> Footer
+    @State private var details: ChatRunDetails?
 
     var body: some View {
         ScrollView {
@@ -326,6 +329,43 @@ struct ChatTranscript<Footer: View>: View {
         .defaultScrollAnchor(.bottom, for: .alignment)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
+        .sheet(item: $details) { run in RunDetailsView(title: run.title, steps: run.steps, actions: run.actions) }
+    }
+
+    /// The task entry `i` is part of: its steps, and the actions the Activity Log has between the
+    /// message that asked for it and the next one.
+    private func run(at i: Int) -> ChatRunDetails {
+        func asks(_ entry: ChatEntry) -> Bool {
+            switch entry.kind { case .you, .request: true; default: false }
+        }
+        let start = entries[...i].lastIndex(where: asks)
+        let end = entries[(i + 1)...].firstIndex(where: asks)
+        let from = start.map { entries[$0].at.addingTimeInterval(-1) } ?? entries[i].at.addingTimeInterval(-600)
+        let to = end.map { entries[$0].at } ?? Date.distantFuture
+        var steps: [PlanStep] = []
+        var title = String(localized: "Task Details")
+        for entry in entries[(start ?? i)..<(end ?? entries.count)] {
+            switch entry.kind {
+            case .plan(let plan): steps += plan
+            case .step(let text, let ok): steps.append(PlanStep(text, state: ok == true ? .done : ok == false ? .failed : .current))
+            case .you(let text, _): title = String(text.prefix(40))
+            case .request(let text, _): title = String(text.prefix(40))
+            default: break
+            }
+        }
+        return ChatRunDetails(title: title, steps: steps, actions: ActionLog.shared.entries(session: session, from: from, to: to))
+    }
+
+    /// Touch and hold on a task's steps, a step line or an approval.
+    @ViewBuilder private func menu(at i: Int) -> some View {
+        Button("View Details", systemImage: "info.circle") { details = run(at: i) }
+        Button("Copy Steps", systemImage: "doc.on.doc") {
+            let run = run(at: i)
+            UIPasteboard.general.string = RunDetailsView.text(title: run.title, steps: run.steps, actions: [])
+        }
+        Button("Copy Details", systemImage: "list.bullet.clipboard") { UIPasteboard.general.string = run(at: i).text }
+        Button("Copy Diagnostic Log", systemImage: "doc.text") { UIPasteboard.general.string = AppLog.shared.text }
+        ShareLink(item: run(at: i).text) { Label("Share", systemImage: "square.and.arrow.up") }
     }
 
     @ViewBuilder private func row(_ entry: ChatEntry, at i: Int) -> some View {
@@ -363,14 +403,25 @@ struct ChatTranscript<Footer: View>: View {
         case .plan(let steps):
             HStack {
                 PlanBubble(steps: steps, tail: isLast(i, poki: true))
+                    .contentShape(.contextMenuPreview, .rect(cornerRadius: .cornerRadius, style: .continuous))
+                    .contextMenu { menu(at: i) }
                 Spacer(minLength: .messageInsetPadding)
             }
             .padding(.top, startsRun(i) ? 10 : 0)
             .transition(PlanMotion.stepTransition)
+        case .note(.approval(let approval)):
+            HStack {
+                ApprovalNoteCard(note: approval)
+                    .contentShape(.contextMenuPreview, .rect(cornerRadius: 16, style: .continuous))
+                    .contextMenu { menu(at: i) }
+                Spacer(minLength: .messageInsetPadding)
+            }
+            .padding(.vertical, 4)
+            .transition(PlanMotion.stepTransition)
         case .note(let note):
             NoteLine(note: note)
         case .step(let text, let ok):
-            StepLine(text: text, ok: ok)
+            StepLine(text: text, ok: ok).contextMenu { menu(at: i) }
         }
     }
 
@@ -661,6 +712,7 @@ private struct NoteLine: View {
         switch note {
         case .waiting: .island
         case .approved, .modelApproved: .ok
+        case .approval(let note): note.state == .allowed ? StatusGlyph.ok : note.state == .asking ? StatusGlyph.working : StatusGlyph.failed
         case .declined, .modelDeclined: .failed
         case .expired, .problem: .warning
         case .modelChecking: .working
@@ -674,12 +726,96 @@ private struct NoteLine: View {
         case .declined: String(localized: "Not approved, so Poki skipped that step")
         case .expired: String(localized: "The approval ran out, so Poki skipped that step")
         case .problem(let text): text
+        case .approval(let note): note.summary
         case .modelChecking: String(localized: "The model is checking this step")
         case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model: \(why)")
         case .modelDeclined(let why):
             why.isEmpty ? String(localized: "Not approved by model. Say yes in the chat to let it through.")
                 : String(localized: "Not approved by model: \(why). Say yes in the chat to let it through.")
         }
+    }
+}
+
+/// What View Details shows for one task of a chat.
+struct ChatRunDetails: Identifiable {
+    let id = UUID()
+    var title: String
+    var steps: [PlanStep]
+    var actions: [ActionLog.Entry]
+    var text: String { RunDetailsView.text(title: title, steps: steps, actions: actions) }
+}
+
+/// An approval in the conversation: what was asked, why it needed an answer, and who answered what.
+struct ApprovalNoteCard: View {
+    var note: ApprovalNote
+
+    private var title: String {
+        switch (note.state, note.byModel) {
+        case (.asking, true): String(localized: "Checking This Step")
+        case (.asking, false): String(localized: "Waiting for Your Approval")
+        case (.allowed, true): String(localized: "Approved Automatically")
+        case (.allowed, false): String(localized: "You Approved")
+        case (.refused, true): String(localized: "Not Approved")
+        case (.refused, false): String(localized: "You Did Not Approve")
+        case (.expired, _): String(localized: "Approval Ran Out")
+        }
+    }
+
+    private var symbol: String {
+        switch note.state {
+        case .asking: "shield.lefthalf.filled"
+        case .allowed: "checkmark.shield.fill"
+        case .refused: "xmark.shield.fill"
+        case .expired: "exclamationmark.shield.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch note.state {
+        case .asking: Site.blue
+        case .allowed: ChatColor.green
+        case .refused: Color(.systemRed)
+        case .expired: Color(.systemOrange)
+        }
+    }
+
+    /// "Messages · sending a message": the app and PokiCore's reason, without its quoted word.
+    private var context: String {
+        let why = note.why.split(separator: "(").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        let app = note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : note.app
+        return [app, why.isEmpty ? nil : why].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint)
+                Text(verbatim: title).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
+                Spacer(minLength: 4)
+                if note.state == .asking, note.byModel {
+                    ProgressView().controlSize(.mini)
+                } else if let at = note.answered {
+                    Text(at.formatted(date: .omitted, time: .shortened)).font(.system(size: 11)).foregroundStyle(ChatColor.secondary)
+                }
+            }
+            Text(verbatim: note.summary).font(.system(size: 15)).foregroundStyle(Color(.label))
+                .fixedSize(horizontal: false, vertical: true)
+            if !context.isEmpty {
+                Text(verbatim: context).font(.system(size: 12)).foregroundStyle(ChatColor.secondary)
+            }
+            if !note.reason.isEmpty {
+                Text(verbatim: note.reason).font(.system(size: 13)).foregroundStyle(ChatColor.pending)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if note.state == .refused, note.reply {
+                Text("Say yes in the chat to let it through.").font(.system(size: 12)).foregroundStyle(ChatColor.secondary)
+            }
+        }
+        .padding(.vertical, 10).padding(.horizontal, 12)
+        .frame(width: 250, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(tint.opacity(0.25), lineWidth: 1) }
+        .accessibilityElement(children: .combine)
     }
 }
 
