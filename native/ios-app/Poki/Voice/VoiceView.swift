@@ -34,9 +34,9 @@ struct VoiceView: View {
                 } footer: {
                     if micDenied { Text("Poki can't use the microphone. Allow it in Settings, Privacy, Microphone.").foregroundStyle(.orange) }
                     else if voice.canTalkLive {
-                        Text("In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud. It ends by itself 8 seconds after an answer if nobody speaks, and when Poki goes to the background (once a running step is done). Tap End to stop sooner. The microphone in the message field only dictates.")
+                        Text("On the Voice page, holding the button starts a live conversation: Poki listens, acts and answers out loud. It ends by itself 8 seconds after an answer if nobody speaks, and when Poki goes to the background (once a running step is done). Slide up to end it sooner. The microphone in the message field only dictates.")
                     } else {
-                        Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Model. Dictation in the message field works with every model.")
+                        Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Accounts and Models. Dictation in the message field works with every model.")
                     }
                 }
                 if voice.lastTurnMS != nil || voice.bridge != nil || VoiceDirect.apiKey == nil {

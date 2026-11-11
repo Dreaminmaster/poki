@@ -104,7 +104,7 @@ struct RootView: View {
                     VoicePage(
                         back: split ? nil : { home = NavigationPath() },
                         openDetails: { openDetails() },
-                        openVoiceSettings: { openDetails([DetailsRoute.voice]) },
+                        openModel: { openDetails([DetailsRoute.model]) },
                         select: { target in withAnimation(.snappy) { page = target } }
                     )
                     .transition(.move(edge: .trailing))

@@ -9,7 +9,8 @@ struct VoicePage: View {
     @Environment(AppModel.self) private var model
     var back: (() -> Void)? = nil
     var openDetails: () -> Void
-    var openVoiceSettings: () -> Void
+    /// Accounts and Models: voice needs a chat model to dictate, or an OpenAI key to talk live.
+    var openModel: () -> Void
     var select: (RootPage) -> Void
     @State private var holding = false
     @State private var cancelling = false
@@ -46,7 +47,7 @@ struct VoicePage: View {
             case .ready:
                 Text("Hold and say it.").font(.system(size: 34, weight: .bold)).foregroundStyle(.white)
                 Text(readyLine).font(.system(size: 17)).foregroundStyle(.white.opacity(0.72)).multilineTextAlignment(.center)
-                    .onTapGesture { if !voice.canTalk { openVoiceSettings() } }
+                    .onTapGesture { if !voice.canTalk { openModel() } }
             case .listening:
                 heard.font(.system(size: 40, weight: .bold)).foregroundStyle(.white).multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -123,7 +124,7 @@ struct VoicePage: View {
                 if !holding {
                     holding = true
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    if voice.canTalk { Task { await voice.press() } } else { openVoiceSettings() }
+                    if voice.canTalk { Task { await voice.press() } } else { openModel() }
                 }
                 cancelling = value.translation.height < -60
             }
