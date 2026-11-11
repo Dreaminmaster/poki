@@ -432,12 +432,12 @@
         }
       }
     },
-    "Add a model key first: tap my picture, then Model." : {
+    "Add a model key first: tap my picture, then Accounts and Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先添加模型密钥：轻点头像，再选择“模型”。"
+            "value" : "请先添加模型密钥：轻点头像，再选择“账号与模型”。"
           }
         }
       }
@@ -493,12 +493,12 @@
         }
       }
     },
-    "Add your %@ key: tap my picture, then Model." : {
+    "Add your %@ key: tap my picture, then Accounts and Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请添加 %@ 密钥：轻点头像，再选择“模型”。"
+            "value" : "请添加 %@ 密钥：轻点头像，再选择“账号与模型”。"
           }
         }
       }
@@ -4269,22 +4269,22 @@
         }
       }
     },
-    "Sign in to ChatGPT again: tap my picture, then Model." : {
+    "Sign in to ChatGPT again: tap my picture, then Accounts and Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请重新登录 ChatGPT：轻点头像，再选择“模型”。"
+            "value" : "请重新登录 ChatGPT：轻点头像，再选择“账号与模型”。"
           }
         }
       }
     },
-    "Sign in to ChatGPT first: tap my picture, then Model." : {
+    "Sign in to ChatGPT first: tap my picture, then Accounts and Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先登录 ChatGPT：轻点头像，再选择“模型”。"
+            "value" : "请先登录 ChatGPT：轻点头像，再选择“账号与模型”。"
           }
         }
       }
