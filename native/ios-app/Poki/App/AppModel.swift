@@ -1511,8 +1511,8 @@ final class AppModel {
                 guard state.phase == .working, state.stepCount == 0, state.approval == nil, state.handoff == nil else { return }
                 state.phase = .idle; state.headline = "Waiting for agent"; state.since = nil
             }
-            // Its reply still reaches an owner who is elsewhere (a task sent from a shortcut).
-            if !inFront, let reply { postReply(reply) }
+            // The owner's own reply still reaches them when they are elsewhere (a task sent from a shortcut).
+            if !inFront, let reply, session == AskPoki.chat?.sessionID { postReply(reply) }
             return
         }
         finishTask()

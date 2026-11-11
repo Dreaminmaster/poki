@@ -13,11 +13,18 @@ final class PokiEntry {
 
     static let shared = PokiEntry()
     private(set) var pending: Request?
+    @ObservationIgnored private var askedAt = Date.distantPast
 
-    func ask(_ request: Request) { pending = request }
+    func ask(_ request: Request) {
+        pending = request
+        askedAt = .now
+    }
 
+    /// A Talk request that waited more than a few seconds only shows the chat: the microphone starts
+    /// on a press, never later on its own.
     func take() -> Request? {
         defer { pending = nil }
+        if pending == .talk, Date.now.timeIntervalSince(askedAt) > 15 { return .show }
         return pending
     }
 }
