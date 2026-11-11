@@ -349,7 +349,7 @@ struct HandsView: View {
                 } header: {
                     Text("Automation")
                 } footer: {
-                    Text("Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested: if the agent can’t see the screen after this, turn it off and open Poki again.")
+                    Text("Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again.")
                 }
             }
             // Main's Runner section. The in-process path has no Poki Runner to start or stop (ESP-152).
@@ -371,7 +371,7 @@ struct HandsView: View {
                 }
             }
             // Main #143's Setup › Advanced › Typing: the Poki keyboard by default, Paste only when chosen.
-            if model.automationPath == .nativeServices { TypingSettingsSection() }
+            if model.automationPath != .runner { TypingSettingsSection() }
 
             // The off side of main's Poki switch: resting only stands by, this ends the session and the relay.
             if model.sessionOn {
@@ -465,50 +465,15 @@ struct HealthView: View {
     }
 }
 
-/// Rules: when Poki asks you before a sensitive step (main #150's Agents › Approvals, as it is there),
-/// and what the phone does when a task ends (main #150's Setup › Advanced › Chat).
+/// Rules: when Poki asks you before a sensitive step (main's Agents › Safety › Approvals, the same
+/// sections), and what the phone does when a task ends (main #150's Setup › Advanced › Chat).
 struct ApprovalsSettingsView: View {
-    @Environment(AppModel.self) private var model
     @AppStorage(AppModel.afterTaskKey) private var afterTask = "notify"
 
     var body: some View {
-        @Bindable var model = model
         Form {
-            Section {
-                Picker(selection: $model.approvalMode) {
-                    ForEach(ApprovalClassifier.Mode.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    Label("Ask Before Sensitive Steps", systemImage: "hand.raised")
-                }
-                .accessibilityIdentifier("approvals.mode")
-                if model.approvalMode != .off {
-                    Picker(selection: $model.classifierLevel) {
-                        ForEach(ApprovalClassifier.Level.allCases) { Text($0.title).tag($0) }
-                    } label: {
-                        Label("Sensitivity", systemImage: "dial.medium")
-                    }
-                    .accessibilityIdentifier("approvals.sensitivity")
-                }
-            } header: {
-                Text("Approvals")
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                    switch model.approvalMode {
-                    case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
-                    case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                    case .off: Text("Agents do all of that without asking.")
-                    }
-                    if model.approvalMode != .off {
-                        if model.classifierLevel == .everything {
-                            Text("Ask for Everything: nothing is approved automatically. Steps that follow straight after your answer in the same app do not ask again.")
-                        } else {
-                            Text("Permissive, Balanced and Strict let your chat model approve steps in Poki’s own chat that fit what you asked for, and only ask you about the rest. The chat and the Activity Log show each decision.")
-                        }
-                    }
-                    Text("Turning asking on or off takes effect the next time Poki opens.")
-                }
-            }
+            // Main's Approvals page, as it is there: how Poki asks, and the sensitivity slider.
+            ApprovalsSections()
 
             Section {
                 Picker(selection: $afterTask) {
@@ -520,7 +485,7 @@ struct ApprovalsSettingsView: View {
                 .accessibilityIdentifier("moreSettings.afterTask")
             } header: { Text("Chat") } footer: {
                 Text(afterTask == "return" ? "Poki comes back to the front with its reply when a task ends."
-                     : "The phone stays where the task ended. Poki’s reply comes as a notification: touch and hold it to answer and carry on from there.")
+                     : "The phone stays where the task ended. Poki’s reply comes as a notification. Touch and hold it to answer and carry on from there.")
             }
         }
         .navigationTitle("Rules")
@@ -536,8 +501,8 @@ struct AgentsAndRelayView: View {
 
     private var relayLine: String {
         if model.relayAddress == nil { return String(localized: "Set an address first") }
-        if !model.relayEnabled { return String(localized: "Off: agents can’t reach this iPhone") }
-        if !model.sessionOn { return String(localized: "Waiting for Poki: turn Poki on and agents can connect") }
+        if !model.relayEnabled { return String(localized: "Off, agents can’t reach this iPhone") }
+        if !model.sessionOn { return String(localized: "Waiting for Poki, turn Poki on and agents can connect") }
         return Health.relay(model).word
     }
 
@@ -576,8 +541,8 @@ struct AgentsAndRelayView: View {
                 Text("External Agents")
             } footer: {
                 Text(model.relayAddress == nil
-                     ? "Set your relay first: each agent gets its own MCP address on it."
-                     : "Each agent gets its own MCP address; add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                     ? "Set your relay first. Each agent gets its own MCP address on it."
+                     : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
             }
 
             Section {

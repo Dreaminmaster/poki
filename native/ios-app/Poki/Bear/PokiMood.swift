@@ -102,7 +102,8 @@ struct PokiStatus: Equatable {
         if SetupIssueHint.runnerIssue(model: model) != nil { return PokiStatus(.cantReach) }
         if chat.canRetry { return PokiStatus(.tripped) }
         if DoneLinger.shared.showing { return PokiStatus(.done) }
-        if !model.setupLooksComplete { return PokiStatus(.hello) }
+        // Setup is open, unless only the loopback is missing and Poki can start without it (main's rule for Home).
+        if !model.setupLooksComplete && !model.canStartWithoutLoopback { return PokiStatus(.hello) }
         if !(model.sessionOn || model.wantsOn) { return PokiStatus(.paused, word: String(localized: "Off")) }
         // Standing by after the idle minute is still ready: only the owner's own pause puts it to sleep.
         if model.ownerPaused { return PokiStatus(.paused) }

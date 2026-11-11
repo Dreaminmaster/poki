@@ -380,7 +380,7 @@ struct SessionsView: View {
                 updated: yesterday,
                 live: false,
                 outcome: .done,
-                entries: [ChatEntry(.poki(String(localized: "Your turn: enter your Apple Account password.")))],
+                entries: [ChatEntry(.poki(String(localized: "Your turn, enter your Apple Account password")))],
                 calls: [],
                 customName: "Claude Code"
             ),
@@ -506,7 +506,7 @@ struct SessionView: View {
             if asking || running != nil || sample {
                 VStack(spacing: 8) {
                     if session?.live == true, let approval = model.approvals.first {
-                        ApprovalAskCard(title: approval.question, detail: approval.reasonLine, quote: approval.summary, expires: approval.expires,
+                        ApprovalAskCard(title: approval.question, detail: approval.reasonLine, quote: ActivityWords.label(approval.summary), expires: approval.expires,
                                         answer: { approved in model.resolve(approval, approved: approved) })
                     } else if session?.live == true, let text = model.handoffText {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)

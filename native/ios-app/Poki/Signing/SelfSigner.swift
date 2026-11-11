@@ -88,6 +88,9 @@ final class SelfSigner {
     /// Before an install the owner asked for: Poki winds down (automation session, Live Activity)
     /// so it exits cleanly when iOS replaces it, and comes back on after.
     var beforeInstall: () -> Void = {}
+    /// The install has everything it needs and waits for Poki to go: background tasks, silent audio,
+    /// location and the Live Activity end, so iOS can replace Poki without having to kill it.
+    var beforeClose: (() -> Void)?
 
     private var started = false
     private var timer: Timer?
@@ -111,7 +114,7 @@ final class SelfSigner {
     /// Why Poki cannot download the update by itself, when it cannot. Nil when it can.
     var updateBlocker: String? {
         guard updateNotReady else { return nil }
-        if !signedIn { return String(localized: "To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac.") }
+        if !signedIn { return String(localized: "To download updates by itself, Poki needs your Apple Account. Sign in under Signing Options. Or update Poki from Poki Setup on your Mac.") }
         if phone() == nil { return String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.") }
         return nil
     }
@@ -162,7 +165,7 @@ final class SelfSigner {
     // MARK: Account
 
     func signIn(appleID: String, password: String, keepPassword: Bool) async {
-        await run("Signing in") {
+        await run(String(localized: "Signing in")) {
             _ = try await SignerBridge.call(["op": "sign_in", "apple_id": appleID, "password": password, "keep_password": keepPassword])
         }
         await reload()
@@ -170,13 +173,13 @@ final class SelfSigner {
     }
 
     func finishSignIn(code: String) async {
-        await run("Checking the code") { _ = try await SignerBridge.call(["op": "finish_sign_in", "code": code]) }
+        await run(String(localized: "Checking the code")) { _ = try await SignerBridge.call(["op": "finish_sign_in", "code": code]) }
         await reload()
         if signedIn { await loadTeams() }
     }
 
     func signOut() async {
-        await run("Signing out") { _ = try await SignerBridge.call(["op": "sign_out"]) }
+        await run(String(localized: "Signing out")) { _ = try await SignerBridge.call(["op": "sign_out"]) }
         teams = []
         await reload()
     }
@@ -187,7 +190,7 @@ final class SelfSigner {
     }
 
     func choose(team: Team) async {
-        await run("Choosing the team") { _ = try await SignerBridge.call(["op": "choose_team", "team_id": team.team_id]) }
+        await run(String(localized: "Choosing the team")) { _ = try await SignerBridge.call(["op": "choose_team", "team_id": team.team_id]) }
         await reload()
     }
 
@@ -296,7 +299,7 @@ final class SelfSigner {
         request["kind"] = kind
         request["app_path"] = Bundle.main.bundlePath
         request["device_name"] = UIDevice.current.name
-        await run(kind == "update" ? "Preparing the update" : "Preparing a refresh") {
+        await run(kind == "update" ? String(localized: "Preparing the update") : String(localized: "Preparing a refresh")) {
             let p = try await SignerBridge.decode(Prepared.self, request) { [weak self] progress in
                 Task { @MainActor in self?.show(progress) }
             }
@@ -350,7 +353,7 @@ final class SelfSigner {
                 }
             }
         }
-        await run("Installing") {
+        await run(String(localized: "Installing")) {
             _ = try await SignerBridge.call(request) { [weak self] progress in
                 Task { @MainActor in self?.show(progress) }
             }
@@ -409,6 +412,7 @@ final class SelfSigner {
         closing = true
         finishNotice = false
         log.add("signing", "closing Poki so iOS can finish the install")
+        beforeClose?()
         let center = UNUserNotificationCenter.current()
         center.removeDeliveredNotifications(withIdentifiers: [Self.finishNoticeID, Self.readyNotice, Self.expiringNotice])
         notify(title: String(localized: "Poki Was Updated"), body: String(localized: "Tap to open Poki again."), id: Self.reopenNotice, after: 15)
@@ -433,7 +437,10 @@ final class SelfSigner {
         guard !steppedAside else { return }
         log.add("signing", "the install's last step: telling the owner Poki will close to finish")
         steppedAside = true
-        working = String(localized: "Finishing the update: Poki will close to finish it")
+        // Nothing may hold Poki up from here on: iOS replaces the app once it is neither in front
+        // nor running, and a background task or a Live Activity kept it alive under the install.
+        beforeClose?()
+        working = String(localized: "Finishing the update, Poki will close to finish it")
         // The last step: the owner is told Poki will close (the alert's OK steps aside, and iOS ends
         // Poki by itself otherwise); the notice says it again in case the alert was missed.
         installStepSince = Date()
@@ -453,10 +460,17 @@ final class SelfSigner {
         }
     }
 
+    /// A step title from the signer ("Checking this iPhone", "Signing Poki for Jane") in the system's language.
+    private static func stepWords(_ title: String) -> String {
+        let prefix = "Signing Poki for "
+        if title.hasPrefix(prefix) { return String(localized: "Signing Poki for \(String(title.dropFirst(prefix.count)))") }
+        return Bundle.main.localizedString(forKey: title, value: title, table: nil)
+    }
+
     private func show(_ progress: [String: Any]) {
         switch progress["kind"] as? String {
         case "step":
-            working = progress["title"] as? String ?? working; fraction = nil
+            working = (progress["title"] as? String).map(Self.stepWords) ?? working; fraction = nil
             // The install itself has begun (the build is on the phone): the last step, where Poki
             // must exit for iOS to finish. The owner is told now rather than at a percentage that a
             // fast or stalled install may never report.
@@ -477,6 +491,7 @@ final class SelfSigner {
         content.title = title
         content.body = body
         content.userInfo = ["poki_link": "poki://setup"]
+        content.interruptionLevel = .timeSensitive
         let trigger = seconds.map { UNTimeIntervalNotificationTrigger(timeInterval: $0, repeats: false) }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
     }
@@ -579,7 +594,7 @@ enum SignerBridge {
                             let wrapped = (try? JSONSerialization.data(withJSONObject: ["v": object["value"] ?? NSNull()])) ?? Data("{\"v\":null}".utf8)
                             box.continuation?.resume(returning: wrapped)
                         } else {
-                            box.continuation?.resume(throwing: SignerError(message: object["error"] as? String ?? "The signer failed.", code: object["code"] as? String ?? ""))
+                            box.continuation?.resume(throwing: SignerError(message: object["error"] as? String ?? String(localized: "The signer failed."), code: object["code"] as? String ?? ""))
                         }
                         box.continuation = nil
                         unmanaged.release()
@@ -591,7 +606,7 @@ enum SignerBridge {
             if rc != 0 {
                 box.takeUnretainedValue().continuation = nil
                 box.release()
-                c.resume(throwing: SignerError(message: "The signer did not take the request.", code: "config"))
+                c.resume(throwing: SignerError(message: String(localized: "The signer did not take the request."), code: "config"))
             }
         }
     }

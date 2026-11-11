@@ -251,8 +251,8 @@ final class ChatModel {
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
-            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first: tap my picture, then Brain.")
-                                       : String(localized: "Add a model key first: tap my picture, then Brain.")))
+            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first. Tap my picture, then Brain.")
+                                       : String(localized: "Add a model key first. Tap my picture, then Brain.")))
             return
         }
         let model = ModelKeys.selectedModel

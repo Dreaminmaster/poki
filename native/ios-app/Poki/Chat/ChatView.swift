@@ -190,15 +190,23 @@ struct ChatView: View {
             ApprovalAskCard(title: sample.question, detail: sample.reasonLine, quote: sample.summary, expires: sample.expires, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
+        } else if sampleScene == "methodAsk" {
+            // The simulator never asks this (Poki chooses no method there): the card, for a look at it.
+            MethodAskCard(ask: .loopbackOff, answer: { _ in })
         } else if let ask = chat.demoAsk {
             ApprovalAskCard(title: ask.question, detail: ask.reasonLine, quote: ask.summary, expires: ask.expires, answer: chat.answerDemo)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let approval = model.approvals.first {
-            ApprovalAskCard(title: approval.question, detail: approval.reasonLine, quote: approval.summary, expires: approval.expires,
+            ApprovalAskCard(title: approval.question, detail: approval.reasonLine, quote: ActivityWords.label(approval.summary), expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let text = model.handoffText {
             TurnCard(text: Self.local(text), done: model.handoffDoneInApp)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if let ask = model.methodAsk, model.sessionOn, !model.methodAskDismissed {
+            // Main's question when native services cannot start: here with the other things that
+            // wait for you, so it shows on the home page too.
+            MethodAskCard(ask: ask) { model.answerMethodAsk(useBanner: $0, from: "the owner, on the card") }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
@@ -297,7 +305,7 @@ struct SetupIssueHint: Equatable {
     @MainActor static func runnerIssue(model: AppModel) -> SetupIssueHint? {
         if let trouble = model.pairingTrouble {
             return SetupIssueHint(
-                message: String(localized: "The phone no longer accepts Poki’s pairing (\(trouble)). Pair again in Setup; it takes a minute."),
+                message: String(localized: "The phone no longer accepts Poki’s pairing (\(trouble)). Pair again in Setup, it takes a minute."),
                 link: String(localized: "Pair This iPhone ›"),
                 target: .step(.pairing)
             )
@@ -905,12 +913,12 @@ private struct NoteLine: View {
         case .declined: String(localized: "Not approved, so Poki skipped that step")
         case .expired: String(localized: "The approval ran out, so Poki skipped that step")
         case .problem(let text): text
-        case .approval(let note): note.summary
+        case .approval(let note): ActivityWords.label(note.summary)
         case .modelChecking: String(localized: "The model is checking this step")
-        case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model: \(why)")
+        case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model, \(why)")
         case .modelDeclined(let why):
             why.isEmpty ? String(localized: "Not approved by model. Say yes in the chat to allow it.")
-                : String(localized: "Not approved by model: \(why). Say yes in the chat to allow it.")
+                : String(localized: "Not approved by model, \(why). Say yes in the chat to allow it.")
         }
     }
 }
@@ -960,9 +968,9 @@ struct ApprovalNoteCard: View {
 
     /// "Messages · sending a message": the app and PokiCore's reason, without its quoted word.
     private var context: String {
-        let why = note.why.split(separator: "(").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        let why = ActivityWords.reason(note.why)
         let app = note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : note.app
-        return [app, why.isEmpty ? nil : why].compactMap { $0 }.joined(separator: " · ")
+        return [app, why.isEmpty ? nil : why].compactMap { $0 }.joined(separator: ", ")
     }
 
     var body: some View {
@@ -977,13 +985,13 @@ struct ApprovalNoteCard: View {
                     Text(at.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(Color(.secondaryLabel))
                 }
             }
-            Text(verbatim: note.summary).font(.subheadline).foregroundStyle(Color(.label))
+            Text(verbatim: ActivityWords.label(note.summary)).font(.subheadline).foregroundStyle(Color(.label))
                 .fixedSize(horizontal: false, vertical: true)
             if !context.isEmpty {
                 Text(verbatim: context).font(.caption).foregroundStyle(Color(.secondaryLabel))
             }
             if !note.reason.isEmpty {
-                Text(verbatim: note.reason).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: Bundle.main.localizedString(forKey: note.reason, value: note.reason, table: nil)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if note.state == .refused, note.reply {
@@ -1176,7 +1184,7 @@ struct ComposerInputView: View {
                     }
                 }
                 if VoiceDirect.apiKey != nil {
-                    Menu("Voice Model: \(VoiceDirect.model)", systemImage: "waveform") {
+                    Menu("Voice Model \(VoiceDirect.model)", systemImage: "waveform") {
                         ForEach(ModelCatalog.voiceAvailable) { choice in
                             Button { ModelCatalog.voiceModel = choice.id; modelVersion += 1 } label: {
                                 if VoiceDirect.model == choice.id { Label(choice.name, systemImage: "checkmark") } else { Text(choice.name) }
@@ -1185,7 +1193,7 @@ struct ComposerInputView: View {
                     }
                 }
             } label: {
-                Label("Chat Model: \(ModelKeys.selectedModelName)", systemImage: "cpu")
+                Label("Chat Model \(ModelKeys.selectedModelName)", systemImage: "cpu")
             }
             .id(modelVersion)
         } else {
@@ -1297,7 +1305,7 @@ final class FieldDictation {
         Task {
             guard await Dictation.allowed() else {
                 starting = false
-                problem = String(localized: "Poki needs the microphone and speech recognition: allow them in Settings › Poki.")
+                problem = String(localized: "Poki needs the microphone and speech recognition. Allow them in Settings › Poki.")
                 return
             }
             guard starting else { return }
@@ -1391,7 +1399,7 @@ struct LiveVoiceBar: View {
     private var detail: String {
         switch voice.phase {
         case .connecting: String(localized: "Connecting…")
-        case .listening: voice.isLive ? String(localized: "Listening. Just talk; Poki answers when you pause.") : String(localized: "Ready")
+        case .listening: voice.isLive ? String(localized: "Listening. Just talk and Poki answers when you pause.") : String(localized: "Ready")
         case .hearing: String(localized: "Hearing you…")
         case .thinking: String(localized: "Working on it…")
         case .speaking: String(localized: "Speaking")

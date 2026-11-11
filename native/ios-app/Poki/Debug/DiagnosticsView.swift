@@ -14,7 +14,7 @@ struct DiagnosticsView: View {
             Section {
                 if let loop = loopbackInterface(addresses) {
                     Text(verbatim: "\(loop.interface)  \(loop.address)").font(.body.monospaced().weight(.semibold))
-                    Text(loop.ipv6.isEmpty ? "No IPv6 on this interface" : "IPv6 present: \(loop.ipv6.joined(separator: ", "))")
+                    Text(loop.ipv6.isEmpty ? "No IPv6 on this interface" : "IPv6 present, \(loop.ipv6.joined(separator: ", "))")
                         .font(.footnote.monospaced()).foregroundStyle(loop.ipv6.isEmpty ? Color.secondary : Color.red)
                 } else {
                     Text("No interface has a 10.7.0.x address. Check that your proxy app is on and its loopback module is enabled.")
@@ -55,7 +55,7 @@ struct DiagnosticsView: View {
         let label = r.label.replacingOccurrences(of: " (10.7.0.1)", with: "")
         let outcome = r.outcome.prefix(1).uppercased() + r.outcome.dropFirst()
         func local(_ s: String) -> String { Bundle.main.localizedString(forKey: s, value: s, table: nil) }
-        return String(localized: "\(local(label)): \(local(outcome))")
+        return String(localized: "\(local(label)), \(local(outcome))")
     }
 
     private func run() async {
@@ -98,11 +98,10 @@ struct LogView: View {
 /// Steps and the Auto-Classifier are in Poki › Rules.
 struct TestingOptionsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(NativeServicesWDA.inputWithoutScreenSharingKey) private var bareInput = false
+    @AppStorage(NativeServicesWDA.inputWithoutScreenSharingKey) private var bareInput = true
     var body: some View {
         @Bindable var model = model
         Form {
-            AutomationMethodSection()
             Section {
                 Toggle("ask_poki Tool", isOn: $model.askPokiTool)
             } header: {
@@ -115,7 +114,7 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Touches and Keys")
             } footer: {
-                Text("Poki sends touches and keys over a screen-sharing session, and iOS turns the camera off in every app while one is open, so Poki opens it only for an action and closes it 5 seconds after the last one. With this on, Poki opens no session at all. If taps and typing still work, the camera is never affected; if they stop working, turn it off. Takes effect the next time Poki turns on.")
+                Text("Poki sends touches and keys over a screen-sharing session, and iOS turns the camera off in every app while one is open, so Poki opens it only for an action and closes it 5 seconds after the last one. With this on (the default), Poki opens no session at all, so the camera is never affected. If taps and typing stop working, turn it off. Takes effect the next time Poki turns on.")
             }
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }

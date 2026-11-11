@@ -37,7 +37,12 @@ struct MessageBubble: View {
                     .padding(.vertical, .messageVerticalPadding)
                     .padding(.horizontal, .messageHorizontalPadding)
                     .background(direction == .guest ? Tint.solid : Tint.blue, in: shape)
+                    // The bubble is one flat layer with its own outline, so the lifted copy of it (the
+                    // long press) is cut to the same outline and the small corner stays where it is.
+                    .clipShape(shape)
+                    .compositingGroup()
                     .contentShape(.contextMenuPreview, shape)
+                    .contentShape(.interaction, shape)
                     .contextMenu { copyButton { UIPasteboard.general.string = text } }
                     .frame(maxWidth: 320, alignment: .trailing)
             }
@@ -82,8 +87,12 @@ extension View {
                                            bottomTrailingRadius: .cornerRadius, topTrailingRadius: .cornerRadius, style: .continuous)
         return background(Color(.secondarySystemGroupedBackground), in: shape)
             .overlay(shape.strokeBorder(Tint.ring.opacity(0.5), lineWidth: 0.5))
+            // One flat layer cut to its outline (as your bubble), under the shadow.
+            .clipShape(shape)
+            .compositingGroup()
             .shadow(color: Tint.bubbleShadow, radius: 6, y: 2)
             .contentShape(.contextMenuPreview, shape)
+            .contentShape(.interaction, shape)
     }
 }
 

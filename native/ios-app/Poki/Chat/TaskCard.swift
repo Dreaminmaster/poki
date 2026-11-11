@@ -387,6 +387,40 @@ struct ApprovalAskCard: View {
     }
 }
 
+/// Native services cannot start and the XCTest session could (main's automation chooser): the
+/// owner's choice, drawn as the approval's card. Starting the other way shows iOS's banner and
+/// nothing else, so it is a tap, not a hold.
+struct MethodAskCard: View {
+    var ask: AutomationChooser.Ask
+    var answer: (Bool) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let answers = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(AnswerRow())
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                PokiAvatar(size: 48, mood: .needsYou)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start Another Way?").font(.headline).foregroundStyle(Color(.label))
+                    Text(verbatim: AppModel.ownerWords(ask)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            answers {
+                Button { answer(false) } label: {
+                    Text("Keep Waiting").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                Button("Start With Banner") { answer(true) }.buttonStyle(SolidCapsuleButtonStyle())
+            }
+        }
+        .padding(18)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
+        .accessibilityIdentifier("methodAsk.card")
+    }
+}
+
 /// The two answers side by side, the second 1.35 times the first: the board's Don’t Allow and Hold to Allow.
 private struct AnswerRow: Layout {
     var spacing: CGFloat = 8

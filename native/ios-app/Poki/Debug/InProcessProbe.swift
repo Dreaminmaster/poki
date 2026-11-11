@@ -408,27 +408,36 @@ final class InProcessProbe: ObservableObject {
     }
 }
 
-/// Testing Options: which way Poki controls the phone. Takes effect when Poki starts again.
+/// Set Up the Local Connection: which way Poki controls the phone. Takes effect when Poki starts again.
 struct AutomationMethodSection: View {
-    @AppStorage("automationPath") private var path = AutomationPath.nativeServices.rawValue
-    private let running = AutomationPath.current
+    /// nil is Automatic: Poki chooses between tasks.
+    @AppStorage("automationPath") private var saved: String?
 
     var body: some View {
         Section {
-            Picker("Method", selection: $path) {
-                Text("XCTest session").tag(AutomationPath.inProcess.rawValue)
-                Text("Native services").tag(AutomationPath.nativeServices.rawValue)
+            Picker("Method", selection: Binding(get: { saved ?? "automatic" }, set: { saved = $0 == "automatic" ? nil : $0 })) {
+                row("Automatic", "Native services when the connection is on, the XCTest session when it is not.").tag("automatic")
+                row("Native Services", "No banner. Needs Wi-Fi and the loopback.").tag(AutomationPath.nativeServices.rawValue)
+                row("XCTest Session", "Works without Wi-Fi or the loopback. Shows iOS’s automation banner.").tag(AutomationPath.inProcess.rawValue)
             }
-            if path != running.rawValue {
-                Text("Takes effect when Poki starts again.").font(.caption).foregroundStyle(.orange)
-            }
+            .pickerStyle(.inline)
+            .labelsHidden()
         } header: {
-            Text("Automation")
+            Text("Method")
         } footer: {
-            Text("Native services controls the phone through its paired accessibility, screenshot and input services, with no automation session and no banner. The XCTest session is the earlier way, with iOS’s automation banner.")
+            if saved != AutomationPath.pinned?.rawValue {
+                Text("Takes effect when Poki starts again.").foregroundStyle(.orange)
+            }
         }
         .onAppear {
-            if path == AutomationPath.runner.rawValue { path = AutomationPath.nativeServices.rawValue }
+            if saved == AutomationPath.runner.rawValue { saved = nil }
+        }
+    }
+
+    private func row(_ title: LocalizedStringKey, _ detail: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(detail).font(.footnote).foregroundStyle(.secondary)
         }
     }
 }

@@ -52,7 +52,7 @@ struct SavedSession: Codable, Identifiable, Equatable {
             case .you(let text, _), .request(let text, _): return text
             case .step(let text, let ok): return ok == false ? String(localized: "\(text), failed") : text
             case .plan(let steps):
-                if let step = steps.last(where: { $0.state == .waiting }) { return String(localized: "\(step.text) · waiting for you") }
+                if let step = steps.last(where: { $0.state == .waiting }) { return String(localized: "\(step.text), waiting for you") }
                 if let step = steps.last { return step.text }
             case .note(.waiting): return String(localized: "Waiting for your OK")
             case .note(.problem(let text)): return text
@@ -68,7 +68,7 @@ struct SavedSession: Codable, Identifiable, Equatable {
         switch kind {
         case .poki: return autoName ?? (title == String(localized: "New conversation") ? "Poki" : String(title.prefix(40)))
         case .agent: return client ?? String(localized: "An agent")
-        case .handoff: return autoName.map { "\(client ?? String(localized: "An agent")) · \($0)" } ?? "\(client ?? String(localized: "An agent")) → Poki"
+        case .handoff: return autoName.map { "\(client ?? String(localized: "An agent")), \($0)" } ?? "\(client ?? String(localized: "An agent")) → Poki"
         case .voice: return autoName ?? (title.isEmpty ? String(localized: "Voice chat") : String(title.prefix(40)))
         }
     }
@@ -296,13 +296,13 @@ final class SessionStore {
             currentSession = nil
         case .approvalRequested(let approval):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow: \(approval.summary)"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow \(approval.summary)"), ok: nil))) }
         case .approvalEnded(_, let approved):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
             update(agent: id) { $0.entries.append(ChatEntry(.note(approved == true ? .approved(Date()) : approved == false ? .declined : .expired))) }
         case .handoffRequested(_, _, let text, _):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Your turn: \(text ?? String(localized: "finish this step"))"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Your turn, \(text ?? String(localized: "finish this step"))"), ok: nil))) }
         case .relay, .handoffEnded: break
         }
     }
@@ -428,7 +428,7 @@ final class SessionStore {
             ], calls: []),
             SavedSession(id: "sample-cc", kind: .agent, client: "Claude Code", title: "Claude Code", started: at(1500), updated: at(1490), live: false, outcome: .stopped, entries: [
                 ChatEntry(.time(at(1500))), ChatEntry(.step(String(localized: "Open the App Store"), ok: true)),
-                ChatEntry(.step(String(localized: "Your turn: enter your Apple Account password"), ok: nil)),
+                ChatEntry(.step(String(localized: "Your turn, enter your Apple Account password"), ok: nil)),
             ], calls: []),
         ]
     }
