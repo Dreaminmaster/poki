@@ -61,8 +61,16 @@ final class AppModel {
     /// Agents › Approvals › Ask Before Sensitive Steps: how the owner is asked, or never. PokiCore
     /// reads on or off when Poki starts; the way of asking changes at once.
     var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
-        didSet { UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)") }
+        didSet {
+            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
+            for observer in approvalModeObservers { observer() }
+        }
     }
+    /// Whether a sensitive step waits for the owner now: asking is on, and was on when Poki started
+    /// (PokiCore reads it then; turning it off counts at once).
+    var asksBeforeSensitiveSteps: Bool { approvalMode != .off && core.sensitiveRulesOn }
+    private var approvalModeObservers: [() -> Void] = []
+    func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
         didSet { UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)") }
     }

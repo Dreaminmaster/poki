@@ -121,6 +121,7 @@ final class ChatModel {
         app.addShellObserver { [weak self] event in self?.observe(event) }
         app.addApprovalObserver { [weak self] id in self?.waitsForOwner(id) }
         if kind == .handoff { return }
+        app.addApprovalModeObserver { [weak self] in self?.approvalsChanged() }
         // A live voice conversation is part of this chat: what was said and done stays in its history.
         if requester == nil { app.voice.onConversationEnded = { [weak self] lines, started in self?.appendVoice(lines, started: started) } }
         if let scene = UserDefaults.standard.string(forKey: "pokiChat") { loadSample(scene); return }
@@ -135,10 +136,17 @@ final class ChatModel {
     private var greeting: [ChatEntry] {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
-         ChatEntry(.poki(String(localized: "I’ll ask before anything you can’t undo.")))]
+         ChatEntry(.poki(app.asksBeforeSensitiveSteps ? String(localized: "I’ll ask before anything you can’t undo.")
+                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting or sending. You can change that in Agents › Approvals.")))]
     }
 
     private func greet() { entries = greeting }
+
+    /// Asking was turned on or off: a conversation that holds only the greeting says what holds now.
+    private func approvalsChanged() {
+        guard !running, !isSample, !entries.contains(where: { if case .you = $0.kind { return true }; if case .request = $0.kind { return true }; return false }) else { return }
+        greet()
+    }
 
     /// A live voice conversation that just ended, into this chat's history (and its saved session).
     func appendVoice(_ lines: [VoiceLine], started: Date) {
