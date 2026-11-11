@@ -993,14 +993,18 @@ final class Computer: @unchecked Sendable {
         var elements: [Element]?
     }
 
-    /// The first action that needs the owner's approval, and why.
+    /// Where approval begins, with every reason the remaining batch must wait.
     func firstSensitive(_ actions: [JSON]) -> (at: Int, reason: String)? {
         guard config.sensitive.enabled else { return nil }
         var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
+        var matches: [(at: Int, reason: String)] = []
         for (at, action) in actions.enumerated() {
-            if let reason = sensitive(action, &scan) { return (at, reason) }
+            if let reason = sensitive(action, &scan) { matches.append((at, reason)) }
         }
-        return nil
+        guard let first = matches.first else { return nil }
+        guard matches.count > 1 else { return first }
+        let reasons = matches.map { "action \($0.at + 1): \($0.reason)" }.joined(separator: "; ")
+        return (first.at, "multiple sensitive actions: " + reasons)
     }
 
     /// Why this action needs the owner's approval, or nil; `scan` moves on past it. `do` checks its

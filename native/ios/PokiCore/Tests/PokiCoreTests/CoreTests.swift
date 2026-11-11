@@ -171,6 +171,22 @@ final class ApprovalTests: XCTestCase {
         return wda
     }
 
+    func testABatchReportsEverySensitiveActionBeforeOwnerApproval() async throws {
+        let wda = FakeWDA()
+        wda.source([("Button", "Photo"), ("Button", "Call"), ("Button", "Delete"), ("Button", "Pay")], app: "Photos")
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["tap": 1], ["tap": 2], ["tap": 3], ["tap": 4]]])
+
+        XCTAssertTrue(result.text.contains("not_sent from action 2: approval_required"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "Only the non-sensitive prefix may run")
+        let approval = try XCTUnwrap(core.pendingApproval)
+        XCTAssertTrue(approval.reason.contains("action 2: a call (\"call\")"), approval.reason)
+        XCTAssertTrue(approval.reason.contains("action 3: deleting (\"delete\")"), approval.reason)
+        XCTAssertTrue(approval.reason.contains("action 4: a payment (\"pay\")"), approval.reason)
+
+    }
+
     func testADeletionWaitsForTheOwnerAndSendsNothing() async {
         let (core, wda, _) = makeCore(screenWithDelete())
         _ = await core.call("look", [:])
