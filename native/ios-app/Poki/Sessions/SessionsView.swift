@@ -507,7 +507,10 @@ struct SessionView: View {
             if asking || running != nil || sample {
                 VStack(spacing: 8) {
                     if session?.live == true, let approval = model.approvals.first {
-                        ApprovalAskCard(title: approval.question, detail: approval.reasonLine, quote: ActivityWords.label(approval.summary), expires: approval.expires,
+                        // A message of the handed-over task: who it goes to and the words, as in the chat.
+                        let words = running?.askWords[approval.id]
+                        ApprovalAskCard(title: words?.title ?? approval.question, detail: words?.detail ?? approval.reasonLine,
+                                        quote: words?.quote ?? ActivityWords.label(approval.summary), expires: approval.expires,
                                         answer: { approved in model.resolve(approval, approved: approved) })
                     } else if session?.live == true, let text = model.handoffText {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
