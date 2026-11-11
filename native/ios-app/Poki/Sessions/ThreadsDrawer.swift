@@ -17,6 +17,8 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     @State private var width: CGFloat = 320
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Where the content scrolls sideways by itself (`scrollsSideways`), in screen coordinates.
+    @State private var sideways: [CGRect] = []
     /// How much of the drawer shows, 0 to its width.
     private var shown: CGFloat {
         min(width, max(0, (isOpen ? width : 0) + (pull ?? 0)))
@@ -26,6 +28,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
         content
             .accessibilityHidden(isOpen)
             .simultaneousGesture(drag, including: enabled && !isOpen ? .all : .subviews)
+            .onPreferenceChange(SidewaysScrollAreas.self) { sideways = $0 }
             .overlay {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
@@ -64,19 +67,25 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
         withAnimation(reduceMotion ? .easeOut(duration: 0.2) : ThreadsDrawerMotion.settle) { isOpen = open }
     }
 
+    /// The drag began on something that scrolls sideways itself (the home page's suggestion rows),
+    /// and not at the screen's very edge: it is that row's, not the drawer's.
+    private func scrolls(_ value: DragGesture.Value) -> Bool {
+        !isOpen && value.startLocation.x > 24 && sideways.contains { $0.contains(value.startLocation) }
+    }
+
     private var drag: some Gesture {
         DragGesture(minimumDistance: 16, coordinateSpace: .global)
             .updating($pull) { value, state, _ in
                 let dx = value.translation.width
                 if state == nil {
                     // A mostly sideways drag in the drawer's direction; an up or down one belongs to the scroll view.
-                    guard abs(dx) > abs(value.translation.height) * 1.5, isOpen ? dx < 0 : dx > 0 else { return }
+                    guard abs(dx) > abs(value.translation.height) * 1.5, isOpen ? dx < 0 : dx > 0, !scrolls(value) else { return }
                 }
                 state = dx
             }
             .onEnded { value in
                 let dx = value.translation.width
-                guard abs(dx) > abs(value.translation.height) * 1.2 else { return }
+                guard abs(dx) > abs(value.translation.height) * 1.2, !scrolls(value) else { return }
                 let thrown = value.predictedEndTranslation.width
                 if isOpen {
                     if dx < -width * 0.3 || thrown < -width * 0.5 { set(false) }
@@ -84,6 +93,20 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                     set(true)
                 }
             }
+    }
+}
+
+/// Where on the screen a sideways drag belongs to the content: such a view says where it is, and the
+/// drawer's swipe leaves drags that begin there alone.
+struct SidewaysScrollAreas: PreferenceKey {
+    static let defaultValue: [CGRect] = []
+    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) { value += nextValue() }
+}
+
+extension View {
+    /// Marks this view as scrolling sideways by itself while `on`.
+    func scrollsSideways(_ on: Bool = true) -> some View {
+        background { GeometryReader { geometry in Color.clear.preference(key: SidewaysScrollAreas.self, value: on ? [geometry.frame(in: .global)] : []) } }
     }
 }
 

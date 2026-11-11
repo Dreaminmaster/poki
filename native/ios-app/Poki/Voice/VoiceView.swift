@@ -36,7 +36,7 @@ struct VoiceView: View {
                     else if voice.canTalkLive {
                         Text("On the Voice page, holding the button starts a live conversation: Poki listens, acts and answers out loud. It ends by itself 8 seconds after an answer if nobody speaks, and when Poki goes to the background (once a running step is done). Slide up to end it sooner. The microphone in the message field only dictates.")
                     } else {
-                        Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Brain. Dictation in the message field works with every model.")
+                        Text("Live voice uses OpenAI Realtime, which needs an OpenAI API key in Poki › Brain. Dictation in the message field works with any model.")
                     }
                 }
                 if voice.lastTurnMS != nil || voice.bridge != nil || VoiceDirect.apiKey == nil {

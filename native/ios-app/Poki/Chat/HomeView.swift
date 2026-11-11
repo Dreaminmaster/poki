@@ -26,6 +26,9 @@ enum HomeMotion {
     static let button: CGFloat = 48
     private static let fade = Animation.easeInOut(duration: 0.2)
     /// `-pokiSlow 4` plays the whole change four times slower, for a slow-motion recording of it.
+    /// The two rows of suggestions, in points a second: positive goes left, negative right. Slow, and
+    /// a little apart, so the rows never move as one.
+    static let pillSpeeds: (top: Double, bottom: Double) = (20, -18)
     static let slow = max(1, UserDefaults.standard.double(forKey: "pokiSlow"))
     /// Every animation of the change goes through here, delays included.
     static func paced(_ animation: Animation) -> Animation { slow > 1 ? animation.speed(1 / slow) : animation }
@@ -407,7 +410,7 @@ struct HomeIdea: Identifiable {
     static var first: [HomeIdea] {
         [idea("Slack", String(localized: "Tell the team I’m late")),
          idea("Messages", String(localized: "Text Mom I’m on my way")),
-         idea("Uber", String(localized: "Ride home"))].compactMap { $0 }
+         idea("Uber", String(localized: "Book a ride home"))].compactMap { $0 }
     }
     static var second: [HomeIdea] {
         [idea("Starbucks", String(localized: "Order my usual coffee")),
@@ -425,9 +428,13 @@ struct HomePage<Footer: View>: View {
     var status: PokiStatus
     var promise: String?
     var bear: () -> Void
+    /// The message field has the keyboard: the suggestions stand still meanwhile.
+    var writing = false
     var pick: (String) -> Void
     @ViewBuilder var footer: () -> Footer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     /// Everything but the bear: the two lines, the pills and the room between them.
     @ScaledMetric(relativeTo: .title) private var rest: CGFloat = 268
 
@@ -460,7 +467,7 @@ struct HomePage<Footer: View>: View {
                             .font(Prominent.font(size: 30, relativeTo: .largeTitle, .bold)).tracking(-0.6)
                             .foregroundStyle(Color(.label))
                             .accessibilityAddTraits(.isHeader)
-                        Text(verbatim: Self.line([String(localized: "I tap, type and scroll for you."), promise]))
+                        Text(verbatim: Self.line([String(localized: "I tap, type, and scroll for you."), promise]))
                             .font(.subheadline).lineSpacing(1).foregroundStyle(Tint.homeSecondary).frame(maxWidth: 290)
                         footer()
                     }
@@ -485,10 +492,12 @@ struct HomePage<Footer: View>: View {
                             .opacity(home ? 1 : 0)
                     }
                     VStack(spacing: 8) {
-                        row(HomeIdea.first, startsAt: 0.16)
-                        row(HomeIdea.second, startsAt: 0)
+                        row(HomeIdea.first, speed: HomeMotion.pillSpeeds.top, start: 64)
+                        row(HomeIdea.second, speed: HomeMotion.pillSpeeds.bottom, start: 0)
                     }
                     .padding(.top, 2)
+                    // A sideways drag on the rows scrolls them; it does not pull the drawer out.
+                    .scrollsSideways(home)
                     .opacity(home ? 1 : 0)
                     .offset(y: home || reduceMotion ? 0 : 14)
                     .animation(HomeMotion.pills(home, reduceMotion), value: home)
@@ -501,34 +510,40 @@ struct HomePage<Footer: View>: View {
         }
     }
 
-    /// One row of pills that scrolls sideways. The first row starts a little way along, as the board
-    /// draws it, so the two rows do not line up and the page shows there is more to the side.
-    private func row(_ ideas: [HomeIdea], startsAt start: CGFloat) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(ideas) { idea in
-                    Button { pick(idea.prompt) } label: {
-                        HStack(spacing: 8) {
-                            IdeaCapsule(app: idea.app)
-                            Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
-                        }
-                        .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
-                        .contentShape(.capsule)
+    /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
+    /// moves and flicks (`Marquee`). It stands still with Reduce Motion and while the keyboard is up,
+    /// and its clock stops when the page is not in front. With VoiceOver it is a plain row, each pill
+    /// once. The two ends fade out over 20 points. The first row starts a little way along, so the two
+    /// rows do not line up.
+    private func row(_ ideas: [HomeIdea], speed: Double, start: CGFloat) -> some View {
+        Marquee(speed: speed, spacing: 8, start: start, running: !reduceMotion && !writing,
+                active: home && scenePhase == .active, loops: !voiceOver) {
+            ForEach(ideas) { idea in
+                Button { pick(idea.prompt) } label: {
+                    HStack(spacing: 8) {
+                        IdeaCapsule(app: idea.app)
+                        Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .glassSurface(in: Capsule(), interactive: true)
-                    .accessibilityLabel(Text(verbatim: idea.app.name + ", " + idea.text))
-                    .accessibilityHint(Text("Puts this in the message field"))
-                    .accessibilityIdentifier("home.idea." + idea.app.name)
+                    .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
+                    .contentShape(.capsule)
                 }
+                .buttonStyle(.plain)
+                .glassSurface(in: Capsule(), interactive: true)
+                .accessibilityLabel(Text(verbatim: idea.app.name + ", " + idea.text))
+                .accessibilityHint(Text("Puts this in the message field"))
+                .accessibilityIdentifier("home.idea." + idea.app.name)
+                // Said here and not on the row: the pills live in the scroll view's own hosting view.
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
-            .glassGroup(spacing: 8)
-            .padding(.horizontal, 20)
         }
-        .scrollIndicators(.hidden)
-        .scrollClipDisabled()
-        .defaultScrollAnchor(UnitPoint(x: start, y: 0.5))
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .mask {
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 20)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 20)
+            }
+            .padding(.vertical, -12)
+        }
     }
 }
 

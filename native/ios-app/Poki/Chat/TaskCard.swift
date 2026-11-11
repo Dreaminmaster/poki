@@ -314,8 +314,8 @@ private struct TaskStepRow: View {
         switch state {
         case .done?: Text("Done")
         case .failed?: Text("Failed")
-        case .current?, .waiting?: Text("Under way")
-        case nil: Text("Still to come")
+        case .current?, .waiting?: Text("In progress")
+        case nil: Text("Upcoming")
         }
     }
 
@@ -454,7 +454,7 @@ struct HoldToAllowButton: View {
             .sensoryFeedback(.impact(weight: .light), trigger: pressing) { _, down in down }
             .accessibilityElement()
             .accessibilityLabel(Text("Allow"))
-            .accessibilityHint(Text("Touch and hold to allow this step"))
+            .accessibilityHint(Text("Allows this step"))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { action() }
             .accessibilityIdentifier("approval.allow")

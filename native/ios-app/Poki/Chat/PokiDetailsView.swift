@@ -61,7 +61,7 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("details.voice")
                     NavigationLink(value: SettingsRoute.memory) {
-                        ProfileRow(title: "Memory", caption: "Routines and notes I keep", symbol: "bookmark.fill", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
+                        ProfileRow(title: "Memory", caption: "Routines and notes Poki keeps", symbol: "bookmark.fill", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                 }
@@ -140,7 +140,7 @@ struct PokiDetailsView: View {
                     .accessibilityIdentifier("details.turnOn")
             }
             ProfileTile(title: "Voice", caption: "Talk to Poki", symbol: "waveform") { dismiss(); openVoice() }
-            ProfileTile(title: "Activity", caption: "What I did", symbol: "list.bullet.rectangle") { path.append(DetailsRoute.history) }
+            ProfileTile(title: "Activity", caption: "What Poki did", symbol: "list.bullet.rectangle") { path.append(DetailsRoute.history) }
                 .accessibilityIdentifier("details.activity")
         }
     }
@@ -317,7 +317,7 @@ struct HandsView: View {
                 .accessibilityIdentifier("hands.on")
             } footer: {
                 // Resting is not a lock: an agent's request, or a task you send, starts Poki again.
-                Text(on ? "Poki can tap, type and scroll on this iPhone."
+                Text(on ? "Poki can tap, type, and scroll on this iPhone."
                      : model.sessionOn ? "Poki is resting. It starts again when you send a task or an agent asks."
                      : "Poki is off. Agents can’t reach this iPhone.")
             }

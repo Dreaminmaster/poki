@@ -513,7 +513,7 @@ struct SessionView: View {
                     }
                     if running != nil {
                         // Said where Stop is, and only there: the words promise what the button does.
-                        Text("A guest is borrowing Poki’s hands. Stop is always yours.")
+                        Text("A guest is borrowing Poki’s hands. You can tap Stop anytime.")
                             .font(.footnote).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
                         Button("Stop Poki", systemImage: "stop.fill") { AskPoki.live(id)?.stop() }
                             .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(Tint.red)

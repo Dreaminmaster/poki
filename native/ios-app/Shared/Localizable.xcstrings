@@ -211,16 +211,6 @@
         }
       }
     },
-    "%@, " : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@，"
-          }
-        }
-      }
-    },
     "%@, %lld missed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -532,12 +522,12 @@
         }
       }
     },
-    "A guest is borrowing Poki’s hands. Stop is always yours." : {
+    "A guest is borrowing Poki’s hands. You can tap Stop anytime." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "有访客在借用 Poki 的手。停不停随时由你定。"
+            "value" : "有访客在借用 Poki 的手。你随时可以点停止。"
           }
         }
       }
@@ -548,16 +538,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已保存密钥。输入新密钥将覆盖原密钥。"
-          }
-        }
-      }
-    },
-    "A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Brain. Dictation in the message field works with every model." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "实时对话使用 OpenAI 的 Realtime 语音，需要在“Poki”›“大脑”中添加 OpenAI API 密钥。消息栏里的听写适用于所有模型。"
           }
         }
       }
@@ -1194,6 +1174,16 @@
         }
       }
     },
+    "Allows this step" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许这一步"
+          }
+        }
+      }
+    },
     "Almost Ready" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1560,6 +1550,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "行为"
+          }
+        }
+      }
+    },
+    "Book a ride home" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打车回家"
           }
         }
       }
@@ -2811,7 +2811,7 @@
         }
       }
     },
-    "Enter your relay's address first (Poki › Guests › Address). Poki has no default relay." : {
+    "Enter your relay’s address first in Poki › Guests › Address. Poki has no default relay." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
@@ -3383,16 +3383,6 @@
         }
       }
     },
-    "I couldn’t find a chat with Mom in Messages." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我在“信息”里没找到和妈妈的对话。"
-          }
-        }
-      }
-    },
     "I stopped after %lld steps. Tell me how to go on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3403,7 +3393,7 @@
         }
       }
     },
-    "I tap, type and scroll for you." : {
+    "I tap, type, and scroll for you." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -3489,6 +3479,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用中"
+          }
+        }
+      }
+    },
+    "In progress" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进行中"
           }
         }
       }
@@ -4074,6 +4074,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "实时语音使用 OpenAI 的 Realtime API，只有 OpenAI API 密钥才能使用。消息栏里的听写可以用这个账号。"
+          }
+        }
+      }
+    },
+    "Live voice uses OpenAI Realtime, which needs an OpenAI API key in Poki › Brain. Dictation in the message field works with any model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音使用 OpenAI Realtime，需要在“Poki”›“大脑”中添加 OpenAI API 密钥。消息栏里的听写适用于所有模型。"
           }
         }
       }
@@ -5024,7 +5034,7 @@
         }
       }
     },
-    "Not approved by model. Say yes in the chat to let it through." : {
+    "Not approved by model. Say yes in the chat to allow it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -5034,7 +5044,7 @@
         }
       }
     },
-    "Not approved by model: %@. Say yes in the chat to let it through." : {
+    "Not approved by model: %@. Say yes in the chat to allow it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -6489,7 +6499,7 @@
         }
       }
     },
-    "Poki can tap, type and scroll on this iPhone." : {
+    "Poki can tap, type, and scroll on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -7648,17 +7658,7 @@
         }
       }
     },
-    "Ride home" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打车回家"
-          }
-        }
-      }
-    },
-    "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then Rules." : {
+    "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, tap my picture, then Rules." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -7678,12 +7678,12 @@
         }
       }
     },
-    "Routines and notes I keep" : {
+    "Routines and notes Poki keeps" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "我记着的惯例和备注"
+            "value" : "Poki 记着的惯例和备注"
           }
         }
       }
@@ -7829,7 +7829,7 @@
         }
       }
     },
-    "Say yes in the chat to let it through." : {
+    "Say yes in the chat to allow it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -8069,12 +8069,12 @@
         }
       }
     },
-    "Set up Poki’s model first: tap here, or Poki › Brain." : {
+    "Set up Poki’s model first. Tap to open Poki › Brain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先设置 Poki 的模型：轻点这里，或前往“Poki”›“大脑”。"
+            "value" : "请先设置 Poki 的模型。轻点打开“Poki”›“大脑”。"
           }
         }
       }
@@ -8548,16 +8548,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你回答的步骤会显示在这里。"
-          }
-        }
-      }
-    },
-    "Still to come" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没开始"
           }
         }
       }
@@ -9741,16 +9731,6 @@
         }
       }
     },
-    "Touch and hold to allow this step" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按住以允许这一步"
-          }
-        }
-      }
-    },
     "Touches and Keys" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10237,16 +10217,6 @@
         }
       }
     },
-    "Under way" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "进行中"
-          }
-        }
-      }
-    },
     "Until %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10263,6 +10233,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已是最新"
+          }
+        }
+      }
+    },
+    "Upcoming" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没开始"
           }
         }
       }
@@ -10689,22 +10669,22 @@
         }
       }
     },
-    "What I did" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我做过的事"
-          }
-        }
-      }
-    },
     "What Poki asks about first" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "哪些事先问你"
+          }
+        }
+      }
+    },
+    "What Poki did" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 做过的事"
           }
         }
       }

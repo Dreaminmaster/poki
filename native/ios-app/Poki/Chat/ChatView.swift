@@ -114,7 +114,7 @@ struct ChatView: View {
             }
             // The home page stays in the tree while the conversation is in front, so the bear's place
             // on it is known when a new conversation brings it back; it is neither seen nor touched.
-            HomePage(home: home, status: status, promise: promise, bear: bearTapped, pick: { draft = $0; writing = true }) {
+            HomePage(home: home, status: status, promise: promise, bear: bearTapped, writing: writing, pick: { draft = $0; writing = true }) {
                 if home, let hint = currentSetupHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
                 }
@@ -909,8 +909,8 @@ private struct NoteLine: View {
         case .modelChecking: String(localized: "The model is checking this step")
         case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model: \(why)")
         case .modelDeclined(let why):
-            why.isEmpty ? String(localized: "Not approved by model. Say yes in the chat to let it through.")
-                : String(localized: "Not approved by model: \(why). Say yes in the chat to let it through.")
+            why.isEmpty ? String(localized: "Not approved by model. Say yes in the chat to allow it.")
+                : String(localized: "Not approved by model: \(why). Say yes in the chat to allow it.")
         }
     }
 }
@@ -987,7 +987,7 @@ struct ApprovalNoteCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if note.state == .refused, note.reply {
-                Text("Say yes in the chat to let it through.").font(.caption).foregroundStyle(Color(.secondaryLabel))
+                Text("Say yes in the chat to allow it.").font(.caption).foregroundStyle(Color(.secondaryLabel))
             }
         }
         .padding(.vertical, 10).padding(.horizontal, 12)

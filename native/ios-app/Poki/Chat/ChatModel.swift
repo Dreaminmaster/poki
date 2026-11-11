@@ -139,7 +139,7 @@ final class ChatModel {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
          ChatEntry(.poki(app.asksBeforeSensitiveSteps ? String(localized: "I’ll ask before anything you can’t undo.")
-                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting or sending. To change that, tap my picture, then Rules.")))]
+                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, tap my picture, then Rules.")))]
     }
 
     private func greet() { entries = greeting }
