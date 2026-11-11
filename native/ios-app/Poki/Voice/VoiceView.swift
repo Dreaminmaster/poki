@@ -42,6 +42,7 @@ struct VoiceView: View {
                         Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Settings › Models. Dictation in the message field works with every model.")
                     }
                 }
+                ActionButtonSection()
                 if voice.lastTurnMS != nil || voice.bridge != nil || VoiceDirect.apiKey == nil {
                     DisclosureGroup("Advanced") {
                         if let ms = voice.lastTurnMS { LabeledContent("Last Answer", value: "\(ms) ms") }
