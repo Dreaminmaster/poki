@@ -47,6 +47,23 @@ enum ActivityWords {
         brief(translate(label.components(separatedBy: ", then ").first ?? label))
     }
 
+    /// The one word the compact island has room for: what kind of step this is ("Tap", "Type"). It
+    /// is looked up from the start of PokiCore's English label and then worded in the system's
+    /// language, never cut out of a translated sentence (Chinese has no spaces to cut at). A label
+    /// that starts otherwise has no verb, and the island shows the count alone.
+    static func verb(_ label: String) -> String? {
+        let first = label.components(separatedBy: ", then ").first ?? label
+        // Longer openings first: "Press and hold" is Hold, not Press.
+        let table: [(String, String.LocalizationValue)] = [
+            ("Press and hold", "Hold"), ("Tap", "Tap"), ("Press", "Press"), ("Type", "Type"), ("Scroll", "Scroll"),
+            ("Swipe", "Swipe"), ("Drag", "Drag"), ("Zoom", "Zoom"), ("Open", "Open"), ("Look", "Look"), ("Wait", "Wait"),
+        ]
+        for (start, word) in table where first == start || first.hasPrefix(start + " ") {
+            return String(localized: word, table: Self.table)
+        }
+        return nil
+    }
+
     /// A step label from PokiCore in the system's language, whole, for the app's own screens.
     static func label(_ label: String) -> String { translate(label) }
 

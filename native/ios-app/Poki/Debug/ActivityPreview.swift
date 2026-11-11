@@ -125,20 +125,20 @@ struct ActivityPreview: View {
         working.app = messages
         working.since = now.addingTimeInterval(-42)
         working.stepCount = 6; working.failedCount = 1
-        working.outcomes = [true, true, true, true, false, true]
+        working.previous = "Type “On my way”"
 
         var step = working
         step.event = .init(kind: .app, text: "Now in Messages")
         step.headline = "Tap “Search”, then type “Mom”"
         step.stepCount = 7
-        step.outcomes.append(true)
+        step.caller = "Claude Code"
 
         var approval = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 1)
         approval.app = messages
         // What PokiCore asks for when the agent taps Send in Messages.
         approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))
         approval.since = now.addingTimeInterval(-61)
-        approval.stepCount = 4; approval.outcomes = [true, true, true, true]
+        approval.stepCount = 4
 
         var deciding = approval
         deciding.phase = .deciding; deciding.decision = true
@@ -155,7 +155,6 @@ struct ActivityPreview: View {
         done.app = "Messages"
         done.since = now.addingTimeInterval(-84); done.endedAt = now
         done.stepCount = 12; done.failedCount = 1
-        done.outcomes = [true, true, false, true, true, true, true, true, true, true, true, true]
 
         // A task from Poki's own chat counts its plan's steps ("2/5"), not the taps under them (main #150).
         var plan = working
@@ -268,20 +267,21 @@ private struct TopBannerFrame: View {
 private struct IslandExpandedFrame: View {
     var state: PokiState
     var body: some View {
-        let insets = ActivityMetrics.islandInsets
+        let face = state.face
         let shape = RoundedRectangle(cornerRadius: ActivityMetrics.islandCorner, style: .continuous)
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
             HStack(spacing: 0) {
-                IslandLeading(face: state.face).frame(width: 110, height: 36, alignment: .leading)
+                IslandLeading(face: face)
                 Spacer(minLength: 120)
-                IslandTrailing(face: state.face).frame(width: 110, height: 36, alignment: .trailing)
+                IslandTrailing(face: face)
             }
-            IslandBottom(face: state.face)
+            .frame(height: ActivityMetrics.cameraRow)
+            IslandBottom(face: face)
         }
-        .padding(insets)
-        .frame(maxWidth: 371)
+        .frame(width: 376)
         .background(.black, in: shape)
-        .overlay { if state.face.outlined { shape.strokeBorder(ActivityTheme.current.approvalOutline, lineWidth: 1.5) } }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
         .overlay(alignment: .top) {
             Capsule()
                 .fill(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255))
@@ -291,31 +291,31 @@ private struct IslandExpandedFrame: View {
                         .frame(width: 10, height: 10)
                         .padding(.trailing, 12)
                 }
-                .frame(width: 120, height: 36)
-                .padding(.top, insets.top)
+                .frame(width: 125, height: 36)
+                .padding(.top, 1)
         }
         .environment(\.colorScheme, .dark)
     }
 }
 
-/// The compact island: leading, the camera, trailing, and the minimal circle beside it.
+/// The compact island: the bear's block, the camera, the words, and the minimal circle beside it.
 private struct IslandCompactFrame: View {
     var state: PokiState
     var body: some View {
+        let face = state.face
         HStack(spacing: 12) {
             HStack(spacing: 0) {
-                CompactLeading(face: state.face).frame(width: 44, alignment: .leading)
-                Spacer(minLength: 70)
-                CompactTrailing(face: state.face).frame(width: 97, alignment: .trailing)
+                CompactLeading(face: face)
+                Spacer(minLength: 0).frame(width: 125.33)
+                CompactTrailing(face: face).frame(minWidth: 44, alignment: .trailing).padding(.trailing, 7)
             }
-            .padding(.leading, 8).padding(.trailing, 12)
-            .frame(width: 231, height: 37)
+            .frame(height: ActivityMetrics.compactHeight)
             .background(.black, in: .capsule)
-            .overlay { if state.face.outlined { Capsule().strokeBorder(ActivityTheme.current.approvalOutline, lineWidth: 1.5) } }
-            MinimalView(face: state.face)
-                .frame(width: 37, height: 37)
+            .clipShape(.capsule)
+            .overlay { Capsule().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
+            MinimalView(face: face)
                 .background(.black, in: .circle)
-                .overlay { if state.face.outlined { Circle().strokeBorder(ActivityTheme.current.approvalOutline, lineWidth: 1.5) } }
+                .overlay { Circle().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
         }
         .environment(\.colorScheme, .dark)
     }

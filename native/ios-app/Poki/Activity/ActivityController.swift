@@ -111,10 +111,10 @@ final class ActivityController {
     /// Counts a finished step for the step line and the run's summary.
     func record(step text: String, ok: Bool) {
         update { state in
-            state.outcomes.append(ok)
-            if state.outcomes.count > PokiState.outcomeLimit { state.outcomes.removeFirst(state.outcomes.count - PokiState.outcomeLimit) }
             state.stepCount += 1
             if !ok { state.failedCount += 1 }
+            // Only a step that went through is shown ticked under the next one.
+            state.previous = ok ? String(text.prefix(80)) : nil
         }
         justRecorded = true
     }
@@ -132,7 +132,7 @@ final class ActivityController {
         let final: ActivityContent<PokiState>? = state.phase == .done || state.phase == .problem
             ? ActivityContent(state: state, staleDate: nil, relevanceScore: 0) : nil
         let policy: ActivityUIDismissalPolicy = final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60))
-        state.outcomes = []; state.guide = nil; state.pin = nil; state.since = nil; state.event = nil
+        state.guide = nil; state.pin = nil; state.since = nil; state.event = nil; state.previous = nil
         state.stepCount = 0; state.failedCount = 0; state.endedAt = nil; state.decision = nil; state.plan = nil
         let previous = tail
         tail = Task { await previous?.value; await activity.end(final, dismissalPolicy: policy) }
@@ -178,7 +178,7 @@ final class ActivityController {
         // A new run of steps: from anything that is not already a run.
         let runPhases = Self.runPhases
         if state.phase == .working, !runPhases.contains(old.phase) {
-            state.stepCount = 0; state.failedCount = 0; state.endedAt = nil; state.outcomes = []
+            state.stepCount = 0; state.failedCount = 0; state.endedAt = nil; state.previous = nil
             tally = Tally()
             if planFinished { state.plan = nil; planFinished = false }
             AppLog.shared.add("activity", "run started from \(old.phase.rawValue)\(activity == nil ? " with no Live Activity" : "")")
@@ -281,6 +281,7 @@ final class ActivityController {
         logRun("finished")
         runAnnounced = false
         state.endedAt = Date()
+        state.previous = nil
         state.headline = "Finished"
         setEvent(.finished, "Finished")
         let summary = state.runSummary
@@ -309,7 +310,7 @@ final class ActivityController {
             self.update { state in
                 state.phase = .idle
                 state.headline = "Waiting for agent"
-                state.outcomes = []; state.stepCount = 0; state.failedCount = 0
+                state.previous = nil; state.stepCount = 0; state.failedCount = 0
                 state.since = nil; state.endedAt = nil; state.event = nil; state.plan = nil
             }
         }
@@ -393,6 +394,7 @@ final class ActivityController {
         func size() -> Int { (try? JSONEncoder().encode(state).count) ?? 0 }
         guard size() > 3_500 else { return }
         state.headline = String(state.headline.prefix(80))
+        state.previous = nil
         if var approval = state.approval {
             approval.summary = String(approval.summary.prefix(80)); approval.reason = String(approval.reason.prefix(60))
             state.approval = approval

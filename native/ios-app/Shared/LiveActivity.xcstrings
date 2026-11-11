@@ -540,6 +540,17 @@
         }
       }
     },
+    "Hold": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长按"
+          }
+        }
+      }
+    },
     "Idle": {
       "extractionState": "manual",
       "localizations": {
@@ -624,6 +635,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在听"
+          }
+        }
+      }
+    },
+    "Look": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看"
           }
         }
       }
@@ -745,6 +767,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "未启动"
+          }
+        }
+      }
+    },
+    "Not updating": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有更新"
+          }
+        }
+      }
+    },
+    "Open": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开"
           }
         }
       }
@@ -1046,6 +1090,17 @@
         }
       }
     },
+    "Press": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按键"
+          }
+        }
+      }
+    },
     "Press %@": {
       "extractionState": "manual",
       "localizations": {
@@ -1321,6 +1376,17 @@
         }
       }
     },
+    "Stalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有进展"
+          }
+        }
+      }
+    },
     "Started": {
       "extractionState": "manual",
       "localizations": {
@@ -1460,6 +1526,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "向上轻扫"
+          }
+        }
+      }
+    },
+    "Tap": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "轻点"
           }
         }
       }
@@ -1651,6 +1728,17 @@
         }
       }
     },
+    "Type": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入"
+          }
+        }
+      }
+    },
     "Type %lld hidden characters": {
       "extractionState": "manual",
       "localizations": {
@@ -1834,6 +1922,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "轮到你了"
+          }
+        }
+      }
+    },
+    "Zoom": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缩放"
           }
         }
       }

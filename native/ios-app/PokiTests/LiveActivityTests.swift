@@ -27,4 +27,24 @@ final class LiveActivityTests: XCTestCase {
         agent.update { $0.phase = .working; $0.caller = "Claude Code"; $0.headline = "Open Notes" }
         XCTAssertNil(agent.state.plan)
     }
+
+    /// One step count on every presentation of the Live Activity (the inventory of state machines,
+    /// item 2): with a plan from the chat's model, the compact island, the line above the title and
+    /// the row of segments all say the plan's step, however many actions lie under it; without a
+    /// plan they all count actions, and no total is made up.
+    func testEveryPresentationShowsTheSameStep() {
+        var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
+        state.stepCount = 7
+        state.plan = .init(total: 5, current: 2)
+        var face = state.face
+        XCTAssertEqual(face.kicker, "Step 2 of 5")
+        XCTAssertEqual(face.compact, .steps(verb: "Tap", count: "2/5"))
+        XCTAssertEqual(face.bottom, .progress(step: 2, total: 5, stop: true))
+
+        state.plan = nil
+        face = state.face
+        XCTAssertEqual(face.kicker, "Step 8")
+        XCTAssertEqual(face.compact, .steps(verb: "Tap", count: "Step 8"))
+        XCTAssertEqual(face.bottom, .progress(step: 8, total: nil, stop: true))
+    }
 }

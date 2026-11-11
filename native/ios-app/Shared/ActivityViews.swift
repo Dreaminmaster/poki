@@ -6,403 +6,510 @@
 // ios/AgentActivity/AgentActivityWidget.swift in onehumanbeing/esp32-iphone-agent (commit cc966294),
 // MIT License, Copyright (c) 2026 Henry Yuan. Interpolated text, the phase spring and margins kept
 // concentric with the island's corners are from leepokai/Codync (commit 848070d,
-// apps/ios/Widgets/CodyncWidgets.swift), Copyright 2026 Po Kai Lee, Apache License 2.0. Poki adds the
-// step line, the pairing code, the setup steps, the thumbnail and the bear avatar from ESP-139's
-// board 02 and ESP-171's final Dynamic Island / Lock Screen boards.
+// apps/ios/Widgets/CodyncWidgets.swift), Copyright 2026 Po Kai Lee, Apache License 2.0. The layout,
+// the bear that rises from the bottom edge, the two-line compact island and the colours are Poki's
+// own: ESP-344's final design (定稿规格, drawn at 402 by 874 points; not yet run on a phone).
 // See THIRD_PARTY_NOTICES.md.
 import ActivityKit
 import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// Sizes (HIG, iPhone): the Lock Screen card and the expanded island are 371 points wide and at most
-/// 160 tall; anything taller is cut. Every view here draws one `ActivityFace`, so the four
-/// presentations always say the same thing. The sizes follow ESP-139's final board 02 and ESP-171's
-/// final Dynamic Island / Lock Screen boards.
+/// Sizes, in points, from ESP-344's final design. The Lock Screen card and the expanded island are
+/// 376 wide there and at most 160 tall (the system's limit for a Live Activity). Every view here
+/// draws one `ActivityFace`, so the four presentations always say the same thing.
 enum ActivityMetrics {
-    /// The Lock Screen card's padding: 14 top and bottom, 20 leading, 14 trailing.
-    static let lockInsets = EdgeInsets(top: 14, leading: 20, bottom: 14, trailing: 14)
-    /// The card's corner as iOS draws it, for the concentric corners inside it.
+    /// The card's corner as iOS draws it, and the expanded island's.
     static let lockCorner: CGFloat = 24
-    /// Inside the card's padding: 140 points tall, 156 while an approval or handoff waits. Fixed, so
-    /// the card does not grow or shrink as lines and screenshots come and go within a phase.
-    static let lockContent: CGFloat = 112
-    static let lockApprovalContent: CGFloat = 128
-    /// The expanded island's margins inside its 44 point corners.
-    static let islandInsets = EdgeInsets(top: 11, leading: 14, bottom: 16, trailing: 14)
-    static let islandCorner: CGFloat = 44
-    static let islandGap: CGFloat = 6
-    /// iOS clips the expanded island's content to the island inset by about 13 points, with corners
-    /// about 36 points round (measured on the iPhone 17 Pro simulator). At the board's margins the
-    /// corners cut the bear, the meta's last letters and the ends of the last row, so those move in.
-    /// The row beside the camera: extra room on the outer side.
-    static let islandRowInset: CGFloat = 14
-    /// The last row: extra room below it, more for a flat row than for a capsule, and the setup
-    /// steps narrower as well.
-    static func islandBottomExtra(_ bottom: ActivityFace.Bottom) -> CGFloat {
-        switch bottom {
-        case .none: 18
-        default: 8
-        }
-    }
-    static let islandLastRowInset: CGFloat = 10
-    static let islandSegmentsInset: CGFloat = 10
-
-    static let avatar: CGFloat = 20
-    static let compactAvatar: CGFloat = 22
-    static let thumbnail = CGSize(width: 52, height: 112)
+    static let islandCorner: CGFloat = 46
+    /// The row beside the camera in the expanded island ends here; the words start under it.
+    static let cameraRow: CGFloat = 38
+    static let compactHeight: CGFloat = 36.67
+    /// The compact island's left block, and how wide the bear's head is in it.
+    static let compactBlock: CGFloat = 51
+    static let compactHead: CGFloat = 38
+    /// The minimal circle's bear: the whole picture's side, the same for every pose, so the bear
+    /// does not grow or shrink when the state changes.
+    static let minimalBear: CGFloat = 36.7
+    static let button: CGFloat = 38
+    static let stopCircle: CGFloat = 46
+    static let stopCapsule: CGFloat = 34
     static let smallThumbnail = CGSize(width: 34, height: 72)
-    /// Concentric with the card: its corner less the inset.
-    static let thumbnailCorner = lockCorner - lockInsets.top
     static let smallThumbnailCorner: CGFloat = 7
 
-    static func buttonHeight(_ surface: ActivitySurface) -> CGFloat { surface == .lockScreen ? 44 : 38 }
-    static let denyWidth: CGFloat = 96
-    static func stopWidth(_ surface: ActivitySurface) -> CGFloat { surface == .lockScreen ? 80 : 92 }
-    static let stopHeight: CGFloat = 36
-    static let openWidth: CGFloat = 120
-    static func openHeight(_ surface: ActivitySurface) -> CGFloat { surface == .lockScreen ? 40 : 36 }
+    struct Sizes {
+        var island: CGFloat, islandBear: CGFloat, islandLeft: CGFloat
+        var lock: CGFloat, lockBear: CGFloat, lockLeft: CGFloat
+        /// The short cards keep the bear 4 points off the left edge; the tall ones let it touch.
+        var lockBearInset: CGFloat
+    }
 
-    static let dot: CGFloat = 8
-    static let missedDot: CGFloat = 10
-    static let lastDot: CGFloat = 12
-    static let currentDot: CGFloat = 13
-    static let dotSlot: CGFloat = 22
-    static let line: CGFloat = 3
+    static func sizes(_ face: ActivityFace) -> Sizes {
+        switch face.size {
+        case .low:
+            Sizes(island: 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
+        case .working:
+            // Without a plan there is no line of segments; a ticked previous step adds a line.
+            Sizes(island: (face.bottom.hasLine ? 118 : 106) + (face.previous == nil ? 0 : 18), islandBear: 96, islandLeft: 104,
+                  lock: face.bottom.hasLine ? 134 : 124, lockBear: 116, lockLeft: 122, lockBearInset: 4)
+        case .asking:
+            Sizes(island: 150, islandBear: 128, islandLeft: 130, lock: 154, lockBear: 134, lockLeft: 138, lockBearInset: 0)
+        case .tall:
+            Sizes(island: 160, islandBear: 134, islandLeft: 134, lock: 160, lockBear: 136, lockLeft: 138, lockBearInset: 0)
+        }
+    }
+
+    /// The screenshot on the right of the Lock Screen card: as tall as the card allows, a phone's shape.
+    static func thumbnail(_ face: ActivityFace) -> CGSize? {
+        switch face.thumbnail {
+        case .none: return nil
+        case .small: return smallThumbnail
+        case .large:
+            let height = sizes(face).lock - 28
+            return CGSize(width: (height * 0.46).rounded(), height: height)
+        }
+    }
+}
+
+extension ActivityFace.Bottom {
+    /// A run with a plan draws its steps as segments.
+    var hasLine: Bool { if case .progress(_, let total, _) = self { total != nil } else { false } }
+    var isProgress: Bool { if case .progress = self { true } else { false } }
+    var isHandoff: Bool { if case .handoff = self { true } else { false } }
 }
 
 // MARK: Lock Screen & Non-Dynamic Island Top Banner
 
-/// The Lock Screen (and non-Dynamic Island top banner) card, with its padding and the glass edge.
-/// The widget adds the blue background tint.
+/// The Lock Screen card (and the banner on a phone without the island): the website's blue with
+/// only white on it, the bear rising from its bottom-left corner. The widget adds the blue itself.
 struct LockScreenCard: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     private let theme = ActivityTheme.current
 
     var body: some View {
-        content(face)
-            .padding(ActivityMetrics.lockInsets)
-            .foregroundStyle(theme.lock.text)
-            .overlay { GlassEdge() }
-            .environment(\.colorScheme, .dark)
-            .animation(dimmed ? nil : ActivityMotion.phase, value: face)
-            .accessibilityElement(children: .contain)
+        let sizes = ActivityMetrics.sizes(face)
+        let palette = theme.lock
+        ZStack(alignment: .bottomLeading) {
+            RisingBear(bear: face.bear, side: sizes.lockBear, rim: 26, colour: palette.rim)
+                .padding(.leading, sizes.lockBearInset)
+            words(palette)
+                .padding(.leading, sizes.lockLeft).padding(.trailing, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(height: sizes.lock)
+        .frame(maxWidth: .infinity)
+        .foregroundStyle(palette.text)
+        .environment(\.colorScheme, .dark)
+        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .animation(dimmed ? nil : ActivityMotion.step, value: face.content)
+        .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder
-    private func content(_ face: ActivityFace) -> some View {
-        switch face.bottom {
-        case .approval, .deciding, .handoff:
+    private func words(_ palette: ActivityPalette) -> some View {
+        let top: CGFloat = switch face.size { case .low: 30; case .working, .asking: 22; case .tall: 20 }
+        let bottom: CGFloat = switch face.size { case .low: 0; case .working: 12; case .asking, .tall: 16 }
+        let hasKicker = face.kicker != nil || face.event != nil
+        // The screenshot stands in the top right corner, over the words' column and outside its
+        // flow: the words keep clear of it, and it never pushes the control off the card.
+        let thumbnail = ActivityMetrics.thumbnail(face)
+        let reserved = thumbnail.map { $0.width + 12 } ?? 0
+        // The value (time, countdown) sits on the first line that has room for it: beside the
+        // control where the control leaves room, and always there when the screenshot takes the
+        // top line's end.
+        let metaBesideControl = face.bottom.isHandoff || thumbnail != nil && face.bottom.isProgress
+        // Beside the screenshot the countdown keeps to its digits, to leave the reason its room.
+        let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
+                               timer: thumbnail != nil && !metaBesideControl ? 38 : 46)
+        return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        StatusRow(face: face)
-                        Title(face: face, surface: .lockScreen)
-                        Subtitle(face: face, surface: .lockScreen)
+                if hasKicker {
+                    HStack(spacing: 8) {
+                        Kicker(face: face, palette: palette)
+                        Spacer(minLength: 0)
+                        if !metaBesideControl { meta }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    if face.thumbnail != .none {
-                        Thumbnail(size: ActivityMetrics.smallThumbnail, corner: ActivityMetrics.smallThumbnailCorner)
+                    .frame(height: 16)
+                }
+                Title(face: face, palette: palette).padding(.top, hasKicker ? 3 : 0)
+                if face.subtitle != nil || !hasKicker && !metaBesideControl {
+                    Group {
+                        if hasKicker || metaBesideControl {
+                            Subtitle(face: face, palette: palette)
+                        } else if face.size == .low {
+                            // A finished run: what it took and when, on one line, or one under the other.
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 8) { Subtitle(face: face, palette: palette); Spacer(minLength: 0); meta }
+                                VStack(alignment: .leading, spacing: 3) { Subtitle(face: face, palette: palette); meta }
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 8) {
+                                Subtitle(face: face, palette: palette, lines: thumbnail == nil ? nil : 2)
+                                Spacer(minLength: 0)
+                                meta
+                            }
+                        }
                     }
+                    .padding(.top, 4)
                 }
-                Spacer(minLength: 8)
-                BottomControl(face: face, surface: .lockScreen)
-            }
-            .frame(height: ActivityMetrics.lockApprovalContent)
-        case .progress:
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 0) {
-                    StatusRow(face: face)
-                    Spacer(minLength: 4)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Title(face: face, surface: .lockScreen)
-                        Subtitle(face: face, surface: .lockScreen)
-                    }
-                    Spacer(minLength: 4)
-                    BottomControl(face: face, surface: .lockScreen)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if face.thumbnail != .none {
-                    Thumbnail(size: ActivityMetrics.thumbnail, corner: ActivityMetrics.thumbnailCorner)
-                }
-            }
-            .frame(height: ActivityMetrics.lockContent)
-        default:
-            VStack(alignment: .leading, spacing: 0) {
-                StatusRow(face: face)
-                Spacer(minLength: 4)
-                VStack(alignment: .leading, spacing: 2) {
-                    Title(face: face, surface: .lockScreen)
-                    Subtitle(face: face, surface: .lockScreen)
-                }
-                if face.bottom != .none {
-                    Spacer(minLength: 4)
-                    BottomControl(face: face, surface: .lockScreen)
-                } else {
-                    Spacer(minLength: 0)
+                if case .progress(let step, let total?, _) = face.bottom {
+                    SegmentLine(step: step, total: total, palette: palette).padding(.top, 9)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: ActivityMetrics.lockContent)
-            .padding(.trailing, 6)
+            .padding(.trailing, reserved)
+            Spacer(minLength: 0)
+            HStack(spacing: 12) {
+                Control(face: face, surface: .lockScreen)
+                if metaBesideControl { meta }
+            }
+            .padding(.trailing, face.thumbnail == .large ? reserved : 0)
+        }
+        .padding(.top, top).padding(.bottom, bottom)
+        .overlay(alignment: .topTrailing) {
+            if let thumbnail {
+                Thumbnail(size: thumbnail, corner: face.thumbnail == .small ? ActivityMetrics.smallThumbnailCorner : 10)
+                    .padding(.top, 14)
+            }
         }
     }
 }
 
-/// The 1 point glass line around the blue card, brighter along the top, as on the website's cards.
-private struct GlassEdge: View {
+// MARK: Dynamic Island, expanded
+
+/// Beside the camera, left: nothing. The bear stands in the bottom-left corner and says the state.
+struct IslandLeading: View {
+    var face: ActivityFace
+    var body: some View { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
+}
+
+/// Beside the camera, right: the one small value (time, countdown, a tick), with the outside agent's
+/// badge to its left.
+struct IslandTrailing: View {
+    var face: ActivityFace
+    var body: some View {
+        MetaCluster(face: face, palette: ActivityTheme.current.island, meta: face.meta)
+            .padding(.trailing, 24)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .environment(\.colorScheme, .dark)
+    }
+}
+
+/// Under the camera: the bear from the bottom edge, and the words and the control beside it.
+struct IslandBottom: View {
+    var face: ActivityFace
+    @Environment(\.isLuminanceReduced) private var dimmed
+    private let theme = ActivityTheme.current
+
+    var body: some View {
+        let sizes = ActivityMetrics.sizes(face)
+        let palette = theme.island
+        let height = sizes.island - ActivityMetrics.cameraRow
+        ZStack(alignment: .bottomLeading) {
+            // Taller than this region in the two low states: the ears reach up beside the camera.
+            RisingBear(bear: face.bear, side: sizes.islandBear, rim: 22, colour: palette.rim)
+                .frame(width: sizes.islandBear, height: height, alignment: .bottom)
+            words(palette)
+                .padding(.leading, sizes.islandLeft)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .foregroundStyle(palette.text)
+        .environment(\.colorScheme, .dark)
+        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .animation(dimmed ? nil : ActivityMotion.step, value: face.content)
+    }
+
+    @ViewBuilder private func words(_ palette: ActivityPalette) -> some View {
+        let hasKicker = face.kicker != nil || face.event != nil
+        if case .progress(let step, let total, let stop) = face.bottom {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1)
+                    Title(face: face, palette: palette).padding(.top, 2)
+                    if let previous = face.previous {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                            Text(previous).font(theme.subtitle).lineLimit(1)
+                        }
+                        .foregroundStyle(palette.quiet)
+                        .frame(height: 16).padding(.top, 2)
+                        .transition(.opacity)
+                    }
+                    if let total { SegmentLine(step: step, total: total, palette: palette).padding(.top, 11) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if stop {
+                    StopButton(surface: .island)
+                        .padding(.top, (total == nil ? 9 : 16) + (face.previous == nil ? 0 : 9))
+                        .transition(.opacity)
+                }
+            }
+            .padding(.trailing, 16)
+        } else {
+            let top: CGFloat = face.size == .tall ? 3 : 5
+            let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking: 14; case .tall: 12 }
+            VStack(alignment: .leading, spacing: 0) {
+                if hasKicker { Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1) }
+                Title(face: face, palette: palette).padding(.top, hasKicker ? 2 : top)
+                Subtitle(face: face, palette: palette).padding(.top, face.size == .tall ? 2 : 3)
+                Spacer(minLength: 0)
+                Control(face: face, surface: .island)
+            }
+            .padding(.trailing, face.bottom == .none ? 24 : 18)
+            .padding(.bottom, bottom)
+        }
+    }
+}
+
+// MARK: Dynamic Island, compact and minimal
+
+/// The bear's face looking out over the bottom edge of the island: its head 38 points wide, the chin
+/// a little under the edge. A new state sinks the old bear and raises the new one.
+struct CompactLeading: View {
+    var face: ActivityFace
+    @Environment(\.isLuminanceReduced) private var dimmed
+    var body: some View {
+        let head = face.bear.head
+        let side = ActivityMetrics.compactHead / (head.right - head.left)
+        ZStack {
+            Image(face.bear.image).resizable().interpolation(.high)
+                .frame(width: side, height: side)
+                .offset(x: 8 - head.left * side, y: 6 - head.top * side)
+                .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
+                .id(face.bear)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 7) }
+        .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
+        .clipped()
+        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Two short lines rather than a sentence, so it never truncates: the step's verb over its count.
+struct CompactTrailing: View {
+    var face: ActivityFace
+    @Environment(\.isLuminanceReduced) private var dimmed
     private let theme = ActivityTheme.current
     var body: some View {
-        ContainerRelativeShape()
-            .strokeBorder(
-                LinearGradient(colors: [theme.glassHighlight, theme.glassEdge, theme.glassEdge], startPoint: .top, endPoint: .bottom),
-                lineWidth: 1)
+        let palette = theme.island
+        ZStack {
+            switch face.compact {
+            case .steps(let verb, let count):
+                VStack(alignment: .trailing, spacing: 0) {
+                    if let verb {
+                        Text(verb).font(theme.compact).foregroundStyle(palette.text).frame(height: 15)
+                        Text(count).font(theme.compactCount).foregroundStyle(palette.quiet).frame(height: 13)
+                    } else {
+                        Text(count).font(theme.compact.monospacedDigit()).foregroundStyle(palette.text)
+                    }
+                }
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .id("\(verb ?? "") \(count)")
+                .transition(.push(from: .bottom))
+            case .text(let text, let tone):
+                Text(text).font(theme.compact).foregroundStyle(palette.color(tone))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .contentTransition(.numericText())
+            case .code(let code):
+                Text(code).font(theme.compactCode).foregroundStyle(palette.accent)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            case .countdown(let until):
+                TimerText(range: Countdown.range(until), down: true, colour: palette.approval, width: 42)
+            case .symbol(let name, let tone):
+                StateSymbol(name: name, tone: tone, palette: palette, size: name == "checkmark" ? 15.5 : name.hasPrefix("exclamationmark") ? 16 : 15)
+            }
+        }
+        .frame(maxWidth: 52, alignment: .trailing)
+        .clipped()
+        .padding(.trailing, 4)
+        .environment(\.colorScheme, .dark)
+        .animation(dimmed ? nil : ActivityMotion.step, value: face.compact)
+    }
+}
+
+/// Another app's activity shares the island: only the bear, no ring, set by the middle of its head
+/// and hand so every pose sits the same way in the circle, its body cut by the lower edge.
+struct MinimalView: View {
+    var face: ActivityFace
+    @Environment(\.isLuminanceReduced) private var dimmed
+    var body: some View {
+        let side = ActivityMetrics.minimalBear
+        let middle = face.bear.middle
+        let radius = ActivityMetrics.compactHeight / 2
+        ZStack {
+            Image(face.bear.image).resizable().interpolation(.high)
+                .frame(width: side, height: side)
+                .offset(x: radius - middle.x * side, y: radius - middle.y * side)
+                .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                .id(face.bear)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
+        .frame(width: radius * 2, height: radius * 2)
+        .clipShape(.circle)
+        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: Pieces
+
+/// The bear in a corner: the whole square picture, its lower edge on the surface's, darkening
+/// towards that edge as if it came up from inside. A new state sinks the old bear and raises the new.
+private struct RisingBear: View {
+    var bear: ActivityBear
+    var side: CGFloat
+    var rim: CGFloat
+    var colour: Color
+    var body: some View {
+        ZStack {
+            Image(bear.image).resizable().interpolation(.high)
+                .frame(width: side, height: side)
+                .id(bear)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .overlay(alignment: .bottom) { Rim(colour: colour, height: rim) }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct Rim: View {
+    var colour: Color
+    var height: CGFloat
+    var body: some View {
+        LinearGradient(colors: [colour.opacity(0), colour], startPoint: .top, endPoint: .bottom)
+            .frame(height: height)
             .allowsHitTesting(false)
     }
 }
 
-/// The Lock Screen's top row: the bear, the status word and the meta value (plus the caller badge).
-private struct StatusRow: View {
+/// Over the title: which step this is, in the accent colour, and beside it the app in front, or for
+/// a few seconds what just happened ("Started", "Allowed").
+private struct Kicker: View {
     var face: ActivityFace
+    var palette: ActivityPalette
     private let theme = ActivityTheme.current
     var body: some View {
-        HStack(spacing: 6) {
-            BearMark(size: ActivityMetrics.avatar, ringed: true)
-            Text(face.status)
-                .font(theme.status)
-                .foregroundStyle(theme.lock.color(face.tone))
-                .transaction { $0.animation = nil }
-                .lineLimit(1)
-                .contentTransition(.interpolate)
-            Spacer(minLength: 8)
-            MetaView(meta: face.meta, surface: .lockScreen)
-            if let caller = face.caller { CallerBadge(name: caller, size: 18) }
+        HStack(spacing: 7) {
+            if let kicker = face.kicker {
+                Text(kicker).font(theme.kicker).foregroundStyle(palette.accent)
+                    .contentTransition(.numericText())
+                    .layoutPriority(1)
+            }
+            if let word = face.event ?? face.place {
+                Text(word).font(theme.place)
+                    .foregroundStyle(face.event == nil ? palette.quiet : palette.color(face.eventTone))
+                    .contentTransition(.interpolate)
+            }
         }
-        .frame(height: ActivityMetrics.avatar)
+        .lineLimit(1).minimumScaleFactor(0.8)
     }
 }
 
+/// The main line. A new step pushes the old one up and out.
 private struct Title: View {
     var face: ActivityFace
-    var surface: ActivitySurface
+    var palette: ActivityPalette
     private let theme = ActivityTheme.current
     var body: some View {
         if face.contentIsCode {
             Text(face.content)
-                .font(theme.code)
-                .tracking(theme.codeTracking)
-                .foregroundStyle(theme.palette(surface).text)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(height: 52)
+                .font(theme.code).tracking(theme.codeTracking)
+                .lineLimit(1).minimumScaleFactor(0.6)
+                .frame(height: 46)
                 .contentTransition(.numericText())
         } else {
-            Text(face.content)
-                .font(theme.title)
-                .tracking(theme.titleTracking)
-                .foregroundStyle(theme.palette(surface).text.opacity(face.stale ? 0.72 : 1))
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(height: 25)
-                .contentTransition(.interpolate)
+            // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do.
+            let stepLike = face.size == .working || face.size == .low
+            ZStack(alignment: .leading) {
+                Text(face.content)
+                    .font(stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
+                    .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .id(face.content)
+                    .transition(face.bottom.isProgress ? .push(from: .bottom) : .opacity)
+            }
+            .frame(height: stepLike ? 24 : 25, alignment: .leading)
+            .clipped()
         }
     }
 }
 
 private struct Subtitle: View {
     var face: ActivityFace
-    var surface: ActivitySurface
+    var palette: ActivityPalette
+    /// More lines than the state asks for, where the column is narrow.
+    var lines: Int?
     private let theme = ActivityTheme.current
     var body: some View {
         if let subtitle = face.subtitle {
-            // Setup hints may take two lines; everything else keeps to one.
-            let twoLines = face.bottom.isSegments
+            let lines = max(lines ?? 1, face.subtitleLines)
             Text(subtitle)
                 .font(theme.subtitle)
-                .foregroundStyle(theme.palette(surface).color(face.subtitleTone))
-                .lineLimit(twoLines ? 2 : 1)
-                .lineSpacing(twoLines ? 2 : 0)
+                .foregroundStyle(palette.reason)
+                .lineLimit(lines)
+                .lineSpacing(lines > 1 ? 1 : 0)
+                .minimumScaleFactor(0.9)
                 .fixedSize(horizontal: false, vertical: true)
                 .contentTransition(.interpolate)
         }
     }
 }
 
-extension ActivityFace.Bottom {
-    var isSegments: Bool { if case .segments = self { true } else { false } }
-}
-
-// MARK: Dynamic Island, expanded
-
-/// Beside the camera, left: the bear and the short status word.
-struct IslandLeading: View {
+/// The small value in a corner, with the outside agent's badge to its left.
+private struct MetaCluster: View {
     var face: ActivityFace
-    @Environment(\.isLuminanceReduced) private var dimmed
-    private let theme = ActivityTheme.current
-    var body: some View {
-        HStack(spacing: 6) {
-            BearMark(size: ActivityMetrics.avatar)
-            Text(face.shortStatus)
-                .font(theme.status)
-                .foregroundStyle(theme.island.color(face.tone))
-                .transaction { $0.animation = nil }
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .contentTransition(.interpolate)
-        }
-        .padding(.leading, ActivityMetrics.islandRowInset)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .environment(\.colorScheme, .dark)
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face)
-    }
-}
-
-/// Beside the camera, right: the short meta value (and caller badge when an outside agent drives the phone).
-struct IslandTrailing: View {
-    var face: ActivityFace
-    @Environment(\.isLuminanceReduced) private var dimmed
-    var body: some View {
-        HStack(spacing: 6) {
-            MetaView(meta: face.shortMeta, surface: .island)
-            if let caller = face.caller { CallerBadge(name: caller, size: 18) }
-        }
-        .padding(.trailing, ActivityMetrics.islandRowInset)
-        .frame(maxHeight: .infinity, alignment: .center)
-        .environment(\.colorScheme, .dark)
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face)
-    }
-}
-
-/// Under the camera: the title, the subtitle and the phase's control.
-struct IslandBottom: View {
-    var face: ActivityFace
-    @Environment(\.isLuminanceReduced) private var dimmed
-    var body: some View {
-        VStack(alignment: .leading, spacing: ActivityMetrics.islandGap) {
-            VStack(alignment: .leading, spacing: face.bottom.isSegments ? 2 : 0) {
-                Title(face: face, surface: .island)
-                Subtitle(face: face, surface: .island)
-            }
-            BottomControl(face: face, surface: .island)
-        }
-        .padding(.bottom, ActivityMetrics.islandBottomExtra(face.bottom))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(ActivityTheme.current.island.text)
-        .environment(\.colorScheme, .dark)
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face)
-    }
-}
-
-// MARK: Dynamic Island, compact and minimal
-
-struct CompactLeading: View {
-    var face: ActivityFace
-    var body: some View {
-        // Kept clear of the camera (main #143): the space is on the camera's side.
-        BearMark(size: ActivityMetrics.compactAvatar)
-            .padding(.trailing, 6)
-            .environment(\.colorScheme, .dark)
-    }
-}
-
-/// A short value rather than a sentence, so it never truncates.
-struct CompactTrailing: View {
-    var face: ActivityFace
-    private let theme = ActivityTheme.current
-    var body: some View {
-        let palette = theme.island
-        Group {
-            switch face.compact {
-            case .text(let text, let tone):
-                Text(text).font(theme.compact).foregroundStyle(palette.color(tone))
-                    .transaction { $0.animation = nil }
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .contentTransition(.numericText())
-            case .code(let code):
-                Text(code).font(theme.compactCode).foregroundStyle(palette.accent)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-            case .mark(let mark, let tone):
-                Text(mark).font(theme.compactMark).foregroundStyle(palette.color(tone))
-            case .countdown(let until):
-                CountdownText(until: until, color: palette.approval, width: 42)
-            case .elapsed(let since):
-                ElapsedText(since: since, color: palette.approval, width: 42)
-            case .symbol(let name, let tone):
-                Image(systemName: name)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(palette.color(tone))
-                    .contentTransition(.symbolEffect(.replace))
-            }
-        }
-        .padding(.trailing, 4)
-        .environment(\.colorScheme, .dark)
-    }
-}
-
-/// Another app's activity shares the island: the one thing that matters, around the bear.
-struct MinimalView: View {
-    var face: ActivityFace
-    private let theme = ActivityTheme.current
-    var body: some View {
-        Group {
-            switch face.minimal {
-            case .avatar:
-                BearMark(size: ActivityMetrics.avatar)
-            case .ring(let progress):
-                ZStack {
-                    // Inset by half the line, so the stroke stays inside the frame (main #131).
-                    Circle().inset(by: 1).stroke(theme.island.track, lineWidth: 2)
-                    Circle().inset(by: 1).trim(from: 0, to: max(0.04, min(1, progress)))
-                        .stroke(theme.island.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    BearMark(size: 16)
-                }
-                .frame(width: 24, height: 24)
-            case .approval:
-                ZStack {
-                    Circle().strokeBorder(theme.approvalOutline, lineWidth: 2)
-                    BearMark(size: 16)
-                }
-                .frame(width: 24, height: 24)
-            case .problem:
-                Text("!").font(theme.compactMark).foregroundStyle(theme.island.problem)
-            }
-        }
-        .environment(\.colorScheme, .dark)
-    }
-}
-
-// MARK: Pieces
-
-/// The top-right value: text, the approval's countdown, a time of day, or elapsed handoff wait.
-private struct MetaView: View {
+    var palette: ActivityPalette
     var meta: ActivityFace.Meta
-    var surface: ActivitySurface
+    /// The room a running time keeps, so the words beside it do not shift as its digits change.
+    var timer: CGFloat = 46
     private let theme = ActivityTheme.current
     var body: some View {
-        let palette = theme.palette(surface)
-        switch meta {
-        case .none:
-            EmptyView()
-        case .text(let text):
-            Text(text).font(theme.meta).foregroundStyle(palette.quiet)
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .contentTransition(.numericText())
-        case .countdown(let until):
-            CountdownText(until: until, color: palette.approval, width: 46)
-        case .clock(let date):
-            Text(date, style: .time).font(theme.meta).foregroundStyle(palette.quiet)
-                .lineLimit(1)
-        case .elapsed(let since):
-            ElapsedText(since: since, color: palette.approval, width: 46)
+        HStack(spacing: 6) {
+            if let caller = face.caller { CallerBadge(name: caller, size: 18) }
+            switch meta {
+            case .none:
+                EmptyView()
+            case .text(let text):
+                Text(text).font(theme.place).foregroundStyle(palette.quiet)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            case .countdown(let until):
+                TimerText(range: Countdown.range(until), down: true, colour: palette.approval, width: timer)
+            case .clock(let date):
+                Text(date, style: .time).font(theme.place).foregroundStyle(palette.quiet).lineLimit(1)
+            case .elapsed(let since):
+                TimerText(range: since...since.addingTimeInterval(12 * 3600), down: false, colour: palette.quiet, width: timer)
+            case .symbol(let name, let tone):
+                StateSymbol(name: name, tone: tone, palette: palette, size: name == "checkmark" ? 16 : 17)
+            }
         }
     }
 }
 
-/// What sits at the bottom of a card: the step line and Stop, the approval's buttons, Open Poki,
-/// Handoff Done, or the setup steps.
-private struct BottomControl: View {
+/// A tick in the accent colour, or the red disc of a problem with its mark in white.
+private struct StateSymbol: View {
+    var name: String
+    var tone: ActivityTone
+    var palette: ActivityPalette
+    var size: CGFloat
+    var body: some View {
+        if tone == .problem {
+            Image(systemName: name).font(.system(size: size, weight: .semibold))
+                .symbolRenderingMode(.palette).foregroundStyle(.white, ActivityTheme.red)
+        } else {
+            Image(systemName: name).font(.system(size: size, weight: .semibold))
+                .foregroundStyle(palette.color(tone))
+                .contentTransition(.symbolEffect(.replace))
+        }
+    }
+}
+
+/// What sits at the bottom of a card: Stop, the approval's buttons, Done, Open Poki, or the setup
+/// steps. On the expanded island a run's Stop is the round button beside the words instead.
+private struct Control: View {
     var face: ActivityFace
     var surface: ActivitySurface
     private let theme = ActivityTheme.current
@@ -412,17 +519,8 @@ private struct BottomControl: View {
         switch face.bottom {
         case .none:
             EmptyView()
-        case .progress(let outcomes, let current, let finished, let stop):
-            HStack(spacing: 8) {
-                StepLine(outcomes: outcomes, current: current, finished: finished,
-                         capacity: capacity(stop: stop), palette: palette)
-                Spacer(minLength: 0)
-                if stop { StopButton(surface: surface).transition(.opacity) }
-            }
-            // The island keeps Stop's height when the run ends, so it does not shrink at Done.
-            .frame(height: stop || surface == .island ? ActivityMetrics.stopHeight : 16)
-            .padding(.horizontal, surface == .island ? ActivityMetrics.islandLastRowInset : 0)
-            .transition(.activityRow)
+        case .progress(_, _, let stop):
+            if stop, surface == .lockScreen { StopButton(surface: surface).transition(.opacity) }
         case .approval(let id):
             ApprovalButtons(approvalID: id, surface: surface)
                 .transition(.activityRow)
@@ -431,99 +529,48 @@ private struct BottomControl: View {
                 .font(theme.button)
                 .foregroundStyle(palette.text)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.buttonHeight(surface), maxHeight: ActivityMetrics.buttonHeight(surface))
+                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
                 .background(palette.buttonFill, in: .capsule)
                 .contentTransition(.interpolate)
         case .handoff(let id):
             HandoffDoneButton(handoffID: id, surface: surface)
                 .transition(.activityRow)
         case .openPoki:
-            HStack {
-                Spacer(minLength: 0)
-                Link(destination: face.link) {
-                    Text(String(activity: "Open Poki"))
-                        .font(theme.button)
-                        .foregroundStyle(palette.primaryText)
-                        .frame(width: ActivityMetrics.openWidth, height: ActivityMetrics.openHeight(surface))
-                        .background(palette.primaryFill, in: .capsule)
-                }
+            Link(destination: face.link) {
+                Text(String(activity: "Open Poki"))
+                    .font(theme.button)
+                    .foregroundStyle(palette.text)
+                    .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
+                    .background(palette.buttonFill, in: .capsule)
             }
             .transition(.activityRow)
         case .segments(let number, let count):
-            HStack(spacing: 4) {
-                ForEach(1...max(1, count), id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(index < number ? palette.segmentDone : index == number ? palette.text : palette.track)
-                        .frame(height: 4)
-                }
-            }
-            .padding(.horizontal, surface == .island ? ActivityMetrics.islandSegmentsInset : 0)
-            .transition(.activityRow)
-        }
-    }
-
-    /// How many dots fit beside Stop (or without it) on this surface, the current step included.
-    private func capacity(stop: Bool) -> Int {
-        switch (surface, stop) {
-        case (.lockScreen, true): 8
-        case (.lockScreen, false): 12
-        case (.island, true): 11
-        case (.island, false): 15
+            SegmentLine(step: number, total: count, palette: palette)
+                .transition(.activityRow)
         }
     }
 }
 
-/// One dot per step on a 3 point line: plain when the step went through, larger and red when it did
-/// not, the current step hollow. A finished run turns the line green and ends on a larger dot. The
-/// newest steps are kept when they do not all fit.
-private struct StepLine: View {
-    var outcomes: [Bool]
-    var current: Bool
-    var finished: Bool
-    var capacity: Int
+/// One segment per step, 4 points high, 3 apart: lit up to the step under way.
+private struct SegmentLine: View {
+    var step: Int
+    var total: Int
     var palette: ActivityPalette
-    private let theme = ActivityTheme.current
-
     var body: some View {
-        let shown = Array(outcomes.suffix(max(0, capacity - (current ? 1 : 0))).enumerated())
-        let slots = shown.count + (current ? 1 : 0)
-        let slot = ActivityMetrics.dotSlot
-        let line = finished ? palette.finished : theme.stepLine
-        ZStack(alignment: .leading) {
-            if slots > 1 {
-                Capsule().fill(line)
-                    .frame(width: CGFloat(slots - 1) * slot, height: ActivityMetrics.line)
-                    .padding(.leading, slot / 2)
-            }
-            HStack(spacing: 0) {
-                ForEach(shown, id: \.offset) { index, ok in
-                    let last = finished && index == shown.count - 1 && ok
-                    let size = last ? ActivityMetrics.lastDot : ok ? ActivityMetrics.dot : ActivityMetrics.missedDot
-                    Circle()
-                        .fill(ok ? line : theme.stepMissed)
-                        .frame(width: size, height: size)
-                        .frame(width: slot)
-                }
-                if current {
-                    ZStack {
-                        Circle().fill(theme.stepLine)
-                        Circle().fill(theme.stepHole).padding(ActivityMetrics.line)
-                    }
-                    .frame(width: ActivityMetrics.currentDot, height: ActivityMetrics.currentDot)
-                    .frame(width: slot)
-                    .transition(.opacity)
-                }
+        HStack(spacing: 3) {
+            ForEach(1...max(1, total), id: \.self) { index in
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(index <= step ? palette.segmentDone : palette.track)
+                    .frame(height: 4)
             }
         }
-        .frame(height: 16)
-        // The first dot's edge, not its slot, lines up with the text above.
-        .padding(.leading, -(slot - ActivityMetrics.dot) / 2)
-        .animation(ActivityMotion.phase, value: outcomes)
+        .animation(ActivityMotion.step, value: step)
+        .accessibilityHidden(true)
     }
 }
 
-/// Don’t Allow and Allow (ESP-171 and ESP-139 final boards). Allow asks for Face ID first (see
-/// ApproveActionIntent), so it carries the Face ID glyph.
+/// Don’t Allow and Allow, the same width. Allow asks for Face ID first (see ApproveActionIntent),
+/// so it carries the Face ID glyph.
 struct ApprovalButtons: View {
     var approvalID: String
     var surface: ActivitySurface
@@ -531,23 +578,24 @@ struct ApprovalButtons: View {
 
     var body: some View {
         let palette = theme.palette(surface)
-        let height = ActivityMetrics.buttonHeight(surface)
+        let height = ActivityMetrics.button
         HStack(spacing: 8) {
             Button(intent: DenyActionIntent(approvalID: approvalID)) {
                 Text(String(activity: "Don’t Allow"))
                     .font(theme.button)
                     .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .frame(width: ActivityMetrics.denyWidth, height: height)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 6)
+                    .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
                     .background(palette.buttonFill, in: .capsule)
             }
             .buttonStyle(.plain)
             Button(intent: ApproveActionIntent(approvalID: approvalID)) {
                 HStack(spacing: 6) {
-                    Image(systemName: "faceid").font(.system(size: 16, weight: .medium)).foregroundStyle(theme.primaryIcon)
-                    Text(String(activity: "Allow")).font(theme.button).foregroundStyle(palette.primaryText)
+                    Image(systemName: "faceid").font(.system(size: 13, weight: .semibold))
+                    Text(String(activity: "Allow")).font(theme.button).lineLimit(1)
                 }
+                .foregroundStyle(palette.primaryText)
                 .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
                 .background(palette.primaryFill, in: .capsule)
             }
@@ -556,8 +604,8 @@ struct ApprovalButtons: View {
     }
 }
 
-/// The one button on the "Your turn" card: the person finished what the agent could not do, and the
-/// agent carries on (HandoffDoneIntent).
+/// The one button of "your turn": the person finished what the agent could not do, and the agent
+/// carries on (HandoffDoneIntent).
 struct HandoffDoneButton: View {
     var handoffID: String
     var surface: ActivitySurface
@@ -565,80 +613,62 @@ struct HandoffDoneButton: View {
 
     var body: some View {
         let palette = theme.palette(surface)
-        let height = ActivityMetrics.buttonHeight(surface)
+        let height = ActivityMetrics.button
         Button(intent: HandoffDoneIntent(handoffID: handoffID)) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(palette.primaryText)
-                Text(String(activity: "Done, carry on"))
-                    .font(theme.button)
-                    .foregroundStyle(palette.primaryText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
-            .background(palette.primaryFill, in: .capsule)
+            Text(String(activity: "Done, carry on"))
+                .font(theme.button)
+                .foregroundStyle(palette.primaryText)
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: surface == .island ? .infinity : nil, minHeight: height, maxHeight: height)
+                .background(palette.primaryFill, in: .capsule)
         }
         .buttonStyle(.plain)
     }
 }
 
-/// Stop runner: stops the runner, and with it iOS's automation banner, until the agent's next request.
+/// Stop: stops the runner, and with it iOS's automation banner, until the agent's next request. On
+/// the island it is drawn as the system draws Screen Recording's: a white ring round a red square.
+/// On the blue card it is a white capsule with the red square and the word.
 struct StopButton: View {
     var surface: ActivitySurface
     private let theme = ActivityTheme.current
     var body: some View {
-        let palette = theme.palette(surface)
         Button(intent: StopRunnerIntent()) {
-            Text(String(activity: "Stop"))
-                .font(theme.button)
-                .foregroundStyle(palette.text)
-                .frame(width: ActivityMetrics.stopWidth(surface), height: ActivityMetrics.stopHeight)
-                .background(palette.buttonFill, in: .capsule)
+            if surface == .island {
+                let side = ActivityMetrics.stopCircle
+                ZStack {
+                    Circle().strokeBorder(.white, lineWidth: side * 0.05)
+                    RoundedRectangle(cornerRadius: side * 0.1, style: .continuous).fill(ActivityTheme.red)
+                        .frame(width: side * 0.4, height: side * 0.4)
+                }
+                .frame(width: side, height: side)
+                .contentShape(.circle)
+            } else {
+                HStack(spacing: 7) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous).fill(ActivityTheme.red).frame(width: 11, height: 11)
+                    Text(String(activity: "Stop")).font(theme.button).foregroundStyle(Color(hex: 0x111111))
+                }
+                .padding(.horizontal, 14)
+                .frame(height: ActivityMetrics.stopCapsule)
+                .background(.white, in: .capsule)
+            }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(activity: "Stop")))
     }
 }
 
-extension View {
-    /// Liquid Glass on iOS 26 and later in the app process; WidgetKit's remote view archiver drops
-    /// `glassEffect` subtrees in Live Activity extensions, so the widget uses the design board's
-    /// translucent glass fill directly.
-    @ViewBuilder func activityGlassSurface<S: Shape>(fill: Color, in shape: S) -> some View {
-        #if POKI_APP
-        if #available(iOS 26.0, *) {
-            self.background(fill, in: shape)
-                .glassEffect(.clear, in: shape)
-        } else {
-            self.background(fill, in: shape)
-        }
-        #else
-        self.background(fill, in: shape)
-        #endif
-    }
-}
-
-/// An approval's time left, counted down by the system between updates.
-private struct CountdownText: View {
-    var until: Date
-    var color: Color
+/// A time the system counts by itself between updates: an approval's time left, a run's time so far.
+private struct TimerText: View {
+    var range: ClosedRange<Date>
+    var down: Bool
+    var colour: Color
     var width: CGFloat
     var body: some View {
         // No fixedSize on timer text: it blanks the whole card on iOS 26.
-        Text(timerInterval: Countdown.range(until), countsDown: true)
-            .font(ActivityTheme.current.countdown).foregroundStyle(color)
-            .multilineTextAlignment(.trailing)
-            .frame(width: width, alignment: .trailing)
-    }
-}
-
-/// How long the agent has waited for the person, counted up by the system.
-private struct ElapsedText: View {
-    var since: Date
-    var color: Color
-    var width: CGFloat
-    var body: some View {
-        Text(timerInterval: since...since.addingTimeInterval(12 * 3600), countsDown: false)
-            .font(ActivityTheme.current.countdown).foregroundStyle(color)
+        Text(timerInterval: range, countsDown: down)
+            .font(ActivityTheme.current.value).foregroundStyle(colour)
             .multilineTextAlignment(.trailing)
             .frame(width: width, alignment: .trailing)
     }
@@ -648,24 +678,6 @@ enum Countdown {
     /// Counting down to `until`. The start is fixed just under an hour before it (not "now", which the
     /// system may take at another moment than it draws), so the remaining time is always `until - now`.
     static func range(_ until: Date) -> ClosedRange<Date> { until.addingTimeInterval(-3599)...until }
-}
-
-/// The bear, round, like the website's avatar. On the blue Lock Screen card it carries a 1.5 point
-/// white ring so the blue top of the avatar stands out from the card.
-struct BearMark: View {
-    var size: CGFloat
-    var ringed: Bool = false
-    var body: some View {
-        Image("Bear").resizable().scaledToFill()
-            .frame(width: size, height: size)
-            .clipShape(.circle)
-            .overlay {
-                if ringed {
-                    Circle().stroke(.white, lineWidth: 1.5)
-                }
-            }
-            .accessibilityHidden(true)
-    }
 }
 
 /// The latest screenshot, read from the App Group container and drawn like a small phone. The view is

@@ -50,9 +50,22 @@ for png in "$HERE"/Poki/AppIcons/*.png; do
   echo '{"images":[{"filename":"icon@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$APP/$name.imageset/Contents.json"
 done
 
+# The Live Activity's bears (Poki/ActivityBears, see its README), one per pose, for the app's preview
+# and the widget. In a catalogue, so the Live Activity's archive names them instead of carrying them.
+bears() {
+  for png in "$HERE"/Poki/ActivityBears/*.png; do
+    name="$(basename "$png" .png)"
+    mkdir -p "$1/$name.imageset"
+    cp "$png" "$1/$name.imageset/bear@3x.png"
+    echo '{"images":[{"filename":"bear@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$1/$name.imageset/Contents.json"
+  done
+}
+bears "$APP"
+
 WIDGET="$HERE/PokiWidgets/Assets.xcassets"
 catalog "$WIDGET"
 bear "$WIDGET"
+bears "$WIDGET"
 # The calling agent's logo on the Live Activity.
 logos "$WIDGET"
 echo "assets in $APP and $WIDGET"

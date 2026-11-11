@@ -46,17 +46,19 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// The runner is stopped while no agent uses the phone (no automation banner); the next
         /// request starts it again.
         var runnerPaused = false
-        /// Whether each of the run's latest steps went through, newest last, at most `outcomeLimit`.
-        var outcomes: [Bool] = []
         /// During setup: which step the person is on ("2/6").
         var guide: Guide?
         /// Live voice conversation state, when active.
         var voice: Voice? = nil
         /// When the agent's current run of steps began.
         var since: Date?
-        /// Steps in the current run, and how many of them did not go through. Kept by ActivityController.
+        /// Actions taken in the current run, and how many of them did not go through. Kept by
+        /// ActivityController. What the Live Activity shows as the step is `progress` (ActivityFace).
         var stepCount = 0
         var failedCount = 0
+        /// The step before the one under way, in English like `headline`: the expanded island shows
+        /// it ticked under the current one. Kept by ActivityController.
+        var previous: String?
         /// When the run finished (phase `done`), so the summary shows a fixed duration.
         var endedAt: Date?
         /// A short-lived event ("Started", "Now in WeChat", "Allowed") shown as the status word for a few
@@ -66,8 +68,6 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// The plan the chat's model published: the Live Activity then counts the plan's steps, as the
         /// chat's plan bubble does, not the single taps under them.
         var plan: Plan?
-
-        static let outcomeLimit = 12
     }
     struct Plan: Codable, Hashable {
         var total: Int
