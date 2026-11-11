@@ -467,6 +467,25 @@ struct AgentsAndRelayView: View {
                     Text("Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested: if the agent can’t see the screen after this, turn it off and open Poki again.")
                 }
             }
+            // Main's Runner section, where it was before the redesign (ESP-321 decision 3). The in-process
+            // path has no Poki Runner to start or stop (ESP-152).
+            if model.automationPath == .runner {
+                Section {
+                    LabeledContent("Runner", value: Health.runner(model).word)
+                    Picker("Stop When Idle For", selection: $model.idleStopSeconds) {
+                        ForEach(SettingsHome.idleChoices, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    if model.runnerPaused {
+                        Button("Start Now") { model.wakeRunner() }
+                    } else {
+                        Button("Stop Runner", role: .destructive) { model.pauseRunner() }.disabled(!model.approvals.isEmpty)
+                    }
+                } header: {
+                    Text("Runner")
+                } footer: {
+                    Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                }
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Agents and Relay")
