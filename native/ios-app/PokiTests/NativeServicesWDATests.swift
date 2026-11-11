@@ -84,8 +84,11 @@ final class NativeServicesWDATests: XCTestCase {
         var state = PokiState(phase: .idle, headline: "Ready", thumbnailVersion: 0)
         state.event = .init(kind: .started, text: "Started")
         let face = state.face
-        guard case .text(_, let tone) = face.compact else { return XCTFail("Expected compact status") }
-        XCTAssertEqual(tone, face.tone)
+        // #87 shows Ready as a symbol in the compact island; main showed the word. Either way it takes the event's colour.
+        switch face.compact {
+        case .text(_, let tone), .symbol(_, let tone), .mark(_, let tone): XCTAssertEqual(tone, face.tone)
+        default: XCTFail("Expected a toned compact status, got \(face.compact)")
+        }
     }
 
     func testDragVelocityUsesScreenPointsNotHIDCoordinates() {

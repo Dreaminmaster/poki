@@ -151,8 +151,11 @@ extension PokiState {
             face.tone = event.tone
             // Compact text and its adjacent glyph are one status. A transient
             // event must not recolor only the glyph (for example blue + green Ready).
-            if case .text(let text, _) = face.compact {
-                face.compact = .text(text, event.tone)
+            switch face.compact {
+            case .text(let text, _): face.compact = .text(text, event.tone)
+            case .symbol(let name, _): face.compact = .symbol(name, event.tone)
+            case .mark(let mark, _): face.compact = .mark(mark, event.tone)
+            default: break
             }
         }
         if stale, phase == .working || phase == .handoff {
