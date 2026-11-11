@@ -21,8 +21,6 @@ struct PokiApp: App {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
             UINavigationBar.appearance().titleTextAttributes = [.font: inline]
         }
-        // The tab bar's attention dots (Setup items open, Agents trouble) are orange, the warning colour.
-        UITabBarItem.appearance().badgeColor = .systemOrange
         #if DEBUG && targetEnvironment(simulator)
         TestCredential.importIfGiven()
         #endif
@@ -42,66 +40,99 @@ struct PokiApp: App {
     }
 }
 
-/// Two tabs, as a native iPhone app has them: Chats (the Sessions list, Poki's chat and an agent's session
-/// over it, like Messages) and Status (Poki's run status, model, history and settings). Voice lives inside
-/// the chat: a live conversation button and dictation into the message field.
+/// Home is the Sessions list only (ESP-174 boards "H1 Home sessions", "H2 Home paused"): Poki's chat and
+/// an agent's session open over it, like a conversation in Messages; swiping left in Poki's chat enters the
+/// full-screen Voice page; all settings live inside Poki's avatar details screen, layered by frequency.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @Environment(\.scenePhase) private var scenePhase
-    @State private var tab = RootTab.chats
-    @State private var home = NavigationPath()
-    /// The Agents and Setup tabs' pages, pushed; nothing is an overlay.
-    @State private var agents = NavigationPath()
-    @State private var setup = NavigationPath()
-
-    /// Sessions is the first page; Poki's chat and an agent's session open over it, like a conversation
-    /// in Messages; setup's checklist and its items are pushed there too.
-    enum HomeRoute: Hashable { case chat, session(String), setup }
-    enum RootTab: Hashable { case chats, agents, setup, newChat }
-
     @Environment(\.horizontalSizeClass) private var width
-    /// In a wide window (iPad, the inner display of iPhone Duo, a large Split View or Stage Manager
-    /// window) the Poki tab is split: sessions and controls on the left, the chat on the right.
+
+    @State private var home = NavigationPath()
     @State private var wide: HomeRoute = .chat
-    /// The tab bar leaves while a conversation is open on iPhone. It is set here, on the stack, and
-    /// changed inside an animation, so it eases out on the way in and eases back in on the way out
-    /// (a hidden tab bar set by the pushed page itself snaps).
-    @State private var tabBarHidden = false
+    @State private var page: RootPage = .chat
+    @State private var detailsOpen = false
+    @State private var detailsPath = NavigationPath()
+
+    enum HomeRoute: Hashable { case chat, session(String), setup }
 
     private func show(_ route: HomeRoute) {
         wide = route
         home = NavigationPath([route])
-        setTabBarHidden(route != .setup && width != .regular)
     }
 
-    private func setTabBarHidden(_ hidden: Bool) {
-        guard hidden != tabBarHidden else { return }
-        withAnimation(.easeInOut(duration: 0.3)) { tabBarHidden = hidden }
+    private func openDetails(_ items: [any Hashable] = []) {
+        var next = NavigationPath()
+        for item in items { next.append(item) }
+        detailsPath = next
+        detailsOpen = true
     }
 
     private var sessions: some View {
-        SessionsView(openChat: { show(HomeRoute.chat) }, openSession: { show(HomeRoute.session($0)) },
-                     openModel: { openAgents(AgentsRoute.accounts) },
-                     openConnectors: { tab = .agents; agents = NavigationPath() },
-                     openDetails: { tab = .agents }, openVoice: openLiveVoice,
-                     openSetup: { tab = .setup; setup = NavigationPath() })
+        SessionsView(
+            openChat: {
+                page = .chat
+                show(.chat)
+            },
+            openSession: { show(.session($0)) },
+            openModel: { openDetails([DetailsRoute.model]) },
+            openConnectors: { openDetails([DetailsRoute.moreSettings, DetailsRoute.settings]) },
+            openDetails: { openDetails() },
+            openVoice: openLiveVoice,
+            openSetup: { openDetails([DetailsRoute.moreSettings, DetailsRoute.setup]) },
+            openSetupStep: { step in home.append(step) }
+        )
     }
 
-    @ViewBuilder private func page(_ route: HomeRoute, split: Bool) -> some View {
+    @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
         switch route {
         case .chat:
-            ChatView(openDetails: { tab = .agents }, openVoice: openLiveVoice,
-                     openSetup: openSetup, openModel: { openAgents(AgentsRoute.accounts) },
-                     back: split ? nil : { home = NavigationPath() })
+            ZStack {
+                if page == .chat {
+                    ChatView(
+                        openDetails: { openDetails() },
+                        openVoice: { withAnimation(.snappy) { page = .voice } },
+                        openSetup: { openDetails([DetailsRoute.moreSettings, DetailsRoute.setup]) },
+                        openSetupStep: { step in home.append(step) },
+                        openModel: { openDetails([DetailsRoute.model]) },
+                        selectMode: { target in withAnimation(.snappy) { page = target } },
+                        back: split ? nil : { home = NavigationPath() }
+                    )
+                    .transition(.move(edge: .leading))
+                } else {
+                    VoicePage(
+                        back: split ? nil : { home = NavigationPath() },
+                        openDetails: { openDetails() },
+                        openVoiceSettings: { openDetails([DetailsRoute.voice]) },
+                        select: { target in withAnimation(.snappy) { page = target } }
+                    )
+                    .transition(.move(edge: .trailing))
+                }
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 40)
+                    .onEnded { value in
+                        let dx = value.translation.width
+                        let dy = value.translation.height
+                        guard abs(dx) > abs(dy) * 1.5 else { return }
+                        if dx < -50, page == .chat {
+                            withAnimation(.snappy) { page = .voice }
+                        } else if dx > 50, page == .voice {
+                            withAnimation(.snappy) { page = .chat }
+                        }
+                    }
+            )
+            .background((page == .voice ? Site.blue : Color(.systemBackground)).ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
         case .session(let id):
             SessionView(id: id, back: { home = NavigationPath() })
         case .setup:
-            SetupChecklist()
+            SetupChecklist().toolbar(.visible, for: .navigationBar)
         }
     }
 
-    @ViewBuilder private var pokiTab: some View {
+    @ViewBuilder private var mainNavigation: some View {
         if width == .regular {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge, which left a gap above home's blue header and pushed
@@ -109,72 +140,51 @@ struct RootView: View {
             HStack(spacing: 0) {
                 NavigationStack {
                     sessions
-                        .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0) }
+                        .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
                 }
                 .frame(width: 375)
                 Divider().ignoresSafeArea()
                 NavigationStack {
-                    page(wide, split: true).id(wide)
-                        .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0) }
+                    destination(wide, split: true).id(wide)
+                        .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
                 }
             }
         } else {
             NavigationStack(path: $home) {
                 sessions
-                    .navigationDestination(for: HomeRoute.self) { page($0, split: false) }
-                    .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0) }
+                    .navigationDestination(for: HomeRoute.self) { destination($0, split: false) }
+                    .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
             }
-            .toolbarVisibility(tabBarHidden ? .hidden : .visible, for: .tabBar)
-            // Back (the button or the edge swipe) empties the path: the tab bar eases back in.
-            .onChange(of: home.isEmpty) { _, empty in if empty { setTabBarHidden(false) } }
         }
     }
 
-    /// The tabs, apart from `body`: together with its alerts and handlers the one expression was more
-    /// than the compiler would type-check in its time limit.
-    private var tabs: some View {
-        TabView(selection: $tab) {
-            Tab(String(localized: "Poki"), systemImage: "bubble.left.and.bubble.right.fill", value: RootTab.chats) {
-                pokiTab.environment(\.horizontalSizeClass, width)
+    /// The navigation and Poki's details, apart from `body`: together with its alerts and handlers the one
+    /// expression was more than the compiler would type-check in its time limit (main #145).
+    private var navigation: some View {
+        mainNavigation
+            .fullScreenCover(isPresented: $detailsOpen) {
+                PokiDetailsView(
+                    openVoice: {
+                        detailsOpen = false
+                        openLiveVoice()
+                    },
+                    openSetup: {
+                        var next = NavigationPath()
+                        next.append(DetailsRoute.moreSettings)
+                        next.append(DetailsRoute.setup)
+                        detailsPath = next
+                    },
+                    openSession: { id in
+                        detailsOpen = false
+                        openRun(id)
+                    },
+                    path: $detailsPath
+                )
             }
-
-            Tab("Agents", systemImage: "point.3.connected.trianglepath.dotted", value: RootTab.agents) {
-                AgentsView(path: $agents, openSession: openRun).environment(\.horizontalSizeClass, width)
-            }
-            // A dot when something there needs attention: no account for the chat, or the relay down.
-            .badge(agentsNeedAttention ? Text(verbatim: " ") : nil)
-
-            Tab("Setup", systemImage: "checklist", value: RootTab.setup) { SetupTab(path: $setup).environment(\.horizontalSizeClass, width) }
-                // A dot while a setup item is still open.
-                .badge(model.setupLooksComplete ? nil : Text(verbatim: " "))
-
-            // iOS 26: New Chat is the round button at the bottom right, on the tab bar's line (the
-            // place iOS gives a search tab). Choosing it starts a chat and goes back to the Poki tab.
-            if #available(iOS 26.0, *) {
-                Tab(String(localized: "New Chat"), systemImage: "square.and.pencil", value: RootTab.newChat, role: .search) { Color.clear }
-            }
-        }
-        // The tab bar stays at the bottom on iPad too: in a wide window iOS moves it to a floating bar
-        // at the top, over home's header. The tab bar reads the compact width here; each tab's own
-        // content gets the real width back.
-        .environment(\.horizontalSizeClass, UserInterfaceSizeClass.compact)
     }
 
     var body: some View {
-        tabs
-        .onChange(of: tab) { old, new in
-            // Leaving the Poki tab from a conversation (to Accounts, Setup, a connector): the Poki
-            // tab is back at Sessions, with its tab bar, when you come back. Done without animation
-            // while the other tab is in front, so nothing flashes and the tab bar is laid out afresh.
-            if old == .chats, new != .chats, new != .newChat, width != .regular, !home.isEmpty {
-                var quiet = Transaction(); quiet.disablesAnimations = true
-                withTransaction(quiet) { home = NavigationPath(); tabBarHidden = false }
-            }
-            guard new == .newChat else { return }
-            tab = .chats
-            if !chat.running { chat.newConversation() }
-            show(HomeRoute.chat)
-        }
+        navigation
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
@@ -208,15 +218,15 @@ struct RootView: View {
             if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.clearNotices(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
-        // the setup step, or the Activity Log for a problem; `poki://voice` opens the chat too (it
-        // never turns on the microphone).
+        // the setup step, or the Activity Log for a problem; `poki://voice` opens the voice page.
         .onOpenURL { url in open(link: url) }
         .onAppear(perform: openLaunchScreen)
         .task {
             #if DEBUG
             // Development builds: `-pokiVoiceLink "poki://voice?…"` at launch starts a silent test run.
             if let link = UserDefaults.standard.string(forKey: "pokiVoiceLink"), let url = URL(string: link), url.host() == "voice" {
-                tab = .chats; show(HomeRoute.chat)
+                page = .voice
+                show(.chat)
                 model.voice.openAtLaunch(url)
             }
             #endif
@@ -230,88 +240,93 @@ struct RootView: View {
         // A pairing file or a setup link (from Poki Setup on a computer, AirDrop or Files) opens
         // setup at that step, where the result is shown.
         if let step = model.open(link: url) {
-            tab = .setup
-            setup = NavigationPath([step])
+            detailsOpen = false
+            home = NavigationPath([step])
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
-            // The Live Activity during setup: the Setup tab.
-            tab = .setup
+            openDetails([DetailsRoute.moreSettings, DetailsRoute.setup])
         } else if url.host() == "log" {
-            // The Live Activity's problem: what went wrong is in the Activity Log.
-            openAgents(.activityLog)
+            openDetails([DetailsRoute.history])
+        } else if url.host() == "voice" {
+            detailsOpen = false
+            model.voice.open(url)
+            page = .voice
+            show(.chat)
         } else {
-            if url.host() == "voice" { model.voice.open(url) }
-            tab = .chats; show(HomeRoute.chat)
+            detailsOpen = false
+            page = .chat
+            show(.chat)
         }
     }
 
-    /// The Agents tab needs a look: no usable chat account, or the relay set but not reachable.
-    private var agentsNeedAttention: Bool {
-        if !ModelKeys.hasUsableKey { return true }
-        if case .offline = model.relayStatus { return true }
-        return false
-    }
-
-    /// A page of the Agents tab: accounts, voice, the Activity Log.
-    private func openAgents(_ route: AgentsRoute) {
-        tab = .agents
-        agents = NavigationPath([route])
-    }
-
-    /// The live voice conversation runs inside Poki's chat: the chat opens and the conversation starts.
+    /// Opens the full-screen Voice page inside Poki's chat and starts the live voice conversation if ready.
     private func openLiveVoice() {
-        tab = .chats
-        show(HomeRoute.chat)
+        page = .voice
+        show(.chat)
         if !model.voice.isOn, model.voice.canTalkLive {
-            // Taps that send, pay, delete or call ask for the person's OK, also by notification.
             ApprovalNotice.requestPermission()
             Task { await model.voice.start() }
         }
     }
 
-    /// Setup's checklist, on the Chats page.
-    private func openSetup() {
-        tab = .chats
-        show(HomeRoute.setup)
-    }
-
     /// A run from the Activity Log: Poki's own chat or an outside agent's session, in Chats.
     private func openRun(_ id: String) {
-        tab = .chats
         if let session = SessionStore.shared.session(id), session.kind == .poki {
             if session.id != chat.sessionID { chat.restore(session) }
-            show(HomeRoute.chat)
+            page = .chat
+            show(.chat)
         } else {
-            show(HomeRoute.session(id))
+            show(.session(id))
         }
     }
-
 
     /// `-pokiScreen setup` (connect, debug, activity, details, model, voice…) opens that screen at launch,
     /// for the build's screenshots; `-pokiSetupStep 3` opens setup at that step.
     private func openLaunchScreen() {
         let defaults = UserDefaults.standard
-        // `-pokiVoiceBridge <address>`: the voice bridge address, from the Mac that launches the app (only a
-        // developer connection can pass launch arguments). It never turns on the microphone.
         if let address = defaults.string(forKey: "pokiVoiceBridge") { _ = model.voice.setBridge(address) }
-        // A sample conversation (`-pokiChat working`) opens in the chat itself.
-        if defaults.string(forKey: "pokiChat") != nil { show(HomeRoute.chat) }
+        if defaults.string(forKey: "pokiChat") != nil {
+            page = .chat
+            show(.chat)
+        }
         switch defaults.string(forKey: "pokiScreen") {
-        case "chat": show(HomeRoute.chat)
-        case "session": if let first = SessionStore.shared.ordered.first(where: { $0.kind == .agent || $0.kind == .handoff }) { show(HomeRoute.session(first.id)) }
+        case "chat":
+            page = .chat
+            show(.chat)
+        case "voice":
+            page = .voice
+            show(.chat)
+        case "session":
+            if let first = SessionStore.shared.ordered.first(where: { $0.kind == .agent || $0.kind == .handoff }) {
+                show(.session(first.id))
+            }
         case "setup":
             let step = defaults.integer(forKey: "pokiSetupStep")
-            tab = .setup
-            setup = step > 0 ? NavigationPath([SetupStep.shown[min(step, SetupStep.shown.count) - 1]]) : NavigationPath()
-        case "connect", "settings": tab = .agents
-        case "debug": tab = .setup; setup = NavigationPath([SettingsRoute.diagnostics])
-        case "activity": tab = .setup; setup = NavigationPath([SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            if step > 0 {
+                let target = SetupStep.shown[min(step, SetupStep.shown.count) - 1]
+                openDetails([DetailsRoute.moreSettings, DetailsRoute.setup, target])
+            } else {
+                openDetails([DetailsRoute.moreSettings, DetailsRoute.setup])
+            }
+        case "moreSettings":
+            openDetails([DetailsRoute.moreSettings])
+        case "connect", "settings":
+            openDetails([DetailsRoute.moreSettings, DetailsRoute.settings])
+        case "debug":
+            openDetails([DetailsRoute.moreSettings, SettingsRoute.diagnostics])
+        case "activity":
+            openDetails([DetailsRoute.moreSettings, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
-            tab = .agents
-            if let first = model.identity.secrets.first { agents = NavigationPath([SettingsRoute.connector(first)]) }
-        case "details", "status": tab = .agents
-        case "model": openAgents(.accounts)
-        case "steps": openAgents(.activityLog)
-        case "voice": show(HomeRoute.chat)
+            if let first = model.identity.secrets.first {
+                openDetails([DetailsRoute.moreSettings, DetailsRoute.settings, SettingsRoute.connector(first)])
+            } else {
+                openDetails([DetailsRoute.moreSettings, DetailsRoute.settings])
+            }
+        case "details", "status":
+            openDetails()
+        case "model":
+            openDetails([DetailsRoute.model])
+        case "steps":
+            openDetails([DetailsRoute.history])
         default: break
         }
     }

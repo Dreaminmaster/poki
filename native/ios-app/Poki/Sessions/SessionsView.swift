@@ -1,130 +1,68 @@
+//
+//  SessionsView.swift
+//  Poki
+//
+//  Session rows and pinned channels are adapted from GetStream/swiftui-iMessage-clone (commit df114b4,
+//  iMessageClone/ChannelList/iMessageChannelListItemView.swift and
+//  iMessageClone/ChannelList/PinnedChannelsView.swift, by Stefan Blos; the repository has no licence file).
+//
+
 import SwiftUI
 import UIKit
 
-/// Poki's home: every conversation, like the Messages list. The owner's chats with Poki, the sessions of
-/// outside agents (Claude, Codex, any MCP client) and the tasks they handed to Poki, live first. On top,
-/// a strip with one half for each way of using Poki: the address agents connect to, and Poki's own model.
+/// Poki's home (ESP-174 boards "H1 Home sessions" and "H2 Home paused"): every conversation, like the
+/// Messages list, with no bottom tab bar and no permanent warning cards. Paused state is a small orange
+/// badge on the top-left Poki avatar; tapping the avatar opens Poki Details.
 struct SessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     var openChat: () -> Void
     var openSession: (String) -> Void
-    var openModel: () -> Void
-    var openConnectors: () -> Void
+    var openModel: () -> Void = {}
+    var openConnectors: () -> Void = {}
     var openDetails: () -> Void
-    var openVoice: () -> Void
-    var openSetup: () -> Void
-    @State private var copied = false
+    var openVoice: () -> Void = {}
+    var openSetup: () -> Void = {}
+    var openSetupStep: (SetupStep) -> Void = { _ in }
     @State private var query = ""
     @State private var renaming: SavedSession?
     @State private var newName = ""
 
     private var store: SessionStore { SessionStore.shared }
+    private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
+
+    /// Whether Poki shows the small orange pause badge on the top-left avatar (board "H2 Home paused").
+    /// Matches standalone's power state (#78 & #79): when Poki is on (or `wantsOn` after Poki Setup install)
+    /// and setup is complete with no runner failure, Poki is ready (`isPaused == false`).
+    var isPaused: Bool {
+        if sampleHome == "paused" { return true }
+        if sampleHome == "sessions" { return false }
+        let setupIncomplete = !model.setupLooksComplete
+        let runnerFailed = model.runner.state == "failed" || model.pairingTrouble != nil || model.servicesSilent
+        return !(model.sessionOn || model.wantsOn) || setupIncomplete || runnerFailed
+    }
+
+    /// Runtime connection/runner failure hint (#78 "Can't Reach iPhone", pairing refusal, etc.) on the home page.
+    private var homeRunnerHint: SetupIssueHint? {
+        guard sampleHome == nil else { return nil }
+        return SetupIssueHint.runnerIssue(model: model)
+    }
 
     var body: some View {
-        List {
-            // What matters before any conversation: whether Poki is on, whether agents can reach it,
-            // and what setup still needs.
-            // One warning while Poki can't work fully, naming where to fix it (the tab bar dots match).
-            if setupLeft > 0 || agentsIssue != nil {
-                Section {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Poki can’t work fully yet").font(Prominent.font(.headline, .semibold))
-                            Text("Fix the items below. Each one has a dot on its tab.")
-                                .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                        }
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    }
-                    if setupLeft > 0 {
-                        Button(action: openSetup) {
-                            LabeledContent {
-                                Text(setupLeft == 1 ? String(localized: "1 item") : String(localized: "\(setupLeft) items"))
-                            } label: {
-                                Label("Setup", systemImage: "checklist")
-                            }
-                        }
-                        .foregroundStyle(Color(.label))
-                    }
-                    if let issue = agentsIssue {
-                        Button(action: ModelKeys.hasUsableKey ? openConnectors : openModel) {
-                            LabeledContent {
-                                Text(issue)
-                            } label: {
-                                Label("Agents", systemImage: "point.3.connected.trianglepath.dotted")
-                            }
-                        }
-                        .foregroundStyle(Color(.label))
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                topBar
+                titleBar
+                searchBar
+                PinnedChannelsView(items: pinnedItems, openChat: openChat, openSession: openSession)
+                if let hint = homeRunnerHint {
+                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
                 }
-            }
-            if let warning = ExpiryWarning(expiry: model.signer.expiry) {
-                ExpiryWarningSection(warning: warning)
-            }
-            if store.ordered.isEmpty {
-                // In the list, under the controls (an overlay would sit on top of them).
-                Section {
-                    ContentUnavailableView {
-                        Label("No Sessions Yet", systemImage: "bubble.left.and.bubble.right")
-                    } description: {
-                        Text("Start a chat with Poki, or connect an agent such as Claude or Codex in Agents. Every session shows up here.")
-                    }
-                    .listRowBackground(Color.clear)
-                }
-            }
-            Section {
-                ForEach(shown) { session in
-                    Button { open(session) } label: { SessionRow(session: session) }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            if !session.live {
-                                Button(role: .destructive) { store.delete(session.id) } label: { Label("Delete", systemImage: "trash") }
-                            }
-                            Button { startRename(session) } label: { Label("Rename", systemImage: "pencil") }
-                                .tint(.blue)
-                        }
-                        .contextMenu {
-                            Button { startRename(session) } label: { Label("Rename", systemImage: "pencil") }
-                            if !session.live {
-                                Button(role: .destructive) { store.delete(session.id) } label: { Label("Delete", systemImage: "trash") }
-                            }
-                        }
-                }
-            }
-            if !query.isEmpty, shown.isEmpty {
-                ContentUnavailableView.search(text: query).listRowBackground(Color.clear)
+                sessionList
             }
         }
-        .listStyle(.insetGrouped)
-        // The grouped list leaves a section's worth of space above its first row; under the search
-        // field that read as a hole.
-        .contentMargins(.top, 6, for: .scrollContent)
-        // Home's own header: a soft translucent blue that fades into the list, the bear and "Poki" in
-        // Geist at the top left. The other pages keep the system's plain bars.
-        .scrollContentBackground(.hidden)
-        .background {
-            ZStack(alignment: .top) {
-                Color(.systemGroupedBackground)
-                LinearGradient(colors: [Color.blue.opacity(0.30), Color.blue.opacity(0.10), Color.blue.opacity(0)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 320)
-            }
-            .ignoresSafeArea()
-        }
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search Sessions"))
-        .navigationTitle(Text(verbatim: "Poki"))
-        .navigationBarTitleDisplayMode(.inline)
-        // The system title gives way to HomeBrand; "Poki" stays the back button's title.
-        .toolbar(removing: .title)
-        .toolbar {
-            HomeBrand()
-            ToolbarItem(placement: .topBarTrailing) {
-                PowerButton(state: !model.setupLooksComplete ? .paused : model.sessionOn ? .ready : .stopped,
-                            turnOn: { model.startSession() }, turnOff: { chat.stop(); model.stopSession() }, openSetup: openSetup)
-            }
-        }
+        .background(Color(.systemBackground).ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) { renaming = nil }
@@ -133,60 +71,219 @@ struct SessionsView: View {
                 renaming = nil
             }
         }
-        // A new chat with Poki's own agent, at the bottom right. On iOS 26 it is the round button on
-        // the tab bar's line instead (RootView's New Chat tab).
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            if #unavailable(iOS 26.0) { newChatButton }
-        }
     }
 
-    private var newChatButton: some View {
-            Button { chat.newConversation(); openChat() } label: {
-                Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
-                    .frame(width: 28, height: 28)
+    private var topBar: some View {
+        HStack {
+            Button(action: openDetails) {
+                ZStack(alignment: .bottomTrailing) {
+                    PokiAvatar(size: 36)
+                    if isPaused {
+                        PausedAvatarBadge()
+                            .offset(x: 3, y: 3)
+                    }
+                }
             }
-            .newChatStyle()
-            .controlSize(.large)
-            .fixedSize()
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(isPaused ? "Poki, paused, details" : "Poki, details"))
+            .accessibilityIdentifier("home.poki.details")
+
+            Spacer()
+
+            Button {
+                if !chat.running { chat.newConversation() }
+                openChat()
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Site.blue)
+                    .frame(width: 28, height: 28)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
             .disabled(chat.running)
-            .padding(.trailing, 16).padding(.bottom, 8)
             .accessibilityLabel(Text("New Chat with Poki"))
+            .accessibilityIdentifier("home.newChat")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
     }
 
-    /// "Working in Messages", "Ready", "Off".
-    private var runLine: String {
-        if chat.running { return model.currentApp.map { String(localized: "Working in \($0)") } ?? String(localized: "Working") }
-        if !model.sessionOn { return String(localized: "Off. Agents and chats can’t use this iPhone.") }
-        if model.runnerPaused { return String(localized: "Paused") }
-        return String(localized: "On, ready for a task")
+    private var titleBar: some View {
+        Text(verbatim: "Poki")
+            .font(.system(size: 34, weight: .bold))
+            .foregroundStyle(Color(.label))
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
     }
 
-    private var agentsLine: String {
-        let live = SessionStore.shared.liveAgentCount
-        switch model.relayStatus {
-        case .ready: return live > 0 ? String(localized: "Online · \(live) live") : String(localized: "Online")
-        case .connecting: return String(localized: "Connecting")
-        case .offline: return String(localized: "Offline")
-        case .off: return model.identity.secrets.isEmpty ? String(localized: "None yet") : String(localized: "Off")
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color(hex: 0x8E8E93))
+            TextField("Search", text: $query)
+                .font(.system(size: 17))
+                .foregroundStyle(Color(.label))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .background(Color(hex: 0xEEEEF0), in: .rect(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
+    }
+
+    @ViewBuilder private var sessionList: some View {
+        let rows = shown
+        if rows.isEmpty, query.isEmpty {
+            Text("Tap Poki to ask for anything on this iPhone. Claude, Codex and other agents show up here once they connect.")
+                .font(.system(size: 15))
+                .foregroundStyle(ChatColor.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.leading, 40)
+                .padding(.trailing, 24)
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity)
+        } else if rows.isEmpty {
+            ContentUnavailableView.search(text: query)
+                .padding(.top, 24)
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(rows) { session in
+                    Button { open(session) } label: {
+                        iMessageChannelListItemView(session: session, stampOverride: sampleStamp(for: session.id))
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button { startRename(session) } label: { Label("Rename", systemImage: "pencil") }
+                        if !session.live {
+                            Button(role: .destructive) { store.delete(session.id) } label: { Label("Delete", systemImage: "trash") }
+                        }
+                    }
+                }
+            }
         }
     }
 
-    private var needsSetup: Bool { model.pairingPath == nil || model.setupStepsLeft }
-
-    private var setupLeft: Int { model.setupLooksComplete ? 0 : SetupStep.shown.filter { !model.looksDone($0) }.count }
-
-    /// What the Agents tab needs, if anything (the same test as its tab bar dot).
-    private var agentsIssue: String? {
-        if !ModelKeys.hasUsableKey { return String(localized: "No chat account") }
-        if case .offline = model.relayStatus { return String(localized: "Relay offline") }
-        return nil
+    private var pinnedItems: [PinnedChannelItem] {
+        if sampleHome == "paused" {
+            return [.poki]
+        }
+        if sampleHome == "sessions" {
+            return [
+                .poki,
+                PinnedChannelItem(id: "sample-claude", name: "Claude Code", client: "Claude Code", isPoki: false, liveBubble: String(localized: "Typing “On my way”"), sessionID: "sample-1"),
+                PinnedChannelItem(id: "sample-codex", name: "Codex", client: "Codex", isPoki: false, liveBubble: nil, sessionID: "sample-3"),
+            ]
+        }
+        var result: [PinnedChannelItem] = [.poki]
+        var seen: Set<String> = []
+        for session in store.ordered where session.kind == .agent || session.kind == .handoff {
+            let client = (session.client ?? session.name).trimmingCharacters(in: .whitespaces)
+            guard !client.isEmpty, !seen.contains(client) else { continue }
+            seen.insert(client)
+            result.append(PinnedChannelItem(
+                id: session.id,
+                name: client,
+                client: client,
+                isPoki: false,
+                liveBubble: session.live ? (session.lastLine.isEmpty ? String(localized: "Working…") : session.lastLine) : nil,
+                sessionID: session.id
+            ))
+            if result.count == 3 { break }
+        }
+        return result
     }
 
     /// The sessions matching the search field: name, first message or last line.
     private var shown: [SavedSession] {
+        if sampleHome == "paused" { return [] }
+        let base = sampleHome == "sessions" ? Self.sampleSessions : store.ordered
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return store.ordered }
-        return store.ordered.filter { [$0.name, $0.title, $0.lastLine, $0.client ?? ""].contains { $0.localizedCaseInsensitiveContains(q) } }
+        guard !q.isEmpty else { return base }
+        return base.filter { [$0.name, $0.title, $0.lastLine, $0.client ?? ""].contains { $0.localizedCaseInsensitiveContains(q) } }
+    }
+
+    private func sampleStamp(for id: String) -> String? {
+        guard sampleHome == "sessions" else { return nil }
+        switch id {
+        case "sample-1": return String(localized: "now")
+        case "sample-2": return "12:23 PM"
+        case "sample-3": return "11:22 AM"
+        case "sample-4", "sample-5": return String(localized: "Yesterday")
+        default: return nil
+        }
+    }
+
+    private static var sampleSessions: [SavedSession] {
+        let now = Date()
+        let yesterday = now.addingTimeInterval(-86400)
+        return [
+            SavedSession(
+                id: "sample-1",
+                kind: .handoff,
+                client: "Claude Code",
+                title: "Claude → Poki",
+                started: now,
+                updated: now,
+                live: true,
+                outcome: nil,
+                entries: [ChatEntry(.poki(String(localized: "Needs your OK: send “On my way” to Mom")))],
+                calls: [],
+                customName: "Claude → Poki"
+            ),
+            SavedSession(
+                id: "sample-2",
+                kind: .poki,
+                client: nil,
+                title: String(localized: "What iOS version is this?"),
+                started: now,
+                updated: now,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "It’s iOS 27.3. Want me to check for an update?")))],
+                calls: []
+            ),
+            SavedSession(
+                id: "sample-3",
+                kind: .agent,
+                client: "Codex",
+                title: "Codex",
+                started: now,
+                updated: now,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "Opened Photos and tapped “Albums”. Done in 3 steps.")))],
+                calls: [],
+                customName: "Codex"
+            ),
+            SavedSession(
+                id: "sample-4",
+                kind: .poki,
+                client: nil,
+                title: String(localized: "Order oat milk again"),
+                started: yesterday,
+                updated: yesterday,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "Ran your routine: same order as last week, $4.99.")))],
+                calls: []
+            ),
+            SavedSession(
+                id: "sample-5",
+                kind: .agent,
+                client: "Claude Code",
+                title: "Claude Code",
+                started: yesterday,
+                updated: yesterday,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "Your turn: enter your Apple Account password.")))],
+                calls: [],
+                customName: "Claude Code"
+            ),
+        ]
     }
 
     private func startRename(_ session: SavedSession) {
@@ -196,182 +293,223 @@ struct SessionsView: View {
 
     private func open(_ session: SavedSession) {
         if session.kind == .poki {
-            if session.id != chat.sessionID { chat.restore(session) }
+            if session.id != chat.sessionID, sampleHome == nil { chat.restore(session) }
             openChat()
         } else {
             openSession(session.id)
         }
     }
+}
 
+/// The orange pause badge at the bottom-right of the top-left Poki avatar (board "H2 Home paused").
+struct PausedAvatarBadge: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color(hex: 0xFF9500))
+                .frame(width: 16, height: 16)
+                .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2))
+            HStack(spacing: 1.8) {
+                RoundedRectangle(cornerRadius: 0.6).fill(.white).frame(width: 1.6, height: 6)
+                RoundedRectangle(cornerRadius: 0.6).fill(.white).frame(width: 1.6, height: 6)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct PinnedChannelItem: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var client: String
+    var isPoki: Bool
+    var liveBubble: String?
+    var sessionID: String?
+
+    static let poki = PinnedChannelItem(id: "poki", name: "Poki", client: "Poki", isPoki: true, liveBubble: nil, sessionID: nil)
+}
+
+// Adapted from GetStream/swiftui-iMessage-clone (commit df114b4,
+// iMessageClone/ChannelList/PinnedChannelsView.swift, by Stefan Blos).
+struct PinnedChannelsView: View {
+    var items: [PinnedChannelItem]
+    var openChat: () -> Void
+    var openSession: (String) -> Void
+
+    let columnStructure = [
+        GridItem(.flexible()),
+        GridItem(.flexible()),
+        GridItem(.flexible()),
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(items) { item in
+                Button {
+                    if item.isPoki {
+                        openChat()
+                    } else if let sessionID = item.sessionID {
+                        openSession(sessionID)
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        ZStack(alignment: .top) {
+                            if item.isPoki {
+                                PokiAvatar(size: 76)
+                                    .shadow(color: Site.blue.opacity(0.20), radius: 5, y: 3)
+                            } else {
+                                AgentBadge(name: item.client, size: 76)
+                                    .overlay {
+                                        if item.liveBubble != nil {
+                                            Circle()
+                                                .strokeBorder(Color(.systemBackground), lineWidth: 3)
+                                                .background(Circle().stroke(ChatColor.green, lineWidth: 5))
+                                        }
+                                    }
+                            }
+                            if let bubble = item.liveBubble {
+                                HStack(spacing: 5) {
+                                    Text(verbatim: bubble)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Color(.label))
+                                        .lineLimit(1)
+                                    HStack(spacing: 2) {
+                                        Circle().fill(Color(hex: 0x8E8E93)).frame(width: 4, height: 4)
+                                        Circle().fill(Color(hex: 0xAEAEB2)).frame(width: 4, height: 4)
+                                        Circle().fill(Color(hex: 0xC7C7CC)).frame(width: 4, height: 4)
+                                    }
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(ChatColor.incoming, in: Capsule())
+                                .shadow(color: .black.opacity(0.08), radius: 3, y: 2)
+                                .fixedSize()
+                                .offset(y: -24)
+                            }
+                        }
+                        Text(verbatim: item.name)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color(hex: 0x6B6B70))
+                            .lineLimit(1)
+                    }
+                    .frame(width: 100)
+                }
+                .buttonStyle(.plain)
+                if items.count > 1, item.id != items.last?.id {
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 30)
+        .padding(.bottom, 16)
+        .padding(.horizontal, 12)
+    }
+}
+
+// Adapted from GetStream/swiftui-iMessage-clone (commit df114b4,
+// iMessageClone/ChannelList/iMessageChannelListItemView.swift, by Stefan Blos).
+struct iMessageChannelListItemView: View {
+    let session: SavedSession
+    var stampOverride: String? = nil
+
+    var lastMessageStamp: String {
+        if let stampOverride { return stampOverride }
+        return session.live ? String(localized: "now") : ChatTime.row(session.updated)
+    }
+
+    private var lastMessage: String {
+        let line = session.lastLine
+        if session.kind != .poki, line.isEmpty { return session.title }
+        return line
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ZStack {
+                if session.live {
+                    Circle()
+                        .fill(Site.blue)
+                        .frame(width: 10, height: 10)
+                }
+            }
+            .frame(width: 22)
+            .padding(.top, 26)
+
+            SessionAvatar(session: session, size: 50)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(verbatim: session.name)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color(.label))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+
+                    Text(verbatim: lastMessageStamp)
+                        .font(.system(size: 15))
+                        .foregroundStyle(ChatColor.secondary)
+
+                    Text(verbatim: "›")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color(hex: 0xC4C4C7))
+                }
+
+                HStack(alignment: .top, spacing: 4) {
+                    outcomeMark
+                    Text(verbatim: lastMessage)
+                        .foregroundStyle(ChatColor.secondary)
+                        .font(.system(size: 15))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .overlay(alignment: .bottom) {
+                ChatColor.separator.frame(height: 0.5)
+            }
+        }
+        .padding(.trailing, 16)
+        .background(Color(.systemBackground))
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var outcomeMark: some View {
+        switch session.outcome {
+        case .failed?:
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(Color(.systemOrange))
+                .padding(.top, 2)
+        case .stopped?:
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(ChatColor.secondary)
+                .padding(.top, 2)
+        default:
+            EmptyView()
+        }
+    }
+}
+
+/// Kept for compatibility with existing callers; wraps `iMessageChannelListItemView`.
+struct SessionRow: View {
+    var session: SavedSession
+    var body: some View {
+        iMessageChannelListItemView(session: session)
+    }
 }
 
 extension View {
     /// The line under the title (iOS 26's navigation subtitle); nothing before iOS 26.
     @ViewBuilder func sessionSubtitle(_ text: String) -> some View {
         if #available(iOS 26.0, *), !text.isEmpty { navigationSubtitle(Text(verbatim: text)) } else { self }
-    }
-}
-
-private extension View {
-    /// The state pill: a fixed-width capsule filled with the state's colour (iOS 26's prominent toolbar
-    /// button, which takes the place of the bar's glass rather than sitting on it; a prominent capsule
-    /// before iOS 26).
-    @ViewBuilder func powerStyle(tint: Color) -> some View {
-        if #available(iOS 26.0, *) { buttonStyle(.glassProminent).buttonBorderShape(.capsule).tint(tint) }
-        else { buttonStyle(.borderedProminent).buttonBorderShape(.capsule).tint(tint) }
-    }
-
-    /// Blue-tinted Liquid Glass on iOS 26 and later; a blue prominent capsule before it.
-    @ViewBuilder func newChatStyle() -> some View {
-        if #available(iOS 26.0, *) { buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(.blue) }
-        else { buttonStyle(.borderedProminent).buttonBorderShape(.circle).tint(.blue) }
-    }
-}
-
-/// The home page's title: the bear and "Poki" in Geist, at the top left in place of the system title,
-/// without the toolbar's glass behind it on iOS 26.
-struct HomeBrand: ToolbarContent {
-    var body: some ToolbarContent {
-        if #available(iOS 26.0, *) {
-            ToolbarItem(placement: .topBarLeading) { label }
-                .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarLeading) { label }
-        }
-    }
-
-    private var label: some View {
-        HStack(spacing: 10) {
-            Image("Bear").resizable().scaledToFill()
-                .frame(width: 34, height: 34)
-                .clipShape(.rect(cornerRadius: 9, style: .continuous))
-                .shadow(color: .blue.opacity(0.35), radius: 6, y: 2)
-            Text(verbatim: "Poki")
-                .font(Prominent.font(.title, .bold))
-                .foregroundStyle(.primary)
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: "Poki"))
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// Poki's state as a fixed-width pill at the top right: Ready (blue, on; a tap turns it off), Stopped
-/// (red, off; a tap turns it on), Paused (orange, a setup item is open; a tap opens Setup). Words as
-/// well as colours, so the state reads without colour. A haptic for each turn.
-struct PowerButton: View {
-    enum Status { case ready, stopped, paused }
-    var state: Status
-    var turnOn: () -> Void
-    var turnOff: () -> Void
-    var openSetup: () -> Void
-
-    var body: some View {
-        Button {
-            switch state {
-            case .ready:
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                turnOff()
-            case .stopped:
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                turnOn()
-            case .paused:
-                // A setup item is open: the fix is there, not in turning on.
-                openSetup()
-            }
-        } label: {
-            // The state's symbol before its word, a touch taller than the text, in a pill of fixed width.
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.body.weight(.semibold))
-                    .imageScale(.medium)
-                    .contentTransition(.symbolEffect(.replace))
-                Text(word)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .contentTransition(.interpolate)
-            }
-            .frame(width: 96)
-        }
-        .powerStyle(tint: tint)
-        .animation(.snappy, value: state)
-        .accessibilityLabel(Text("Poki"))
-        .accessibilityValue(Text(word))
-        .accessibilityHint(Text(state == .ready ? "Turns Poki off" : state == .stopped ? "Turns Poki on" : "Opens Setup"))
-    }
-
-    private var word: LocalizedStringKey {
-        switch state {
-        case .ready: "Ready"
-        case .stopped: "Stopped"
-        case .paused: "Paused"
-        }
-    }
-
-    private var symbol: String {
-        switch state {
-        case .ready: "checkmark.circle.fill"
-        case .stopped: "power"
-        case .paused: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch state {
-        case .ready: .blue
-        case .stopped: .red
-        case .paused: .orange
-        }
-    }
-}
-
-/// One row: who, when, the last thing that happened, and how it ended.
-struct SessionRow: View {
-    var session: SavedSession
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SessionAvatar(session: session, size: 44)
-                .overlay(alignment: .topTrailing) {
-                    if session.live {
-                        Circle().fill(ChatColor.green).frame(width: 12, height: 12)
-                            .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2))
-                            .offset(x: 2, y: -2)
-                            .accessibilityLabel(Text("Live"))
-                    }
-                }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(verbatim: session.name).font(Prominent.font(.body, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(session.live ? String(localized: "now") : ChatTime.row(session.updated)).font(.system(size: 15)).foregroundStyle(ChatColor.secondary)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(.tertiaryLabel))
-                }
-                HStack(spacing: 4) {
-                    outcomeMark
-                    Text(verbatim: subtitle).font(.system(size: 15)).foregroundStyle(ChatColor.secondary).lineLimit(2)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var subtitle: String {
-        let line = session.lastLine
-        if session.kind != .poki, line.isEmpty { return session.title }
-        return line
-    }
-
-    @ViewBuilder private var outcomeMark: some View {
-        switch session.outcome {
-        case .failed?: Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13)).foregroundStyle(Color(.systemOrange))
-        case .stopped?: Image(systemName: "pause.circle.fill").font(.system(size: 13)).foregroundStyle(ChatColor.secondary)
-        default: EmptyView()
-        }
     }
 }
 
@@ -395,7 +533,7 @@ struct SessionAvatar: View {
         case .handoff:
             ZStack(alignment: .bottomTrailing) {
                 AgentBadge(name: session.client ?? "", size: size)
-                PokiAvatar(size: size * 0.5).overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2))
+                PokiAvatar(size: size * 0.44).overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2))
                     .offset(x: 3, y: 3)
             }
         }
@@ -423,7 +561,11 @@ struct SessionView: View {
         let session = SessionStore.shared.session(id)
         ChatTranscript(entries: (AskPoki.live(id)?.entries ?? session?.entries) ?? [], typing: AskPoki.live(id)?.awaitingModel ?? false, canRetry: false, retry: {}) {
             if session?.live == true, let approval = model.approvals.first {
-                ApprovalCard(approval: approval) { approved in model.resolve(approval, approved: approved) }
+                ForegroundApprovalSection(
+                    title: approval.summary,
+                    subtitle: model.currentApp.map { String(localized: "\($0) · Poki acts only if you allow") } ?? String(localized: "Poki acts only if you allow"),
+                    answer: { approved in model.resolve(approval, approved: approved) }
+                )
             }
         }
         // Stop sits on the bottom edge as an inset, so the bubbles scroll under it and the bars keep
@@ -459,23 +601,66 @@ struct SessionView: View {
     }
 }
 
-/// An approval waiting for the owner, in the chat and in the session that asked for it (also in the
-/// Dynamic Island, which iOS hides while Poki is in front).
+/// An approval waiting for the owner, in the chat and in the session that asked for it (ESP-174 board
+/// "P1 Chat approval in app"; also in the Dynamic Island when Poki is in the background).
 struct ApprovalCard: View {
-    var approval: PendingApproval
+    var title: String
+    var subtitle: String
     var answer: (Bool) -> Void
+
+    init(approval: PendingApproval, answer: @escaping (Bool) -> Void) {
+        self.title = approval.summary
+        self.subtitle = String(localized: "Poki acts only if you allow")
+        self.answer = answer
+    }
+
+    init(title: String, subtitle: String, answer: @escaping (Bool) -> Void) {
+        self.title = title
+        self.subtitle = subtitle
+        self.answer = answer
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Allow this step?").font(.system(size: 15, weight: .semibold))
-            Text(verbatim: approval.summary).font(.system(size: 15)).foregroundStyle(Color(.label))
-            HStack {
-                Button("Don’t Allow") { answer(false) }.buttonStyle(.bordered)
-                Button("Allow") { answer(true) }.buttonStyle(.borderedProminent)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                PokiAvatar(size: 30)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(verbatim: title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color(.label))
+                    Text(verbatim: subtitle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(ChatColor.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                Button { answer(false) } label: {
+                    Text("Don’t Allow")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color(.label))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(ChatColor.incoming, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                Button { answer(true) } label: {
+                    Text("Allow")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(Site.blue, in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16, style: .continuous))
+        .background(Color(.systemBackground), in: .rect(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color(hex: 0xD1D1D6), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.10), radius: 9, y: 6)
         .padding(.top, 8)
     }
 }

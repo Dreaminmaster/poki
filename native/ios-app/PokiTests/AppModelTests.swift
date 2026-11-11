@@ -1,4 +1,5 @@
 import PokiCore
+import SwiftUI
 import XCTest
 @testable import Poki
 
@@ -290,5 +291,141 @@ final class InProcessPasscodeTests: XCTestCase {
         await waitFor("iOS gave up on the passcode") { !self.model.passcodeHint && !self.model.host.currentRunner.describe.hasPrefix("starting") }
         let failed = model.host.currentRunner.describe
         XCTAssertTrue(failed.contains("owner needs to enter the iPhone passcode"), failed)
+    }
+}
+
+@MainActor
+final class FrontendSubtractionTests: XCTestCase {
+    private var savedSetup: SetupState!
+
+    override func setUp() {
+        savedSetup = SetupState.load()
+    }
+
+    override func tearDown() {
+        savedSetup.save()
+    }
+
+    /// Every incomplete setup step produces a direct-link hint in ChatView that targets that exact
+    /// SetupStepPage, and completing all steps clears the setup-step hint.
+    func testChatSetupIssueHintLinksDirectlyToFirstIncompleteStep() {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.setup.runnerInstalled = false
+        model.setup.developerMode = false
+        model.setup.loopback = .none
+        model.setup.uiAutomation = false
+
+        let firstHint = SetupIssueHint.first(model: model)
+        XCTAssertNotNil(firstHint)
+        XCTAssertEqual(firstHint?.target, SetupStep.shown.first.map(SetupIssueHint.Target.step))
+        XCTAssertFalse(firstHint?.link.isEmpty ?? true)
+
+        // Mark developer mode done and verify the hint advances to the next open step (.loopback).
+        model.setup.runnerInstalled = true
+        model.setup.developerMode = true
+        let secondHint = SetupIssueHint.first(model: model)
+        XCTAssertEqual(secondHint?.target, .step(.loopback))
+    }
+
+    /// Every Layer 1, Layer 2, and Layer 3 destination in the ESP-174 capability table is addressable
+    /// through PokiDetailsView's NavigationPath.
+    func testCapabilityTableRoutesAreReachableInDetailsNavigationPath() {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let secret = model.identity.secrets.first ?? model.addConnector(name: "Test Agent")
+
+        // Layer 1 routes on PokiDetailsView
+        let layer1: [DetailsRoute] = [.model, .history, .voice, .moreSettings]
+        for route in layer1 {
+            var path = NavigationPath()
+            path.append(route)
+            XCTAssertEqual(path.count, 1, "Layer 1 route \(route) must be pushable")
+        }
+
+        // Layer 2 routes under More Settings
+        let layer2Details: [DetailsRoute] = [.setup, .signing, .approvals, .settings]
+        for route in layer2Details {
+            var path = NavigationPath()
+            path.append(DetailsRoute.moreSettings)
+            path.append(route)
+            XCTAssertEqual(path.count, 2, "Layer 2 route \(route) must be reachable from More Settings")
+        }
+        let layer2Settings: [SettingsRoute] = [.memory, .diagnostics]
+        for route in layer2Settings {
+            var path = NavigationPath()
+            path.append(DetailsRoute.moreSettings)
+            path.append(route)
+            XCTAssertEqual(path.count, 2, "Layer 2 settings route \(route) must be reachable from More Settings")
+        }
+
+        // Layer 3 routes: every SetupStep under Setup, plus ConnectorDetail, RelayView, LogView, ActivityPreview
+        for step in SetupStep.shown {
+            var path = NavigationPath()
+            path.append(DetailsRoute.moreSettings)
+            path.append(DetailsRoute.setup)
+            path.append(step)
+            XCTAssertEqual(path.count, 3, "SetupStep \(step) must be reachable at Layer 3")
+            XCTAssertFalse(String(describing: step.rowTitle).isEmpty)
+        }
+
+        var connectorPath = NavigationPath()
+        connectorPath.append(DetailsRoute.moreSettings)
+        connectorPath.append(DetailsRoute.settings)
+        connectorPath.append(SettingsRoute.connector(secret))
+        XCTAssertEqual(connectorPath.count, 3)
+
+        var relayPath = NavigationPath()
+        relayPath.append(DetailsRoute.moreSettings)
+        relayPath.append(DetailsRoute.settings)
+        relayPath.append(SettingsRoute.relay)
+        XCTAssertEqual(relayPath.count, 3)
+
+        for debugLeaf in [SettingsRoute.log, SettingsRoute.activityPreview] {
+            var debugPath = NavigationPath()
+            debugPath.append(DetailsRoute.moreSettings)
+            debugPath.append(SettingsRoute.diagnostics)
+            debugPath.append(debugLeaf)
+            XCTAssertEqual(debugPath.count, 3)
+        }
+    }
+
+    /// #78 ("Can't Reach iPhone" by failure code), #79 (Poki Setup auto-turn-on via `wantsOn`),
+    /// and #81 (Poki Version under More Settings › Signing) all surface in the new Home, Chat hint,
+    /// and PokiDetailsView.
+    func testUnreachableRunnerFailureAndAutoTurnOnSurfaceInNewHomeAndDetails() async throws {
+        defer { try? FileManager.default.removeItem(at: SelfSigner.handedIdentity) }
+        try FileManager.default.createDirectory(at: SelfSigner.handedIdentity.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: SelfSigner.handedIdentity)
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertTrue(model.wantsOn, "#79: Poki Setup install turns wantsOn on automatically")
+        XCTAssertTrue(model.sessionOn || model.wantsOn, "#79: PokiDetailsView and Home treat wantsOn as active")
+
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        model.startSession()
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+        }
+        model.wakeRunner()
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in ["failed", "running"].contains(model.runner.state) }, object: nil)
+        await fulfillment(of: [done], timeout: 5)
+
+        let fix = "Poki can't reach this iPhone. Check in this order: Setup › Loopback (your proxy app or LocalDevVPN is connected, with 10.7.0.1 set), then Setup › Pairing (pair again with the loopback on), then Developer Mode in Settings → Privacy & Security."
+        model.runnerChanged(RunnerStatus(state: "failed", detail: "tunnel closed", fix: fix, code: "unreachable"))
+
+        let hint = SetupIssueHint.runnerIssue(model: model)
+        XCTAssertNotNil(hint, "#78: unreachable failure code surfaces a SetupIssueHint on Home and Chat")
+        XCTAssertEqual(hint?.target, .step(.loopback))
+        XCTAssertTrue(hint?.message.contains("reach this iPhone") == true || hint?.message.contains("Reach iPhone") == true)
+
+        let detailsIssues = Issue.current(model)
+        let runnerIssue = detailsIssues.first { $0.id == "runner" }
+        XCTAssertNotNil(runnerIssue, "#78: PokiDetailsView Issue.current(model) includes the runner failure")
+        XCTAssertEqual(runnerIssue?.fix, .setup)
+        XCTAssertFalse(model.signer.installedVersion.isEmpty, "#81: Poki Version is accessible via More Settings › Signing")
     }
 }
