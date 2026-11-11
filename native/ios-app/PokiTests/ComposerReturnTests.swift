@@ -44,6 +44,11 @@ final class ComposerReturnTests: XCTestCase {
         _ = try pressReturn(field)
         XCTAssertEqual(draft.sent, [])
         XCTAssertEqual(field.plainText, "nihao")
+        field.unmarkText()
+        field.delegate?.textViewDidChange?(field)
+        XCTAssertFalse(try pressReturn(field))
+        XCTAssertEqual(draft.sent, ["nihao"])
+        settle { field.plainText.isEmpty }
     }
 
     func testPastingTextThatEndsInANewLineKeepsTheDraft() throws {
