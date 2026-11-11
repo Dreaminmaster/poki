@@ -266,6 +266,20 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(ExpiryWarning(expiry: nil, now: now), "no profile, as on a simulator")
     }
 
+    /// Without an Apple Account Poki still looks up the channel's newest build when it starts (ESP-387),
+    /// so Home and Signing can say an update is out. On a simulator `-pokiLatest newer` answers for GitHub.
+    func testLooksUpTheNewestBuildWithoutAnAppleAccount() async {
+        UserDefaults.standard.set("newer", forKey: "pokiLatest")
+        defer { UserDefaults.standard.removeObject(forKey: "pokiLatest") }
+        let (model, _) = model()
+        model.startSigner()
+        let found = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in MainActor.assumeIsolated { model.signer.latest != nil } }, object: nil)
+        found.expectationDescription = "the newest build is known"
+        await fulfillment(of: [found], timeout: 10)
+        XCTAssertFalse(model.signer.signedIn)
+        XCTAssertTrue(model.signer.updateAvailable)
+    }
+
     /// Idle stop setting round-trips and never goes below the floor the picker offers.
     func testIdleStopSetting() {
         let (model, _) = model()
