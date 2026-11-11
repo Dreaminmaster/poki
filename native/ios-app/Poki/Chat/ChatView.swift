@@ -33,8 +33,13 @@ struct ChatView: View {
         }
         .animation(.snappy, value: voice.isOn)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ComposerInputView(running: chat.running, send: chat.send, stop: chat.stop, openVoice: openVoice, openModel: openModel,
-                              newConversation: chat.newConversation)
+            VStack(spacing: 0) {
+                // Poki's own browser, while a task uses it (ESP-145).
+                BrowserPanel()
+                ComposerInputView(running: chat.running, send: chat.send, stop: chat.stop, openVoice: openVoice, openModel: openModel,
+                                  newConversation: chat.newConversation)
+            }
+            .animation(.snappy, value: PokiBrowser.shared.isOpen)
         }
         .background(Color(.systemBackground))
         // The conversation's name (the one Poki gave it, or the owner's) is the title, and its title

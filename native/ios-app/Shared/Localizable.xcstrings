@@ -916,6 +916,16 @@
         }
       }
     },
+    "Close Browser" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭浏览器"
+          }
+        }
+      }
+    },
     "Collapsed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1482,6 +1492,16 @@
         }
       }
     },
+    "Forward" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前进"
+          }
+        }
+      }
+    },
     "Free on the App Store" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1529,6 +1549,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "前往“设置 › 其他”并开启“包含路由 10.7.0.1/32”（若无此选项请更新 Shadowrocket）。"
+          }
+        }
+      }
+    },
+    "Hand Back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "交还 Poki"
           }
         }
       }
@@ -2044,6 +2074,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "日志、连接检查、后台保活、网络地址与实时活动预览。"
+          }
+        }
+      }
+    },
+    "Look for “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找“%@”"
           }
         }
       }
@@ -2835,6 +2875,46 @@
         }
       }
     },
+    "Poki asks: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 请你：%@"
+          }
+        }
+      }
+    },
+    "Poki is browsing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在看网页"
+          }
+        }
+      }
+    },
+    "Poki waits until you hand it back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你交还之前，Poki 会一直等着。"
+          }
+        }
+      }
+    },
+    "Poki’s Browser" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 的浏览器"
+          }
+        }
+      }
+    },
     "PROXY LOOPBACK INTERFACE" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3363,12 +3443,32 @@
         }
       }
     },
+    "Read the page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取页面"
+          }
+        }
+      }
+    },
     "RELAY ADDRESS" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "中转地址"
+          }
+        }
+      }
+    },
+    "Reload" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新载入"
           }
         }
       }
@@ -3972,6 +4072,16 @@
         }
       }
     },
+    "Stop Task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止任务"
+          }
+        }
+      }
+    },
     "Stop When Idle For" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4058,6 +4168,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用系统拼音键盘输入中文"
+          }
+        }
+      }
+    },
+    "Take Over" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接手"
+          }
+        }
+      }
+    },
+    "Tap “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按“%@”"
+          }
+        }
+      }
+    },
+    "The page Poki is using. Double-tap to take over." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在用的页面。连按两下接手。"
           }
         }
       }
@@ -4777,6 +4917,16 @@
         }
       }
     },
+    "Type “%@” in “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“%2$@”中输入“%1$@”"
+          }
+        }
+      }
+    },
     "Type “On my way”" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5009,6 +5159,16 @@
         }
       }
     },
+    "Waiting for you: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你处理：%@"
+          }
+        }
+      }
+    },
     "Waiting for your approval" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5045,6 +5205,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在执行"
+          }
+        }
+      }
+    },
+    "You have the page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面在你手上"
           }
         }
       }

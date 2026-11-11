@@ -394,6 +394,8 @@ final class ChatModel {
         stopAsked = true
         loop?.stop()
         task?.cancel()
+        // A browser step waiting for a page or for the owner ends too.
+        PokiBrowser.shared.taskStopped()
         // A step waiting for an approval would hold the task until the approval ran out.
         if kind == .poki, ChatModel.delegatedBusy == nil { for approval in app.approvals { app.resolve(approval, approved: false) } }
         finishPlan()
@@ -479,6 +481,8 @@ final class ChatModel {
                 for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting { steps[i].state = result.success ? .done : .failed }
             }
             return PokiCore.ToolAnswer(text: Harness.resultRecorded, jpeg: nil, isError: false)
+        case let name where WebTools.names.contains(name):
+            return await WebTools.perform(name, arguments: call.arguments)
         default:
             return await app.runTool(call.name, arguments: call.arguments)
         }
