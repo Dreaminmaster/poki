@@ -190,13 +190,22 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(UserDefaults.standard.integer(forKey: "idleStopSeconds.v4"), 120)
         model.idleStopSeconds = 60
     }
+
 }
 
 @MainActor
 final class ApprovalDefaultTests: XCTestCase {
     private var saved: Any?
-    override func setUp() { saved = UserDefaults.standard.object(forKey: LiveCore.askKey) }
-    override func tearDown() { UserDefaults.standard.set(saved, forKey: LiveCore.askKey) }
+    private var savedMode: Any?
+    override func setUp() {
+        saved = UserDefaults.standard.object(forKey: LiveCore.askKey)
+        savedMode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.modeKey)
+    }
+    override func tearDown() {
+        UserDefaults.standard.set(saved, forKey: LiveCore.askKey)
+        UserDefaults.standard.set(savedMode, forKey: ApprovalClassifier.modeKey)
+    }
 
     /// A phone that never chose (a new install, or an alpha tester who left the switch alone) asks the
     /// owner before a sensitive step: the Send tap in Messages waits for an answer instead of going
@@ -206,7 +215,7 @@ final class ApprovalDefaultTests: XCTestCase {
         let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
         let tap = await core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.2)
         XCTAssertFalse(tap.mayTap, "\(tap)")
-        XCTAssertTrue(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).askBeforeSensitiveSteps)
+        XCTAssertNotEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .off)
     }
 
     /// An owner who turned asking off keeps that choice.
@@ -215,6 +224,63 @@ final class ApprovalDefaultTests: XCTestCase {
         let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
         let tap = await core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.2)
         XCTAssertEqual(tap, .clear)
+    }
+
+    func testPaymentsAndDeletionsAlwaysRequireTheOwner() async {
+        UserDefaults.standard.set(ApprovalClassifier.Mode.off.rawValue, forKey: ApprovalClassifier.modeKey)
+        let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
+        for (label, reason) in [("Pay", "a payment (\"pay\")"), ("Delete", "deleting (\"delete\")")] {
+            let tap = await core.clearTap(on: label, inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.01)
+            XCTAssertFalse(tap.mayTap, "Never must not bypass \(label)")
+            for mode in ApprovalClassifier.Mode.allCases {
+                UserDefaults.standard.set(mode.rawValue, forKey: ApprovalClassifier.modeKey)
+                let approval = PendingApproval(id: UUID().uuidString, app: "Messages", summary: label,
+                                               reason: reason, expires: Date().addingTimeInterval(60))
+                XCTAssertEqual(ApprovalClassifier.route(approval, voiceOn: true), .owner)
+            }
+        }
+    }
+
+    /// Allow and Don’t Allow on the Live Activity: the card for a waiting approval carries the buttons
+    /// for that approval, and each button's intent reaches PokiCore, which lets the held tap through
+    /// or refuses it. The bridge handler is AppModel's forwarding without its pause for the island to
+    /// fold (AppModel.decide), which this does not cover.
+    func testLiveActivityAllowAndDenyAnswerTheWaitingTap() async throws {
+        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
+        var pending: [PendingApproval] = []
+        let eventsTask = Task { @MainActor in
+            for await event in core.events {
+                switch event {
+                case .approvalRequested(let approval): pending.append(approval)
+                case .approvalEnded(let id, _): pending.removeAll { $0.id == id }
+                default: break
+                }
+            }
+        }
+        defer { eventsTask.cancel() }
+        ApprovalIntentBridge.install { decision in
+            core.resolveApproval(id: decision.approvalID, approved: decision.approved)
+            return true
+        }
+        defer { ApprovalIntentBridge.install { _ in false } }
+
+        async let allowTap = core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 5.0)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)], timeout: 2.0)
+        let first = try XCTUnwrap(pending.first)
+        var card = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
+        card.approval = first
+        XCTAssertEqual(card.face.bottom, .approval(id: first.id))
+        _ = try await ApproveActionIntent(approvalID: first.id).perform()
+        let allowVerdict = await allowTap
+        XCTAssertEqual(allowVerdict, .approved("sending a message (\"send\")"))
+
+        async let denyTap = core.clearTap(on: "Delete", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 5.0)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !pending.isEmpty }, object: nil)], timeout: 2.0)
+        let second = try XCTUnwrap(pending.first)
+        _ = try await DenyActionIntent(approvalID: second.id).perform()
+        let denyVerdict = await denyTap
+        XCTAssertFalse(denyVerdict.mayTap, "\(denyVerdict)")
     }
 }
 
@@ -289,6 +355,161 @@ final class InProcessPasscodeTests: XCTestCase {
         session.answer(["ok": false, "code": "com.apple.dt.XCTest.XCTFuture 1000", "detail": "Timed out while enabling automation mode.", "seconds": 60.0])
         await waitFor("iOS gave up on the passcode") { !self.model.passcodeHint && !self.model.host.currentRunner.describe.hasPrefix("starting") }
         let failed = model.host.currentRunner.describe
-        XCTAssertTrue(failed.contains("owner needs to enter the iPhone passcode"), failed)
+        XCTAssertTrue(failed.contains("owner did not enter the iPhone passcode"), failed)
+        XCTAssertTrue(failed.contains("the owner turns Poki off and on"), failed)
+    }
+}
+
+@MainActor
+final class FrontendSubtractionTests: XCTestCase {
+    private var savedSetup: SetupState!
+
+    override func setUp() {
+        savedSetup = SetupState.load()
+    }
+
+    override func tearDown() {
+        savedSetup.save()
+    }
+
+    /// Every incomplete setup step produces a direct-link hint in ChatView that targets that exact
+    /// SetupStepPage, and completing all steps clears the setup-step hint.
+    func testChatSetupIssueHintLinksDirectlyToFirstIncompleteStep() {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.setup.runnerInstalled = false
+        model.setup.developerMode = false
+        model.setup.loopback = .none
+        model.setup.uiAutomation = false
+
+        let firstHint = SetupIssueHint.first(model: model)
+        XCTAssertNotNil(firstHint)
+        XCTAssertEqual(firstHint?.target, SetupStep.shown.first.map(SetupIssueHint.Target.step))
+        XCTAssertFalse(firstHint?.link.isEmpty ?? true)
+
+        // Mark developer mode done and verify the hint advances to the next open step (.loopback).
+        model.setup.runnerInstalled = true
+        model.setup.developerMode = true
+        let secondHint = SetupIssueHint.first(model: model)
+        XCTAssertEqual(secondHint?.target, .step(.loopback))
+    }
+
+    /// ESP-321: standing by (right after Turn On, or after the idle minute) Poki's details offer
+    /// Resume, as main's Pause and Resume pair does. Before, the one tile still said Pause there, and
+    /// Pause turned Poki off.
+    func testDetailsOffersResumeWhileStandingBy() {
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(PowerTile(model: model, running: false), .turnOn)
+
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+            UserDefaults.standard.removeObject(forKey: "wantsOn")
+        }
+        model.startSession()
+        XCTAssertTrue(model.sessionOn && model.runnerPaused, "Turn On stands by until an agent asks")
+        XCTAssertEqual(PowerTile(model: model, running: false), .resume)
+        XCTAssertEqual(PowerTile(model: model, running: true), .pause, "a chat task under way is paused, not resumed")
+
+        model.wakeRunner()
+        XCTAssertEqual(PowerTile(model: model, running: false), .pause)
+        model.pauseRunner()
+        XCTAssertEqual(PowerTile(model: model, running: false), .resume)
+        XCTAssertTrue(model.sessionOn, "Pause stands by; it does not turn Poki off")
+    }
+
+    /// ESP-340: the bear sleeps and the Hands switch reads "Resting" only after the owner's own pause.
+    /// Standing by right after Turn On, or after the idle time, is not a pause: read from `runnerPaused`
+    /// (what Pause and Resume go by), Poki looked asleep the moment it was turned on.
+    func testOnlyTheOwnersPauseCountsAsResting() {
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+            UserDefaults.standard.removeObject(forKey: "wantsOn")
+        }
+        model.startSession()
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertFalse(model.ownerPaused, "Turn On stands by; nobody paused it")
+
+        // What the idle check does once the idle time has passed.
+        model.wakeRunner()
+        model.pauseRunner(reason: "Stopped after 1 min without agent activity", byOwner: false)
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertFalse(model.ownerPaused, "standing by after the idle time is not the owner's pause")
+
+        // The Hands switch, turned off while Poki stands by: now it rests.
+        model.pauseByOwner()
+        XCTAssertTrue(model.ownerPaused)
+        model.wakeRunner()
+        XCTAssertFalse(model.ownerPaused, "a task, an agent's request or Resume ends the rest")
+
+        model.pauseByOwner()
+        XCTAssertTrue(model.ownerPaused && model.runnerPaused, "from awake, the owner's pause stands by and rests")
+        model.stopSession()
+        XCTAssertFalse(model.ownerPaused, "off is off, not resting")
+    }
+
+    /// ESP-321: Home has no tab bar, so main's Setup dot is Home's hint line. An open setup step shows
+    /// there and links to that step; before, Home showed only runner failures and said nothing.
+    func testHomeHintShowsOpenSetupStepWithoutTabBar() {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.setup.runnerInstalled = false
+        model.setup.developerMode = false
+        model.setup.loopback = .none
+        model.setup.uiAutomation = false
+
+        model.setup.runnerInstalled = true
+        model.setup.developerMode = true
+
+        let hint = SetupIssueHint.home(model: model)
+        XCTAssertEqual(hint?.target, .step(.loopback), "the first open step, Local Connection, shows on Home")
+    }
+    /// #78 ("Can't Reach iPhone" by failure code) and #79 (Poki Setup's install turns Poki on) still
+    /// reach the new screens: the failure is the hint line on Home and in the chat, and an issue row
+    /// on Poki's details.
+    func testUnreachableRunnerFailureAndAutoTurnOnSurfaceInNewHomeAndDetails() async throws {
+        defer { try? FileManager.default.removeItem(at: SelfSigner.handedIdentity) }
+        try FileManager.default.createDirectory(at: SelfSigner.handedIdentity.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: SelfSigner.handedIdentity)
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertTrue(model.wantsOn, "#79: Poki Setup install turns wantsOn on automatically")
+
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        model.startSession()
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+        }
+        model.wakeRunner()
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in ["failed", "running"].contains(model.runner.state) }, object: nil)
+        await fulfillment(of: [done], timeout: 5)
+
+        let fix = "Poki can't reach this iPhone. Check in this order: Setup › Loopback (your proxy app or LocalDevVPN is connected, with 10.7.0.1 set), then Setup › Pairing (pair again with the loopback on), then Developer Mode in Settings → Privacy & Security."
+        model.runnerChanged(RunnerStatus(state: "failed", detail: "tunnel closed", fix: fix, code: "unreachable"))
+
+        let hint = SetupIssueHint.runnerIssue(model: model)
+        XCTAssertNotNil(hint, "#78: unreachable failure code surfaces a SetupIssueHint on Home and Chat")
+        XCTAssertEqual(hint?.target, .step(.loopback))
+        XCTAssertTrue(hint?.message.contains("reach this iPhone") == true || hint?.message.contains("Reach iPhone") == true)
+
+        let detailsIssues = Issue.current(model)
+        let runnerIssue = detailsIssues.first { $0.id == "runner" }
+        XCTAssertNotNil(runnerIssue, "#78: PokiDetailsView Issue.current(model) includes the runner failure")
+        XCTAssertEqual(runnerIssue?.fix, .setup)
     }
 }

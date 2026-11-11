@@ -48,8 +48,16 @@ final class AppModel {
     private(set) var recentSteps: [RecentStep] = []
     /// The app the agent is in, from its last step.
     private(set) var currentApp: String?
+    /// What the core last saw of the screen: the small picture it already makes of every look (the Live
+    /// Activity's), for the task card of the task under way. Kept in memory only, and dropped when a
+    /// task or an agent's session begins or ends, so one task never shows another's screen.
+    private(set) var lastShot: UIImage?
     /// The runner is stopped until the next agent request (idle, or the owner tapped Stop runner).
     private(set) var runnerPaused = false
+    /// The owner paused Poki (Pause, the Hands switch, Stop on the Live Activity), as opposed to the
+    /// runner standing by on its own after the idle time. The bear sleeps and Hands reads off only for
+    /// this one: standing by after a quiet minute is still ready. Cleared when the runner starts again.
+    private(set) var ownerPaused = false
     /// Stop the runner after this long without agent activity; 0 never stops it.
     /// 60 s by default. An agent can think for about a minute between steps of a long task; after a
     /// longer pause the runner stops, and the agent's next request starts it again.
@@ -58,17 +66,21 @@ final class AppModel {
     var closeSessionWhenIdle: Bool = UserDefaults.standard.bool(forKey: "inProcess.closeWhenIdle") {
         didSet { UserDefaults.standard.set(closeSessionWhenIdle, forKey: "inProcess.closeWhenIdle"); log.add("runner", "close the session when idle: \(closeSessionWhenIdle ? "on" : "off")") }
     }
-    /// Ask the owner before payments, deleting, sending, calls, passwords and Wallet input. On unless
-    /// they turned it off; PokiCore reads it when Poki starts.
-    var askBeforeSensitiveSteps: Bool = LiveCore.asksBeforeSensitiveSteps {
-        didSet { UserDefaults.standard.set(askBeforeSensitiveSteps, forKey: LiveCore.askKey); log.add("approval", "ask before sensitive steps: \(askBeforeSensitiveSteps ? "on" : "off") (from the next start of Poki)") }
+    /// Agents › Approvals › Ask Before Sensitive Steps: how the owner is asked, or never. PokiCore
+    /// reads on or off when Poki starts; the way of asking changes at once.
+    var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
+        didSet {
+            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
+            for observer in approvalModeObservers { observer() }
+        }
     }
-    /// Approvals are decided by the chat model (ApprovalClassifier) instead of the owner. Testing only, off.
-    var approvalClassifier: Bool = UserDefaults.standard.bool(forKey: ApprovalClassifier.onKey) {
-        didSet { UserDefaults.standard.set(approvalClassifier, forKey: ApprovalClassifier.onKey); log.add("approval", "auto-classifier: \(approvalClassifier ? "on" : "off") (from the next start of Poki)") }
-    }
+    /// Whether a sensitive step waits for the owner now: asking is on, and was on when Poki started
+    /// (PokiCore reads it then; turning it off counts at once).
+    var asksBeforeSensitiveSteps: Bool { approvalMode != .off && core.sensitiveRulesOn }
+    private var approvalModeObservers: [() -> Void] = []
+    func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
-        didSet { UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "auto-classifier level: \(classifierLevel.rawValue)") }
+        didSet { UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)") }
     }
     /// Lists ask_poki for outside agents. Testing only, off.
     var askPokiTool: Bool = UserDefaults.standard.bool(forKey: AskPoki.onKey) {
@@ -188,10 +200,10 @@ final class AppModel {
         if !approvals.isEmpty { return String(localized: "An approval is waiting for you.") }
         if sessionStarting { return String(localized: "Poki is turning on.") }
         if let step = stepUnderWay, sessionOn, Date().timeIntervalSince(step.started) < 120 {
-            return String(localized: "The agent is doing a step: \(step.summary).")
+            return String(localized: "The agent is doing a step, \(step.summary).")
         }
         let since = Date().timeIntervalSince(lastStepAt)
-        if since < 60 { return String(localized: "The agent acted \(Int(since)) s ago; Install opens a minute after its last step.") }
+        if since < 60 { return String(localized: "The agent acted \(Int(since)) s ago. Install opens a minute after its last step.") }
         return nil
     }
 
@@ -236,6 +248,11 @@ final class AppModel {
     /// The chats watch the steps and approvals of the task they run (the in-app chat and an outside
     /// agent's hand-off each have one).
     private var shellObservers: [(ShellEvent) -> Void] = []
+    /// Told when an approval the model would not allow goes on to the owner's card, by id.
+    private var approvalObservers: [(String) -> Void] = []
+    func addApprovalObserver(_ observer: @escaping (String) -> Void) { approvalObservers.append(observer) }
+    /// Approvals the chat model is checking, or that needed nobody; `approvals` are the owner's.
+    private var checking: [PendingApproval] = []
     func addShellObserver(_ observer: @escaping (ShellEvent) -> Void) { shellObservers.append(observer) }
     /// A Debug probe drives PokiCore on the simulator without a runner session (the chat's end-to-end check).
     private(set) var probeDriven = false
@@ -840,6 +857,7 @@ final class AppModel {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Open Poki Again to Start Another Task")
         content.body = String(localized: "Poki closed after you stopped it. Open it to turn it on again.")
+        content.interruptionLevel = .timeSensitive
         content.userInfo = ["poki_link": "poki://chat"]
         content.sound = .default
         // Shown at once (the delegate shows banners while Poki is open too); Poki leaves only after
@@ -869,6 +887,7 @@ final class AppModel {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Tap to Open Poki")
         content.body = String(localized: "Poki restarted so agents can see the screen again. It turns on when it opens.")
+        content.interruptionLevel = .timeSensitive
         content.userInfo = ["poki_link": "poki://chat"]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "nz.zheha.poki.relaunch", content: content,
                                                                       trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
@@ -913,6 +932,7 @@ final class AppModel {
         }
         idleTimer?.invalidate(); idleTimer = nil
         runnerPaused = false; host.setPaused(false)
+        ownerPaused = false
         background.stop()
         activity.end()
         sessionOn = false
@@ -950,7 +970,7 @@ final class AppModel {
 
     /// Stops the runner, and with it iOS's automation banner, while the relay stays connected; the
     /// next agent request starts it again. From the Stop runner button, the Live Activity, or idle.
-    func pauseRunner(reason: String = "Stopped") {
+    func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
         guard sessionOn, !runnerPaused, approvals.isEmpty else { return }
         // Allow on the Live Activity is followed by its layout changing under the finger: a Stop
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
@@ -959,6 +979,7 @@ final class AppModel {
             log.add("runner", "a Stop from the Live Activity right after an approval was ignored")
             return
         }
+        ownerPaused = byOwner
         if automationPath == .inProcess {
             // The in-process session is closed, and with it Automation Mode and iOS's banner; the
             // next agent request opens a new one (a few seconds, no passcode within the same boot).
@@ -1028,6 +1049,11 @@ final class AppModel {
     private static let stuckNotice = "Poki Runner is still running after Stop. Swipe it away in the app switcher; the banner goes with it."
     private func clearStuckNotice() { if problem == Self.stuckNotice { problem = nil } }
 
+    func pauseByOwner() {
+        guard sessionOn else { return }
+        if runnerPaused { ownerPaused = true } else { pauseRunner() }
+    }
+
     /// The runner is off and starts on the next agent request.
     private func standBy(reason: String?) {
         runnerPaused = true
@@ -1040,6 +1066,7 @@ final class AppModel {
 
     /// Starts a paused runner again (the next agent request, or the owner).
     func wakeRunner() {
+        ownerPaused = false
         guard sessionOn, runnerPaused else { return }
         runnerPaused = false
         host.setPaused(false)
@@ -1072,7 +1099,7 @@ final class AppModel {
                 guard let self else { return }
                 if let line { self.log.add("runner", line) }
                 guard self.activityText == "Idle", Date().timeIntervalSince(self.lastAgentActivity) >= Double(self.idleStopSeconds) else { return }
-                self.pauseRunner(reason: reason)
+                self.pauseRunner(reason: reason, byOwner: false)
             }
         }
     }
@@ -1178,9 +1205,13 @@ final class AppModel {
         if status.state == "failed" {
             let title = Self.problemText(code: status.code, fix: status.fix ?? status.detail ?? "The runner stopped")
             activity.update { $0.phase = .problem; $0.label = "Runner Stopped"; $0.headline = title }
+        } else if activity.state.approval != nil || activity.state.handoff != nil {
+            // Runner readiness must not replace a decision waiting for the owner.
+        } else if let step = stepUnderWay {
+            activity.update { $0.phase = .working; $0.headline = step.summary; $0.since = step.started; $0.runnerPaused = false }
         } else if !status.isRunning {
             activity.update { $0.phase = .idle; $0.headline = status.title }
-        } else if activity.state.phase == .problem || activity.state.phase == .idle || activity.state.headline == "Starting the runner" {
+        } else if activity.state.phase == .problem || activity.state.phase == .idle || activity.state.headline == "Starting the runner" || activity.state.headline == "Starting native services" {
             activity.update { $0.phase = .idle; $0.headline = "Waiting for agent" }
         }
     }
@@ -1203,7 +1234,7 @@ final class AppModel {
         }
         for observer in shellObservers { observer(event) }
         switch event {
-        case .session: break
+        case .session: lastShot = nil
         case .relay(let status):
             if status != relayStatus { log.add("relay", "\(status)") }
             relayStatus = status
@@ -1225,7 +1256,7 @@ final class AppModel {
         case .toolFinished(let summary, let delivery, let app, let thumbnail, let error, _):
             lastAgentActivity = Date(); lastStepAt = Date()
             stepUnderWay = nil
-            lastAction = "\(summary) · \(delivery)"
+            lastAction = "\(summary), \(delivery)"
             activityText = "Idle"
             let failed = delivery.hasPrefix("failed")
             log.add("agent", "\(failed ? "failed" : "done"): \(summary) · \(delivery.prefix(160))" + (error.map { " · \($0)" } ?? ""))
@@ -1240,30 +1271,46 @@ final class AppModel {
             activity.record(step: summary, ok: !failed)
             activity.update { state in state.app = app ?? state.app }
             activity.setThumbnail(thumbnail)
-        case .approvalRequested(let approval) where ApprovalClassifier.isOn:
-            // The chat model decides, out of sight: no Live Activity card, no notification, no tap.
-            approvals.append(approval)
-            log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking the auto-classifier")
-            Task { [weak self] in
-                let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved, voice: self?.voice.lines ?? [])
-                guard let self else { return }
-                self.log.add("approval", "auto-classifier \(verdict.allowed ? "allowed" : "refused") \(approval.id): \(verdict.reason)")
-                self.core.resolveApproval(id: approval.id, approved: verdict.allowed)
-            }
+            if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
         case .approvalRequested(let approval):
-            approvals.append(approval)
-            log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
-            let caller = currentCaller
-            activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-            // The Live Activity pops up for it by itself; the notification is for when it is not running.
-            // Before iOS 26 an approval is answered from the notification (touch and hold it); later, from
-            // the Live Activity's own buttons when one is running.
-            if #available(iOS 26.0, *), activity.isRunning {} else { ApprovalNotice.post(approval, caller: caller) }
+            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
+            case .allow:
+                // The rules were on when Poki started and asking has been turned off since.
+                checking.append(approval)
+                log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking is off, allowed")
+                core.resolveApproval(id: approval.id, approved: true)
+            case .model(let reply):
+                // The chat model checks it first: no Live Activity card, no notification, no tap. The chat shows it.
+                checking.append(approval)
+                log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking the auto-classifier")
+                Task { [weak self] in
+                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved, voice: self?.voice.lines ?? [])
+                    guard let self, self.checking.contains(where: { $0.id == approval.id }) else { return }
+                    self.log.add("approval", "auto-classifier \(verdict.allowed ? "allowed" : "refused") \(approval.id): \(verdict.reason)")
+                    if verdict.allowed || reply {
+                        self.core.resolveApproval(id: approval.id, approved: verdict.allowed)
+                    } else {
+                        // With Confirmation: what the model would not allow is the owner's to answer.
+                        self.checking.removeAll { $0.id == approval.id }
+                        ApprovalClassifier.handToOwner(approval.id)
+                        for observer in self.approvalObservers { observer(approval.id) }
+                        self.askOwner(approval)
+                    }
+                }
+            case .owner:
+                askOwner(approval)
+            }
         case .approvalEnded(let id, let approved):
             lastApprovalAnswered = Date()
+            if let approval = approvals.first(where: { $0.id == id }) {
+                record(approval, approved: approved)
+            } else if let approval = checking.first(where: { $0.id == id }) {
+                record(approval, approved: approved)
+            }
             approvals.removeAll { $0.id == id }
+            checking.removeAll { $0.id == id }
             log.add("approval", "ended \(id): \(approved.map { $0 ? "approved" : "denied" } ?? "expired or replaced")")
-            if approved == nil, !ApprovalClassifier.isOn { problem = "An approval ran out before you answered, so that step was not done. The agent can ask again." }
+            if approved == nil, !ApprovalClassifier.modelAnswered(id) { problem = "An approval ran out before you answered, so that step was not done. The agent can ask again." }
             ApprovalNotice.clear(id)
             activity.update { state in
                 if state.approval?.id == id { state.approval = nil; state.phase = .working; state.headline = approved == true ? "Continuing" : "Step skipped" }
@@ -1299,7 +1346,51 @@ final class AppModel {
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
     func finishTask() {
+        lastShot = nil
         Task { [core, log] in if let line = await core.finishTask() { log.add("runner", line) } }
+    }
+
+    // MARK: The chat's task
+
+    /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
+    func chatTaskBegan() {
+        lastShot = nil
+        // The owner sees at once that Poki took the task: the Live Activity (started here, while
+        // Poki is in front) and iOS's background line say so before the model's first answer.
+        if sessionOn {
+            activity.update { state in
+                state.plan = nil
+                guard state.approval == nil, state.handoff == nil, state.phase == .idle || state.phase == .done else { return }
+                state.phase = .working
+                state.headline = "Thinking"
+                state.since = Date()
+            }
+            if !activity.isRunning, inFront { activity.start(deviceName: deviceName) }
+        } else {
+            activity.update { $0.plan = nil }
+        }
+    }
+
+    /// The chat's model published its plan: the Live Activity counts the same steps as the chat.
+    func chatPlan(total: Int, current: Int) {
+        activity.update { $0.plan = .init(total: total, current: current) }
+    }
+
+    /// End the task, return to Poki and finish its Live Activity.
+    func chatTaskEnded(reply: String?, session: String, acted: Bool) {
+        lastShot = nil
+        guard acted else {
+            finishTask()
+            // A turn that never touched the phone: nothing ran, so nothing is left showing as working.
+            activity.update { state in
+                state.plan = nil
+                guard state.phase == .working, state.stepCount == 0, state.approval == nil, state.handoff == nil else { return }
+                state.phase = .idle; state.headline = "Waiting for agent"; state.since = nil
+            }
+            return
+        }
+        finishTask()
+        activity.finishNow(alert: true)
     }
 
     func runTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
@@ -1313,9 +1404,45 @@ final class AppModel {
         return await core.callTool(name, arguments: arguments)
     }
 
+    /// After Stop: waits until the phone has finished the action a stopped call had already sent.
+    func phoneSettles(within seconds: Double) async -> Bool { await core.settle(timeout: seconds) }
+
     // MARK: Approvals
 
     /// Approvals from the app's own screen (the same path as the Live Activity's buttons).
+    /// An approval's answer in the Activity Log: what was asked, who answered, and the model's reason.
+    private func record(_ approval: PendingApproval, approved: Bool?) {
+        let detail: String
+        if ApprovalClassifier.modelAnswered(approval.id), let verdict = ApprovalClassifier.verdicts[approval.id] {
+            detail = (approved == true ? String(localized: "Allowed automatically") : String(localized: "Not allowed automatically")) + (verdict.reason.isEmpty ? "" : ": \(verdict.reason)")
+        } else if ApprovalClassifier.mode == .off, !ApprovalClassifier.requiresOwner(approval) {
+            detail = String(localized: "Allowed, asking is off")
+
+        } else {
+            switch approved {
+            case true?: detail = String(localized: "You allowed it")
+            case false?: detail = String(localized: "You did not allow it")
+            case nil: detail = String(localized: "Ran out before an answer")
+            }
+        }
+        let chat = AskPoki.chat
+        ActionLog.shared.add(approval.summary, app: approval.app, ok: approved == true,
+                             session: SessionStore.shared.activeSessionID ?? (chat?.running == true ? chat?.sessionID : nil),
+                             caller: currentCaller, kind: .approval, detail: detail, why: approval.reason)
+    }
+
+    /// Each request is answered by the owner on its own card or notification.
+    private func askOwner(_ approval: PendingApproval) {
+        approvals.append(approval)
+        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
+        let caller = currentCaller
+        activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
+        // The Live Activity pops up for it by itself; the notification is for when it is not running.
+        // Before iOS 26 an approval is answered from the notification (touch and hold it); later, from
+        // the Live Activity's own buttons when one is running.
+        if #available(iOS 26.0, *), activity.isRunning {} else { ApprovalNotice.post(approval, caller: caller) }
+    }
+
     func resolve(_ approval: PendingApproval, approved: Bool) {
         core.resolveApproval(id: approval.id, approved: approved)
     }
@@ -1343,6 +1470,16 @@ final class AppModel {
     /// The person tapped "Done, carry on" on the Live Activity's "Your turn" card.
     func handoffDone() {
         guard let id = ApprovalMailbox.drainHandoffDone() else { return }
+        handoffDone(id: id)
+    }
+
+    /// The same answer from the chat's "Your turn" card, while Poki is in front.
+    func handoffDoneInApp() {
+        guard let id = activity.state.handoff?.id else { return }
+        handoffDone(id: id)
+    }
+
+    private func handoffDone(id: String) {
         log.add("handoff", "done by the owner: \(id)")
         if id == Self.runnerPasscodeHandoff {
             // The runner's own launch: the launcher notices by itself when the runner answers.
@@ -1363,7 +1500,7 @@ final class AppModel {
         case .password: "The screen asks for a password"
         case .verification: "The screen asks for a verification step"
         case .payment: "The screen asks you to confirm a payment"
-        case .other: "The agent cannot act on this screen; please do this step"
+        case .other: "The agent cannot act on this screen, please do this step"
         }
     }
 
@@ -1456,7 +1593,7 @@ final class AppModel {
     /// opened from AirDrop or Files. Returns the setup step to show, or nil when the link was none of these.
     func open(link url: URL) -> SetupStep? {
         if url.isFileURL {
-            do { try importPairingFile(from: url) } catch { pairingNote = String(localized: "Invalid Pairing File: \(error.localizedDescription)") }
+            do { try importPairingFile(from: url) } catch { pairingNote = String(localized: "Invalid Pairing File. \(error.localizedDescription)") }
             try? FileManager.default.removeItem(at: url)
             return .pairing
         }
@@ -1465,7 +1602,7 @@ final class AppModel {
         switch url.host() {
         case "pairing":
             if let text = item("data"), let data = Data(base64URL: text) {
-                do { try importPairingFile(data, how: "received by link") } catch { pairingNote = String(localized: "Invalid Pairing File: \(error.localizedDescription)") }
+                do { try importPairingFile(data, how: "received by link") } catch { pairingNote = String(localized: "Invalid Pairing File. \(error.localizedDescription)") }
             } else if let from = item("url").flatMap(URL.init(string:)), ["http", "https"].contains(from.scheme ?? "") {
                 let expected = item("sha256")?.lowercased()
                 pairingNote = String(localized: "Fetching the pairing file from \(from.host() ?? "your computer")…")
@@ -1476,7 +1613,7 @@ final class AppModel {
                             throw NSError(domain: "poki", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "the file does not match the link")])
                         }
                         try importPairingFile(data, how: "fetched from \(from.host() ?? "?")")
-                    } catch { pairingNote = String(localized: "Could not get the pairing file: \(error.localizedDescription)") }
+                    } catch { pairingNote = String(localized: "Could not get the pairing file. \(error.localizedDescription)") }
                 }
             } else {
                 pairingNote = String(localized: "The pairing link carried no file.")
@@ -1647,7 +1784,7 @@ final class AppModel {
 
     // MARK: Relay and connectors
 
-    static let noRelay = "Enter your relay's address first (Settings › Relay). Poki has no default relay."
+    static let noRelay = "Enter your relay’s address first in Poki › Guests › Address. Poki has no default relay."
 
     /// Saves the relay address the person entered; false when it is not one. A running session moves
     /// to the new relay at once.

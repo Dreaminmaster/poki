@@ -19,6 +19,10 @@ struct PokiActivityAttributes: ActivityAttributes {
             /// The phases a person has to answer: a step from the agent never replaces them.
             var holdsApproval: Bool { self == .approval || self == .deciding }
         }
+        /// Live voice session state when Poki's voice mode is active.
+        enum Voice: String, Codable, Hashable {
+            case listening, thinking, speaking
+        }
         var phase: Phase
         /// What the agent is doing, in a few words ("Tap “Send”"), or the phase's line, in English: the
         /// face words it in the system's language (ActivityWords).
@@ -42,22 +46,33 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// The runner is stopped while no agent uses the phone (no automation banner); the next
         /// request starts it again.
         var runnerPaused = false
-        /// Whether each of the run's latest steps went through, newest last, at most `outcomeLimit`.
-        var outcomes: [Bool] = []
         /// During setup: which step the person is on ("2/6").
         var guide: Guide?
+        /// Live voice conversation state, when active.
+        var voice: Voice? = nil
         /// When the agent's current run of steps began.
         var since: Date?
-        /// Steps in the current run, and how many of them did not go through. Kept by ActivityController.
+        /// Actions taken in the current run, and how many of them did not go through. Kept by
+        /// ActivityController. What the Live Activity shows as the step is `progress` (ActivityFace).
         var stepCount = 0
         var failedCount = 0
+        /// The step before the one under way, in English like `headline`: the expanded island shows
+        /// it ticked under the current one. Kept by ActivityController.
+        var previous: String?
         /// When the run finished (phase `done`), so the summary shows a fixed duration.
         var endedAt: Date?
         /// A short-lived event ("Started", "Now in WeChat", "Allowed") shown as the status word for a few
         /// seconds. ActivityController clears it.
         var event: Event?
 
-        static let outcomeLimit = 12
+        /// The plan the chat's model published: the Live Activity then counts the plan's steps, as the
+        /// chat's plan bubble does, not the single taps under them.
+        var plan: Plan?
+    }
+    struct Plan: Codable, Hashable {
+        var total: Int
+        /// The step under way, from 1.
+        var current: Int
     }
     struct Event: Codable, Hashable {
         enum Kind: String, Codable, Hashable { case started, app, finished, approved, denied, expired, problem, paired, code, handoff, resumed }
@@ -95,13 +110,37 @@ struct PendingApproval: Codable, Hashable {
     /// The summary ("Tap “Send”") says how, which the thumbnail shows better.
     var question: String {
         // PokiCore names the app, or says "unknown", or describes the home screen at length.
-        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : app
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
         if reason.hasPrefix("sending") { return place.map { String(activity: "Send in \($0)?") } ?? String(activity: "Send a message?") }
         if reason.hasPrefix("a payment") { return place.map { String(activity: "Pay in \($0)?") } ?? String(activity: "Make a payment?") }
         if reason.hasPrefix("deleting") { return place.map { String(activity: "Delete in \($0)?") } ?? String(activity: "Delete this?") }
         if reason.hasPrefix("typing into a password") { return String(activity: "Type a password?") }
         if reason.hasPrefix("input in"), let place { return String(activity: "Use \(place)?") }
         return String(activity: "Allow this step?")
+    }
+
+    /// The reason as a line under the summary: "Sending a message in Messages".
+    var reasonLine: String {
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
+        if reason.hasPrefix("sending") {
+            return place.map { String(activity: "Sending a message in \($0)") } ?? String(activity: "Sending a message")
+        }
+        if reason.hasPrefix("a payment") {
+            return place.map { String(activity: "Making a payment in \($0)") } ?? String(activity: "Making a payment")
+        }
+        if reason.hasPrefix("deleting") {
+            return place.map { String(activity: "Deleting in \($0)") } ?? String(activity: "Deleting")
+        }
+        if reason.hasPrefix("typing into a password") {
+            return place.map { String(activity: "Typing a password in \($0)") } ?? String(activity: "Typing a password")
+        }
+        var text = reason
+        if let quote = text.range(of: " (\"") { text = String(text[..<quote.lowerBound]) }
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        if let place, !text.contains(" in ") {
+            return "\(text) in \(place)"
+        }
+        return text
     }
 }
 

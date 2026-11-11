@@ -86,6 +86,51 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.details, [TaskResult.Detail(label: "Battery", value: "81%")])
     }
 
+    /// The model's name for the task comes with its plan and is kept on the task's plan entry, where
+    /// the task card reads its title ("Book a class", not the whole sentence that was asked). A
+    /// sentence sent as the title is not taken. When the task ends, its entry also keeps how it ended.
+    func testThePlansTitleNamesTheTask() async throws {
+        let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the gym app", "Book the class"], "currentStep": 1, "title": "Book a class"]),
+            done, FakeCompletions.text("Booked."),
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1, "title": "Open the Settings app and read out what the battery page says first"]),
+            done, FakeCompletions.text("81%."),
+        ])
+        let chat = chat(on: server)
+
+        _ = await chat.runDelegated("Book a class at my gym for tomorrow morning, the early one")
+        _ = await chat.runDelegated("What is the battery level?")
+
+        let plans = chat.entries.filter { if case .plan = $0.kind { true } else { false } }
+        XCTAssertEqual(plans.map(\.title), ["Book a class", nil])
+        // How each task ended stays with it, for the folded card: when, and out of how many planned steps.
+        XCTAssertEqual(plans.map(\.total), [2, 1])
+        XCTAssertTrue(plans.allSatisfy { $0.ended != nil })
+    }
+
+    /// Stop ends the phone step under way at its next action, instead of letting the rest of a long
+    /// `do` run on the phone (seen on the owner's phone: 16 to 22 s of typing after Stop), and the chat
+    /// says Stopping until that step has ended.
+    func testStopEndsTheStepUnderWayAtItsNextAction() async throws {
+        let waits = Array(repeating: ["wait": 1000], count: 15)
+        let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["actions": waits]), FakeCompletions.text("Done.")])
+        let chat = chat(on: server)
+        func said() -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
+
+        chat.send("Wait on the phone")
+        while chat.awaitingModel { try await Task.sleep(for: .milliseconds(50)) }
+        let stopped = ContinuousClock.now
+        chat.stop()
+        XCTAssertEqual(said().last, "Stopping…")
+        while chat.savedCalls.isEmpty, ContinuousClock.now - stopped < .seconds(20) { try await Task.sleep(for: .milliseconds(100)) }
+        let after = ContinuousClock.now - stopped
+        XCTAssertLessThan(after, .seconds(3), "the do call ended \(after) after Stop")
+        while said().last != "Stopped.", ContinuousClock.now - stopped < .seconds(10) { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(said().last, "Stopped.")
+        XCTAssertFalse(said().contains("Stopping…"))
+    }
+
     /// The system prompt names no tool the model does not have (the app has no unlock_device or
     /// handle_alert).
     func testThePromptNamesOnlyToolsTheModelHas() throws {

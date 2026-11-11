@@ -530,6 +530,12 @@ public final class PokiCore: @unchecked Sendable {
     public static var toolCatalogJSON: String { JSON.array(tools).serialized() }
     public static var toolInstructions: String { instructions }
 
+    /// A cancelled call answers at once, while the action it had sent may still be running on the
+    /// phone. True once the runner is through with it, false if it is not within `timeout`.
+    public func settle(timeout: Double) async -> Bool {
+        await computer.runner.settle(timeout: timeout)
+    }
+
     func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if let tool = hostTools.value.first(where: { $0.name == name }) {

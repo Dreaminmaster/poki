@@ -1,11 +1,13 @@
 // MessageBubble is from Mackarous/ConversationUI (commit e77c69e,
 // Sources/ConversationUI/MessageBubble.swift), Copyright (c) 2024 Andrew Mackarous, MIT License. See
-// THIRD_PARTY_NOTICES.md. Changed: Poki's message kinds, the ESP-171 board's colours, 17 pt text, the
-// tail corner on the last bubble of a run, and 60 pt kept free on the far side (280 pt at most).
+// THIRD_PARTY_NOTICES.md. Changed: Poki's message kinds, the tail corner on the last bubble of a run,
+// 60 pt kept free on the far side, and the colours: an outside agent's request in ink, and for
+// ESP-376 your bubble in Poki's blue and Poki's words in a white bubble with a soft shadow.
 import SwiftUI
 
 struct MessageBubble: View {
-    enum Direction { case incoming, outgoing }
+    /// Poki's words, yours, or an outside agent's request to Poki.
+    enum Direction { case incoming, outgoing, guest }
     var direction: Direction
     var text: String
     /// The last bubble of its run has the small corner on its side.
@@ -13,24 +15,36 @@ struct MessageBubble: View {
 
     var body: some View {
         HStack {
-            if direction == .outgoing {
+            if direction != .incoming {
                 Spacer(minLength: .messageInsetPadding)
             }
-            Text(rendered)
-                .font(.system(size: 17))
-                .tint(direction == .incoming ? Site.blue : .white)
-                .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(foregroundStyle)
-                .padding(.vertical, .messageVerticalPadding)
-                .padding(.horizontal, 14)
-                .background(backgroundStyle, in: shape)
-                .contentShape(.contextMenuPreview, shape)
-                .contextMenu {
-                    copyButton { UIPasteboard.general.string = text }
-                }
-                .frame(maxWidth: 280, alignment: direction == .incoming ? .leading : .trailing)
             if direction == .incoming {
+                Text(rendered)
+                    .font(.body)
+                    .tint(Tint.blueText)
+                    .foregroundStyle(Color(.label))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, .messageVerticalPadding)
+                    .padding(.horizontal, .messageHorizontalPadding)
+                    .pokiBubble(tail: tail)
+                    .contextMenu { copyButton { UIPasteboard.general.string = text } }
                 Spacer(minLength: .messageInsetPadding)
+            } else {
+                Text(rendered)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(direction == .guest ? Tint.onSolid : Color.white)
+                    .padding(.vertical, .messageVerticalPadding)
+                    .padding(.horizontal, .messageHorizontalPadding)
+                    .background(direction == .guest ? Tint.solid : Tint.blue, in: shape)
+                    // The bubble is one flat layer with its own outline, so the lifted copy of it (the
+                    // long press) is cut to the same outline and the small corner stays where it is.
+                    .clipShape(shape)
+                    .compositingGroup()
+                    .contentShape(.contextMenuPreview, shape)
+                    .contentShape(.interaction, shape)
+                    .contextMenu { copyButton { UIPasteboard.general.string = text } }
+                    .frame(maxWidth: 320, alignment: .trailing)
             }
         }
     }
@@ -45,11 +59,9 @@ struct MessageBubble: View {
     }
 
     private var shape: UnevenRoundedRectangle {
-        let small: CGFloat = tail ? .tailRadius : .cornerRadius
-        return UnevenRoundedRectangle(topLeadingRadius: .cornerRadius,
-                                      bottomLeadingRadius: direction == .incoming ? small : .cornerRadius,
-                                      bottomTrailingRadius: direction == .outgoing ? small : .cornerRadius,
-                                      topTrailingRadius: .cornerRadius, style: .continuous)
+        UnevenRoundedRectangle(topLeadingRadius: .cornerRadius, bottomLeadingRadius: .cornerRadius,
+                               bottomTrailingRadius: tail ? .tailRadius : .cornerRadius,
+                               topTrailingRadius: .cornerRadius, style: .continuous)
     }
 
     private func copyButton(copy: @escaping () -> Void) -> some View {
@@ -57,27 +69,31 @@ struct MessageBubble: View {
             Label("Copy", systemImage: "doc.on.doc")
         }
     }
-
-    private var foregroundStyle: AnyShapeStyle {
-        switch direction {
-        case .incoming: AnyShapeStyle(Color(.label))
-        case .outgoing: AnyShapeStyle(.white)
-        }
-    }
-
-    private var backgroundStyle: AnyShapeStyle {
-        switch direction {
-        case .incoming: AnyShapeStyle(ChatColor.incoming)
-        case .outgoing: AnyShapeStyle(Site.blue)
-        }
-    }
 }
 
 extension CGFloat {
-    static let cornerRadius: CGFloat = 20
-    static let tailRadius: CGFloat = 6
+    static let cornerRadius: CGFloat = 22
+    static let tailRadius: CGFloat = 7
     static let messageInsetPadding: CGFloat = 60
-    static let messageVerticalPadding: CGFloat = 9
+    static let messageVerticalPadding: CGFloat = 13
+    static let messageHorizontalPadding: CGFloat = 18
+}
+
+extension View {
+    /// Poki's bubble (ESP-376): the card's white with a soft shadow in light; in dark the card's grey
+    /// with a hairline, where a shadow does not show. The small corner sits on Poki's side.
+    func pokiBubble(tail: Bool) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: .cornerRadius, bottomLeadingRadius: tail ? .tailRadius : .cornerRadius,
+                                           bottomTrailingRadius: .cornerRadius, topTrailingRadius: .cornerRadius, style: .continuous)
+        return background(Color(.secondarySystemGroupedBackground), in: shape)
+            .overlay(shape.strokeBorder(Tint.ring.opacity(0.5), lineWidth: 0.5))
+            // One flat layer cut to its outline (as your bubble), under the shadow.
+            .clipShape(shape)
+            .compositingGroup()
+            .shadow(color: Tint.bubbleShadow, radius: 6, y: 2)
+            .contentShape(.contextMenuPreview, shape)
+            .contentShape(.interaction, shape)
+    }
 }
 
 /// The chat's greys. The boards draw iMessage's light colours, which are iOS's own system colours, so

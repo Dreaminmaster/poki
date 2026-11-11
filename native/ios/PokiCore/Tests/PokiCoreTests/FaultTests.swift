@@ -550,6 +550,32 @@ final class FaultTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "the second tap was not queued")
     }
 
+    /// Stop part way through a do (the app's chat cancels the call): the actions after the one under
+    /// way are never sent, and settle answers only once the runner is through with that one.
+    func testACancelledDoSendsNothingMoreAndSettleWaitsForTheActionUnderWay() async throws {
+        let (core, wda, _) = makeCore { $0.actionCap = 10 }
+        _ = await core.call("look", [:])
+        // The tap runs on until it is released, whatever this side does, and every request queued
+        // behind it on the runner waits for it (the fake has no queue of its own).
+        let held = LockedBox(true)
+        wda.hold("POST /wda/tap", while: held)
+        let call = Task { await core.call("do", ["actions": [["tap": [100, 120]], ["tap": [100, 160]], ["tap": [100, 200]]]]) }
+        let sent = await eventually(3) { !wda.bodies("POST /wda/tap").isEmpty }
+        XCTAssertTrue(sent)
+        for route in ["POST /session", "GET /source", "GET /wda/activeAppInfo", "GET /wda/locked", "GET /wda/screen"] { wda.hold(route, while: held) }
+        // Settle may be asked before the cancelled request has noted that the runner is busy with it.
+        call.cancel()
+        let settled = LockedBox<Bool?>(nil)
+        let settling = Task { settled.value = await core.settle(timeout: 5) }
+        _ = await call.value
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertNil(settled.value, "settled while the tap was still running")
+        held.value = false
+        await settling.value
+        XCTAssertEqual(settled.value, true)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "the taps after the stop were sent: \(wda.sent)")
+    }
+
     /// WDA's XML tree lists the same elements as its JSON one, without the custom actions it fetches
     /// for every JSON element.
     func testTheXMLTreeReadsLikeTheJSONOne() async {

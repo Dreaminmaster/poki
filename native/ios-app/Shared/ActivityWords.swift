@@ -47,8 +47,58 @@ enum ActivityWords {
         brief(translate(label.components(separatedBy: ", then ").first ?? label))
     }
 
+    /// The one word the compact island has room for: what kind of step this is ("Tap", "Type"). It
+    /// is looked up from the start of PokiCore's English label and then worded in the system's
+    /// language, never cut out of a translated sentence (Chinese has no spaces to cut at). A label
+    /// that starts otherwise has no verb, and the island shows the count alone.
+    static func verb(_ label: String) -> String? {
+        let first = label.components(separatedBy: ", then ").first ?? label
+        // Longer openings first: "Press and hold" is Hold, not Press.
+        let table: [(String, String.LocalizationValue)] = [
+            ("Press and hold", "Hold"), ("Tap", "Tap"), ("Press", "Press"), ("Type", "Type"), ("Scroll", "Scroll"),
+            ("Swipe", "Swipe"), ("Drag", "Drag"), ("Zoom", "Zoom"), ("Open", "Open"), ("Look", "Look"), ("Wait", "Wait"),
+        ]
+        for (start, word) in table where first == start || first.hasPrefix(start + " ") {
+            return String(localized: word, table: Self.table)
+        }
+        return nil
+    }
+
     /// A step label from PokiCore in the system's language, whole, for the app's own screens.
-    static func label(_ label: String) -> String { translate(label) }
+    /// Several actions ("Tap “Search”, then type “cats”") are worded one by one and joined in that
+    /// language's own way.
+    static func label(_ label: String) -> String {
+        let parts = actions(label)
+        guard parts.count > 1 else { return translate(label) }
+        let words = parts.enumerated().map { index, part in
+            // PokiCore lowercases every action after the first; the table has them capitalised.
+            translate(index == 0 ? part : part.prefix(1).uppercased() + part.dropFirst())
+        }
+        return words.dropFirst().reduce(words[0]) { String(activity: "\($0), then \($1)") }
+    }
+
+    /// PokiCore's reason for an approval ("sending a message (\"send\")", "input in Wallet") in the
+    /// system's language, without the word in brackets that set it off.
+    static func reason(_ why: String) -> String {
+        let plain = why.split(separator: "(").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        if plain.hasPrefix("input in ") { return String(activity: "Input in \(String(plain.dropFirst("input in ".count)))") }
+        return local(plain)
+    }
+
+    /// A label's actions. A ", then " inside typed text (between “ and ”) does not split it.
+    private static func actions(_ label: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        for piece in label.components(separatedBy: ", then ") {
+            current = current.isEmpty ? piece : current + ", then " + piece
+            if current.filter({ $0 == "“" }).count == current.filter({ $0 == "”" }).count {
+                parts.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { parts.append(current) }
+        return parts
+    }
 
     private static func isHan(_ scalar: Unicode.Scalar) -> Bool {
         (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value)
@@ -76,6 +126,7 @@ enum ActivityWords {
         if let name = quoted("Tap") { return String(activity: "Tap “\(name)”") }
         if let name = quoted("Press and hold") { return String(activity: "Press and hold “\(name)”") }
         if let text = quoted("Type") { return String(activity: "Type “\(text)”") }
+        if let name = quoted("Run") { return String(activity: "Run “\(name)”") }
         if let name = quoted("Scroll to") { return String(activity: "Scroll to “\(name)”") }
         if let point = after("Tap at") { return String(activity: "Tap at \(point)") }
         if let point = after("Press and hold at") { return String(activity: "Press and hold at \(point)") }
