@@ -262,23 +262,26 @@ private struct TopBannerFrame: View {
     }
 }
 
-/// The expanded island, regions placed the way iOS does: leading and trailing beside the camera,
-/// the bottom region under them, inside the widget's margins.
+/// The expanded island, regions placed the way iOS does on a 402-point iPhone: 374 wide, leading and
+/// trailing against the top edge at their own height, the bottom region under a row of 36.67, and the
+/// content cut to the outline drawn in by `ActivityMetrics.islandClip`. An earlier frame here had no
+/// such cut and a centred top row, and passed a layout the real island then clipped.
 private struct IslandExpandedFrame: View {
     var state: PokiState
     var body: some View {
         let face = state.face
         let shape = RoundedRectangle(cornerRadius: ActivityMetrics.islandCorner, style: .continuous)
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 IslandLeading(face: face)
                 Spacer(minLength: 120)
                 IslandTrailing(face: face)
             }
-            .frame(height: ActivityMetrics.cameraRow)
+            .frame(height: ActivityMetrics.systemCameraRow, alignment: .top)
             IslandBottom(face: face)
         }
-        .frame(width: 376)
+        .frame(width: 374)
+        .clipShape(RoundedRectangle(cornerRadius: ActivityMetrics.islandClipCorner).inset(by: ActivityMetrics.islandClip))
         .background(.black, in: shape)
         .clipShape(shape)
         .overlay { shape.strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }

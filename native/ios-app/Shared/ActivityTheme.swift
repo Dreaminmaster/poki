@@ -15,8 +15,6 @@ enum Site {
     /// Exact design board tokens for the Live Activity (ESP-139 board 02 and ESP-171).
     static let boardBlue = Color(hex: 0x0077FD)
     static let boardInk = Color(hex: 0x0060D8)
-    static let boardOk = Color(hex: 0x5BE37A)
-    static let boardBad = Color(hex: 0xFF5F57)
 
     #if POKI_APP
     /// The system's blue in the app's screens.

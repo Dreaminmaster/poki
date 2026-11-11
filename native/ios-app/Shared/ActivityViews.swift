@@ -8,7 +8,9 @@
 // concentric with the island's corners are from leepokai/Codync (commit 848070d,
 // apps/ios/Widgets/CodyncWidgets.swift), Copyright 2026 Po Kai Lee, Apache License 2.0. The layout,
 // the bear that rises from the bottom edge, the two-line compact island and the colours are Poki's
-// own: ESP-344's final design (定稿规格, drawn at 402 by 874 points; not yet run on a phone).
+// own: ESP-344's final design (定稿规格, drawn at 402 by 874 points). The design draws to the island's
+// edge; iOS does not (see `ActivityMetrics.islandClip`), so what stood on the edge stands on the
+// system's line instead. Run as a real Live Activity on the iOS 27 simulator; not yet on a phone.
 // See THIRD_PARTY_NOTICES.md.
 import ActivityKit
 import AppIntents
@@ -22,8 +24,19 @@ enum ActivityMetrics {
     /// The card's corner as iOS draws it, and the expanded island's.
     static let lockCorner: CGFloat = 24
     static let islandCorner: CGFloat = 46
-    /// The row beside the camera in the expanded island ends here; the words start under it.
+    /// The design's heights for the expanded island count the row beside the camera as 38 points.
+    /// iOS makes that row 36.67, so the island comes out 1.33 lower than the design's number.
     static let cameraRow: CGFloat = 38
+    static let systemCameraRow: CGFloat = 36.67
+    /// iOS draws nothing of ours nearer than this to the expanded island's outline, also with the
+    /// content margins at zero: it clips the content to the outline drawn in by 12.33 points, with
+    /// a corner of about 36. Measured on a real Live Activity on the iOS 27 simulator (a 402-point
+    /// iPhone, island 374 wide); not yet on a phone. So the bear stands on that line and not on the
+    /// edge, and a control near a corner keeps clear of the corner's curve.
+    static let islandClip: CGFloat = 12.33
+    static let islandClipCorner: CGFloat = 36
+    /// The same in the compact island: 4.33 points up from its bottom edge.
+    static let compactClip: CGFloat = 4.33
     static let compactHeight: CGFloat = 36.67
     /// The compact island's left block, and how wide the bear's head is in it.
     static let compactBlock: CGFloat = 51
@@ -182,15 +195,17 @@ struct IslandLeading: View {
     var body: some View { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
 }
 
-/// Beside the camera, right: the one small value (time, countdown, a tick), with the outside agent's
-/// badge to its left.
+/// Beside the camera, right: nothing to see. iOS sets this region against the island's top edge at
+/// its content's own height, which put the value half under the system's clip; the value is drawn
+/// from `IslandBottom` instead, at a place of its own. The value stays here unseen, so the row beside
+/// the camera keeps the size it had.
 struct IslandTrailing: View {
     var face: ActivityFace
     var body: some View {
         MetaCluster(face: face, palette: ActivityTheme.current.island, meta: face.meta)
-            .padding(.trailing, 24)
-            .frame(maxHeight: .infinity, alignment: .center)
-            .environment(\.colorScheme, .dark)
+            .padding(.trailing, 30)
+            .hidden()
+            .accessibilityHidden(true)
     }
 }
 
@@ -206,11 +221,23 @@ struct IslandBottom: View {
         let height = sizes.island - ActivityMetrics.cameraRow
         ZStack(alignment: .bottomLeading) {
             // Taller than this region in the two low states: the ears reach up beside the camera.
-            RisingBear(bear: face.bear, side: sizes.islandBear, rim: 22, colour: palette.rim)
+            // The bear stands on the system's line: moved in from the left edge by as much as iOS
+            // cuts away, so its cheek is whole, and shaded where the line cuts it below.
+            RisingBear(bear: face.bear, side: sizes.islandBear, rim: 22, lift: ActivityMetrics.islandClip, colour: palette.rim)
                 .frame(width: sizes.islandBear, height: height, alignment: .bottom)
+                .padding(.leading, ActivityMetrics.islandClip)
             words(palette)
                 .padding(.leading, sizes.islandLeft)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        // The one small value (time, countdown, a tick) with the outside agent's badge to its left,
+        // beside the camera: its middle 26 points under the island's top edge and 30 in from the
+        // right, where the corner of the system's clip no longer reaches it.
+        .overlay(alignment: .topTrailing) {
+            MetaCluster(face: face, palette: palette, meta: face.meta)
+                .frame(height: 24)
+                .padding(.trailing, 30)
+                .offset(y: -(ActivityMetrics.systemCameraRow - 14))
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
@@ -240,15 +267,17 @@ struct IslandBottom: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if stop {
+                    // In the lowest island the circle sits a little higher, clear of the corner.
                     StopButton(surface: .island)
-                        .padding(.top, (total == nil ? 9 : 16) + (face.previous == nil ? 0 : 9))
+                        .padding(.top, (total == nil ? 6 : 16) + (face.previous == nil ? 0 : 9))
                         .transition(.opacity)
                 }
             }
-            .padding(.trailing, 16)
+            .padding(.trailing, 20)
         } else {
             let top: CGFloat = face.size == .tall ? 3 : 5
-            let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking: 14; case .tall: 12 }
+            // A capsule 14 up and 24 in clears the corner of the system's clip.
+            let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking, .tall: 14 }
             VStack(alignment: .leading, spacing: 0) {
                 if hasKicker { Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1) }
                 Title(face: face, palette: palette).padding(.top, hasKicker ? 2 : top)
@@ -256,7 +285,7 @@ struct IslandBottom: View {
                 Spacer(minLength: 0)
                 Control(face: face, surface: .island)
             }
-            .padding(.trailing, face.bottom == .none ? 24 : 18)
+            .padding(.trailing, 24)
             .padding(.bottom, bottom)
         }
     }
@@ -280,7 +309,7 @@ struct CompactLeading: View {
                 .id(face.bear)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 7) }
+        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 7).padding(.bottom, ActivityMetrics.compactClip) }
         .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
         .clipped()
         .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
@@ -363,6 +392,8 @@ private struct RisingBear: View {
     var bear: ActivityBear
     var side: CGFloat
     var rim: CGFloat
+    /// How far above the bottom edge the shade ends: where the surface's clip cuts the bear.
+    var lift: CGFloat = 0
     var colour: Color
     var body: some View {
         ZStack {
@@ -371,7 +402,7 @@ private struct RisingBear: View {
                 .id(bear)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
-        .overlay(alignment: .bottom) { Rim(colour: colour, height: rim) }
+        .overlay(alignment: .bottom) { Rim(colour: colour, height: rim).padding(.bottom, lift) }
         .accessibilityHidden(true)
     }
 }
