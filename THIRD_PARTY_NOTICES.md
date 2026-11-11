@@ -83,6 +83,10 @@ The iPhone app's sessions list, chat, Poki details and model pages ([native/ios-
 
 The plan bubble's motion (`PlanMotion.swift`) uses the spring, duration and order parameters of four [Motion+](https://motion.dev/plus) examples for React (notifications-list, copy-button, todo-list, typewriter-change-content), rewritten in SwiftUI. The typing pace is Poki's own. No Motion+ file is included.
 
+## iPhone app capsule field
+
+The message field's app capsules ([native/ios-app/Poki/Capsule](native/ios-app/Poki/Capsule), ESP-377) adapt three files from [element-hq/element-x-ios](https://github.com/element-hq/element-x-ios/tree/21758530da454c65969c6ef159b9ca47b9394a7a) at commit `2175853`, copyright 2025 Element Creations Ltd. and 2023-2025 New Vector Ltd., under the GNU Affero General Public License v3.0 only, the license Poki itself uses: `ElementX/Sources/Other/Pills/PillTextAttachment.swift`, `PillTextAttachmentData.swift` and `PillView.swift`. Poki removed their room context and WysiwygComposer dependency, made the pill an app's icon and name, and draws it into the attachment's image. Each file names its source in its header. The app icons in `native/ios-app/Poki/AppIcons` come from the App Store and are their makers' trademarks.
+
 ## iPhone app model loop
 
 The chat's model loop (`native/ios-app/Poki/Chat/PiLoop.swift`) links two products of [xibbon/PiSwift](https://github.com/xibbon/PiSwift/tree/f8696524cf41ca0a7f42f5b230eafa443daececd) at commit `f869652`, a Swift port of Mario Zechner's pi-mono, copyright 2025 Mario Zechner, under the [MIT license](third_party/LICENSE.piswift): PiSwiftAgent (the agent loop) and PiSwiftAI (the model providers and the ChatGPT sign-in). They are a Swift package dependency, not copied files; PiSwift's own dependencies come with it through the package resolution: MacPaw/OpenAI and jamesrochabrun/SwiftAnthropic (MIT) and apple/swift-argument-parser (Apache-2.0).

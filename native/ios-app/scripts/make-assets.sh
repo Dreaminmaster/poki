@@ -42,6 +42,13 @@ for png in "$HERE"/Poki/ProxyIcons/*.png; do
   cp "$png" "$APP/$name.imageset/icon@3x.png"
   echo '{"images":[{"filename":"icon@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$APP/$name.imageset/Contents.json"
 done
+# Apps' own App Store icons (Poki/AppIcons, see its README) in the app capsules (ESP-377).
+for png in "$HERE"/Poki/AppIcons/*.png; do
+  name="App-$(basename "$png" .png)"
+  mkdir -p "$APP/$name.imageset"
+  cp "$png" "$APP/$name.imageset/icon@3x.png"
+  echo '{"images":[{"filename":"icon@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$APP/$name.imageset/Contents.json"
+done
 
 WIDGET="$HERE/PokiWidgets/Assets.xcassets"
 catalog "$WIDGET"
