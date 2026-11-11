@@ -48,6 +48,10 @@ final class AppModel {
     private(set) var recentSteps: [RecentStep] = []
     /// The app the agent is in, from its last step.
     private(set) var currentApp: String?
+    /// What the core last saw of the screen: the small picture it already makes of every look (the Live
+    /// Activity's), for the task card of the task under way. Kept in memory only, and dropped when a
+    /// task or an agent's session begins or ends, so one task never shows another's screen.
+    private(set) var lastShot: UIImage?
     /// The runner is stopped until the next agent request (idle, or the owner tapped Stop runner).
     private(set) var runnerPaused = false
     /// The owner paused Poki (Pause, the Hands switch, Stop on the Live Activity), as opposed to the
@@ -1282,7 +1286,7 @@ final class AppModel {
         }
         for observer in shellObservers { observer(event) }
         switch event {
-        case .session: break
+        case .session: lastShot = nil
         case .relay(let status):
             if status != relayStatus { log.add("relay", "\(status)") }
             relayStatus = status
@@ -1319,6 +1323,7 @@ final class AppModel {
             activity.record(step: summary, ok: !failed)
             activity.update { state in state.app = app ?? state.app }
             activity.setThumbnail(thumbnail)
+            if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
         case .approvalRequested(let approval):
             switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
             case .allow:
@@ -1396,6 +1401,7 @@ final class AppModel {
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
     func finishTask() {
+        lastShot = nil
         Task { [core, log] in if let line = await core.finishTask() { log.add("runner", line) } }
     }
 
@@ -1408,6 +1414,7 @@ final class AppModel {
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
     func chatTaskBegan() {
+        lastShot = nil
         if sessionOn, !activity.isRunning, inFront {
             activity.start(deviceName: deviceName)
             if activity.isRunning { log.add("activity", "Live Activity started again (a chat task began)") }
@@ -1424,6 +1431,7 @@ final class AppModel {
     /// stays away and sends its reply as a notification the owner can answer; the Live Activity shows
     /// the run as finished at once.
     func chatTaskEnded(reply: String?, session: String, acted: Bool) {
+        lastShot = nil
         guard acted else { activity.update { $0.plan = nil }; finishTask(); return }
         let stays = !Self.returnsAfterTask
         let bundle = Bundle.main.bundleIdentifier

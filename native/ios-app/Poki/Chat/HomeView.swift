@@ -1,0 +1,568 @@
+import SwiftUI
+
+// The home page and the way from it into the conversation (ESP-376 boards 06 and 08, variant B, and
+// the design's final table 定稿-首页渐变和玻璃参数). The chat page (`ChatView`) owns the state and
+// puts these pieces together: `HomePage` under the top bar, `ChatTopBar` in it, and `BearFlight` over
+// everything, drawing the one bear that is both the large one here and Poki's picture there.
+
+// MARK: Timing
+
+/// The change from the home page to the conversation, 600 ms in all, counted from Send:
+/// - the title and its line fade in 160 ms, so they are gone before the bear passes over them;
+/// - the pills fade and sink 14 points in 180 ms;
+/// - the bear dips 4 points for 80 ms, then flies on a spring (response 0.5, damping 0.82), which
+///   brings it to its place at about 430 ms; it lands at 108 % and settles;
+/// - the whole bear changes into its picture between 240 and 360 ms;
+/// - the name and the new-conversation button turn up between 300 and 480 ms;
+/// - the light takes from 60 to 510 ms to sink to the bottom edge;
+/// - your words rise out of the message field on their own spring (response 0.45, damping 0.85).
+/// Every piece is driven by the one fact "the conversation has begun", so the change can be turned
+/// round at any moment and each piece carries on from where it is. With Reduce Motion nothing flies or
+/// shrinks: the page cross-fades in 200 ms.
+enum HomeMotion {
+    static let space = "chat.page"
+    /// The side of Poki's picture in the top bar, and of the round buttons beside it.
+    static let avatar: CGFloat = 56
+    static let button: CGFloat = 48
+    private static let fade = Animation.easeInOut(duration: 0.2)
+    /// `-pokiSlow 4` plays the whole change four times slower, for a slow-motion recording of it.
+    static let slow = max(1, UserDefaults.standard.double(forKey: "pokiSlow"))
+    /// Every animation of the change goes through here, delays included.
+    static func paced(_ animation: Animation) -> Animation { slow > 1 ? animation.speed(1 / slow) : animation }
+
+    /// The bear: after its dip on the way out; straight away on the way back.
+    static func flight(_ home: Bool, _ reduce: Bool) -> Animation {
+        let spring = Animation.spring(response: 0.5, dampingFraction: 0.82)
+        return paced(reduce ? fade : home ? spring : spring.delay(0.08))
+    }
+    static func ground(_ reduce: Bool) -> Animation { paced(reduce ? fade : .easeInOut(duration: 0.45).delay(0.06)) }
+    /// Leaving, the words go first; coming back, they wait for the bear.
+    static func words(_ home: Bool, _ reduce: Bool) -> Animation {
+        paced(reduce ? fade : home ? .easeOut(duration: 0.25).delay(0.3) : .easeOut(duration: 0.16))
+    }
+    static func pills(_ home: Bool, _ reduce: Bool) -> Animation {
+        paced(reduce ? fade : home ? .easeOut(duration: 0.25).delay(0.3) : .easeIn(duration: 0.18))
+    }
+    /// The name and the new-conversation button, on the beat the bear lands on.
+    static func landing(_ home: Bool, _ reduce: Bool) -> Animation {
+        paced(reduce ? fade : home ? .easeOut(duration: 0.12) : .easeOut(duration: 0.18).delay(0.3))
+    }
+}
+
+// MARK: The bear
+
+/// The bear on the home page, and nothing else: how it is drawn is all in here, so the picture can
+/// give way to the three-dimensional model's live rendering (ESP-319) without the page or the flight
+/// to Poki's picture changing. It fills the square it is given.
+///
+/// For now it is the transition version from ESP-382 (its HomeBear.swift, with every number as given
+/// there; changed only to fill its frame instead of a fixed 280 points, to show the face for Poki's
+/// state, and to start breathing when Reduce Motion is turned off later): the one still picture comes
+/// in on a spring, then breathes and floats. Its pixels are never recoloured, only scaled and moved.
+/// Its feet fade out, and in dark a blue light is laid over them first, so the body melts into the
+/// ground's light and does not grey. With Reduce Motion it stands still.
+struct HomeBear: View {
+    /// The face it shows.
+    var face: PokiMood
+    /// True while the bear flies to the top bar: the breathing and floating fold back to rest inside
+    /// the flight's first 80 ms.
+    var frozen = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+    @State private var idleStart: Date? = nil
+
+    // Entrance: one spring.
+    static let enterScale = 0.86, enterRise = 16.0
+    static let enterSpring = Animation.spring(response: 0.55, dampingFraction: 0.62)
+    // Idle: breathing about the bottom centre, slow float. Cosine curves, eased in over the first second.
+    static let idleDelay = 0.6, breathAmp = 0.012, breathPeriod = 4.0, floatPt = 3.0, floatPeriod = 6.0
+    // Bottom fade on the canvas (fixed, does not move with the bear) and the dark-mode blue light.
+    static let fade = Gradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: 0.76),
+                                       .init(color: .white.opacity(0.55), location: 0.86), .init(color: .white.opacity(0.18), location: 0.93),
+                                       .init(color: .white.opacity(0), location: 1)])
+    static let darkLight = Color(red: 40 / 255, green: 90 / 255, blue: 220 / 255)
+    static let darkTint = Gradient(stops: [.init(color: darkLight.opacity(0), location: 0), .init(color: darkLight.opacity(0), location: 0.62),
+                                           .init(color: darkLight.opacity(0.55), location: 0.80), .init(color: darkLight.opacity(0.85), location: 0.92),
+                                           .init(color: darkLight, location: 1)])
+
+    static func idle(_ t: Double) -> (scale: Double, dy: Double) {
+        let ramp = min(1, max(0, t))
+        let b = 0.5 - 0.5 * cos(2 * .pi * t / breathPeriod)
+        let f = 0.5 - 0.5 * cos(2 * .pi * t / floatPeriod)
+        return (1 + breathAmp * ramp * b, -floatPt * ramp * f)
+    }
+
+    /// The face for Poki's state: asleep or in trouble it shows that; at work it thinks; otherwise it
+    /// greets you.
+    static func face(_ mood: PokiMood) -> PokiMood {
+        switch mood {
+        case .paused, .cantReach, .tripped: mood
+        case .thinking, .onYourPhone, .checking, .needsYou, .yourTurn: .thinking
+        default: .hello
+        }
+    }
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion || frozen || idleStart == nil)) { ctx in
+            let t = idleStart.map { ctx.date.timeIntervalSince($0) } ?? 0
+            let i = (reduceMotion || frozen) ? (scale: 1.0, dy: 0.0) : Self.idle(t)
+            picture
+                .scaleEffect(i.scale, anchor: .bottom).offset(y: i.dy)
+                .scaleEffect(appeared ? 1 : Self.enterScale, anchor: .bottom)
+                .offset(y: appeared ? 0 : Self.enterRise)
+                .opacity(appeared ? 1 : 0)
+                .animation(HomeMotion.paced(.easeOut(duration: 0.08)), value: frozen)   // folds the idle offset back inside the send transition's first 80 ms
+        }
+        .overlay { if scheme == .dark { LinearGradient(gradient: Self.darkTint, startPoint: .top, endPoint: .bottom).blendMode(.sourceAtop) } }
+        .compositingGroup()
+        .mask(LinearGradient(gradient: Self.fade, startPoint: .top, endPoint: .bottom))
+        .onAppear {
+            if reduceMotion { appeared = true; return }
+            withAnimation(Self.enterSpring) { appeared = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleDelay) { idleStart = .now }
+        }
+        // Reduce Motion turned off while the page is up: the bear is already there, it starts to breathe.
+        .onChange(of: reduceMotion) { _, reduce in
+            if !reduce, idleStart == nil { appeared = true; idleStart = .now }
+        }
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var picture: some View {
+        if let image = PokiMood.cutout(face, small: false) {
+            Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
+        }
+    }
+}
+
+/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground.
+struct PokiPortrait: View {
+    var mood: PokiMood
+    /// The circle's side. Given, not measured: measured inside the flight, the bear in it lagged a
+    /// beat behind its circle.
+    var side: CGFloat = HomeMotion.avatar
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Tint.portrait)
+            if let image = PokiMood.cutout(mood, small: true) {
+                // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
+                // cuts it at the chest.
+                Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
+                    .frame(width: side * 50 / 56, height: side * 50 / 56)
+                    .offset(y: side * 3 / 56)
+                    // A new face is just there: no animation around it may fade it in late.
+                    .transaction { $0.animation = nil }
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(.circle)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The two places the bear can be, reported up to the page that draws it.
+enum BearPlace: Hashable { case hero, avatar }
+
+struct BearFrameKey: PreferenceKey {
+    static let defaultValue: [BearPlace: CGRect] = [:]
+    static func reduce(value: inout [BearPlace: CGRect], nextValue: () -> [BearPlace: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+extension View {
+    /// Marks where the bear stands (the home page) or sits (the top bar).
+    func reportsBearFrame(_ place: BearPlace) -> some View {
+        background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: BearFrameKey.self, value: [place: geometry.frame(in: .named(HomeMotion.space))])
+            }
+        }
+    }
+}
+
+/// The bear, one view for both pages. `progress` runs from 0 (large, on the home page) to 1 (Poki's
+/// picture in the top bar) and place, size and picture are all read off it, so the flight can be
+/// turned round at any moment and carries on from where it is. The path is the board's: a curve that
+/// goes up first and then across (from the middle of the bear, by a point 70 % of the way up and a
+/// little to the right, to the middle of the picture).
+struct BearFlight: View, Animatable {
+    var progress: CGFloat
+    /// The conversation has begun: starts the dip and the landing.
+    var landed: Bool
+    var hero: CGRect
+    var avatar: CGRect
+    /// The face on the home page, and Poki's state for its picture.
+    var face: PokiMood
+    var mood: PokiMood
+    /// Reduce Motion: no flight, the two cross-fade where they are.
+    var still: Bool
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        let p = min(max(progress, 0), 1)
+        if hero.isEmpty || avatar.isEmpty {
+            Color.clear.allowsHitTesting(false)
+        } else if still {
+            ZStack {
+                HomeBear(face: face, frozen: landed).frame(width: hero.width, height: hero.height)
+                    .position(x: hero.midX, y: hero.midY).opacity(1 - p)
+                PokiPortrait(mood: mood, side: avatar.width)
+                    .position(x: avatar.midX, y: avatar.midY).opacity(p)
+            }
+            .allowsHitTesting(false)
+        } else {
+            // The spring is a third of the way in time when it is two thirds of the way in distance;
+            // the board has the bear at a little over half its way then, hence the power.
+            let u = pow(p, 1.5)
+            let side = hero.width + (avatar.width - hero.width) * u
+            let from = CGPoint(x: hero.midX, y: hero.midY), to = CGPoint(x: avatar.midX, y: avatar.midY)
+            let bend = CGPoint(x: from.x + (from.x - to.x) * 0.11, y: from.y + (to.y - from.y) * 0.7)
+            let x = (1 - u) * (1 - u) * from.x + 2 * (1 - u) * u * bend.x + u * u * to.x
+            let y = (1 - u) * (1 - u) * from.y + 2 * (1 - u) * u * bend.y + u * u * to.y
+            // 240 to 360 ms on the clock is 0.67 to 0.95 of the spring.
+            let change = min(max((p - 0.67) / 0.28, 0), 1)
+            ZStack {
+                HomeBear(face: face, frozen: landed).opacity(1 - change)
+                PokiPortrait(mood: mood, side: side).opacity(change)
+            }
+            .frame(width: side, height: side)
+            // Each of the two gestures has its own clock, and that clock drives the gesture alone. As
+            // plain `animation(_:value:)` it also took over everything under it that changed at Send:
+            // Poki's picture swapped its face on the landing's delayed clock and stood empty until then.
+            .animation(landed ? HomeMotion.paced(.easeOut(duration: 0.18).delay(0.36)) : nil) {
+                $0.modifier(Swell(amount: landed ? 1 : 0, scale: 0.08))
+            }
+            .animation(landed ? HomeMotion.paced(.linear(duration: 0.16)) : nil) {
+                $0.modifier(Dip(amount: landed ? 1 : 0, depth: 4))
+            }
+            .position(x: x, y: y)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+/// Hands the bear its place on the home page, and follows that place when it moves (the keyboard, a
+/// longer message) on whatever animation moved it. It is a view of its own so that such a move never
+/// replaces the flight's spring: the two animate apart.
+struct BearFollow<Content: View>: View, Animatable {
+    var hero: CGRect
+    @ViewBuilder var content: (CGRect) -> Content
+
+    var animatableData: CGRect.AnimatableData {
+        get { hero.animatableData }
+        set { hero.animatableData = newValue }
+    }
+
+    var body: some View { content(hero) }
+}
+
+/// Grows and comes back once as `amount` goes from 0 to 1: the bear landing a touch large.
+private struct Swell: ViewModifier, Animatable {
+    var amount: CGFloat
+    var scale: CGFloat
+    var animatableData: CGFloat {
+        get { amount }
+        set { amount = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.scaleEffect(1 + scale * sin(.pi * min(max(amount, 0), 1)))
+    }
+}
+
+/// Sinks and comes back once as `amount` goes from 0 to 1: the bear gathering itself before it jumps.
+private struct Dip: ViewModifier, Animatable {
+    var amount: CGFloat
+    var depth: CGFloat
+    var animatableData: CGFloat {
+        get { amount }
+        set { amount = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.offset(y: depth * sin(.pi * min(max(amount, 0), 1)))
+    }
+}
+
+// MARK: Top bar
+
+/// The two round glass buttons that never move, and between them, once a conversation has begun,
+/// Poki's picture and name (board 08, variant B). On the home page the new-conversation button is grey
+/// and does nothing: the page already is a new conversation.
+struct ChatTopBar: View {
+    var status: PokiStatus
+    var home: Bool
+    /// A task is under way: no new conversation until it ends or is stopped.
+    var busy: Bool
+    /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
+    var openThreads: (() -> Void)?
+    var newConversation: () -> Void
+    var openDetails: () -> Void
+    /// A newer Poki waits (its version): the home page says so between the two buttons, where the
+    /// conversation has Poki's name, and a tap opens Updates.
+    var update: String? = nil
+    var openUpdates: () -> Void = {}
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Resting or in trouble, Poki says so under its name; otherwise its face is the status.
+    private var says: Bool { [.paused, .cantReach, .tripped].contains(status.mood) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let openThreads {
+                Button(action: openThreads) { glyph("line.3.horizontal") }
+                    .buttonStyle(.plain)
+                    .glassSurface(in: Circle(), interactive: true)
+                    .accessibilityLabel(Text("Conversations"))
+                    .accessibilityIdentifier("chat.threads")
+            }
+            Button(action: openDetails) {
+                HStack(spacing: 12) {
+                    Color.clear.frame(width: HomeMotion.avatar, height: HomeMotion.avatar).reportsBearFrame(.avatar)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(verbatim: "Poki").font(Prominent.font(.title2, .bold)).foregroundStyle(Color(.label))
+                        if says { Text(verbatim: status.word).font(.caption).foregroundStyle(Color(.secondaryLabel)) }
+                    }
+                    .lineLimit(1)
+                    .opacity(home ? 0 : 1)
+                    .animation(HomeMotion.landing(home, reduceMotion), value: home)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .allowsHitTesting(!home)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Poki, \(status.word), details"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHidden(home)
+            .accessibilityIdentifier("chat.header.details")
+            Spacer(minLength: 8)
+            Button(action: newConversation) {
+                glyph("square.and.pencil", dim: home || busy).animation(HomeMotion.landing(home, reduceMotion), value: home)
+            }
+            .buttonStyle(.plain)
+            .glassSurface(in: Circle(), interactive: !home && !busy)
+            .allowsHitTesting(!home && !busy)
+            .accessibilityLabel(Text("New Conversation"))
+            .accessibilityHidden(home)
+            .accessibilityIdentifier("home.newChat")
+        }
+        .overlay {
+            if home, let update {
+                Button(action: openUpdates) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle.fill").foregroundStyle(Tint.blue)
+                        Text("Update Available").foregroundStyle(Color(.label))
+                    }
+                    .font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 16).frame(minHeight: 44)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                // On the button, as the round ones: glass inside a label in this bar takes the touch.
+                .glassSurface(in: Capsule(), interactive: true)
+                .accessibilityValue(Text(verbatim: update))
+                .accessibilityIdentifier("home.update")
+                .padding(.horizontal, HomeMotion.button + 12)
+                .glassAppearing()
+            }
+        }
+        .animation(HomeMotion.words(home, reduceMotion), value: home)
+        .animation(.easeOut(duration: 0.25), value: update)
+        .glassGroup()
+        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 6)
+        .frame(maxWidth: 720)
+        // A bar's controls stop growing where the system's bars do.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+    }
+
+    private func glyph(_ symbol: String, dim: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color(.label).opacity(dim ? 0.35 : 1))
+            .frame(width: HomeMotion.button, height: HomeMotion.button)
+            .contentShape(.circle)
+    }
+}
+
+// MARK: Home page
+
+/// Something you could ask, with the app it happens in.
+struct HomeIdea: Identifiable {
+    var app: AppCapsule
+    var text: String
+    var id: String { app.id }
+
+    /// What goes into the message field: the app, then the sentence. The field draws the app as its capsule.
+    var prompt: String { CapsuleText.prefill(app: app, sentence: text) }
+
+    private static func idea(_ app: String, _ text: String) -> HomeIdea? {
+        AppCapsule.catalog.first { $0.name == app }.map { HomeIdea(app: $0, text: text) }
+    }
+    static var first: [HomeIdea] {
+        [idea("Slack", String(localized: "Tell the team I’m late")),
+         idea("Messages", String(localized: "Text Mom I’m on my way")),
+         idea("Uber", String(localized: "Ride home"))].compactMap { $0 }
+    }
+    static var second: [HomeIdea] {
+        [idea("Starbucks", String(localized: "Order my usual coffee")),
+         idea("Notes", String(localized: "Add milk to my list")),
+         idea("Instagram", String(localized: "Post today’s photo"))].compactMap { $0 }
+    }
+}
+
+/// The home page, before your first message: what Poki is for and whether it asks first, the bear
+/// large in the middle, and things you could ask as two rows of glass pills. A pill fills the message
+/// field; nothing is sent until you send it. The bear itself is drawn by `BearFlight` over the page:
+/// here is only its place, which is also the button that opens Poki's profile (or wakes it).
+struct HomePage<Footer: View>: View {
+    var home: Bool
+    var status: PokiStatus
+    var promise: String?
+    var bear: () -> Void
+    var pick: (String) -> Void
+    @ViewBuilder var footer: () -> Footer
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Everything but the bear: the two lines, the pills and the room between them.
+    @ScaledMetric(relativeTo: .title) private var rest: CGFloat = 268
+
+    /// Asleep or in trouble, the page says so under the bear; otherwise the bear's face is the status.
+    private var note: String? {
+        switch status.mood {
+        // In Poki's own voice; waits for the copy pass.
+        case .paused: String(localized: "I’m resting. Tap me and I’ll carry on.")
+        case .cantReach, .tripped: status.word
+        default: nil
+        }
+    }
+
+    /// Sentences on one line: a space between them, except after a full-width stop, which brings its own.
+    private static func line(_ sentences: [String?]) -> String {
+        sentences.compactMap { $0 }.reduce(into: "") { line, next in
+            line += line.isEmpty || line.hasSuffix("。") ? next : " " + next
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            // The board's bear is 280 points square; a small phone, the keyboard or large text leave it less.
+            let side = max(96, min(280, geometry.size.width - 48, geometry.size.height - rest))
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 8)
+                    VStack(spacing: 8) {
+                        Text("Hand me your phone.")
+                            .font(Prominent.font(size: 30, relativeTo: .largeTitle, .bold)).tracking(-0.6)
+                            .foregroundStyle(Color(.label))
+                            .accessibilityAddTraits(.isHeader)
+                        Text(verbatim: Self.line([String(localized: "I tap, type and scroll for you."), promise]))
+                            .font(.subheadline).lineSpacing(1).foregroundStyle(Tint.homeSecondary).frame(maxWidth: 290)
+                        footer()
+                    }
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .opacity(home ? 1 : 0)
+                    .animation(HomeMotion.words(home, reduceMotion), value: home)
+
+                    Button(action: bear) {
+                        Color.clear.frame(width: side, height: side).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .reportsBearFrame(.hero)
+                    .background { BearGlow().opacity(home ? 1 : 0).animation(HomeMotion.words(home, reduceMotion), value: home) }
+                    .padding(.top, 27)
+                    .accessibilityLabel(Text(status.mood == .paused ? "Poki, resting" : "Poki, details"))
+                    .accessibilityIdentifier("home.poki.details")
+
+                    if let note {
+                        Text(verbatim: note).font(.footnote.weight(.medium)).foregroundStyle(Tint.homeNote)
+                            .padding(.bottom, 8)
+                            .opacity(home ? 1 : 0)
+                    }
+                    VStack(spacing: 8) {
+                        row(HomeIdea.first, startsAt: 0.16)
+                        row(HomeIdea.second, startsAt: 0)
+                    }
+                    .padding(.top, 2)
+                    .opacity(home ? 1 : 0)
+                    .offset(y: home || reduceMotion ? 0 : 14)
+                    .animation(HomeMotion.pills(home, reduceMotion), value: home)
+                    Spacer().frame(height: 34)
+                }
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    /// One row of pills that scrolls sideways. The first row starts a little way along, as the board
+    /// draws it, so the two rows do not line up and the page shows there is more to the side.
+    private func row(_ ideas: [HomeIdea], startsAt start: CGFloat) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(ideas) { idea in
+                    Button { pick(idea.prompt) } label: {
+                        HStack(spacing: 8) {
+                            IdeaCapsule(app: idea.app)
+                            Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
+                        }
+                        .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
+                        .contentShape(.capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .glassSurface(in: Capsule(), interactive: true)
+                    .accessibilityLabel(Text(verbatim: idea.app.name + ", " + idea.text))
+                    .accessibilityHint(Text("Puts this in the message field"))
+                    .accessibilityIdentifier("home.idea." + idea.app.name)
+                }
+            }
+            .glassGroup(spacing: 8)
+            .padding(.horizontal, 20)
+        }
+        .scrollIndicators(.hidden)
+        .scrollClipDisabled()
+        .defaultScrollAnchor(UnitPoint(x: start, y: 0.5))
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+}
+
+/// An app's icon and name on the app's own colour, as a suggestion shows it (the board's capsule: 24
+/// points high, a 16-point icon, the name at caption size). Solid, never glass, since it sits inside a
+/// glass pill. The colours are the message field's capsules' (`CapsuleColors`); on black, a thin light
+/// edge in dark keeps its outline.
+struct IdeaCapsule: View {
+    var app: AppCapsule
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let colours = CapsuleColors.of(app)
+        HStack(spacing: 5) {
+            Image(app.asset).resizable().frame(width: 16, height: 16)
+                .clipShape(RoundedRectangle(cornerRadius: 4.5, style: .continuous))
+            Text(verbatim: app.name).font(.caption.weight(.semibold)).lineLimit(1)
+        }
+        .foregroundStyle(Color(uiColor: colours.foreground))
+        .padding(.leading, 4).padding(.trailing, 8).frame(minHeight: 24)
+        .background(Color(uiColor: colours.background), in: .capsule)
+        .overlay { if colours.edgeInDark, scheme == .dark { Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 1) } }
+    }
+}
+
+/// A soft light behind the bear, so it stands in front of the ground and not on it: the final
+/// table's round light, 172 points in radius about the bear's middle.
+private struct BearGlow: View {
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let dark = scheme == .dark
+        RadialGradient(stops: SoftLight.stops(Color(hex: dark ? 0x3C8DFF : 0xE2EEFF), strength: dark ? 0.12 : 0.45),
+                       center: .center, startRadius: 0, endRadius: 172 * 1.2)
+            .frame(width: 172 * 2.4, height: 172 * 2.4)
+            .allowsHitTesting(false)
+    }
+}

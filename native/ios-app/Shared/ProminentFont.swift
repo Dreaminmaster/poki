@@ -30,6 +30,12 @@ enum Prominent {
         return .custom(name(weight), size: baseSize(style.uiKit), relativeTo: style)
     }
 
+    /// Geist at a size of its own, for a page's one large line, growing with `style` under Dynamic Type.
+    static func font(size: CGFloat, relativeTo style: Font.TextStyle, _ weight: Font.Weight = .bold) -> Font {
+        guard usesGeist else { return .system(style, weight: weight) }
+        return .custom(name(weight), size: size, relativeTo: style)
+    }
+
     static func uiFont(_ style: UIFont.TextStyle, _ weight: Font.Weight) -> UIFont? {
         guard usesGeist, let base = UIFont(name: name(weight), size: baseSize(style)) else { return nil }
         return UIFontMetrics(forTextStyle: style).scaledFont(for: base)

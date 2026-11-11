@@ -142,6 +142,7 @@ final class SelfSigner {
                 await reload()
                 loadReady()
                 maintain()
+                await checkLatestIfDue()
             } catch {
                 lastError = error.localizedDescription
                 log.add("signing", "signer did not start: \(error.localizedDescription)")
@@ -250,6 +251,20 @@ final class SelfSigner {
         // download starts now too, as it would from that check.
         if updateNotReady { maintain() }
         return true
+    }
+
+    /// Looks for a newer build when Poki opens or comes forward, at most once an hour, with or without
+    /// an Apple Account: the home page's hint and Health's row depend on it. Before this, someone who
+    /// had not signed in never learned of an update unless they opened Signing Options.
+    func checkLatestIfDue() async {
+        // `-pokiUpdate <version>`: a newer build to show, for the screenshots. Nothing is fetched.
+        if let sample = UserDefaults.standard.string(forKey: "pokiUpdate") {
+            latest = Release(tag: "sample", version: sample, build: "99999", channel: status?.channel ?? "alpha")
+            return
+        }
+        guard status != nil, working == nil else { return }
+        if latest != nil, let lastCheck, Date().timeIntervalSince(lastCheck) < 3600 { return }
+        await checkLatest()
     }
 
     /// Download and Install Update, in one tap: gets the newest build and signs it, then installs it.

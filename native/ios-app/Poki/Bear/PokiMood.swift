@@ -55,6 +55,14 @@ enum PokiMood: String, CaseIterable {
     static func image(_ mood: PokiMood, small: Bool) -> UIImage? {
         UIImage(named: "\(small ? "PokiBearSmall" : "PokiBear")-\(mood.rawValue)")
     }
+
+    /// The bear without its ground, for where it stands on the page itself: every face at 256 px, and
+    /// at 768 px the five the home page shows. A stand-in keyed from the pictures above until the
+    /// artwork comes with its own transparency (ESP-319).
+    static func cutout(_ mood: PokiMood, small: Bool) -> UIImage? {
+        if !small, let large = UIImage(named: "PokiBearCut-\(mood.rawValue)") { return large }
+        return UIImage(named: "PokiBearCutSmall-\(mood.rawValue)")
+    }
 }
 
 /// What the bear shows and says now.
@@ -70,6 +78,12 @@ struct PokiStatus: Equatable {
     /// Read from what the app already knows, most pressing first: a live voice turn, a step waiting for
     /// your answer, a hand-over, a task under way, a problem, and at rest whether Poki is on.
     @MainActor static func current(model: AppModel, chat: ChatModel) -> PokiStatus {
+        // The demo conversation (`-pokiChat demo`) has no phone behind it: its own script says what shows.
+        if chat.isDemo {
+            if chat.demoAsk != nil { return PokiStatus(.needsYou) }
+            if chat.running { return PokiStatus(running(chat.entries)) }
+            return PokiStatus(DoneLinger.shared.showing ? .done : .ready)
+        }
         if let sample = sample() { return sample }
         let voice = model.voice
         if voice.isOn {

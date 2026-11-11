@@ -35,6 +35,23 @@ enum Tint {
     static let fill = Color(.secondarySystemBackground)
     /// A hairline around a blue block in dark, where a shadow would read as a glow; nothing in light.
     static let ring = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.18) : .clear })
+    /// The soft shadow under a blue block in light (the prototype's 0 6 18, blue at 22 %); none in dark.
+    static let blueShadow = Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor(hex: 0x0177FD).withAlphaComponent(0.22) })
+    /// The conversation's page (ESP-376): a cool paper white in light, a blue-black in dark.
+    static let page = Color(light: 0xF5F8FC, dark: 0x05070D)
+    /// The round ground of Poki's picture in the top bar.
+    static let portrait = Color(light: 0xE3EEFF, dark: 0x0C2748)
+    /// The shadow under Poki's white bubble (0 2 12, ink at 5 %); none in dark.
+    static let bubbleShadow = Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor(hex: 0x11191C).withAlphaComponent(0.05) })
+    /// Words on the home page's gradient, each measured there for contrast (ESP-376's table, 5.3 to 7.8
+    /// against the least favourable pixels): the line under the title, the message field's
+    /// placeholder, and the line under the bear when it rests.
+    static let homeSecondary = Color(light: 0x5F676C, dark: 0x8E959A)
+    static let homePlaceholder = Color(light: 0x3D4549, dark: 0xC7CCD6)
+    static let homeNote = Color(light: 0x444C51, dark: 0xC7CCD6)
+    /// The hairline around a card and around a picture on it: the prototype's line (#EEEEF0, #25282D),
+    /// which is the system's lightest grey but one.
+    static let line = Color(.systemGray5)
 }
 
 extension Color {

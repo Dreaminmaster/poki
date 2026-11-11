@@ -1,8 +1,11 @@
 import SwiftUI
+import UIKit
 
-// The task card, the approval card and the "Your turn" card (ESP-326 boards "03 Chat: Back in Poki
-// mid-task", "04 Chat: Needs you", "05 Chat: Your turn"). They take plain values, so the chat, an outside
-// agent's session and the screenshots' sample scenes draw the same thing.
+// The task card, the approval card and the "Your turn" card (ESP-326 boards "31 Task card: every state",
+// "03 Chat: Back in Poki mid-task", "04 Chat: Needs you", "05 Chat: Your turn"). Sizes, radii and
+// spacing are the prototype's (原型/src/chat.tsx), type through the system's text styles. They take
+// plain values, so the chat, an outside agent's session and the screenshots' sample scenes draw the
+// same thing.
 
 /// How a task's card reads: Poki has the phone (blue), it waits for you (amber), or it is over.
 enum TaskCardState: Equatable {
@@ -20,176 +23,311 @@ enum TaskCardState: Equatable {
     }
 }
 
+/// How the card's marks read: on the blue card, amber while the task waits for you, plain once it is over.
+private enum TaskTone { case blue, amber, plain }
+
 /// One task's steps. While Poki has the phone it is the blue card: the only large blue block in the
-/// chat. Waiting for you or over, it folds to one row that opens on a tap.
+/// chat, with what Poki sees of the screen beside the steps. The moment it stops to wait for you the
+/// card goes back to plain and its marks turn amber; over, it folds to one row that opens on a tap.
 struct TaskCard: View {
     var title: String
     var steps: [PlanStep]
     var state: TaskCardState
     /// The steps still to come, when the model published its whole plan.
     var upcoming: [String] = []
+    /// The number of steps is known (the model published its plan): "Step 2 of 4" and the bar. Without
+    /// it the card counts the steps so far and promises no total.
+    var planned = true
     /// The outside agent that asked; nil when you did.
     var asker: String? = nil
     var app: String? = nil
     var started: Date
-    /// Nil until you fold or unfold it: a task that tripped starts unfolded, so the step it tripped on shows.
+    /// What the core last saw of the screen, for the task under way. Never stored with the conversation.
+    var shot: Image? = nil
+    /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
+    /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
     @State private var open: Bool?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var total: Int { steps.count + upcoming.count }
     private var finished: Int { steps.filter { $0.state == .done }.count }
+    private var blue: Bool { state == .running }
+    private var waits: Bool { state == .needsYou || state == .yourTurn }
+    private var tone: TaskTone { blue ? .blue : waits ? .amber : .plain }
+    private var big: Bool { typeSize.isAccessibilitySize }
+    private var isOpen: Bool { blue || (open ?? (state == .failed || state == .yourTurn)) }
+    private var ink: Color { blue ? .white : Color(.label) }
+    private var soft: Color { blue ? .white.opacity(0.74) : Color(.secondaryLabel) }
 
     var body: some View {
-        if state == .running { running } else { folded }
-    }
-
-    // MARK: Poki has the phone
-
-    private var running: some View {
-        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                PokiBear(mood: .onYourPhone, small: true).frame(width: 36, height: 36)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: title).font(.headline).lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
-                    HStack(spacing: 0) {
-                        if let app, !app.isEmpty { Text(verbatim: "\(app), ") }
-                        Text(started, style: .timer).monospacedDigit()
-                    }
-                    .font(.footnote).opacity(0.85)
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        Group {
+            if blue {
+                VStack(alignment: .leading, spacing: 14) {
+                    header
+                    details
                 }
-                Spacer(minLength: 8)
-                Text(verbatim: asker ?? String(localized: "You"))
-                    .font(.caption.weight(.semibold)).lineLimit(1)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(.white.opacity(0.22), in: .capsule)
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-            }
-            VStack(alignment: .leading, spacing: 9) {
-                ForEach(steps) { step in
-                    TaskStepRow(text: step.text, state: step.state, onBlue: true).transition(PlanMotion.stepTransition)
+                .padding(16)
+                .accessibilityElement(children: .combine)
+            } else {
+                DisclosureGroup(isExpanded: Binding(get: { isOpen }, set: { open = $0 })) {
+                    VStack(alignment: .leading, spacing: 14) { details }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 14)
+                } label: {
+                    header
                 }
-                ForEach(Array(upcoming.enumerated()), id: \.offset) { _, text in
-                    TaskStepRow(text: text, state: nil, onBlue: true)
-                }
-            }
-            .animation(PlanMotion.enter, value: steps)
-            if total > 1 {
-                HStack(spacing: 12) {
-                    ProgressView(value: Double(finished), total: Double(total)).tint(.white)
-                        .animation(.easeInOut(duration: 0.4), value: finished)
-                    Text("Step \(min(finished + 1, total)) of \(total)").font(.caption.weight(.medium)).monospacedDigit().opacity(0.9)
-                }
+                .tint(Color(.tertiaryLabel))
+                .padding(.vertical, isOpen ? 16 : 12).padding(.leading, isOpen ? 16 : 12).padding(.trailing, isOpen ? 16 : 14)
             }
         }
-        .foregroundStyle(.white)
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tint.blue, in: shape)
-        // No shadow under the blue: in dark it reads as a glow. A hairline keeps the edge there.
-        .overlay(shape.strokeBorder(Tint.ring, lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        .background(blue ? Tint.blue : Color(.secondarySystemGroupedBackground), in: shape)
+        // Under the blue: a soft shadow in light; in dark it would read as a glow, so a hairline instead.
+        .overlay(shape.strokeBorder(blue ? Tint.ring : waits ? Tint.amberLine : Tint.line, lineWidth: 1))
+        .shadow(color: blue ? Tint.blueShadow : .clear, radius: 9, y: 6)
     }
 
-    // MARK: Waiting for you, or over
+    // MARK: The row every state has
 
-    private var folded: some View {
-        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-        let waits = state == .needsYou || state == .yourTurn
-        return DisclosureGroup(isExpanded: Binding(get: { open ?? (state == .failed) }, set: { open = $0 })) {
+    private var header: some View {
+        HStack(spacing: 10) {
+            mark
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? 3 : 1)
+                subline.font(.caption).foregroundStyle(soft).lineLimit(big ? 2 : 1)
+                // At the accessibility text sizes the title wraps and the label goes under it.
+                if big { pill }
+            }
+            .multilineTextAlignment(.leading)
+            Spacer(minLength: 6)
+            if !big { pill }
+        }
+    }
+
+    /// Poki's face while the task is alive; a tick, a cross or a stop sign once it is over.
+    @ViewBuilder private var mark: some View {
+        switch state {
+        case .running:
+            // On the blue card the face needs no edge: its own blue is the card's.
+            PokiBear(mood: .onYourPhone, small: true).frame(width: 34, height: 34)
+                .clipShape(.rect(cornerRadius: 10, style: .continuous))
+        case .needsYou: PokiAvatar(size: 34, mood: .needsYou)
+        case .yourTurn: PokiAvatar(size: 34, mood: .yourTurn)
+        case .done: glyph("checkmark", Tint.green, on: Tint.greenSoft)
+        case .failed: glyph("xmark", Tint.red, on: Tint.redSoft)
+        case .stopped: glyph("stop.fill", Color(.secondaryLabel), on: Color(.tertiarySystemFill), size: 11)
+        }
+    }
+
+    private func glyph(_ name: String, _ color: Color, on ground: Color, size: CGFloat = 15) -> some View {
+        Image(systemName: name).font(.system(size: size, weight: .bold)).foregroundStyle(color)
+            .frame(width: 34, height: 34).background(ground, in: .circle)
+            .accessibilityHidden(true)
+    }
+
+    /// "Messages, 0:42" while the card is open and alive; where it is or how it ended otherwise.
+    @ViewBuilder private var subline: some View {
+        let at = min(finished + 1, max(total, 1))
+        switch state {
+        case .done: Text("Done in ^[\(steps.count) step](inflect: true)")
+        case .failed: Text("Tripped at step \(at)")
+        case .stopped: Text("Stopped at step \(at)")
+        case .running, .needsYou, .yourTurn:
+            if isOpen {
+                HStack(spacing: 0) {
+                    if let app, !app.isEmpty { Text("\(app), ") }
+                    Text(started, style: .timer).monospacedDigit()
+                }
+            } else if planned, total > 1 {
+                if let app, !app.isEmpty { Text("\(app), step \(at) of \(total)") } else { Text("Step \(at) of \(total)") }
+            } else {
+                Text("Step \(at)")
+            }
+        }
+    }
+
+    /// Who asked, or folded and waiting, what it waits for.
+    @ViewBuilder private var pill: some View {
+        if waits, !isOpen {
+            TaskPill(text: Text(state == .yourTurn ? "Your turn" : "Needs you"), ink: Tint.amberInk, ground: Tint.amberSoft)
+        } else {
+            TaskPill(text: asker.map { Text(verbatim: $0) } ?? Text("You"),
+                     ink: blue ? .white : Color(.secondaryLabel), ground: blue ? .white.opacity(0.18) : Color(.tertiarySystemFill))
+        }
+    }
+
+    // MARK: The steps, what Poki sees, and how far it is
+
+    @ViewBuilder private var details: some View {
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 9) {
-                ForEach(steps) { step in TaskStepRow(text: step.text, state: step.state, onBlue: false) }
+                ForEach(steps) { step in
+                    TaskStepRow(text: step.text, state: step.state, tone: tone).transition(PlanMotion.stepTransition)
+                }
                 ForEach(Array(upcoming.enumerated()), id: \.offset) { _, text in
-                    TaskStepRow(text: text, state: nil, onBlue: false)
+                    TaskStepRow(text: text, state: nil, tone: tone)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12)
-        } label: {
-            // At the accessibility text sizes the title wraps and the label goes under it.
-            let big = typeSize.isAccessibilitySize
-            HStack(spacing: 10) {
-                mark
-                VStack(alignment: .leading, spacing: big ? 4 : 1) {
-                    Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(big ? 3 : 1)
-                    summary.font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(big ? 2 : 1)
-                    if waits, big { waitingLabel }
+            .animation(PlanMotion.enter, value: steps)
+            // The picture gives its column to the words at the accessibility text sizes.
+            if !big {
+                if state == .yourTurn {
+                    ShotWithheld()
+                } else if blue || state == .needsYou, let shot {
+                    TaskShot(image: shot, onBlue: blue)
                 }
-                .multilineTextAlignment(.leading)
-                Spacer(minLength: 6)
-                if waits, !big { waitingLabel }
             }
         }
-        .tint(Color(.tertiaryLabel))
-        .padding(.vertical, 12).padding(.horizontal, 14)
-        .background(Color(.secondarySystemGroupedBackground), in: shape)
-        .overlay(shape.strokeBorder(waits ? Tint.amberLine : Color(.separator), lineWidth: 1))
-    }
-
-    private var waitingLabel: some View {
-        Text(state == .yourTurn ? "Your turn" : "Needs you")
-            .font(.caption.weight(.semibold)).foregroundStyle(Tint.amberInk).lineLimit(1)
-            .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(Tint.amberSoft, in: .capsule)
-    }
-
-    @ViewBuilder private var mark: some View {
-        switch state {
-        case .needsYou: PokiAvatar(size: 36, mood: .needsYou)
-        case .yourTurn: PokiAvatar(size: 36, mood: .yourTurn)
-        case .failed: Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(Tint.red)
-        case .stopped: Image(systemName: "stop.circle.fill").font(.title2).foregroundStyle(Color(.tertiaryLabel))
-        default: Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(Tint.green)
+        if blue || waits, planned, total > 1 {
+            HStack(spacing: 10) {
+                ProgressView(value: Double(finished), total: Double(total))
+                    .progressViewStyle(TaskBarStyle(track: blue ? .white.opacity(0.28) : Color(.tertiarySystemFill), fill: blue ? .white : Tint.amber))
+                    .animation(.easeInOut(duration: 0.4), value: finished)
+                Text("Step \(min(finished + 1, total)) of \(total)").font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(soft)
+            }
         }
-    }
-
-    private var summary: Text {
-        let at = min(finished + 1, max(total, 1))
-        switch state {
-        case .done: return Text("Done in ^[\(steps.count) step](inflect: true)")
-        case .failed: return Text("Tripped at step \(at)")
-        case .stopped: return Text("Stopped at step \(at)")
-        default: return total > 1 ? Text("Step \(at) of \(total)") : Text("Step \(at)")
+        if state == .yourTurn {
+            // What holds while a step is yours: the core sends no input. It still reads the screen (that
+            // is how it sees the step is over), so the card does not say it looks away.
+            Text("Handed back to you. I’ll carry on when you’re done.")
+                .font(.footnote.weight(.medium)).foregroundStyle(Tint.amberInk)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-/// One step of a task: a tick when done, a cross when it failed, a ring while under way, and a dimmer
-/// ring for a step still to come (`state` nil).
+/// The small label on a task's row: who asked, or what it waits for.
+private struct TaskPill: View {
+    var text: Text
+    var ink: Color
+    var ground: Color
+    var body: some View {
+        text.font(.caption.weight(.medium)).foregroundStyle(ink).lineLimit(1)
+            .padding(.horizontal, 10).frame(minHeight: 24)
+            .background(ground, in: .capsule)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+}
+
+/// What Poki last saw of the screen, at the screen's own proportions: the core's small picture of its
+/// latest look (96 pixels wide, the Live Activity's), so it is soft, and enough to tell which screen it is.
+private struct TaskShot: View {
+    var image: Image
+    var onBlue: Bool
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        image.resizable().interpolation(.high).scaledToFit()
+            .frame(width: 52).frame(maxHeight: 124)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(onBlue ? Color.white.opacity(0.55) : Tint.line, lineWidth: onBlue ? 2 : 1))
+            .accessibilityLabel(Text("Latest screenshot"))
+    }
+}
+
+/// In the picture's place while a step is yours: that screen is likely a passcode or a payment, so the
+/// card does not show it.
+private struct ShotWithheld: View {
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        VStack(spacing: 6) {
+            Image(systemName: "lock").font(.system(size: 16, weight: .medium))
+            Text("Not shown").font(.caption2.weight(.medium)).multilineTextAlignment(.center)
+        }
+        .foregroundStyle(Color(.tertiaryLabel))
+        .frame(width: 52, height: 112)
+        .background(Color(.tertiarySystemFill), in: shape)
+        .overlay(shape.strokeBorder(Tint.line, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The task's bar: 4 points high, the board's colours (white on the blue card, amber while it waits).
+private struct TaskBarStyle: ProgressViewStyle {
+    var track: Color
+    var fill: Color
+    func makeBody(configuration: Configuration) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(track)
+                Capsule().fill(fill).frame(width: geometry.size.width * (configuration.fractionCompleted ?? 0))
+            }
+        }
+        .frame(height: 4)
+    }
+}
+
+/// One step of a task: a tick when done, a cross when it failed, a ring with a dot while under way, and
+/// a dimmer ring for a step still to come (`state` nil).
 private struct TaskStepRow: View {
     var text: String
     var state: PlanStep.State?
-    var onBlue: Bool
+    var tone: TaskTone
+    @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 18
 
-    private var ink: Color { onBlue ? .white : Color(.label) }
+    private var now: Bool { state == .current || state == .waiting }
+    private var ink: Color { tone == .blue ? .white : Color(.label) }
+    private var soft: Color { tone == .blue ? .white.opacity(0.74) : Color(.secondaryLabel) }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
-            ZStack {
-                switch state {
-                case .done?:
-                    if onBlue {
-                        DrawingCheck(color: .white).frame(width: 13, height: 13).transition(PlanMotion.swapTransition)
-                    } else {
-                        Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(Tint.green)
-                    }
-                case .failed?:
-                    Image(systemName: "xmark").font(.footnote.weight(.bold)).foregroundStyle(onBlue ? .white : Tint.red)
-                case .current?, .waiting?:
-                    Image(systemName: "smallcircle.filled.circle").font(.footnote.weight(.semibold)).foregroundStyle(ink)
-                        .transition(PlanMotion.swapTransition)
-                case nil:
-                    Image(systemName: "circle").font(.footnote).foregroundStyle(ink.opacity(0.5))
-                }
-            }
-            .frame(width: 18)
-            .animation(PlanMotion.swap, value: state)
-            Text(verbatim: text)
-                .font(state == .current || state == .waiting ? .subheadline.weight(.semibold) : .subheadline)
-                .foregroundStyle(ink.opacity(state == nil ? 0.6 : state == .done ? 0.85 : 1))
+            mark
+                .frame(width: side, height: side)
+                // The mark sits on the first line's middle, whatever the text size.
+                .alignmentGuide(.firstTextBaseline) { $0.height * 0.8 }
+                .animation(PlanMotion.swap, value: state)
+            Text(Self.words(text))
+                .font(now ? .subheadline.weight(.medium) : .subheadline)
+                .foregroundStyle(state == .failed ? Tint.red : now ? ink : soft)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: text))
+        .accessibilityValue(spoken)
+    }
+
+    @ViewBuilder private var mark: some View {
+        switch state {
+        case .done?:
+            Circle().fill(tone == .blue ? Color.white.opacity(0.22) : Tint.greenSoft)
+                .overlay {
+                    DrawingCheck(color: tone == .blue ? .white : Tint.green, lineWidth: side / 12)
+                        .frame(width: side * 0.6, height: side * 0.6)
+                }
+                .transition(PlanMotion.swapTransition)
+        case .failed?:
+            Circle().fill(Tint.redSoft)
+                .overlay { Image(systemName: "xmark").font(.system(size: side * 0.5, weight: .bold)).foregroundStyle(Tint.red) }
+        case .current?, .waiting?:
+            let color = tone == .blue ? Color.white : tone == .amber ? Tint.amber : Color(.label)
+            Circle().strokeBorder(color, lineWidth: side / 9)
+                .overlay { Circle().fill(color).frame(width: side * 4 / 9, height: side * 4 / 9) }
+                .transition(PlanMotion.swapTransition)
+        case nil:
+            Circle().strokeBorder(tone == .blue ? Color.white.opacity(0.4) : Color(.systemGray4), lineWidth: side / 9)
+        }
+    }
+
+    /// The marks are shapes, so VoiceOver is told what they show.
+    private var spoken: Text {
+        switch state {
+        case .done?: Text("Done")
+        case .failed?: Text("Failed")
+        case .current?, .waiting?: Text("Under way")
+        case nil: Text("Still to come")
+        }
+    }
+
+    /// What Poki types or taps stands out: the words between curly quotes are set stronger, as on the board.
+    static func words(_ text: String) -> AttributedString {
+        var out = AttributedString(text)
+        var from = out.startIndex
+        while from < out.endIndex, let opening = out[from...].range(of: "“"), let closing = out[opening.upperBound...].range(of: "”") {
+            out[opening.lowerBound..<closing.upperBound].inlinePresentationIntent = .stronglyEmphasized
+            from = closing.upperBound
+        }
+        return out
     }
 }
 
@@ -207,45 +345,73 @@ struct ApprovalAskCard: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        // Side by side, or one above the other at the accessibility text sizes, as an alert's buttons.
-        let answers = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                PokiAvatar(size: 44, mood: .needsYou)
+        // Side by side with Allow the wider, or one above the other at the accessibility text sizes,
+        // as an alert's buttons.
+        let answers = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(AnswerRow())
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                PokiAvatar(size: 48, mood: .needsYou)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if let expires, expires > Date() {
-                            // The countdown keeps its own width, so the title does not jump each second.
-                            Text(timerInterval: Date()...expires, countsDown: true)
-                                .font(.footnote.weight(.semibold)).monospacedDigit().foregroundStyle(Tint.amberInk)
-                                .multilineTextAlignment(.trailing)
-                                .fixedSize()
-                                .padding(.horizontal, 9).padding(.vertical, 4)
-                                .background(Tint.amberSoft, in: .capsule)
-                                .accessibilityLabel(Text("Time left"))
-                        }
-                    }
-                    Text(verbatim: detail).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let expires, expires > Date() {
+                    // The countdown keeps its own width, so the title does not jump each second.
+                    Text(timerInterval: Date()...expires, countsDown: true)
+                        .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(Tint.amberInk)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize()
+                        .padding(.horizontal, 10).frame(minHeight: 24)
+                        .background(Tint.amberSoft, in: .capsule)
+                        .accessibilityLabel(Text("Time left"))
                 }
             }
             if !quote.isEmpty {
-                Text(verbatim: quote).font(.body).foregroundStyle(Color(.label))
+                Text(verbatim: quote).font(.callout).foregroundStyle(Color(.label))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10).padding(.horizontal, 12)
-                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 14, style: .continuous))
+                    .padding(.vertical, 12).padding(.horizontal, 14)
+                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 16, style: .continuous))
             }
             answers {
                 Button { answer(false) } label: {
-                    Text("Don’t Allow").font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
+                    Text("Don’t Allow").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
                 HoldToAllowButton { answer(true) }
             }
         }
-        .padding(16)
-        .cardGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .padding(18)
+        // It floats over the conversation and asks for an answer: the control layer, so glass.
+        .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
+    }
+}
+
+/// The two answers side by side, the second 1.35 times the first: the board's Don’t Allow and Hold to Allow.
+private struct AnswerRow: Layout {
+    var spacing: CGFloat = 8
+    var weights: [CGFloat] = [1, 1.35]
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        let heights = zip(subviews, widths(width)).map { subview, width in
+            subview.sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        }
+        return CGSize(width: width, height: heights.max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths(bounds.width)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
+    }
+
+    private func widths(_ total: CGFloat) -> [CGFloat] {
+        let free = max(0, total - spacing * CGFloat(weights.count - 1))
+        let sum = weights.reduce(0, +)
+        return weights.map { free * $0 / sum }
     }
 }
 
@@ -263,7 +429,7 @@ struct HoldToAllowButton: View {
 
     var body: some View {
         Text("Hold to Allow")
-            .font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
+            .font(.subheadline.weight(.semibold)).foregroundStyle(Tint.onSolid)
             .frame(maxWidth: .infinity, minHeight: 50)
             .background {
                 GeometryReader { geometry in
@@ -298,36 +464,36 @@ struct HoldToAllowButton: View {
 // MARK: Your turn
 
 /// Poki handed the phone back for something only you can do (a passcode, a password, Face ID): what
-/// it asks, that it sends no input meanwhile, and the button that tells it to carry on.
+/// it asks, that it sends no input meanwhile, and the button that tells it to carry on. Amber is your
+/// turn, so the whole card is.
 struct TurnCard: View {
     var text: String
     var done: () -> Void
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                PokiAvatar(size: 44, mood: .yourTurn)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                PokiAvatar(size: 48, mood: .yourTurn)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Your turn").font(.headline).foregroundStyle(Color(.label))
-                    Text(verbatim: text).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "lock").font(.subheadline.weight(.semibold)).accessibilityHidden(true)
+                        Text("Your turn").font(.headline)
+                    }
+                    Text(verbatim: text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    // What the core keeps to while a step is handed over: no input is sent. It still reads
+                    // the screen (that is how it sees the step is over), so the card does not say it looks away.
+                    Text("I’m not tapping or typing while it’s your turn.").font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 0)
-            }
-            // What the core keeps to while a step is handed over: no input is sent. It still reads the
-            // screen (that is how it sees the step is over), so the card does not say it looks away.
-            Label("I’m not tapping or typing while it’s your turn.", systemImage: "pause.circle")
-                .font(.footnote).foregroundStyle(Tint.amberInk)
+                .foregroundStyle(Tint.amberInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 8).padding(.horizontal, 12)
-                .background(Tint.amberSoft, in: .rect(cornerRadius: 12, style: .continuous))
+            }
             Button(action: done) { Text("Done, carry on") }
                 .buttonStyle(SolidCapsuleButtonStyle())
                 .accessibilityIdentifier("handoff.done")
         }
-        .padding(16)
-        .cardGlass(in: shape)
-        .overlay(shape.strokeBorder(Tint.amberLine, lineWidth: 1))
+        .padding(18)
+        // A card over the conversation, like the approval: glass, tinted amber so it reads as yours.
+        .glassSurface(in: RoundedRectangle(cornerRadius: 26, style: .continuous), tint: Tint.amberSoft, fallback: .card)
     }
 }
 
@@ -337,7 +503,7 @@ struct TurnCard: View {
 struct SolidCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
+            .font(.subheadline.weight(.semibold)).foregroundStyle(Tint.onSolid)
             .frame(maxWidth: .infinity, minHeight: 50)
             .background(Tint.solid, in: .capsule)
             .opacity(configuration.isPressed ? 0.75 : 1)
@@ -357,14 +523,37 @@ struct QuietCapsuleButtonStyle: ButtonStyle {
     }
 }
 
-extension View {
-    /// A card floating over the conversation: Liquid Glass on iOS 26 and later, the regular material
-    /// with a hairline before it.
-    @ViewBuilder func cardGlass<S: InsettableShape>(in shape: S) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: shape)
-        } else {
-            self.background(.regularMaterial, in: shape).overlay(shape.strokeBorder(Color(.separator), lineWidth: 0.5))
+/// A drawn stand-in for the phone's screen in the sample scenes and the demo, which have no phone
+/// behind them: a chat with a few bubbles, in the board's own colours for its thumbnails.
+enum SampleShot {
+    private static let light = draw(dark: false)
+    private static let dark = draw(dark: true)
+
+    static func image(dark: Bool) -> Image { Image(uiImage: dark ? Self.dark : light) }
+
+    private static func draw(dark: Bool) -> UIImage {
+        let size = CGSize(width: 180, height: 390)
+        let line = UIColor(hex: dark ? 0x25282D : 0xEEF0F2), strong = UIColor(hex: dark ? 0x34383E : 0xDDE1E5)
+        let mine = UIColor(hex: dark ? 0x1F5A3A : 0xCFEFD9)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            UIColor(hex: dark ? 0x111315 : 0xFFFFFF).setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+            func pill(_ rect: CGRect, _ colour: UIColor) {
+                colour.setFill()
+                UIBezierPath(roundedRect: rect, cornerRadius: min(rect.height / 2, 14)).fill()
+            }
+            // The title and its line, bubbles from both sides, the field with its send button.
+            pill(CGRect(x: 14, y: 26, width: 22, height: 22), strong)
+            pill(CGRect(x: 44, y: 32, width: 64, height: 10), strong)
+            line.setFill()
+            UIRectFill(CGRect(x: 0, y: 60, width: size.width, height: 1))
+            pill(CGRect(x: 14, y: 84, width: 96, height: 30), line)
+            pill(CGRect(x: 14, y: 120, width: 70, height: 30), line)
+            pill(CGRect(x: 62, y: 170, width: 104, height: 30), mine)
+            pill(CGRect(x: 14, y: 220, width: 84, height: 30), line)
+            pill(CGRect(x: 50, y: 270, width: 116, height: 44), mine)
+            pill(CGRect(x: 14, y: 340, width: 122, height: 30), line)
+            pill(CGRect(x: 142, y: 342, width: 26, height: 26), UIColor(hex: 0x1FB86A))
         }
     }
 }

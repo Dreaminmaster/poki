@@ -465,6 +465,18 @@ struct AgentBadge: View {
     }
 }
 
+/// The boards' guest thread (02b) for the screenshots (`-pokiHome sessions`, the first row): an
+/// outside agent borrowing Poki's hands, at step 2 of 3. Nothing runs.
+private enum GuestSample {
+    static var isOn: Bool { UserDefaults.standard.string(forKey: "pokiHome") != nil }
+    static let plan = [String(localized: "Open TestFlight"), String(localized: "Find Poki"), String(localized: "Tap Update")]
+    static let entries: [ChatEntry] = {
+        var steps = ChatEntry(.plan([PlanStep(plan[0], state: .done), PlanStep(plan[1])]))
+        steps.at = Date().addingTimeInterval(-42)
+        return [ChatEntry(.request(String(localized: "Open TestFlight and install the newest Poki build."), from: "Claude Code")), steps]
+    }()
+}
+
 /// An outside agent's session or hand-off as a conversation: the agent's own steps as grey lines, its
 /// request and Poki's answer as bubbles. Live while the session runs.
 struct SessionView: View {
@@ -474,14 +486,19 @@ struct SessionView: View {
 
     @State private var renaming = false
     @State private var newName = ""
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let session = SessionStore.shared.session(id)
         let running = AskPoki.live(id)
         let live = running?.running ?? (session?.live ?? false)
-        ChatTranscript(entries: (running?.entries ?? session?.entries) ?? [], typing: running?.awaitingModel ?? false, canRetry: false, retry: {}, session: id,
+        let sample = GuestSample.isOn && id == "sample-1"
+        // The live task's card shows what Poki last saw of the screen, as in the chat.
+        let shot: Image? = sample ? SampleShot.image(dark: scheme == .dark) : live ? model.lastShot.map { Image(uiImage: $0) } : nil
+        ChatTranscript(entries: sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? [],
+                       typing: running?.awaitingModel ?? false, canRetry: false, retry: {}, session: id,
                        live: live, waiting: live && !model.approvals.isEmpty, handedOver: live && model.handoffText != nil,
-                       plan: running?.planSteps, app: model.currentApp) { EmptyView() }
+                       plan: sample ? GuestSample.plan : running?.planSteps, app: sample ? "TestFlight" : model.currentApp, shot: shot) { EmptyView() }
         // The step that waits for you and Stop sit on the bottom edge, so the conversation scrolls under
         // them and the bars keep their scroll-edge behaviour (as in the chat).
         .bottomBar {
@@ -495,6 +512,9 @@ struct SessionView: View {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
                     }
                     if running != nil {
+                        // Said where Stop is, and only there: the words promise what the button does.
+                        Text("A guest is borrowing Poki’s hands. Stop is always yours.")
+                            .font(.footnote).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
                         Button("Stop Poki", systemImage: "stop.fill") { AskPoki.live(id)?.stop() }
                             .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(Tint.red)
                     }
@@ -503,7 +523,8 @@ struct SessionView: View {
                 .frame(maxWidth: 720)
             }
         }
-        .background(Color(.systemBackground))
+        // The chat's own page colour, so Poki's white bubbles stand on it as they do there.
+        .background(Tint.page.ignoresSafeArea())
         // The session's name is the title; its menu renames it (the system title menu).
         .navigationTitle(Text(verbatim: session?.name ?? ""))
         .navigationBarTitleDisplayMode(.inline)

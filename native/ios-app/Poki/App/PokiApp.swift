@@ -101,7 +101,7 @@ struct RootView: View {
             },
             openModel: { openDetails([DetailsRoute.model]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
-            profileSource: profile
+            openUpdates: { openDetails([DetailsRoute.updates]) }
         )
     }
 
@@ -153,13 +153,10 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
-            // On iPhone the profile grows out of the bear that was tapped, and shrinks back into it.
-            .fullScreenCover(isPresented: Binding(get: { detailsOpen && width != .regular }, set: { if !$0 { detailsOpen = false } })) {
-                profilePage.navigationTransition(.zoom(sourceID: profileSourceID, in: profile))
-            }
-            // Beside the list (iPad) it is a sheet at a page's width, as the system's own are.
-            .sheet(isPresented: Binding(get: { detailsOpen && width == .regular }, set: { if !$0 { detailsOpen = false } })) {
-                profilePage.presentationSizing(.page)
+            // Poki's profile rises from the bottom (ESP-376): a full-height sheet on iPhone, a sheet at a
+            // page's width beside the list on iPad, as the system's own are.
+            .sheet(isPresented: $detailsOpen) {
+                profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
     }
 
@@ -215,7 +212,7 @@ struct RootView: View {
             Text("This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS: Poki can’t see or read what you enter, and it asks only once until the next restart.")
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
-            if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.clearNotices(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
+            if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.clearNotices(); model.signer.maintain(); Task { await model.signer.checkLatestIfDue() }; Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` opens the voice page.

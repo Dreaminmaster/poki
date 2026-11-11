@@ -51,6 +51,16 @@
         }
       }
     },
+    "%@ asked over MCP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 通过 MCP 请求"
+          }
+        }
+      }
+    },
     "%@ didn’t return its model list. The built-in models still work." : {
       "localizations" : {
         "zh-Hans" : {
@@ -201,6 +211,16 @@
         }
       }
     },
+    "%@, " : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，"
+          }
+        }
+      }
+    },
     "%@, %lld missed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -237,6 +257,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@，失败"
+          }
+        }
+      }
+    },
+    "%@, step %lld of %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，第 %2$lld 步，共 %3$lld 步"
           }
         }
       }
@@ -502,6 +532,16 @@
         }
       }
     },
+    "A guest is borrowing Poki’s hands. Stop is always yours." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有访客在借用 Poki 的手。停不停随时由你定。"
+          }
+        }
+      }
+    },
     "A key is saved. Enter a new one to replace it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -749,6 +789,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "将其添加到 sing-box 配置的 tun 入站中，然后重新加载配置。"
+          }
+        }
+      }
+    },
+    "Add milk to my list" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把牛奶加进清单"
           }
         }
       }
@@ -1856,6 +1906,26 @@
         }
       }
     },
+    "Confirm pickup at 9:55" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认 9:55 取餐"
+          }
+        }
+      }
+    },
+    "Connect this iPhone, open Poki Setup, then choose Set up Poki or Renew." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连上这台 iPhone，打开 Poki Setup，再选 Set up Poki 或 Renew。"
+          }
+        }
+      }
+    },
     "Connect to Wi-Fi and open Poki first. Once it is on, you can switch to cellular and keep using it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2902,6 +2972,26 @@
         }
       }
     },
+    "Find Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到 Poki"
+          }
+        }
+      }
+    },
+    "Find the chat with Mom" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到和妈妈的聊天"
+          }
+        }
+      }
+    },
     "Finish setting up this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3079,6 +3169,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "把手机交给我。"
+          }
+        }
+      }
+    },
+    "Handed back to you. I’ll carry on when you’re done." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已交回给你。你弄好后我接着做。"
           }
         }
       }
@@ -3309,6 +3409,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我替你点、替你打字、替你滑。"
+          }
+        }
+      }
+    },
+    "I tripped. I lost my grip on your phone at step 2, so I stopped before touching anything else." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我绊了一下。第 2 步时我抓不住你的手机了，所以没再碰别的就停下了。"
           }
         }
       }
@@ -3605,6 +3715,16 @@
         }
       }
     },
+    "I’m resting. Tap me and I’ll carry on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我在休息。点我一下，我就接着干。"
+          }
+        }
+      }
+    },
     "Keep IPv6 out of the tun address list." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3773,6 +3893,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上一步"
+          }
+        }
+      }
+    },
+    "Latest screenshot" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新截图"
           }
         }
       }
@@ -4531,6 +4661,16 @@
         }
       }
     },
+    "New Version" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版本"
+          }
+        }
+      }
+    },
     "New conversation" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4944,6 +5084,16 @@
         }
       }
     },
+    "Not shown" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未显示"
+          }
+        }
+      }
+    },
     "Not started" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5095,6 +5245,16 @@
         }
       }
     },
+    "Okay, I didn’t send it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好，我没有发。"
+          }
+        }
+      }
+    },
     "On" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5111,6 +5271,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在此 iPhone 上"
+          }
+        }
+      }
+    },
+    "On it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这就办。"
           }
         }
       }
@@ -5269,6 +5439,16 @@
         }
       }
     },
+    "Open Blue Door Coffee" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Blue Door Coffee"
+          }
+        }
+      }
+    },
     "Open General › About" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5285,6 +5465,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开“信息”"
+          }
+        }
+      }
+    },
+    "Open Notification Center" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开通知中心"
           }
         }
       }
@@ -5449,6 +5639,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开 Shadowrocket。"
+          }
+        }
+      }
+    },
+    "Open TestFlight" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 TestFlight"
+          }
+        }
+      }
+    },
+    "Open TestFlight and install the newest Poki build." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 TestFlight，装上最新的 Poki。"
+          }
+        }
+      }
+    },
+    "Open WhatsApp" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 WhatsApp"
           }
         }
       }
@@ -5671,6 +5891,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可选。不连 Mac 也想续签时，可以在这里登录 Apple 账号，让 Poki 自己续签。"
+          }
+        }
+      }
+    },
+    "Or Update from Your Mac" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "或者在 Mac 上更新"
           }
         }
       }
@@ -5963,6 +6193,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已为你暂停"
+          }
+        }
+      }
+    },
+    "Pay $5.40" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支付 5.40 美元"
           }
         }
       }
@@ -6902,6 +7142,16 @@
         }
       }
     },
+    "Post today’s photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发今天的照片"
+          }
+        }
+      }
+    },
     "Prepare Refresh Now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7317,6 +7567,16 @@
         }
       }
     },
+    "Reorder “Oat flat white, large”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再来一单“大杯燕麦澳白”"
+          }
+        }
+      }
+    },
     "Replace Key" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7384,6 +7644,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "撤销访问权限"
+          }
+        }
+      }
+    },
+    "Ride home" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打车回家"
           }
         }
       }
@@ -7639,12 +7909,32 @@
         }
       }
     },
+    "Send it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送"
+          }
+        }
+      }
+    },
     "Send the pairing file here: tap **Scan Pairing Code** below (or scan Poki Setup's code with the Camera), AirDrop the file to this iPhone and open it with Poki, or tap **Import Pairing File** below." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "把配对文件发送到这里：轻点下方的“**扫描配对码**”（或用相机扫描 Poki Setup 的二维码），用隔空投送把文件发到此 iPhone 并用 Poki 打开，或轻点下方的“**导入配对文件**”。"
+          }
+        }
+      }
+    },
+    "Send “On my way!” to Mom" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把“在路上了！”发给妈妈"
           }
         }
       }
@@ -7665,6 +7955,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "向妈妈发送“On my way”吗？"
+          }
+        }
+      }
+    },
+    "Send “Running 10 min late. Save me a seat!” to Mom" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把“晚到 10 分钟，帮我留个座！”发给妈妈"
           }
         }
       }
@@ -8252,6 +8552,16 @@
         }
       }
     },
+    "Still to come" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没开始"
+          }
+        }
+      }
+    },
     "Stop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8493,6 +8803,16 @@
         }
       }
     },
+    "Tap Clear All" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点“全部清除”"
+          }
+        }
+      }
+    },
     "Tap Install Module, then confirm in Surge." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8551,6 +8871,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "轻点“开始”，离开 App 一段时间后再返回。日志会记录挂起时段及连接断开的时间。"
+          }
+        }
+      }
+    },
+    "Tap Update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点“更新”"
           }
         }
       }
@@ -8685,6 +9015,16 @@
         }
       }
     },
+    "Tell the team I’m late" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "告诉团队我会晚到"
+          }
+        }
+      }
+    },
     "Telling the agent" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8731,6 +9071,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "告诉妈妈\n我在路上了…"
+          }
+        }
+      }
+    },
+    "Text Mom I’m on my way" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给妈妈发消息说我在路上了"
           }
         }
       }
@@ -9697,6 +10047,16 @@
         }
       }
     },
+    "Two ways to update: sign in and Poki updates itself here, or connect this iPhone to your Mac and use Poki Setup." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新有两条路：登录后 Poki 就在这里自己更新，或者把这台 iPhone 连到 Mac，用 Poki Setup 更新。"
+          }
+        }
+      }
+    },
     "Type" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9757,12 +10117,32 @@
         }
       }
     },
+    "Type “On my way!”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入“在路上了！”"
+          }
+        }
+      }
+    },
     "Type “On my way”" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "输入“在路上了”"
+          }
+        }
+      }
+    },
+    "Type “Running 10 min late. Save me a seat!”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入“晚到 10 分钟，帮我留个座！”"
           }
         }
       }
@@ -9853,6 +10233,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用你的代理 App"
+          }
+        }
+      }
+    },
+    "Under way" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进行中"
           }
         }
       }

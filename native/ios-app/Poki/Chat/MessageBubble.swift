@@ -1,8 +1,8 @@
 // MessageBubble is from Mackarous/ConversationUI (commit e77c69e,
 // Sources/ConversationUI/MessageBubble.swift), Copyright (c) 2024 Andrew Mackarous, MIT License. See
 // THIRD_PARTY_NOTICES.md. Changed: Poki's message kinds, the tail corner on the last bubble of a run,
-// 60 pt kept free on the far side, and for ESP-326 your bubble in grey, an outside agent's in ink, and
-// Poki's words without a bubble, in the system's body text.
+// 60 pt kept free on the far side, and the colours: an outside agent's request in ink, and for
+// ESP-376 your bubble in Poki's blue and Poki's words in a white bubble with a soft shadow.
 import SwiftUI
 
 struct MessageBubble: View {
@@ -19,27 +19,27 @@ struct MessageBubble: View {
                 Spacer(minLength: .messageInsetPadding)
             }
             if direction == .incoming {
-                // Poki's words stand on the page without a bubble (ESP-326): blue is kept for what Poki
-                // does on the phone, and a reply reads as text, not as a message from another person.
                 Text(rendered)
                     .font(.body)
                     .tint(Tint.blueText)
                     .foregroundStyle(Color(.label))
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, .messageVerticalPadding)
+                    .padding(.horizontal, .messageHorizontalPadding)
+                    .pokiBubble(tail: tail)
                     .contextMenu { copyButton { UIPasteboard.general.string = text } }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: .messageInsetPadding)
             } else {
                 Text(rendered)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(direction == .guest ? Tint.onSolid : Color(.label))
+                    .foregroundStyle(direction == .guest ? Tint.onSolid : Color.white)
                     .padding(.vertical, .messageVerticalPadding)
-                    .padding(.horizontal, 14)
-                    .background(direction == .guest ? Tint.solid : ChatColor.incoming, in: shape)
+                    .padding(.horizontal, .messageHorizontalPadding)
+                    .background(direction == .guest ? Tint.solid : Tint.blue, in: shape)
                     .contentShape(.contextMenuPreview, shape)
                     .contextMenu { copyButton { UIPasteboard.general.string = text } }
-                    .frame(maxWidth: 300, alignment: .trailing)
+                    .frame(maxWidth: 320, alignment: .trailing)
             }
         }
     }
@@ -67,10 +67,24 @@ struct MessageBubble: View {
 }
 
 extension CGFloat {
-    static let cornerRadius: CGFloat = 20
-    static let tailRadius: CGFloat = 6
+    static let cornerRadius: CGFloat = 22
+    static let tailRadius: CGFloat = 7
     static let messageInsetPadding: CGFloat = 60
-    static let messageVerticalPadding: CGFloat = 9
+    static let messageVerticalPadding: CGFloat = 13
+    static let messageHorizontalPadding: CGFloat = 18
+}
+
+extension View {
+    /// Poki's bubble (ESP-376): the card's white with a soft shadow in light; in dark the card's grey
+    /// with a hairline, where a shadow does not show. The small corner sits on Poki's side.
+    func pokiBubble(tail: Bool) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: .cornerRadius, bottomLeadingRadius: tail ? .tailRadius : .cornerRadius,
+                                           bottomTrailingRadius: .cornerRadius, topTrailingRadius: .cornerRadius, style: .continuous)
+        return background(Color(.secondarySystemGroupedBackground), in: shape)
+            .overlay(shape.strokeBorder(Tint.ring.opacity(0.5), lineWidth: 0.5))
+            .shadow(color: Tint.bubbleShadow, radius: 6, y: 2)
+            .contentShape(.contextMenuPreview, shape)
+    }
 }
 
 /// The chat's greys. The boards draw iMessage's light colours, which are iOS's own system colours, so

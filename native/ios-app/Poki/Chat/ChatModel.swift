@@ -157,6 +157,7 @@ final class ChatModel {
 
     func newConversation() {
         stop()
+        if isDemo { entries = [ChatEntry(.time(Date()))] + greeting.dropFirst(); return }
         loop = nil
         client = nil
         calls = []
@@ -230,6 +231,7 @@ final class ChatModel {
     private func send(_ text: String, again: Bool) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !running else { return }
+        if isDemo { playDemo(text); return }
         // Another conversation (an outside agent's hand-off) is working the phone: one task at a time.
         if kind == .poki, let busy = ChatModel.delegatedBusy {
             entries.append(ChatEntry(.you(text, delivered: false)))
@@ -401,6 +403,7 @@ final class ChatModel {
     /// the phone is doing finishes, and until then the chat says Stopping, not Stopped. The next task
     /// waits for it.
     func stop() {
+        if isDemo { stopDemo(); return }
         guard running else { return }
         stopAsked = true
         loop?.stop()
@@ -640,54 +643,149 @@ final class ChatModel {
 
     // MARK: Screenshots
 
-    /// `-pokiChat empty|working|approval|handoff|failed|approved`: sample conversations, for the build's
-    /// screenshots only. Nothing is sent.
+    /// The boards' stories (ESP-326), for the sample scenes and the demo.
+    enum Sample {
+        static var mom: String { String(localized: "Text Mom I’m running 10 min late") }
+        static var momSteps: [String] {
+            [String(localized: "Open WhatsApp"), String(localized: "Find the chat with Mom"),
+             String(localized: "Type “Running 10 min late. Save me a seat!”"), String(localized: "Send it")]
+        }
+        static var coffee: String { String(localized: "Order my usual coffee") }
+        static var coffeeSteps: [String] {
+            [String(localized: "Open Blue Door Coffee"), String(localized: "Reorder “Oat flat white, large”"),
+             String(localized: "Pay $5.40"), String(localized: "Confirm pickup at 9:55")]
+        }
+        /// The demo's own story, for the home page's suggestion "Messages Text Mom I’m on my way".
+        static var demoSteps: [String] {
+            [String(localized: "Open Messages"), String(localized: "Find the chat with Mom"),
+             String(localized: "Type “On my way!”"), String(localized: "Send it")]
+        }
+        static var demoApproval: PendingApproval {
+            PendingApproval(id: "demo", app: "Messages", summary: String(localized: "Send “On my way!” to Mom"),
+                            reason: "sending a message (\"send\")", expires: Date().addingTimeInterval(48))
+        }
+        /// The app the scene's task is in, for the task card.
+        static func app(_ scene: String?) -> String {
+            switch scene {
+            case "handoff": "Blue Door Coffee"
+            case "demo": "Messages"
+            default: "WhatsApp"
+            }
+        }
+        /// The step a scene's approval card asks about.
+        static var approval: PendingApproval {
+            PendingApproval(id: "sample", app: "WhatsApp", summary: String(localized: "Send “Running 10 min late. Save me a seat!” to Mom"),
+                            reason: "sending a message (\"send\")", expires: Date().addingTimeInterval(48))
+        }
+    }
+
+    /// `-pokiChat empty|working|approval|handoff|failed|approved|demo`: the boards' conversations, for
+    /// the build's screenshots only. Nothing is sent.
     private func loadSample(_ scene: String) {
         let start = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: Date()) ?? Date()
         entries = greeting
         entries[0] = ChatEntry(.time(start))
-        guard scene != "empty" else { return }
-        let you = String(localized: "Text Mom “On my way”")
-        if scene == "working" || scene == "handoff" {
-            // Poki has the phone: two steps done, the third under way, the last still to come. For
-            // "handoff" the phone is back with the owner (the chat shows its "Your turn" card).
-            var plan = ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
-                                        PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                        PlanStep(String(localized: "Type “On my way”"), state: .current)]))
+        guard scene != "empty", scene != "demo", scene != "backdrop" else { return }
+        func steps(_ texts: [String], done: Int, then state: PlanStep.State?) -> ChatEntry {
+            var steps = texts.prefix(done).map { PlanStep($0, state: .done) }
+            if let state, texts.count > done { steps.append(PlanStep(texts[done], state: state)) }
+            var plan = ChatEntry(.plan(steps))
             plan.at = Date().addingTimeInterval(-42)
-            modelPlan = [String(localized: "Open Messages"), String(localized: "Open the chat with Mom"),
-                         String(localized: "Type “On my way”"), String(localized: "Tap Send")]
-            entries = [ChatEntry(.time(start)),
-                       ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
-                       ChatEntry(.you(you, delivered: true)),
-                       ChatEntry(.poki(String(localized: "On it. Opening Messages."))),
-                       plan]
-        } else if scene == "failed" {
-            entries = [ChatEntry(.time(start)),
-                       ChatEntry(.you(you, delivered: true)),
-                       ChatEntry(.poki(String(localized: "On it. Opening Messages."))),
-                       ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
-                                        PlanStep(String(localized: "Open the chat with Mom"), state: .failed)])),
-                       ChatEntry(.note(.problem(String(localized: "I couldn’t find a chat with Mom in Messages."))))]
-        } else if scene == "approval" || scene == "setupHint" {
-            entries = [ChatEntry(.time(start)),
-                       ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
-                       ChatEntry(.you(you, delivered: true)),
-                       ChatEntry(.poki(String(localized: "On it. Opening Messages."))),
-                       ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
-                                        PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                        PlanStep(String(localized: "Type “On my way”"), state: .done),
-                                        PlanStep(String(localized: "Tap Send"), state: .current)]))]
-        } else {
-            entries = [ChatEntry(.time(start)),
-                       ChatEntry(.you(you, delivered: true)),
-                       ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done),
-                                        PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                        PlanStep(String(localized: "Type “On my way”"), state: .done),
-                                        PlanStep(String(localized: "Tap Send"), state: .done)])),
+            return plan
+        }
+        let onIt = ChatEntry(.poki(String(localized: "On it.")))
+        switch scene {
+        case "working":
+            // Poki has the phone: two steps done, the third under way, the last still to come.
+            modelPlan = Sample.momSteps
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 2, then: .current)]
+        case "approval", "setupHint":
+            // The last step waits for your answer (the chat shows its card above the message field).
+            modelPlan = Sample.momSteps
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 3, then: .waiting)]
+        case "handoff":
+            // The phone is back with you for the passcode: the step waits, the card says it is your turn.
+            modelPlan = Sample.coffeeSteps
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.coffee, delivered: true)), onIt, steps(Sample.coffeeSteps, done: 2, then: .waiting)]
+        case "failed":
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Clear my notifications"), delivered: true)), onIt,
+                       ChatEntry(.plan([PlanStep(String(localized: "Open Notification Center"), state: .done),
+                                        PlanStep(String(localized: "Tap Clear All"), state: .failed)])),
+                       ChatEntry(.note(.problem(String(localized: "I tripped. I lost my grip on your phone at step 2, so I stopped before touching anything else."))))]
+        default:
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 4, then: nil),
                        ChatEntry(.note(.approved(start.addingTimeInterval(60)))),
                        ChatEntry(.poki(String(localized: "Sent. Mom has it. Anything else?")))]
         }
+    }
+
+    // MARK: Demo
+
+    /// `-pokiChat demo`: the chat starts on the greeting and plays the boards' "Text Mom" story when a
+    /// message is sent, with nothing behind it: no model, no phone, no Live Activity, no sound. It
+    /// exists to record the main flow on a simulator, where no real task can run.
+    let isDemo = UserDefaults.standard.string(forKey: "pokiChat") == "demo"
+    /// The step the demo waits on your answer for.
+    private(set) var demoAsk: PendingApproval?
+    private var demoTask: Task<Void, Never>?
+
+    private func playDemo(_ text: String) {
+        entries.append(ChatEntry(.you(text, delivered: false)))
+        let youID = entries[entries.count - 1].id
+        running = true
+        awaitingModel = true
+        planID = nil
+        demoTask = Task { [weak self] in
+            func wait(_ seconds: Double) async -> Bool {
+                try? await Task.sleep(for: .seconds(seconds))
+                return !Task.isCancelled && self != nil
+            }
+            guard await wait(1.1), let self else { return }
+            self.awaitingModel = false
+            self.markDelivered(youID)
+            self.entries.append(ChatEntry(.poki(String(localized: "On it."))))
+            self.modelPlan = Sample.demoSteps
+            guard await wait(0.7) else { return }
+            self.updatePlan { $0.append(PlanStep(Sample.demoSteps[0])) }
+            for i in 1..<3 {
+                guard await wait(1.5) else { return }
+                self.updatePlan { steps in
+                    for j in steps.indices where steps[j].state == .current { steps[j].state = .done }
+                    steps.append(PlanStep(Sample.demoSteps[i]))
+                }
+            }
+            guard await wait(1.9) else { return }
+            self.updatePlan { steps in
+                for j in steps.indices where steps[j].state == .current { steps[j].state = .done }
+                steps.append(PlanStep(Sample.demoSteps[3], state: .waiting))
+            }
+            guard await wait(0.5) else { return }
+            self.demoAsk = Sample.demoApproval
+        }
+    }
+
+    /// Your answer to the demo's approval card.
+    func answerDemo(_ approved: Bool) {
+        guard demoAsk != nil else { return }
+        demoAsk = nil
+        updatePlan { steps in for j in steps.indices where steps[j].state == .waiting { steps[j].state = approved ? .current : .failed } }
+        demoTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(approved ? 1.3 : 0.5))
+            guard !Task.isCancelled, let self else { return }
+            self.finishPlan()
+            self.running = false
+            self.entries.append(ChatEntry(.poki(approved ? String(localized: "Sent. Mom has it. Anything else?") : String(localized: "Okay, I didn’t send it."))))
+        }
+    }
+
+    private func stopDemo() {
+        demoTask?.cancel()
+        demoAsk = nil
+        awaitingModel = false
+        guard running else { return }
+        finishPlan()
+        running = false
+        entries.append(ChatEntry(.poki(String(localized: "Stopped."))))
     }
 }
 

@@ -70,10 +70,11 @@ struct DrawnCheck: Shape {
 /// A tick that draws itself when it appears.
 struct DrawingCheck: View {
     var color: Color
+    var lineWidth: CGFloat = 2.5
     @State private var drawn: CGFloat = 0
     var body: some View {
         DrawnCheck(progress: drawn)
-            .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+            .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
             .onAppear { withAnimation(PlanMotion.check) { drawn = 1 } }
             .accessibilityHidden(true)
     }

@@ -110,7 +110,7 @@ struct PokiDetailsView: View {
                 case .setup:
                     SetupLayer2View(path: $path)
                 case .updates:
-                    Form { SigningSection() }
+                    Form { SigningSection(updateFirst: true) }
                         .navigationTitle("Updates")
                         .navigationBarTitleDisplayMode(.inline)
                 case .approvals:
@@ -147,7 +147,7 @@ struct PokiDetailsView: View {
 
     private var hasModel: Bool { isSample || ModelKeys.hasUsableKey }
     private var brainValue: String {
-        if isSample { return "Claude Sonnet 5.5" }
+        if isSample { return "GPT-6.1 Terra" }
         return hasModel ? ModelKeys.selectedModelName : String(localized: "Add")
     }
 
@@ -199,7 +199,7 @@ private struct PokiHero: View {
                 .background(.white.opacity(0.2), in: .capsule)
                 .accessibilityElement(children: .combine)
             }
-            Text(verbatim: "Poki").font(Prominent.font(.largeTitle, .bold))
+            Text(verbatim: "Poki").font(Prominent.font(.largeTitle, .semibold))
                 .accessibilityAddTraits(.isHeader)
             Text("Taps and types on this iPhone for you").font(.subheadline).opacity(0.9)
                 .multilineTextAlignment(.center)
@@ -233,9 +233,11 @@ private struct ProfileTile: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 2) {
-                Image(systemName: symbol).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    .frame(width: 24, height: 24, alignment: .leading)
-                    .padding(.bottom, 10)
+                // The board's tile: the symbol in a 36-point circle.
+                Image(systemName: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                    .frame(width: 36, height: 36)
+                    .background(Color(.tertiarySystemFill), in: .circle)
+                    .padding(.bottom, 8)
                 Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1).minimumScaleFactor(0.8)
                 Text(caption).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
             }
