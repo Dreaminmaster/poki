@@ -8,6 +8,12 @@
             "state" : "translated",
             "value" : "操作按钮"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "動作按鈕"
+          }
         }
       }
     },
@@ -17,6 +23,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按一下就打开 Poki 并开始说话。想改成输入任务，就在那里选「快捷指令」，再选「发任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按一下就打開 Poki 並開始說話。想改成輸入任務，就在那裡選「捷徑」，再選「發任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
           }
         }
       }
@@ -28,6 +40,12 @@
             "state" : "translated",
             "value" : "打开 Poki 并开始说话。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開 Poki 並開始說話。"
+          }
         }
       }
     },
@@ -37,6 +55,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开 Poki 并开始说话。Poki 正在做任务时，显示这个任务，任务继续进行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開 Poki 並開始說話。Poki 正在做任務時，顯示這個任務，任務繼續進行。"
           }
         }
       }
@@ -48,6 +72,12 @@
             "state" : "translated",
             "value" : "Poki 没能开始这个任务，原因在聊天里。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 沒能開始這個任務，原因在聊天裡。"
+          }
         }
       }
     },
@@ -57,6 +87,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 开始做了，做完后会告诉你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 開始做了，做完後會告訴你。"
           }
         }
       }
@@ -68,15 +104,27 @@
             "state" : "translated",
             "value" : "Poki 还在忙，这个任务没有开始。这里是 Poki 正在做的事。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 還在忙，這個任務沒有開始。這裡是 Poki 正在做的事。"
+          }
         }
       }
     },
-    "Poki started the task and opens to turn on." : {
+    "Poki started the task. Turn Poki on so it can act on the phone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 已开始这个任务，正在打开以便开启。"
+            "value" : "Poki 已开始这个任务。开启 Poki 后它才能操作手机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已開始這個任務。開啟 Poki 後它才能操作手機。"
           }
         }
       }
@@ -88,6 +136,12 @@
             "state" : "translated",
             "value" : "Poki 在这台 iPhone 上开始做这个任务，做完后告诉你。"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 在這台 iPhone 上開始做這個任務，做完後告訴你。"
+          }
         }
       }
     },
@@ -97,6 +151,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 还没准备好，请稍后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 還沒準備好，請稍後再試。"
           }
         }
       }
@@ -108,6 +168,12 @@
             "state" : "translated",
             "value" : "把 ${task} 发给 Poki"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把 ${task} 發給 Poki"
+          }
         }
       }
     },
@@ -117,6 +183,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发任务"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "發任務"
           }
         }
       }
@@ -128,6 +200,12 @@
             "state" : "translated",
             "value" : "给 Poki 发任务"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "給 Poki 發任務"
+          }
         }
       }
     },
@@ -137,6 +215,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设置 › 操作按钮 › 控制 › 和 Poki 说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定 › 動作按鈕 › 控制項目 › 和 Poki 說話"
           }
         }
       }
@@ -148,6 +232,12 @@
             "state" : "translated",
             "value" : "和 Poki 说话"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 說話"
+          }
         }
       }
     },
@@ -158,6 +248,12 @@
             "state" : "translated",
             "value" : "任务"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務"
+          }
         }
       }
     },
@@ -167,6 +263,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要 Poki 做什么？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要 Poki 做什麼？"
           }
         }
       }

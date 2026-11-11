@@ -34,7 +34,7 @@ struct SendTaskToPokiIntent: AppIntent {
             return try await showPoki(LocalizedStringResource("Poki couldn’t start the task. The chat says why.", table: "Entry"))
         }
         guard app.sessionOn else {
-            return try await showPoki(LocalizedStringResource("Poki started the task and opens to turn on.", table: "Entry"))
+            return try await showPoki(LocalizedStringResource("Poki started the task. Turn Poki on so it can act on the phone.", table: "Entry"))
         }
         return .result(dialog: IntentDialog(LocalizedStringResource("Poki is on it. It tells you when it’s done.", table: "Entry")))
     }
