@@ -62,6 +62,8 @@ struct BearClips {
     let idle, wave, blink: ClosedRange<TimeInterval>
     /// The top of the wave, where it matches the design's hello picture.
     let hello: TimeInterval
+    /// One frame of the model's timeline.
+    let frame: TimeInterval
 
     /// Reads `{"fps": 30, "clips": {"idle": [95, 105], "wave": [20, 94], "blink": [5, 12]},
     /// "design_hello_frame": 42}`. A file without the three gestures is not a bear; without the hello
@@ -79,6 +81,7 @@ struct BearClips {
             }
             return Double(frames[0]) / file.fps...Double(frames[1]) / file.fps
         }
+        frame = 1 / file.fps
         idle = try span("idle")
         wave = try span("wave")
         blink = try span("blink")
@@ -103,7 +106,10 @@ struct BearClips {
             // picture's size, so it holds the first one and draws nothing until it blinks.
             return idle.lowerBound
         case .blink:
-            return blink.lowerBound + min(max(elapsed, 0), length(.blink))
+            // Whole frames only: the eyes are swapped between frames (the open pupils, the line, the
+            // smile), and between two of them neither shows, which left the eye pads blank and white.
+            let x = min(max(elapsed, 0), length(.blink))
+            return blink.lowerBound + (x / frame + 1e-6).rounded(.down) * frame
         case .hi:
             let rise = hello - wave.lowerBound, x = min(max(elapsed * BearMove.hiPace, 0), 2 * rise)
             return wave.lowerBound + (x <= rise ? x : 2 * rise - x)
