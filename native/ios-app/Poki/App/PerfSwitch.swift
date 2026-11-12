@@ -29,6 +29,8 @@ enum PerfSwitch: String, CaseIterable {
     case old120
     /// The home light and the suggestion rows keep moving under the open drawer.
     case oldUnderDrawer
+    /// The moving light is drawn as SwiftUI draws any view, at the screen's full size.
+    case oldMeshDirect
 
     static func on(_ part: PerfSwitch) -> Bool { active.contains(part) }
 

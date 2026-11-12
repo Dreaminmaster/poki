@@ -247,6 +247,18 @@ private struct DriftingMesh: View, Animatable {
             mesh.gradient(at: t, drift: drift, dark: dark)
                 .opacity(mesh.strength(at: t, drift: drift))
         }
+        .modifier(MeshRaster())
+    }
+}
+
+/// How a moving mesh is drawn each time it changes: on the graphics processor (`drawingGroup`).
+private struct MeshRaster: ViewModifier {
+    func body(content: Content) -> some View {
+        if PerfSwitch.on(.oldMeshDirect) {
+            content
+        } else {
+            content.drawingGroup()
+        }
     }
 }
 
