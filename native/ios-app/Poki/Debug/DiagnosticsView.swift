@@ -94,8 +94,8 @@ struct LogView: View {
     }
 }
 
-/// Poki › Health › Testing Options: switches being tried, all in one place. Ask Before Sensitive
-/// Steps and the Auto-Classifier are in Poki › Rules.
+/// Poki › General › Testing Options: switches being tried, all in one place. Ask Before Sensitive
+/// Steps and the Auto-Classifier are in Poki › Approvals.
 struct TestingOptionsView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
@@ -106,7 +106,7 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Rules.")
+                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Approvals.")
             }
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }

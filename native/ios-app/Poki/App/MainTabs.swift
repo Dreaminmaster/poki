@@ -21,7 +21,7 @@ struct ApprovalsView: View {
     }
 }
 
-/// The two sections of Approvals, for the page above and for Poki › Rules (ESP-340), which shows
+/// The two sections of Approvals, for the page above and for Poki › Approvals (ESP-340), which shows
 /// them with what the phone does when a task ends.
 struct ApprovalsSections: View {
     @Environment(AppModel.self) private var model

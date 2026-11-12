@@ -3,7 +3,7 @@ import SwiftUI
 
 // Poki's profile (ESP-326 board "09 Poki") opens from the bear, like a contact's page in Messages. It
 // replaced ESP-174's details screen and its "More Settings" layer: every setting now sits under the
-// part of Poki it is about (Brain, Hands, Voice, Memory, Rules, Guests, Health), one tap from here.
+// part of Poki it is about (Models, Automation, Voice, Memory, Approvals, External Agents, General), one tap from here.
 
 /// Poki's profile: the bear on its card with what it is doing; Pause, Voice and Activity; any problem
 /// that keeps it from working; then the parts of Poki, each a system list row into its own page.
@@ -16,7 +16,7 @@ struct PokiDetailsView: View {
     /// Opens a run in the chat (from the Activity Log).
     var openSession: (String) -> Void = { _ in }
     @Binding var path: NavigationPath
-    /// Bumped when the chosen model changes, so Brain's value redraws (ModelKeys is not observable).
+    /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
 
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiDetailsSample") }
@@ -48,12 +48,12 @@ struct PokiDetailsView: View {
 
                 Section {
                     NavigationLink(value: DetailsRoute.model) {
-                        ProfileRow(title: "Brain", caption: "Models and accounts", symbol: "brain.head.profile", value: brainValue, warns: !hasModel)
+                        ProfileRow(title: "Models", caption: "Accounts and active models", symbol: "brain.head.profile", value: brainValue, warns: !hasModel)
                             .id(modelVersion)
                     }
                     .accessibilityIdentifier("details.accountsAndModels")
                     NavigationLink(value: DetailsRoute.hands) {
-                        ProfileRow(title: "Hands", caption: "Phone control, pairing, typing", symbol: "hand.tap.fill", value: handsValue, warns: !setupDone)
+                        ProfileRow(title: "Automation", caption: "Touch, typing, and pairing", symbol: "hand.tap.fill", value: handsValue, warns: !setupDone)
                     }
                     .accessibilityIdentifier("details.hands")
                     NavigationLink(value: DetailsRoute.voice) {
@@ -72,16 +72,16 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("details.searchConversations")
                     NavigationLink(value: DetailsRoute.approvals) {
-                        ProfileRow(title: "Rules", caption: "What Poki asks about first", symbol: "checkmark.shield.fill", value: model.approvalMode.title, tile: Tint.amber)
+                        ProfileRow(title: "Approvals", caption: "What Poki asks about first", symbol: "checkmark.shield.fill", value: model.approvalMode.title, tile: Tint.amber)
                     }
                     .accessibilityIdentifier("moreSettings.approvals")
                     NavigationLink(value: DetailsRoute.settings) {
-                        ProfileRow(title: "Guests", caption: "Agents that use Poki’s hands", symbol: "person.2.fill", value: isSample ? nil : Health.relay(model).word,
+                        ProfileRow(title: "External Agents", caption: "Agents controlling this iPhone via Poki", symbol: "person.2.fill", value: isSample ? nil : Health.relay(model).word,
                                    tile: Color(light: 0x11191C, dark: 0x2F3336))
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                     NavigationLink(value: DetailsRoute.health) {
-                        ProfileRow(title: "Health", caption: "Updates, notifications, diagnostics", symbol: "heart.text.square.fill", value: healthValue, warns: updateWaits, tile: Tint.green)
+                        ProfileRow(title: "General", caption: "Updates, notifications, diagnostics", symbol: "heart.text.square.fill", value: healthValue, warns: updateWaits, tile: Tint.green)
                     }
                     .accessibilityIdentifier("details.health")
                 }
@@ -139,7 +139,7 @@ struct PokiDetailsView: View {
         HStack(spacing: 10) {
             switch isSample ? PowerTile.pause : PowerTile(model: model, running: chat.running) {
             case .pause:
-                ProfileTile(title: "Pause", caption: "Hands are on", symbol: "pause.fill") { chat.stop(); model.pauseRunner() }
+                ProfileTile(title: "Pause", caption: "Automation is on", symbol: "pause.fill") { chat.stop(); model.pauseRunner() }
                     .accessibilityIdentifier("details.pause")
             case .resume:
                 ProfileTile(title: "Resume", caption: model.ownerPaused ? "Resting" : "Standing by", symbol: "play.fill") { model.wakeRunner() }
@@ -347,9 +347,9 @@ private struct ProfileRow: View {
     }
 }
 
-// MARK: Hands
+// MARK: Automation
 
-/// Hands: whether Poki may act on this iPhone, what the phone needs for it (Setup), how the runner
+/// Automation: whether Poki may act on this iPhone, what the phone needs for it (Setup), how the runner
 /// and typing behave, and turning Poki off altogether.
 struct HandsView: View {
     @Environment(AppModel.self) private var model
@@ -362,7 +362,7 @@ struct HandsView: View {
         Form {
             Section {
                 Toggle(isOn: Binding(get: { on }, set: set)) {
-                    Label("Hands", systemImage: "hand.tap")
+                    Label("Automation", systemImage: "hand.tap")
                 }
                 .accessibilityIdentifier("hands.on")
             } footer: {
@@ -392,7 +392,7 @@ struct HandsView: View {
                 Section {
                     Toggle("Hide Banner When Idle", isOn: $model.closeSessionWhenIdle)
                 } header: {
-                    Text("Automation")
+                    Text("Automation Banner")
                 } footer: {
                     Text("Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again.")
                 }
@@ -427,7 +427,7 @@ struct HandsView: View {
                 }
             }
         }
-        .navigationTitle("Hands")
+        .navigationTitle("Automation")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -443,9 +443,9 @@ struct HandsView: View {
     }
 }
 
-// MARK: Health
+// MARK: General
 
-/// Health: what keeps Poki from working, this build and its updates, notifications, and the tools
+/// General: what keeps Poki from working, this build and its updates, notifications, and the tools
 /// under the hood (diagnostics, the log, testing options).
 struct HealthView: View {
     @Environment(AppModel.self) private var model
@@ -504,12 +504,12 @@ struct HealthView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Health")
+        .navigationTitle("General")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-/// Rules: when Poki asks you before a sensitive step (main's Agents › Safety › Approvals, the same
+/// Approvals: when Poki asks you before a sensitive step (main's Agents › Safety › Approvals, the same
 /// sections), and what the phone does when a task ends (main #150's Setup › Advanced › Chat).
 struct ApprovalsSettingsView: View {
 
@@ -520,13 +520,13 @@ struct ApprovalsSettingsView: View {
 
 
         }
-        .navigationTitle("Rules")
+        .navigationTitle("Approvals")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-/// Guests: the outside agents that use Poki's hands (list, add, revoke, each one's QR code and address)
-/// and the MCP relay they come through (its switch and address). The runner's settings are in Hands.
+/// External Agents: the outside agents that control this iPhone through Poki (list, add, revoke, each one's QR code and address)
+/// and the MCP relay they come through (its switch and address). The runner's settings are in Automation.
 struct AgentsAndRelayView: View {
     @Environment(AppModel.self) private var model
     @Binding var path: NavigationPath
@@ -570,7 +570,7 @@ struct AgentsAndRelayView: View {
                 }
                 .disabled(model.relayAddress == nil)
             } header: {
-                Text("External Agents")
+                Text("Agents")
             } footer: {
                 Text(model.relayAddress == nil
                      ? "Set your relay first. Each agent gets its own MCP address on it."
@@ -607,7 +607,7 @@ struct AgentsAndRelayView: View {
 
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Guests")
+        .navigationTitle("External Agents")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -620,7 +620,7 @@ struct AgentsAndRelayView: View {
 
 // MARK: Layer 2 - Setup (ESP-174 board "S1 Setup layer 2")
 
-/// Setup, under Hands (ESP-174 board "S1 Setup layer 2"): 5 items that tick themselves, Signing (optional,
+/// Setup, under Automation (ESP-174 board "S1 Setup layer 2"): 5 items that tick themselves, Signing (optional,
 /// Apple Account not needed), and Continue Setup. Each row navigates to its existing step page.
 struct SetupLayer2View: View {
     @Environment(AppModel.self) private var model

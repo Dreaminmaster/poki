@@ -126,7 +126,7 @@ final class AnthropicClient: ModelClient {
         guard (200..<300).contains(status), let json else {
             let text = apiErrorText(json, data, key: key)
             let words: String = switch status {
-            case 401: String(localized: "Anthropic did not accept the key. Check it in Poki › Brain.")
+            case 401: String(localized: "Anthropic did not accept the key. Check it in Poki › Models.")
             case 403: String(localized: "This Anthropic key can’t use \(ModelKeys.selectedModelName).")
             case 429: String(localized: "Anthropic says the key has hit its rate limit. Try again in a minute.")
             case 529: String(localized: "Anthropic is overloaded right now. Try again in a minute.")
