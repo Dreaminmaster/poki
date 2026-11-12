@@ -556,6 +556,8 @@ struct ChatTranscript<Footer: View>: View {
 
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
+    /// Where the bars over the conversation end: the top bar's controls, or the status bar.
+    @State private var topEdge: CGFloat = 0
 
     /// Your newest message: when it changes you have just sent one.
     private var lastSent: UUID? {
@@ -610,6 +612,10 @@ struct ChatTranscript<Footer: View>: View {
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
         }
+        // Messages fade out before they reach the top bar's picture, name and buttons, which have no
+        // ground of their own: under them the page shows, not a bubble cut in two.
+        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentInsets.top }) { _, top in topEdge = top }
+        .mask { TopFade(edge: topEdge).ignoresSafeArea() }
         .overlay(alignment: .bottom) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }
@@ -779,6 +785,20 @@ enum ChatFollow: Equatable {
         case .reading: return (.reading, false)
         case .reaching: return (.reaching, resized)
         case .newest: return resized ? (.reaching, true) : (.reading, false)
+        }
+    }
+}
+
+/// The conversation's mask: nothing above the bars' end but the last stretch, where it fades in, and
+/// all of it below.
+private struct TopFade: View {
+    var edge: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: max(0, edge - 26))
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 34)
+            Color.black
         }
     }
 }
