@@ -530,10 +530,12 @@ struct HomePage<Footer: View>: View {
                     .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
-                .glassSurface(in: Capsule(), interactive: true)
+                // Under the glass: with the menu on the outside, the glass took the long press and the
+                // pill fired as a tap.
                 .contextMenu {
                     Button("Forget", systemImage: "eye.slash", role: .destructive) { shortcutStore.forget(idea) }
                 }
+                .glassSurface(in: Capsule(), interactive: true)
                 .accessibilityLabel(Text(verbatim: [idea.app?.name, idea.text].compactMap { $0 }.joined(separator: ", ")))
                 .accessibilityHint(Text("Puts this in the message field"))
                 .accessibilityIdentifier("home.idea." + (idea.app?.name ?? idea.key))
