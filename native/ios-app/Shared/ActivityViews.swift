@@ -377,7 +377,7 @@ struct CompactTrailing: View {
             Text(count).font(theme.narrowCount).foregroundStyle(palette.text)
                 .lineLimit(1).minimumScaleFactor(0.75)
                 .frame(maxWidth: 26).frame(width: side, height: side)
-        case .countdown(let until):
+        case .countdown(let until), .asking(_, let until):
             Text(timerInterval: Countdown.range(until), countsDown: true)
                 .font(theme.narrowTimer).foregroundStyle(palette.approval)
                 .multilineTextAlignment(.center)
@@ -415,6 +415,17 @@ struct CompactTrailing: View {
             case .code(let code):
                 Text(code).font(theme.compactCode).foregroundStyle(palette.accent)
                     .lineLimit(1).minimumScaleFactor(0.8)
+            case .asking(let text, let until):
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(text).font(theme.compact).foregroundStyle(palette.approval).frame(height: 15)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    // No fixedSize on timer text (see TimerText): a fixed frame instead.
+                    Text(timerInterval: Countdown.range(until), countsDown: true)
+                        .font(theme.compactCount).foregroundStyle(palette.quiet)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: ActivityMetrics.compactWords, height: 13, alignment: .trailing)
+                }
+                .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
             case .countdown(let until):
                 TimerText(range: Countdown.range(until), down: true, colour: palette.approval, width: 42)
             case .symbol(let name, let tone):

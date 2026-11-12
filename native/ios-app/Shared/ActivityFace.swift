@@ -52,6 +52,10 @@ struct ActivityFace: Hashable {
         case text(String, ActivityTone)
         /// The pairing code, tabular digits.
         case code(String)
+        /// Poki waits for your answer: a word saying so ("Allow?") over the time left (ESP-467). The
+        /// island opens by itself when the approval comes and folds back after a few seconds; folded,
+        /// it still says what it waits for.
+        case asking(String, Date)
         case countdown(Date)
         case symbol(String, ActivityTone)
     }
@@ -258,7 +262,7 @@ extension PokiState {
                 subtitle: approval.reasonLine,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
-                compact: .countdown(approval.expires))
+                compact: .asking(String(activity: "Allow?"), approval.expires))
         case .done:
             return ActivityFace(
                 symbol: "checkmark.circle.fill",

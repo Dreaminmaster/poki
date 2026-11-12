@@ -70,6 +70,14 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertFalse(face.compact.says("Tap"))
         XCTAssertTrue(face.compact.counts("Step 4"))
     }
+
+    /// ESP-467: when iOS folds an approval's island back, the compact island says Poki waits for your
+    /// answer, beside the time left, not a bare countdown.
+    func testTheFoldedIslandSaysItWaitsForYourAnswer() {
+        var state = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
+        state.approval = PendingApproval(id: "a", app: "Messages", summary: "Tap “Send”", reason: "sending a message (\"send\")", expires: .now.addingTimeInterval(60))
+        XCTAssertTrue(state.face.compact.says("Allow?"))
+    }
 }
 
 private extension ActivityFace.Compact {

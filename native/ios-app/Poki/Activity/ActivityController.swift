@@ -7,6 +7,7 @@
 import ActivityKit
 import Foundation
 import ImageIO
+import UIKit
 import UniformTypeIdentifiers
 
 /// Runs the one Live Activity: started when a session starts, updated from PokiCore's events, ended
@@ -404,12 +405,19 @@ final class ActivityController {
         guard let activity else { return }
         let previous = tail
         tally.sent += 1
+        let queued = Date()
         tail = Task {
             await previous?.value
             let began = Date()
             if let alert { await activity.update(content, alertConfiguration: alert) } else { await activity.update(content) }
             self.tally.answered += 1
             let seconds = Date().timeIntervalSince(began)
+            if alert != nil {
+                // For the Activity Log: iOS opens the island for an alert, but not while Poki itself is in
+                // front, and late if the update waited behind others.
+                let state = switch UIApplication.shared.applicationState { case .active: "active"; case .inactive: "inactive"; default: "background" }
+                AppLog.shared.add("activity", "alert sent with \(content.state.phase.rawValue) \(String(format: "%.1f", Date().timeIntervalSince(queued))) s after it was queued; \(activity.activityState); Poki \(state)")
+            }
             guard seconds > 2 else { return }
             AppLog.shared.add("activity", "the update to \(content.state.phase.rawValue) step \(content.state.stepCount) took \(String(format: "%.1f", seconds)) s; \(activity.activityState)")
         }

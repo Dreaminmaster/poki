@@ -201,6 +201,29 @@
         }
       }
     },
+    "Allow?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你点头"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你點頭"
+          }
+        }
+      }
+    },
     "Allow this step?" : {
       "extractionState" : "manual",
       "localizations" : {
