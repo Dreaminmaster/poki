@@ -511,6 +511,8 @@ struct CompactTrailing: View {
                 .font(theme.narrowTimer).foregroundStyle(palette.approval)
                 .multilineTextAlignment(.center)
                 .frame(width: 26).frame(width: side, height: side)
+                // The circle is 28 points across at every text size: past the default the digits leave it.
+                .dynamicTypeSize(...DynamicTypeSize.large)
         case .symbol(let name, let tone):
             StateSymbol(name: name, tone: tone, palette: palette, size: name == "checkmark" ? 15.5 : name.hasPrefix("exclamationmark") ? 16 : 15)
                 .frame(width: side, height: side)
