@@ -97,6 +97,9 @@ private struct InUseCard: View {
             Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Color(.label))
         }
         .lineLimit(1)
+        // A chip never gets less than its words need: the row gives a long value (Dictation's
+        // "On This iPhone") its width from the shorter ones, and stacks the chips when they can't all fit.
+        .fixedSize(horizontal: true, vertical: false)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Tint.blueSoft.opacity(0.6), in: .rect(cornerRadius: 12, style: .continuous))
