@@ -238,13 +238,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@，没办完"
+            "value" : "%@，未完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@，沒辦完"
+            "value" : "%@，未完成"
           }
         }
       }
@@ -2855,13 +2855,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没办完"
+            "value" : "未完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "沒辦完"
+            "value" : "未完成"
           }
         }
       }
