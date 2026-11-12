@@ -364,9 +364,13 @@ struct SetupIssueHint: Equatable {
         if let runnerHint = runnerIssue(model: model) {
             return runnerHint
         }
+        if let trouble = model.localSessionTrouble {
+            return SetupIssueHint(message: trouble.text, link: String(localized: "Open Setup ›"), target: .setup)
+        }
         let done: (SetupStep) -> Bool = looks ? model.looksDone : model.isDone
-        if !SetupStep.shown.allSatisfy(done) {
-            for step in SetupStep.shown where !done(step) {
+        let steps = model.canStartTasks ? SetupStep.shown.filter { $0 != .loopback } : SetupStep.shown
+        if !steps.allSatisfy(done) {
+            for step in steps where !done(step) {
                 switch step {
                 case .runner:
                     return SetupIssueHint(

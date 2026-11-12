@@ -1849,6 +1849,10 @@ final class AppModel {
     /// pairing is Poki's own, so a new task can open Poki's session on cellular (ESP-448).
     var canStartFromHome: Bool { canStartFromHome(localDDIAvailable: diskImage.isReady && Self.localDDIMounted) }
 
+    /// Poki can start a task: setup looks complete, or on cellular the mounted image stands in for the
+    /// loopback, because the launcher already handed a task to it or Home can start one there (ESP-448).
+    var canStartTasks: Bool { runner.code == "local_ddi" || canStartFromHome }
+
     func canStartFromHome(localDDIAvailable: @autoclosure () -> Bool) -> Bool {
         if setupLooksComplete { return true }
         guard automationPath == .inProcess, setup.loopback != .none, !setupStepsLeft,

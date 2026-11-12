@@ -103,7 +103,7 @@ struct PokiStatus: Equatable {
         if chat.canRetry { return PokiStatus(.tripped) }
         if DoneLinger.shared.showing { return PokiStatus(.done) }
         // Setup is open, unless only the loopback is missing and Poki can start without it (main's rule for Home).
-        if !model.setupLooksComplete { return PokiStatus(.hello) }
+        if !model.canStartTasks { return PokiStatus(.hello) }
         if !(model.sessionOn || model.wantsOn) { return PokiStatus(.paused, word: String(localized: "Off")) }
         // Standing by after the idle minute is still ready: only the owner's own pause puts it to sleep.
         if model.ownerPaused { return PokiStatus(.paused) }
