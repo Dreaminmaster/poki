@@ -112,6 +112,14 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.coreState(of: RunnerStatus(state: "pairing")).describe, "starting (Checking pairing)")
     }
 
+    func testWorkingLoopbackDoesNotAskForWiFi() {
+        let (model, _) = model()
+        model.loopback.simulate(.working(ms: 9))
+        XCTAssertFalse(model.loopback.onWiFi)
+        XCTAssertFalse(model.loopback.cellularOnly)
+        XCTAssertEqual(model.loopback.detail, "This iPhone answers at 10.7.0.1 (9 ms).")
+    }
+
     /// A pairing refusal is kept until the phone accepts again; a disk-image refusal re-downloads.
     func testPairingRefusalThenAcceptance() {
         let (model, _) = model()
