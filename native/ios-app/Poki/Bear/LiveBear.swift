@@ -383,6 +383,7 @@ private final class BearCanvas: UIView {
                 settling = 3
             }
             guard let drawable = layer.nextDrawable() else { return }
+            BearLog.note(now, playback.move)
             lastPose = pose
             rendering = true
             let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: drawable.texture))
@@ -432,4 +433,22 @@ private final class Ticker {
     weak var canvas: BearCanvas?
     init(_ canvas: BearCanvas) { self.canvas = canvas }
     @objc func tick() { MainActor.assumeIsolated { canvas?.tick() } }
+}
+
+/// `-pokiBearLog YES` writes each frame the bear draws, with its move, to Caches/bear.log: for checking
+/// in the simulator that it draws only while something moves and stops when it is out of sight.
+/// Debug builds only.
+enum BearLog {
+    #if DEBUG
+    private static let on = UserDefaults.standard.bool(forKey: "pokiBearLog")
+    private static var lines: [String] = []
+    static func note(_ now: TimeInterval, _ move: BearMove) {
+        guard on else { return }
+        lines.append(String(format: "%.4f %@", now, String(describing: move)))
+        guard let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("bear.log"), atomically: true, encoding: .utf8)
+    }
+    #else
+    @inline(__always) static func note(_ now: TimeInterval, _ move: BearMove) {}
+    #endif
 }
