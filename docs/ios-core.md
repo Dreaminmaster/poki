@@ -855,7 +855,10 @@ loopback in Shadowrocket: Settings → Other → Include route 10.7.0.1/32").
 What it does:
 
 1. Connects to `device_address`: RemotePairing on 49152 (RPPairing file), or lockdown on 62078
-   (lockdown pairing plist) and then CoreDeviceProxy. The pairing file decides which.
+   (lockdown pairing plist) and then CoreDeviceProxy. The pairing file decides which. iOS moves
+   the RemotePairing service off 49152 when it starts it again and names the port only in Bonjour
+   (`_remotepairing._tcp`): when the port is refused, the app looks it up, checks that it answers
+   at `10.7.0.1`, and sets it with `poki_set_remote_pairing_port`.
 2. Opens the CDTunnel in-process (userspace TCP/IP), then RSD.
 3. Mounts the personalized DDI from `ddi_dir` if it is not mounted (needs internet once per boot for
    Apple's TSS signature).

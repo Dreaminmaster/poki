@@ -596,6 +596,23 @@
         }
       }
     },
+    "Finding Pairing Port" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查找配对端口"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在尋找配對連接埠"
+          }
+        }
+      }
+    },
     "Finish the payment yourself" : {
       "extractionState" : "manual",
       "localizations" : {

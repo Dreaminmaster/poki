@@ -134,6 +134,13 @@ pub unsafe extern "C" fn poki_launcher_free(launcher: *mut PokiLauncher) {
     }
 }
 
+/// The phone's remote pairing port, as the app found it in Bonjour (`_remotepairing._tcp`). Every
+/// later connection of the launcher, the pairing check and the signer goes there. 0 means 49152.
+#[unsafe(no_mangle)]
+pub extern "C" fn poki_set_remote_pairing_port(port: u16) {
+    remote::set_port(port);
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn poki_string_free(text: *mut c_char) {
     if !text.is_null() {
