@@ -1727,9 +1727,10 @@ final class AppModel {
     var localSessionTrouble: (text: String, opensSetup: Bool)? {
         guard sessionOn, runner.isRunning, runner.code == "local_ddi" else { return nil }
         switch inProcessSession {
-        case .opening, .open, .waitingForPasscode:
+        // Waiting its turn: Poki not in front, or another open asking for the passcode.
+        case .opening, .open, .waitingForPasscode, .failed("open_poki_first", _), .failed("open_under_way", _):
             return nil
-        case .passcodeMissed:
+        case .passcodeMissed, .failed("passcode_declined", _):
             return (String(localized: "iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode."), false)
         case .failed(let code, _) where loopback.cellularOnly:
             return (String(localized: "Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again."), false)
