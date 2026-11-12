@@ -1,0 +1,75 @@
+# Deletes preview builds (the Poki-preview-pr<N>-... artifacts that pr-preview.yml makes). After a
+# pull request's preview is built, its earlier builds go, so each pull request offers one. When the
+# `preview` label comes off, or the pull request is merged or closed, all of its builds go: a merged
+# change is in the next pre-alpha, and Poki and Poki Setup return to their channel by themselves.
+#
+# Deleting artifacts needs write access to Actions, so this is kept apart from pr-preview.yml,
+# which runs the pull request's own copy of itself. Both triggers here (workflow_run and
+# pull_request_target) always run the copy of this file on main, and it never checks out or runs
+# the pull request's code. Every value from the event reaches the scripts through env, never
+# written into them. Because GitHub runs main's copy, this works once it is on main.
+name: PR preview tidy
+
+on:
+  workflow_run:
+    workflows: ["PR preview"]
+    types: [completed]
+  pull_request_target:
+    types: [closed, unlabeled]
+
+permissions: {}
+
+jobs:
+  tidy:
+    name: tidy
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.event == 'pull_request'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.head_repository.full_name == github.repository)
+      || (github.event_name == 'pull_request_target'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && (github.event.action == 'closed'
+          || (github.event.action == 'unlabeled' && github.event.label.name == 'preview')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    concurrency:
+      group: pr-preview-tidy-${{ github.event.pull_request.number || github.event.workflow_run.id }}
+    steps:
+      - name: Delete the builds that are replaced or no longer wanted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          CLOSED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_run ]; then
+            # The pull request is the one the finished run built, read from the names of the
+            # artifacts it uploaded (a run that built nothing uploaded none, and nothing goes).
+            gh api "repos/$GH_REPO/actions/runs/$RUN_ID/artifacts?per_page=100" --paginate \
+              | jq -r '.artifacts[] | select(.expired | not) | "\(.id) \(.name)"' > kept.txt
+            PRS="$(sed -nE 's/^[0-9]+ Poki-preview-pr([0-9]+)-.*/\1/p' kept.txt | sort -u)"
+            if [ -z "$PRS" ]; then echo "Run $RUN_ID made no preview build."; exit 0; fi
+            if [ "$(echo "$PRS" | wc -l)" -ne 1 ]; then echo "::error::Run $RUN_ID made builds for more than one pull request."; exit 1; fi
+            PR="$PRS"
+            # Only builds older than this run's go, so a slower run cannot delete a newer build.
+            OLDEST_KEPT="$(grep -E "^[0-9]+ Poki-preview-pr$PR-" kept.txt | cut -d' ' -f1 | sort -n | head -1)"
+          else
+            PR="$CLOSED_PR"
+            OLDEST_KEPT=""
+          fi
+          echo "$PR" | grep -Eq '^[0-9]+$' || { echo "::error::No pull request number."; exit 1; }
+          gh api "repos/$GH_REPO/actions/artifacts?per_page=100" --paginate \
+            | jq -r --arg prefix "Poki-preview-pr$PR-" --arg run "$RUN_ID" --arg below "$OLDEST_KEPT" '
+                .artifacts[]
+                | select(.name | startswith($prefix))
+                | select($run == "" or (.workflow_run.id | tostring) != $run)
+                | select($below == "" or .id < ($below | tonumber))
+                | .id' \
+            | while read -r id; do
+                gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id" && echo "Deleted preview artifact $id"
+              done

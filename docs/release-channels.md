@@ -73,7 +73,9 @@ is tried on a phone before it reaches any channel.
 - **Commission it.** A maintainer adds the `preview` label to the pull request. `pr-preview.yml`
   builds the branch merged with `main`, and builds again on every push while the label stays. Only
   branches in this repository are built, never forks. Removing the label or closing the pull request
-  deletes its builds.
+  deletes its builds, and each new build replaces the one before. The deleting is done by
+  `pr-preview-tidy.yml`, which always runs `main`'s copy and never the pull request's code, so it
+  works only once it is on `main`.
 - **Where it lives.** A preview is a workflow artifact named
   `Poki-preview-pr<N>-<version>-<build>-<commit>`, kept 14 days. It is not a release, has no tag and is
   on no channel, so nobody on Stable, Beta, Alpha or Pre-alpha receives it. The app shows it as

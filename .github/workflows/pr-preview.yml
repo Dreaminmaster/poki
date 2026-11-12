@@ -9,6 +9,9 @@
 # label, or closing or merging the pull request, deletes its builds; otherwise they expire 14 days
 # after the last one.
 #
+# This workflow runs the pull request's own copy of itself, so it only reads. Deleting builds
+# needs write access to Actions, and that is pr-preview-tidy.yml, which always runs main's copy.
+#
 # Only pull requests from a branch of this repository are built, and Poki and Poki Setup only
 # accept artifacts of such runs: a fork's pull request could otherwise put its own build under a
 # preview's name. To preview a fork's pull request, a maintainer pushes its commits to a dev/
@@ -119,33 +122,3 @@ jobs:
             build/app-local
             ~/Library/Developer/Xcode/DerivedData/ModuleCache.noindex
           key: ipa-fast-${{ github.sha }}
-
-  # After a build, the pull request's earlier builds go, so each pull request offers one. When the
-  # label comes off, or the pull request is merged or closed, all of them go: a merged change is in
-  # the next pre-alpha, and Poki and Poki Setup return to their channel by themselves.
-  tidy:
-    name: tidy
-    needs: build
-    if: >-
-      always() && github.event.pull_request.head.repo.full_name == github.repository
-      && (needs.build.result == 'success' || github.event.action == 'closed'
-        || (github.event.action == 'unlabeled' && github.event.label.name == 'preview'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: write
-    steps:
-      - name: Delete the builds this one replaces
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PREFIX: Poki-preview-pr${{ github.event.pull_request.number }}-
-          # After a build, this run's own artifact stays.
-          KEEP_RUN: ${{ needs.build.result == 'success' && github.run_id || '0' }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GH_REPO/actions/artifacts?per_page=100" --paginate \
-            --jq ".artifacts[] | select(.name | startswith(\"$PREFIX\")) | select((.workflow_run.id | tostring) != \"$KEEP_RUN\") | .id" \
-          | while read -r id; do
-              gh api -X DELETE "repos/$GH_REPO/actions/artifacts/$id" && echo "Deleted preview artifact $id"
-            done

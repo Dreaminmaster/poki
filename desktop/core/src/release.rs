@@ -330,6 +330,9 @@ struct GhArtifact {
 }
 #[derive(Deserialize)]
 struct GhRun {
+    /// The run that uploaded the artifact.
+    #[serde(default)]
+    id: Option<u64>,
     #[serde(default)]
     repository_id: Option<u64>,
     #[serde(default)]
@@ -337,7 +340,22 @@ struct GhRun {
     /// The branch the run built: for a pull request's run, the pull request's own branch.
     #[serde(default)]
     head_branch: Option<String>,
+    /// The commit the run built: for a pull request's run, the pull request's head commit.
+    #[serde(default)]
+    head_sha: Option<String>,
 }
+/// What `GET /repos/{repo}/actions/runs/{id}` says about the run that made an artifact.
+#[derive(Deserialize)]
+struct GhRunDetail {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    event: String,
+}
+/// The workflow that builds previews. Only its pull request runs make an artifact a preview.
+const PREVIEW_WORKFLOW: &str = ".github/workflows/pr-preview.yml";
+
+fn run_is_preview(d: &GhRunDetail) -> bool { d.path == PREVIEW_WORKFLOW && d.event == "pull_request" }
 #[derive(Deserialize)]
 struct GhPull {
     number: u64,
@@ -366,10 +384,14 @@ fn preview_name(name: &str) -> Option<(u64, String, String, String)> {
 /// An installable preview build from one artifact. Only a run from a branch of the repository
 /// itself counts: a fork's pull request can upload an artifact with any name, but its run's head
 /// repository is the fork, and the people who can push a branch here are the ones who can merge.
+/// The run must also have built the commit the name carries.
 fn preview_release(a: &GhArtifact) -> Option<Release> {
     let (pr, version, build, sha) = preview_name(&a.name)?;
     let run = a.workflow_run.as_ref()?;
     if a.expired || run.repository_id.is_none() || run.repository_id != run.head_repository_id {
+        return None;
+    }
+    if !run.head_sha.as_deref().is_some_and(|h| h.to_ascii_lowercase().starts_with(&sha.to_ascii_lowercase())) {
         return None;
     }
     Some(Release {
@@ -388,26 +410,59 @@ fn preview_release(a: &GhArtifact) -> Option<Release> {
     })
 }
 
-/// The newest preview build of each open pull request, newest pull request first. The pull
-/// request number in an artifact's name is believed only when the run that made the artifact built
-/// that pull request's own branch, so a build cannot pass as another pull request's preview. A
-/// closed pull request's artifact, which may outlive it for a moment, is not offered.
-fn preview_list(artifacts: &[GhArtifact], open: &[GhPull]) -> Vec<Release> {
-    let mut newest: std::collections::BTreeMap<u64, Release> = Default::default();
+/// Every build that could be each open pull request's preview: newest pull request first, and
+/// within one its builds newest first, each with the run that made it. The pull request number in
+/// an artifact's name is believed only when the run that made the artifact built that pull
+/// request's own branch, so a build cannot pass as another pull request's preview. A closed pull
+/// request's artifact, which may outlive it for a moment, is not offered.
+fn preview_candidates(artifacts: &[GhArtifact], open: &[GhPull]) -> Vec<Vec<(u64, Release)>> {
+    let mut by_pr: std::collections::BTreeMap<u64, Vec<(u64, u64, Release)>> = Default::default();
     for a in artifacts {
         let Some(r) = preview_release(a) else { continue };
         let Some(p) = r.preview.clone() else { continue };
         let Some(pull) = open.iter().find(|q| q.number == p.pr) else { continue };
-        if a.workflow_run.as_ref().and_then(|w| w.head_branch.as_deref()) != Some(pull.head.branch.as_str()) {
+        let Some(run) = a.workflow_run.as_ref() else { continue };
+        let Some(run_id) = run.id else { continue };
+        if run.head_branch.as_deref() != Some(pull.head.branch.as_str()) {
             continue;
         }
         let r = Release { preview: Some(PreviewInfo { title: pull.title.clone(), ..p.clone() }), ..r };
-        let newer = newest.get(&p.pr).and_then(|o| o.preview.as_ref()).map(|o| p.artifact_id > o.artifact_id).unwrap_or(true);
-        if newer {
-            newest.insert(p.pr, r);
+        by_pr.entry(p.pr).or_default().push((p.artifact_id, run_id, r));
+    }
+    by_pr
+        .into_values()
+        .rev()
+        .map(|mut v| {
+            v.sort_by(|a, b| b.0.cmp(&a.0));
+            v.into_iter().map(|(_, run, r)| (run, r)).collect()
+        })
+        .collect()
+}
+
+/// The preview each pull request offers: its newest build whose run is a pull request run of the
+/// preview workflow. `runs` holds the runs read so far (None: it could not be read, so its build
+/// is not offered). The second list is the runs still to read before the answer is complete;
+/// while it is not empty the first is not final.
+fn pick_previews(candidates: &[Vec<(u64, Release)>], runs: &std::collections::HashMap<u64, Option<GhRunDetail>>) -> (Vec<Release>, Vec<u64>) {
+    let (mut found, mut needed) = (vec![], vec![]);
+    for builds in candidates {
+        for (run, r) in builds {
+            match runs.get(run) {
+                None => {
+                    needed.push(*run);
+                    break;
+                }
+                Some(Some(d)) if run_is_preview(d) => {
+                    found.push(r.clone());
+                    break;
+                }
+                Some(_) => {}
+            }
         }
     }
-    newest.into_values().rev().collect()
+    needed.sort_unstable();
+    needed.dedup();
+    (found, needed)
 }
 
 const GITHUB_TOKEN: &str = "github-token";
@@ -584,7 +639,7 @@ fn github(url: String) -> Result<reqwest::RequestBuilder> {
 /// its higher request limit, but listing works without).
 async fn list_previews() -> Result<Vec<Release>> {
     let mut artifacts = vec![];
-    for page in 1..=3 {
+    for page in 1..=10 {
         let got: GhArtifacts = github(format!("https://api.github.com/repos/{}/actions/artifacts?per_page=100&page={page}", repo()))?
             .timeout(std::time::Duration::from_secs(30))
             .send()
@@ -616,7 +671,23 @@ async fn list_previews() -> Result<Vec<Release>> {
             break;
         }
     }
-    Ok(preview_list(&artifacts, &pulls))
+    // Each build on offer is checked against its run: made by the preview workflow, for a pull
+    // request. A run that cannot be read is not believed, and the pull request's next build is tried.
+    let candidates = preview_candidates(&artifacts, &pulls);
+    let mut runs: std::collections::HashMap<u64, Option<GhRunDetail>> = Default::default();
+    loop {
+        let (found, needed) = pick_previews(&candidates, &runs);
+        if needed.is_empty() {
+            return Ok(found);
+        }
+        for id in needed {
+            let detail = match github(format!("https://api.github.com/repos/{}/actions/runs/{id}", repo()))?.timeout(std::time::Duration::from_secs(30)).send().await {
+                Ok(res) if res.status().is_success() => res.json::<GhRunDetail>().await.ok(),
+                _ => None,
+            };
+            runs.insert(id, detail);
+        }
+    }
 }
 
 /// What installs and updates use: the chosen pull request's preview build while it exists, else
@@ -1252,8 +1323,30 @@ mod tests {
         unsafe { std::env::remove_var("POKI_GITHUB_CLIENT_ID") };
     }
 
+    /// An artifact uploaded by run `id * 10`, which built the commit in its name on branch dev/pr<N>.
     fn art(id: u64, name: &str, repo: u64, head: u64) -> GhArtifact {
-        GhArtifact { id, name: name.into(), expired: false, created_at: Some("2026-11-12T05:00:00Z".into()), archive_download_url: format!("https://x/artifacts/{id}/zip"), workflow_run: Some(GhRun { repository_id: Some(repo), head_repository_id: Some(head), head_branch: Some(format!("dev/pr{}", name.trim_start_matches("Poki-preview-pr").split('-').next().unwrap_or(""))) }) }
+        let rest = name.trim_start_matches("Poki-preview-pr");
+        let pr = rest.split('-').next().unwrap_or("");
+        let sha = rest.rsplit('-').next().unwrap_or("");
+        GhArtifact { id, name: name.into(), expired: false, created_at: Some("2026-11-12T05:00:00Z".into()), archive_download_url: format!("https://x/artifacts/{id}/zip"), workflow_run: Some(GhRun { id: Some(id * 10), repository_id: Some(repo), head_repository_id: Some(head), head_branch: Some(format!("dev/pr{pr}")), head_sha: Some(format!("{sha}0123456789abcdef0123456789")) }) }
+    }
+
+    fn preview_run(path: &str, event: &str) -> Option<GhRunDetail> { Some(GhRunDetail { path: path.into(), event: event.into() }) }
+
+    /// The previews offered when every run is known: `runs` maps a run to its detail, and any run
+    /// not in it reads as a pull request run of the preview workflow.
+    fn previews_with(artifacts: &[GhArtifact], open: &[GhPull], runs: Vec<(u64, Option<GhRunDetail>)>) -> Vec<Release> {
+        let candidates = preview_candidates(artifacts, open);
+        let mut known: std::collections::HashMap<u64, Option<GhRunDetail>> = runs.into_iter().collect();
+        loop {
+            let (found, needed) = pick_previews(&candidates, &known);
+            if needed.is_empty() {
+                return found;
+            }
+            for id in needed {
+                known.insert(id, preview_run(PREVIEW_WORKFLOW, "pull_request"));
+            }
+        }
     }
 
     #[test]
@@ -1281,7 +1374,7 @@ mod tests {
         ];
         let pull = |number: u64, title: &str, branch: &str| GhPull { number, title: title.into(), head: GhPullHead { branch: branch.into() } };
         let open = vec![pull(177, "Fix a > b", "dev/pr177"), pull(12, "", "dev/pr12"), pull(180, "", "dev/pr180"), pull(200, "", "dev/pr200")];
-        let found = preview_list(&artifacts, &open);
+        let found = previews_with(&artifacts, &open, vec![]);
         assert_eq!(found.iter().map(|r| r.preview.as_ref().unwrap().pr).collect::<Vec<_>>(), vec![177, 12]);
         let p = &found[0];
         assert_eq!((p.version.as_str(), p.build.as_str(), p.tag.as_str(), p.ipa_url.as_str()), ("0.3.1", "785", "preview-pr-177", "https://x/artifacts/40/zip"));
@@ -1289,12 +1382,29 @@ mod tests {
         // A build of another branch under pull request 177's name is not believed.
         let mut forged = art(70, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
         forged.workflow_run.as_mut().unwrap().head_branch = Some("dev/other".into());
-        assert_eq!(preview_list(&[forged], &open).len(), 0);
+        assert_eq!(previews_with(&[forged], &open, vec![]).len(), 0);
         // A closed pull request's leftover build is not offered, and with no pull requests nothing is.
-        assert_eq!(preview_list(&artifacts, &open[..1]).len(), 1);
-        assert!(preview_list(&artifacts, &[]).is_empty());
+        assert_eq!(previews_with(&artifacts, &open[..1], vec![]).len(), 1);
+        assert!(previews_with(&artifacts, &[], vec![]).is_empty());
+        // The run built another commit than the one the name carries: not believed.
+        let mut moved = art(71, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
+        moved.workflow_run.as_mut().unwrap().head_sha = Some("ffffffffffff0123456789".into());
+        assert_eq!(previews_with(&[moved], &open, vec![]).len(), 0);
+        let mut no_sha = art(72, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
+        no_sha.workflow_run.as_mut().unwrap().head_sha = None;
+        assert_eq!(previews_with(&[no_sha], &open, vec![]).len(), 0);
+        // The newest build of 177 came from another workflow, or from a run that was not a pull
+        // request's, or its run could not be read: the build before it is offered instead.
+        for bad in [preview_run(".github/workflows/other.yml", "pull_request"), preview_run(PREVIEW_WORKFLOW, "push"), preview_run(PREVIEW_WORKFLOW, "workflow_dispatch"), None] {
+            let found = previews_with(&artifacts, &open, vec![(400, bad)]);
+            let p = found[0].preview.as_ref().unwrap();
+            assert_eq!((p.pr, p.artifact_id), (177, 30));
+        }
+        // When no build of a pull request passes, it offers none.
+        let found = previews_with(&artifacts, &open, vec![(400, None), (300, preview_run(PREVIEW_WORKFLOW, "push"))]);
+        assert_eq!(found.iter().map(|r| r.preview.as_ref().unwrap().pr).collect::<Vec<_>>(), vec![12]);
 
-        let found = preview_list(&artifacts, &open[..1]);
+        let found = previews_with(&artifacts, &open[..1], vec![]);
         let channels = vec![gh("app-prealpha-latest", true, "2026-11-09T06:00:00Z", Some("Poki-external-0.3.1-760.ipa"))];
         let (r, gone) = choose(&channels, Channel::PreAlpha, &found, Some(177));
         assert_eq!((r.unwrap().build.as_str(), gone), ("785", false));
