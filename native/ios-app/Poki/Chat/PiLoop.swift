@@ -115,8 +115,8 @@ final class PiLoop {
     /// The provider's message for the owner. pi never puts the key in it; a sign-in that ran out says so.
     private static func words(_ message: String, provider: ModelProvider) -> String {
         if message.contains("No API key") || message.contains("missingApiKey") || message.isEmpty && !ModelKeys.hasKey(provider) {
-            return provider.signsIn ? String(localized: "Sign in to ChatGPT again. Tap my picture, then Models.")
-                                    : String(localized: "Add your \(provider.name) key. Tap my picture, then Models.")
+            return provider.signsIn ? String(localized: "Sign in to ChatGPT again. Open Settings, then Models.")
+                                    : String(localized: "Add your \(provider.name) key. Open Settings, then Models.")
         }
         // The provider's stream ended on an error event with nothing in it (the library prints the
         // missing fields as "undefined"): said plainly, with what is left of it when there is any.

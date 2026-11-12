@@ -168,7 +168,7 @@ final class ChatModel {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
          ChatEntry(.poki(app.asksBeforeSensitiveSteps ? String(localized: "I’ll ask before anything you can’t undo.")
-                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, tap my picture, then Approvals.")))]
+                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, open Settings, then Approvals.")))]
     }
 
     private func greet() { entries = greeting }
@@ -280,8 +280,8 @@ final class ChatModel {
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
-            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first. Tap my picture, then Models.")
-                                       : String(localized: "Add a model key first. Tap my picture, then Models.")))
+            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first. Open Settings, then Models.")
+                                       : String(localized: "Add a model key first. Open Settings, then Models.")))
             return
         }
         let model = ModelKeys.selectedModel
