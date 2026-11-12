@@ -36,6 +36,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     @State private var insets = EdgeInsets()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var scheme
 
     /// Where the content scrolls sideways by itself (`scrollsSideways`), in screen coordinates.
     @State private var sideways: [CGRect] = []
@@ -116,7 +117,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
 
     /// Where the panel is drawn, from its resting place: off to the leading side when closed.
     private var panelOffset: CGFloat {
-        reduceMotion ? 0 : (shown - 1) * (layout.panel.maxX + ThreadsDrawerMotion.shadowRoom)
+        reduceMotion ? 0 : (shown - 1) * layout.travel
     }
 
     private var panel: some View {
@@ -142,7 +143,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             shape.fill(Color(.systemBackground)).overlay(shape.strokeBorder(Color(.separator), lineWidth: 0.5))
         } else if #available(iOS 26.0, *), DrawerGlass.current != .regular {
             // Clear glass, veiled a little in the page's colour so the list reads over any chat.
-            Color.clear.glassEffect(DrawerGlass.current == .soft ? .clear.tint(Color(.systemBackground).opacity(DrawerGlass.veil)) : .clear, in: shape)
+            Color.clear.glassEffect(DrawerGlass.current == .soft ? .clear.tint(Color(.systemBackground).opacity(DrawerGlass.veil(dark: scheme == .dark))) : .clear, in: shape)
         } else {
             Color.clear.glassSurface(in: shape, fallback: .card)
         }
@@ -212,7 +213,9 @@ struct ThreadsDrawerLayout {
         RoundedRectangle(cornerRadius: insets.bottom > 0 ? 34 : 18, style: .continuous)
     }
 
-    /// How far the finger moves the drawer from closed to open.
+    /// How far the finger moves the drawer from closed to open, and how far the panel moves with it: the
+    /// same distance, so the panel stays under the finger. Closed, its trailing edge is at the screen's edge
+    /// (its shadow fades out with it, and it is hidden there).
     var travel: CGFloat { max(panel.maxX, 1) }
 }
 
@@ -229,8 +232,6 @@ enum ThreadsDrawerMotion {
     static let cover: CGFloat = 0.8
     /// How far the chat moves back to the trailing side at fully open.
     static let chatShift: CGFloat = 24
-    /// Past the screen's edge when closed, so the panel's shadow does not show.
-    static let shadowRoom: CGFloat = 40
 
     /// The spring from `from` to `to`, starting at the finger's `speed` (progress per second).
     /// SwiftUI takes the starting speed as a share of the distance to go.
@@ -256,8 +257,10 @@ enum DrawerGlass: String {
     }()
     /// How much the chat blurs under the soft glass when fully open, in points.
     static let blur: CGFloat = 8
-    /// The page colour in the soft glass.
-    static let veil: CGFloat = 0.26
+    /// The page colour in the soft glass. Deeper in dark mode, where the list's light text would
+    /// otherwise sit on a bright part of the chat (the home page's bear) with too little contrast; the
+    /// chat's colours and outlines still show through.
+    static func veil(dark: Bool) -> CGFloat { dark ? 0.6 : 0.26 }
 }
 
 extension EnvironmentValues {

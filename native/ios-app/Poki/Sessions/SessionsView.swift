@@ -19,6 +19,14 @@ struct SessionsView: View {
     @State private var renaming: SavedSession?
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.drawerOnGlass) private var onGlass
+    @Environment(\.colorScheme) private var scheme
+
+    /// The time and the summary line. On the drawer's glass in dark mode a step lighter than the
+    /// system's secondary label, so they still read where a bright part of the chat (the home page's
+    /// bear) shows through, without a ground under the row.
+    private var secondary: Color {
+        onGlass && scheme == .dark ? Color(white: 0.92, opacity: 0.9) : Color(.secondaryLabel)
+    }
     @State private var newName = ""
 
     private var store: SessionStore { SessionStore.shared }
@@ -111,16 +119,16 @@ struct SessionsView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(verbatim: session.name).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
                             Spacer(minLength: 4)
-                            Text(verbatim: stamp(session)).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: stamp(session)).font(.footnote).monospacedDigit().foregroundStyle(secondary)
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(verbatim: line(session))
-                            .font(.subheadline).foregroundStyle(needs ? Tint.amberInk : Color(.secondaryLabel))
+                            .font(.subheadline).foregroundStyle(needs ? Tint.amberInk : secondary)
                             .lineLimit(big ? 2 : 1).frame(maxWidth: .infinity, alignment: .leading)
                         if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
                     }
-                    if big { Text(verbatim: stamp(session)).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                    if big { Text(verbatim: stamp(session)).font(.footnote).foregroundStyle(secondary) }
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 10)
