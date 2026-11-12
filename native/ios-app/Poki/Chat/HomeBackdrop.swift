@@ -15,7 +15,7 @@ import SwiftUI
 /// edge, laid in the stack at its own 797 points, once showed only the middle half of the light.
 ///
 /// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on, and its
-/// clock stops while the app is not active or another page covers this one. With Reduce Motion nothing
+/// clock stops while the app is not active, another page covers this one or the drawer is open. With Reduce Motion nothing
 /// sinks either; the change between the two layers is a fade. Behind the bear's place it always stands
 /// still (`StillPatch`).
 struct HomeBackdrop: View {
@@ -30,6 +30,7 @@ struct HomeBackdrop: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.coveredByDrawer) private var covered
     /// False while another page is pushed over this one.
     @State private var shown = false
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -37,7 +38,7 @@ struct HomeBackdrop: View {
     var body: some View {
         let dark = scheme == .dark
         let resting = reduceMotion || frozen || lowPower
-        let seen = shown && scenePhase == .active
+        let seen = shown && scenePhase == .active && !covered
         let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
             Tint.page

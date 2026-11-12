@@ -2016,6 +2016,23 @@
         }
       }
     },
+    "Close Conversations" : {
+      "comment" : "VoiceOver: the strip of the chat beside the open conversations drawer; activating it closes the drawer.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起对话列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起對話列表"
+          }
+        }
+      }
+    },
     "Collapsed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2880,6 +2897,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在下載開發者磁碟映像，%@"
+          }
+        }
+      }
+    },
+    "Earlier" : {
+      "comment" : "The heading over conversations from before yesterday, in the conversations drawer.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早"
           }
         }
       }
