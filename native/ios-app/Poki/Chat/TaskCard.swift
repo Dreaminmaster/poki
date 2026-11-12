@@ -374,28 +374,38 @@ private struct TaskStepRow: View {
 
 // MARK: Approval
 
-/// A step waiting for your answer, above the message field: what is asked, where, the words or the
-/// button it is about, how long it waits, and the two answers. Allow takes a hold, so a stray tap
-/// never lets a step through.
+/// A step waiting for your answer, above the message field: what is asked, where, every kind the
+/// rules saw, each step of the batch, the words it is about, how long it waits, and the two answers.
+/// Allow takes a hold, so a stray tap never lets a step through. The Lock Screen and the island send
+/// a batch here when they cannot show all of it; so the card shows all of it, scrolling what does
+/// not fit over the answers, which stay in sight.
 struct ApprovalAskCard: View {
     var title: String
     var detail: String
     /// The rules' kinds, over the title: the agent words the title, never these.
     var tags: [ApprovalTag] = []
+    /// The batch's actions, one by one, in order ("Tap “Clear”" four times is four steps).
+    var steps: [String] = []
     var quote: String
     var expires: Date?
     var answer: (Bool) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    /// The card floats over the chat above the message field: at most this tall, so the top bar and
+    /// the last message stay in sight on a 393 by 852 iPhone.
+    static let tallest: CGFloat = 480
+
     /// The card for a step waiting in PokiCore: its one sentence and the rules' kinds, or for a message
     /// this chat's task is about to send, who it goes to and the words.
     init(approval: PendingApproval, words: ChatModel.AskWords?, answer: @escaping (Bool) -> Void) {
         self.init(title: words?.title ?? approval.sentence, detail: words?.detail ?? "", tags: approval.tags,
-                  quote: words?.quote ?? "", expires: approval.expires, answer: answer)
+                  steps: ActivityWords.steps(approval.summary), quote: words?.quote ?? "", expires: approval.expires, answer: answer)
     }
 
-    init(title: String, detail: String, tags: [ApprovalTag] = [], quote: String, expires: Date?, answer: @escaping (Bool) -> Void) {
-        self.title = title; self.detail = detail; self.tags = tags; self.quote = quote; self.expires = expires; self.answer = answer
+    init(title: String, detail: String, tags: [ApprovalTag] = [], steps: [String] = [], quote: String, expires: Date?,
+         answer: @escaping (Bool) -> Void) {
+        self.title = title; self.detail = detail; self.tags = tags; self.steps = steps; self.quote = quote
+        self.expires = expires; self.answer = answer
     }
 
     var body: some View {
@@ -403,6 +413,31 @@ struct ApprovalAskCard: View {
         // as an alert's buttons.
         let large = typeSize.isAccessibilitySize
         let answers = large ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(AnswerRow())
+        // What is left for the words over the answers (one row of 50, or two one above the other).
+        let room = Self.tallest - 18 * 2 - 14 - (large ? 108 : 50)
+        VStack(alignment: .leading, spacing: 14) {
+            UpTo(height: room) {
+                ViewThatFits(in: .vertical) {
+                    details(large)
+                    ScrollView { details(large) }
+                }
+            }
+            answers {
+                Button { answer(false) } label: {
+                    Text("Don’t Allow").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(QuietCapsuleButtonStyle())
+                HoldToAllowButton { answer(true) }
+            }
+        }
+        .padding(18)
+        // It floats over the conversation and asks for an answer: the control layer, so glass. Like
+        // the message field under it, it stops growing at the first accessibility size.
+        .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    private func details(_ large: Bool) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             if large {
                 // At the accessibility sizes the words take the card's whole width under the bear and
@@ -426,20 +461,24 @@ struct ApprovalAskCard: View {
                     .padding(.vertical, 12).padding(.horizontal, 14)
                     .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 16, style: .continuous))
             }
-            answers {
-                Button { answer(false) } label: {
-                    Text("Don’t Allow").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
+            if !steps.isEmpty { stepList }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Each action of the batch, numbered, in the order the agent will take them.
+    private var stepList: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(verbatim: "\(index + 1)").font(.footnote.monospacedDigit()).foregroundStyle(Color(.secondaryLabel))
+                        .accessibilityHidden(true)
+                    Text(verbatim: step).font(.subheadline).foregroundStyle(Color(.label))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(QuietCapsuleButtonStyle())
-                HoldToAllowButton { answer(true) }
             }
         }
-        .padding(18)
-        // It floats over the conversation and asks for an answer: the control layer, so glass. Like
-        // the message field under it, it stops growing at the first accessibility size: it does not
-        // scroll, and larger text would push the buttons off the screen.
-        .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var words: some View {
@@ -485,6 +524,20 @@ struct ApprovalKindTags: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Its content as tall as it would like, up to `height`; taller content gets `height`, so a
+/// `ViewThatFits` inside can choose to scroll.
+private struct UpTo: Layout {
+    var height: CGFloat
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        let size = content.sizeThatFits(ProposedViewSize(width: proposal.width, height: height))
+        return CGSize(width: proposal.width ?? size.width, height: min(size.height, height))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
     }
 }
 

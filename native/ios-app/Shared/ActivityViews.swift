@@ -155,22 +155,38 @@ struct LockScreenCard: View {
         if face.tags.isEmpty { plainWords(palette) } else { taggedWords(palette) }
     }
 
-    /// An approval: the rules' kinds over its sentence, the buttons under them. What gives way, in
-    /// order: the screenshot (kept only while the tags fit on one line beside it), then the sentence
-    /// (down to one line). The tags, on as many lines as they need, and the buttons never do.
+    /// An approval: the rules' kinds as tags, the sentence in large type, the buttons. What gives way,
+    /// in order: the screenshot (kept only while the tags fit on one line beside it), then the
+    /// sentence's second line. Where the tags, one line and the buttons still do not fit (many kinds
+    /// at a large text size), the card shows no Allow: an answer here must see every kind. It shows
+    /// the sentence and Open Poki instead, where the card in the chat lists every kind and step.
     private func taggedWords(_ palette: ActivityPalette) -> some View {
         let shot = Thumbnail.picture
         let thumbnail = shot == nil ? nil : ActivityMetrics.thumbnail(face)
-        return ViewThatFits(in: .horizontal) {
-            if let shot, let thumbnail { tagged(palette, shot: shot, size: thumbnail) }
-            tagged(palette, shot: nil, size: nil)
+        let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
+                               badge: face.badgePlace(.lockScreen) == .besideValue)
+        return ViewThatFits(in: .vertical) {
+            beside(palette, shot: shot, size: thumbnail, lines: 2)
+            beside(palette, shot: shot, size: thumbnail, lines: 1)
+            ApprovalElsewhere(face: face, palette: palette, surface: .lockScreen, lines: 2, meta: meta)
+                .padding(.top, 22).padding(.bottom, 16)
+            ApprovalElsewhere(face: face, palette: palette, surface: .lockScreen, lines: 1, meta: meta)
+                .padding(.top, 22).padding(.bottom, 16)
+        }
+    }
+
+    /// The tagged card, with the screenshot while the tags fit beside it on one line.
+    private func beside(_ palette: ActivityPalette, shot: UIImage?, size: CGSize?, lines: Int) -> some View {
+        ViewThatFits(in: .horizontal) {
+            if let shot, let size { tagged(palette, shot: shot, size: size, lines: lines) }
+            tagged(palette, shot: nil, size: nil, lines: lines)
         }
     }
 
     /// The tagged card with or without the screenshot. Its widest wish is only the tags' row on one
     /// line (the sentence and the buttons take whatever width they get), so `ViewThatFits` keeps the
     /// screenshot exactly while the tags fit beside it.
-    private func tagged(_ palette: ActivityPalette, shot: UIImage?, size: CGSize?) -> some View {
+    private func tagged(_ palette: ActivityPalette, shot: UIImage?, size: CGSize?, lines: Int) -> some View {
         let reserved = size.map { $0.width + 12 } ?? 0
         let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
                                badge: face.badgePlace(.lockScreen) == .besideValue, timer: shot == nil ? 46 : 38)
@@ -181,7 +197,7 @@ struct LockScreenCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     meta.frame(height: 16).fixedSize()
                 }
-                Title(face: face, palette: palette)
+                Title(face: face, palette: palette, lines: lines)
                     .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 3)
                     .layoutPriority(-1)
@@ -360,21 +376,14 @@ struct IslandBottom: View {
             }
             .padding(.trailing, 20)
         } else if !face.tags.isEmpty {
-            // An approval: the rules' kinds on as many lines as they need, then the sentence in what
-            // is left (down to one line), the buttons always whole under them.
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ApprovalTags(tags: face.tags, palette: palette, note: face.event, noteTone: face.eventTone).padding(.top, 1)
-                    HStack(spacing: 6) {
-                        Title(face: face, palette: palette).layoutPriority(-1)
-                        if face.badgePlace(.island) == .afterReason, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
-                    }
-                    .padding(.top, 2)
-                    .layoutPriority(-1)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .clipped()
-                Control(face: face, surface: .island).padding(.top, 4)
+            // An approval: the rules' kinds as tags, the sentence in large type (two lines, then one),
+            // the buttons. Where the tags, one line and the buttons do not all fit (many kinds at a
+            // large text size), no Allow: the sentence and Open Poki, as on the Lock Screen card.
+            ViewThatFits(in: .vertical) {
+                tagged(palette, lines: 2)
+                tagged(palette, lines: 1)
+                ApprovalElsewhere(face: face, palette: palette, surface: .island, lines: 2)
+                ApprovalElsewhere(face: face, palette: palette, surface: .island, lines: 1)
             }
             .padding(.trailing, 24)
             .padding(.bottom, 14)
@@ -396,6 +405,50 @@ struct IslandBottom: View {
             .padding(.trailing, 24)
             .padding(.bottom, bottom)
         }
+    }
+}
+
+extension IslandBottom {
+    private func tagged(_ palette: ActivityPalette, lines: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ApprovalTags(tags: face.tags, palette: palette, note: face.event, noteTone: face.eventTone).padding(.top, 1)
+            HStack(spacing: 6) {
+                Title(face: face, palette: palette, lines: lines).layoutPriority(-1)
+                if face.badgePlace(.island) == .afterReason, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
+            }
+            .padding(.top, 2)
+            Spacer(minLength: 4)
+            Control(face: face, surface: .island)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// An approval where its kinds, the sentence and the answers do not all fit: the sentence, and a
+/// button into Poki, whose card lists every kind and every step. No Allow: an answer given here
+/// would be given without seeing every kind the rules saw. Once answered, the answer's line instead.
+private struct ApprovalElsewhere: View {
+    var face: ActivityFace
+    var palette: ActivityPalette
+    var surface: ActivitySurface
+    var lines: Int
+    /// The countdown, on the Lock Screen card; the island draws its own beside the camera.
+    var meta: MetaCluster?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                Title(face: face, palette: palette, lines: lines)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let meta { meta.frame(height: 16).fixedSize() }
+            }
+            Spacer(minLength: 6)
+            if case .approval = face.bottom {
+                OpenPokiButton(link: face.link, surface: surface)
+            } else {
+                Control(face: face, surface: surface)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -502,6 +555,8 @@ struct CompactTrailing: View {
                         .frame(width: ActivityMetrics.compactWords, height: 13, alignment: .trailing)
                 }
                 .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
+                // Two lines in the island's 36.67 points: past this size the countdown leaves it.
+                .dynamicTypeSize(...DynamicTypeSize.xLarge)
             case .countdown(let until):
                 TimerText(range: Countdown.range(until), down: true, colour: palette.approval, width: 42)
             case .symbol(let name, let tone):
@@ -713,6 +768,8 @@ private struct Title: View {
     var palette: ActivityPalette
     /// The Lock Screen's short cards say Poki's state in large type.
     var large = false
+    /// The lines an approval's sentence may take, where fewer than two are left for it.
+    var lines: Int?
     private let theme = ActivityTheme.current
     var body: some View {
         if face.contentIsCode {
@@ -731,7 +788,7 @@ private struct Title: View {
             Text(face.content)
                 .font(large ? theme.status : stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
                 .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                .lineLimit(asking ? 2 : 1).minimumScaleFactor(large ? 0.65 : 0.8)
+                .lineLimit(asking ? lines ?? 2 : 1).minimumScaleFactor(large ? 0.65 : 0.8)
                 .contentTransition(.interpolate)
                 .frame(height: asking ? nil : large ? 30 : stepLike ? 24 : 25, alignment: .leading)
         }
@@ -838,17 +895,29 @@ private struct Control: View {
             HandoffDoneButton(handoffID: id, surface: surface)
                 .transition(.activityRow)
         case .openPoki:
-            Link(destination: face.link) {
-                Text(String(activity: "Open Poki"))
-                    .font(theme.button)
-                    .foregroundStyle(palette.text)
-                    .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
-                    .background(palette.buttonFill, in: .capsule)
-            }
-            .transition(.activityRow)
+            OpenPokiButton(link: face.link, surface: surface)
+                .transition(.activityRow)
         case .segments(let number, let count):
             SegmentLine(step: number, total: count, palette: palette)
                 .transition(.activityRow)
+        }
+    }
+}
+
+/// Open Poki, at the screen the face links to.
+private struct OpenPokiButton: View {
+    var link: URL
+    var surface: ActivitySurface
+    private let theme = ActivityTheme.current
+    var body: some View {
+        let palette = theme.palette(surface)
+        Link(destination: link) {
+            Text(String(activity: "Open Poki"))
+                .font(theme.button)
+                .foregroundStyle(palette.text)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
+                .background(palette.buttonFill, in: .capsule)
         }
     }
 }

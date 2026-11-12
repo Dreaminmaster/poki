@@ -40,8 +40,9 @@ enum ApprovalNotice {
     static func content(_ approval: PendingApproval, caller: String? = nil) -> UNNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = caller.map { String(localized: "\($0) needs your OK") } ?? StatusWord.needsApproval.text
-        content.body = approval.sentence
-        if let kinds = approval.kindLine { content.subtitle = kinds }
+        // The kinds lead the body ("Payment and Deletion: …"): the banner cuts a long body at its end,
+        // and a subtitle is not shown everywhere the body is.
+        content.body = approval.alertLine
         content.categoryIdentifier = category
         content.userInfo = ["approval": approval.id]
         content.sound = .default
