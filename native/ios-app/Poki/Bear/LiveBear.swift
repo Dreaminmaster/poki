@@ -171,8 +171,9 @@ struct ModelBear<Flat: View>: View {
     var modelled: Bool
     /// The square's side at rest, in points: the bear is drawn at that size and scaled from it.
     var side: CGFloat
-    /// The bear is in sight: otherwise it holds its last frame and draws nothing.
-    var live: Bool
+    /// The bear is in sight: otherwise it holds its last frame and draws nothing. Leaving the screen,
+    /// the drawer or the profile over it, and the background count too, without being told.
+    var live = true
     /// Counts the touches on the bear.
     var pokes = 0
     @ViewBuilder var flat: () -> Flat
@@ -204,6 +205,8 @@ struct ModelBear<Flat: View>: View {
                 .opacity(showsModel ? 1 : 0)
             }
         }
+        // A change of face fades between the model and the flat picture.
+        .animation(.easeInOut(duration: 0.25), value: modelled)
         .keyframeAnimator(initialValue: 1.0, trigger: hops) { content, scale in
             content.scaleEffect(x: 2 - scale, y: scale, anchor: .bottom)
         } keyframes: { _ in

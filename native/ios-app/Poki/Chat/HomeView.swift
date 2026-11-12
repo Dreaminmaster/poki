@@ -43,15 +43,18 @@ enum HomeMotion {
 
 // MARK: Poki's picture
 
-/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground. Ready,
-/// it is the three-dimensional bear, blinking, and a tap on it makes it say hi (`ModelBear`); the
-/// other faces are not modelled yet and are the flat ones, which blink and hop when the state
-/// changes (`BlinkingFace`).
+extension PokiMood {
+    /// The faces the three-dimensional bear has so far: ready, and at work. The others stay flat.
+    var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking].contains(self) }
+}
+
+/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground. Ready
+/// or at work, it is the three-dimensional bear, blinking, and a tap on it makes it say hi
+/// (`ModelBear`); the other faces are not modelled yet and are the flat ones, which blink and hop
+/// when the state changes (`BlinkingFace`). The two fade into each other.
 struct PokiPortrait: View {
     var mood: PokiMood
     var side: CGFloat = HomeMotion.avatar
-    /// In sight: the model draws only then.
-    var live = true
     /// Counts the taps on the picture.
     var pokes = 0
 
@@ -60,7 +63,7 @@ struct PokiPortrait: View {
             Circle().fill(Tint.portrait)
             // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
             // cuts it at the chest.
-            ModelBear(modelled: mood == .ready, side: side * 50 / 56, live: live, pokes: pokes) {
+            ModelBear(modelled: mood.modelled, side: side * 50 / 56, pokes: pokes) {
                 BlinkingFace(mood: mood, side: side * 50 / 56)
             }
             .frame(width: side * 50 / 56, height: side * 50 / 56)
@@ -73,30 +76,25 @@ struct PokiPortrait: View {
 }
 
 /// Poki at the top of the home page and of the conversation (board 定稿 07): its picture in a white
-/// ring with a soft blue shadow, and under it a dot and the word for where it stands. The picture
-/// inside the ring is the one place the three-dimensional bear takes over.
+/// ring with a soft blue shadow, and under it its name on a capsule of glass. Where Poki stands
+/// shows in the picture's face; the word for it is at the top of Poki's card and in what VoiceOver
+/// reads. The picture inside the ring is the one place the three-dimensional bear takes over.
 struct PokiHead: View {
     var status: PokiStatus
     /// Counts the taps on Poki, for the bear to answer.
     var pokes = 0
     @Environment(\.colorScheme) private var scheme
 
-    /// The status word, from the one table (StatusWord).
-    private var word: String { PokiStatusCopy.word(status) }
-
     var body: some View {
         let dark = scheme == .dark
-        VStack(spacing: 5) {
+        VStack(spacing: 6) {
             PokiPortrait(mood: status.mood, pokes: pokes)
                 .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.85 : 1), lineWidth: 2))
                 .shadow(color: dark ? Color(hex: 0x3C8DFF).opacity(0.35) : Color(hex: 0x0177FD).opacity(0.18), radius: dark ? 8 : 7, y: 4)
-            HStack(spacing: 5) {
-                // Ready is green here (the board), as Done is.
-                Circle().fill(status.mood == .ready ? Tint.green : status.mood.dot).frame(width: 6, height: 6)
-                Text(verbatim: word)
-                    .font(.system(size: 13, weight: .medium)).foregroundStyle(dark ? Color(hex: 0xC7CCD6) : Color(hex: 0x5F676C))
-                    .lineLimit(1)
-            }
+            Text(verbatim: "Poki")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(.label))
+                .padding(.horizontal, 12).frame(height: 24)
+                .glassSurface(in: Capsule())
         }
     }
 }

@@ -100,6 +100,11 @@ struct PokiStatusCard: View {
         let power = PowerTile.card(model: model)
         let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
+            // Where Poki stands, which the top bar no longer says in words: its face shows it there.
+            Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
+                .font(.footnote).foregroundStyle(soft)
+                .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
+                .accessibilityIdentifier("status.word")
             modelRow
             if choosingModel { modelChoices }
             rule
