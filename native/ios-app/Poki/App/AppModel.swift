@@ -576,6 +576,7 @@ final class AppModel {
         handoffTick()
         diskImage.notice()
         warmInProcess("Poki came to the front")
+        openWhileInFront("Poki came to the front")
         loopback.resume()
         // Swiped away, ended by iOS, or Poki turned on from the background (where iOS starts none):
         // the Live Activity comes back while Poki is on, so the next thing that needs the owner pops up.
@@ -632,6 +633,8 @@ final class AppModel {
     func wentToBackground() {
         inFront = false
         InProcessWDA.gate.withLock { $0.inFront = false }
+        // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
+        if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
         sessionOn ? loopback.resume(every: 6) : loopback.pause()
         if pairingUnderWay { log.add("pairing", "Poki in the background while pairing; keep-alive \(pairingKeepAlive.isOn ? "playing" : "off")") }
     }
@@ -890,18 +893,25 @@ final class AppModel {
         wantsOn = true
         launcherConfig = LauncherConfig(pairing_file: pairing, ddi_dir: AppFiles.ddiDirectory.path, in_process: automationPath == .inProcess, ddi_marker: Self.ddiMarker)
         lastAgentActivity = Date()
-        // The runner (and with it iOS's automation banner) starts only when an agent asks.
+        // Away from Poki the runner (and with it iOS's automation banner) starts only when an agent asks.
         standBy(reason: nil)
         if let relay { core.start(relay: relay) }
         idleTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkIdle() } }
-        // Where iOS will ask for the passcode, the session opens now, while the owner who just tapped
-        // Continue on the passcode note is here, not at an agent's first request (ESP-451). The
-        // launcher starts, and once it runs, warmInProcess opens the session. It stands by again
-        // after the idle time, as after any task.
-        if passcodeExpected, inFront, !Self.onSimulator {
-            log.add("runner", "turned on by the owner: opening the automation session now, so iOS asks for the passcode while they are here")
-            wakeRunner()
-        }
+        openWhileInFront("turned on with Poki in front")
+    }
+
+    /// Poki on and in front: the automation session opens now, not at an agent's first request, so the
+    /// first step of a task does not wait for it (the owner's call, ESP-464: about 2 s, 4 to 5 s after
+    /// the iPhone restarted), and it does not stand by while Poki stays in front (`checkIdle`). iOS's
+    /// automation banner shows from then on. Where iOS will ask for the passcode first, the owner is
+    /// right here when it does (ESP-451). The session's first open warms up as every open does: a
+    /// shallow read of the app in front and a screenshot (`prepare`), not paid by the first step.
+    /// Not after the owner paused it, nor after they cancelled iOS's passcode screen (no new screen
+    /// until they turn Poki on again), nor once this launch's session was closed (opening Poki again
+    /// starts a new process).
+    private func openWhileInFront(_ why: String) {
+        guard sessionOn, runnerPaused, !ownerPaused, inFront, !Self.onSimulator, !inProcessUsedUp, !InProcessWDA.automationDeclined else { return }
+        wakeRunner(asked: why)
     }
 
     /// Turned on again after a session of this launch was closed: Poki starts over as a new process
@@ -1124,20 +1134,20 @@ final class AppModel {
     }
 
     /// Starts a paused runner again (the next agent request, or the owner).
-    func wakeRunner() {
+    func wakeRunner(asked: String = "an agent asked") {
         ownerPaused = false
         guard sessionOn, runnerPaused else { return }
         runnerPaused = false
         host.setPaused(false)
         lastAgentActivity = Date()
-        log.add("runner", automationPath == .inProcess ? "an agent asked: opening the automation session again" : "an agent asked: starting the runner")
+        log.add("runner", automationPath == .inProcess ? "\(asked): opening the automation session again" : "\(asked): starting the runner")
         activity.update { $0.runnerPaused = false; $0.phase = .working; $0.headline = "Starting the runner"; $0.since = Date() }
         if automationPath == .inProcess, inProcessUsedUp {
             log.add("runner", "an agent asked, but the session of this launch was closed: open Poki to start it again")
             problem = String(localized: "Open Poki so agents can see the screen again: it restarts once.")
             AttentionNotice.post(title: String(localized: "Open Poki"), body: String(localized: "An agent is waiting. Open Poki so it can see the screen again."))
         }
-        if automationPath == .inProcess, runner.isRunning { warmInProcess("an agent asked"); return }
+        if automationPath == .inProcess, runner.isRunning { warmInProcess(asked); return }
         launchRunner()
     }
 
@@ -1148,16 +1158,17 @@ final class AppModel {
         passcodeHint = inProcessPasscode || runner.state == "launching" && launchingSince.map { now.timeIntervalSince($0) > 10 } == true
         // On both paths the automation (the runner, or the in-process session) ends after the idle
         // time, so iOS's banner shows only while an agent works; the next request starts it again.
-        guard sessionOn, !runnerPaused, idleStopSeconds > 0, approvals.isEmpty, activityText == "Idle" else { return }
+        // Not while Poki is in front: there the owner wants it open for the next task (ESP-464).
+        guard sessionOn, !runnerPaused, !inFront, idleStopSeconds > 0, approvals.isEmpty, activityText == "Idle" else { return }
         if now.timeIntervalSince(lastAgentActivity) >= Double(idleStopSeconds) {
             let reason = "Stopped after \(idleStopSeconds / 60 > 0 ? "\(idleStopSeconds / 60) min" : "\(idleStopSeconds) s") without agent activity"
             // The task is over: the phone goes back to the app it began in while the runner can still
-            // switch apps, then the runner stops unless an agent came back meanwhile.
+            // switch apps, then the runner stops unless an agent (or Poki in front) came back meanwhile.
             Task { [weak self, core] in
                 let line = await core.finishTask()
                 guard let self else { return }
                 if let line { self.log.add("runner", line) }
-                guard self.activityText == "Idle", Date().timeIntervalSince(self.lastAgentActivity) >= Double(self.idleStopSeconds) else { return }
+                guard self.activityText == "Idle", !self.inFront, Date().timeIntervalSince(self.lastAgentActivity) >= Double(self.idleStopSeconds) else { return }
                 self.pauseRunner(reason: reason, byOwner: false)
             }
         }
