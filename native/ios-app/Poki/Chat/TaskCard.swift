@@ -390,27 +390,23 @@ struct ApprovalAskCard: View {
     var body: some View {
         // Side by side with Allow the wider, or one above the other at the accessibility text sizes,
         // as an alert's buttons.
-        let answers = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(AnswerRow())
+        let large = typeSize.isAccessibilitySize
+        let answers = large ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(AnswerRow())
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                PokiAvatar(size: 48, mood: .needsYou)
-                VStack(alignment: .leading, spacing: 2) {
-                    if !tags.isEmpty { ApprovalKindTags(tags: tags).padding(.bottom, 4) }
-                    Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
-                    if !detail.isEmpty {
-                        Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
-                    }
+            if large {
+                // At the accessibility sizes the words take the card's whole width under the bear and
+                // the countdown, so the tags and the sentence stay readable and the buttons on screen.
+                HStack(alignment: .center, spacing: 12) {
+                    PokiAvatar(size: 48, mood: .needsYou)
+                    Spacer(minLength: 0)
+                    countdown
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let expires, expires > Date() {
-                    // The countdown keeps its own width, so the title does not jump each second.
-                    Text(timerInterval: Date()...expires, countsDown: true)
-                        .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(Tint.amberInk)
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize()
-                        .padding(.horizontal, 10).frame(minHeight: 24)
-                        .background(Tint.amberSoft, in: .capsule)
-                        .accessibilityLabel(Text("Time left"))
+                words
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    PokiAvatar(size: 48, mood: .needsYou)
+                    words
+                    countdown
                 }
             }
             if !quote.isEmpty {
@@ -428,8 +424,35 @@ struct ApprovalAskCard: View {
             }
         }
         .padding(18)
-        // It floats over the conversation and asks for an answer: the control layer, so glass.
+        // It floats over the conversation and asks for an answer: the control layer, so glass. Like
+        // the message field under it, it stops growing at the first accessibility size: it does not
+        // scroll, and larger text would push the buttons off the screen.
         .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    private var words: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if !tags.isEmpty { ApprovalKindTags(tags: tags).padding(.bottom, 4) }
+            Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
+            if !detail.isEmpty {
+                Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var countdown: some View {
+        if let expires, expires > Date() {
+            // The countdown keeps its own width, so the title does not jump each second.
+            Text(timerInterval: Date()...expires, countsDown: true)
+                .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(Tint.amberInk)
+                .multilineTextAlignment(.trailing)
+                .fixedSize()
+                .padding(.horizontal, 10).frame(minHeight: 24)
+                .background(Tint.amberSoft, in: .capsule)
+                .accessibilityLabel(Text("Time left"))
+        }
     }
 }
 
