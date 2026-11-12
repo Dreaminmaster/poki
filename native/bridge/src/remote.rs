@@ -155,6 +155,23 @@ impl Session {
         Ok(())
     }
 
+    fn input_media_deadline(&self) -> Option<tokio::time::Instant> {
+        let media = self.connection.as_ref()?.media.as_ref()?;
+        Some(
+            (media.last_activity + INPUT_MEDIA_IDLE_TIMEOUT)
+                .min(media.last_input + INPUT_MEDIA_MAX_READ_HOLD),
+        )
+    }
+
+    async fn release_input_on_deadline(&mut self) {
+        if let Some(deadline) = self.input_media_deadline() {
+            tokio::time::sleep_until(deadline).await;
+            let _ = self.release_input().await;
+        } else {
+            std::future::pending::<()>().await;
+        }
+    }
+
     async fn release_input(&mut self) -> Result<()> {
         if let Some(connection) = &mut self.connection {
             close_input(&mut connection.media).await?;
@@ -163,6 +180,12 @@ impl Session {
     }
 
     async fn request(&mut self, request: Value) -> Result<Value> {
+        if self
+            .input_media_deadline()
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            let _ = self.release_input().await;
+        }
         if request["op"] == "release_input" {
             self.release_input().await?;
             return Ok(json!({"released":true}));
@@ -180,6 +203,7 @@ impl Session {
                 action,
                 Request::InstallApp { .. } | Request::UninstallApp { .. }
             ) {
+                let _ = self.release_input().await;
                 return match &self.transport {
                     Transport::Local(udid) => execute(udid, action).await,
                     Transport::Remote(_) => {
@@ -193,6 +217,7 @@ impl Session {
             // Keep the working tunnel until its replacement has actually connected.
             // A failed reconnect must not destroy the only usable cellular session.
             if self.connection.is_none() || request["op"] == "reconnect" {
+                let _ = self.release_input().await;
                 if request["op"] == "reconnect"
                     && matches!(&self.transport, Transport::Remote(config) if config.uses_bonjour())
                 {
@@ -236,7 +261,22 @@ impl Session {
             )
             .await;
             let error = match result {
-                Ok(Ok(value)) => return Ok(value),
+                Ok(Ok(value)) => {
+                    if !action.uses_input_media()
+                        && value["outcome"] != "not_sent"
+                        && value["sent"] != false
+                        && let Some(m) = media.as_mut()
+                    {
+                        m.last_activity = tokio::time::Instant::now();
+                    }
+                    if self
+                        .input_media_deadline()
+                        .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+                    {
+                        let _ = self.release_input().await;
+                    }
+                    return Ok(value);
+                }
                 Ok(Err(error)) => error,
                 Err(_) => "Remote operation timed out".into(),
             };
@@ -386,19 +426,48 @@ async fn reply(session: &mut Session, line: &str) -> Value {
         Err("Remote request exceeds size limit".into())
     } else {
         match serde_json::from_str::<Value>(line) {
-            Ok(request) => session.request(request).await,
+            Ok(request) => Box::pin(session.request(request)).await,
             Err(e) => Err(e.into()),
         }
     };
     response.unwrap_or_else(|e| json!({"isError":true,"transport_error":true,"error":e.to_string(),"screen_change_verified":false}))
 }
 
+const INPUT_MEDIA_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+pub(super) const INPUT_MEDIA_MAX_READ_HOLD: Duration = Duration::from_secs(15);
+
+async fn with_media_deadline<T>(
+    session: &mut Session,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    if session
+        .input_media_deadline()
+        .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+    {
+        let _ = session.release_input().await;
+    }
+    tokio::pin!(future);
+    tokio::select! {
+        biased;
+        output = &mut future => output,
+        () = session.release_input_on_deadline() => future.await,
+    }
+}
+
 pub async fn serve(path: &str) -> Result<Value> {
+    use tokio::io::AsyncWriteExt;
     let mut session = load(path)?;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    while let Some(line) = lines.next_line().await? {
-        println!("{}", reply(&mut session, &line).await);
-        std::io::stdout().flush()?;
+    let mut stdout = tokio::io::stdout();
+    while let Some(line) = with_media_deadline(&mut session, lines.next_line()).await? {
+        let output = reply(&mut session, &line).await;
+        let mut bytes = serde_json::to_vec(&output)?;
+        bytes.push(b'\n');
+        with_media_deadline(&mut session, async {
+            stdout.write_all(&bytes).await?;
+            stdout.flush().await
+        })
+        .await?;
     }
     let _ = session.release_input().await;
     Ok(json!({"closed":true}))
@@ -437,21 +506,34 @@ async fn serve_session(mut session: Session, socket_path: &str) -> Result<Value>
     println!("{}", json!({"ready":true}));
     std::io::stdout().flush()?;
     loop {
-        let (mut socket, _) = listener.accept().await?;
-        let hello = format!("{}\n", json!({"pid":std::process::id()}));
-        if socket.write_all(hello.as_bytes()).await.is_err() {
+        let (mut socket, _) = with_media_deadline(&mut session, listener.accept()).await?;
+        let Some((mut stream, line)) = with_media_deadline(&mut session, async {
+            let hello = format!("{}\n", json!({"pid":std::process::id()}));
+            if socket.write_all(hello.as_bytes()).await.is_err() {
+                return None;
+            }
+            let mut stream = BufReader::new(socket);
+            let mut line = String::new();
+            // The local directory is private. Bound incomplete requests so an abandoned client cannot hold the device.
+            if !matches!(
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    (&mut stream).take(2 * 1024 * 1024 + 1).read_line(&mut line),
+                )
+                .await,
+                Ok(Ok(n)) if n > 0
+            ) {
+                return None;
+            }
+            if line.len() > 2 * 1024 * 1024 {
+                return None;
+            }
+            Some((stream, line))
+        })
+        .await
+        else {
             continue;
-        }
-        let mut stream = BufReader::new(socket);
-        let mut line = String::new();
-        // The local directory is private. Bound incomplete requests so an abandoned client cannot hold the device.
-        if !matches!(tokio::time::timeout(Duration::from_secs(5), (&mut stream).take(2 * 1024 * 1024 + 1).read_line(&mut line)).await, Ok(Ok(n)) if n > 0)
-        {
-            continue;
-        }
-        if line.len() > 2 * 1024 * 1024 {
-            continue;
-        }
+        };
         if serde_json::from_str::<Value>(&line)
             .ok()
             .is_some_and(|v| v["op"] == "disconnect")
@@ -468,6 +550,11 @@ async fn serve_session(mut session: Session, socket_path: &str) -> Result<Value>
             _ => None,
         };
         let read_only = request.as_ref().is_ok_and(Request::read_only);
+        let previous_activity = session
+            .connection
+            .as_ref()
+            .and_then(|c| c.media.as_ref())
+            .map(|m| m.last_activity);
         let mut byte = [0u8; 1];
         let (output, abandoned) = if read_only {
             // Draining an observation preserves service framing when its caller stops waiting.
@@ -492,9 +579,34 @@ async fn serve_session(mut session: Session, socket_path: &str) -> Result<Value>
                 }
             }
         };
+        if abandoned {
+            if let (Some(previous), Some(media)) = (
+                previous_activity,
+                session.connection.as_mut().and_then(|c| c.media.as_mut()),
+            ) {
+                media.last_activity = previous;
+            }
+            if session
+                .input_media_deadline()
+                .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+            {
+                let _ = session.release_input().await;
+            }
+        }
         let mut bytes = serde_json::to_vec(&output)?;
         bytes.push(b'\n');
-        let delivered = !abandoned && stream.get_mut().write_all(&bytes).await.is_ok();
+        let delivered = !abandoned
+            && matches!(
+                with_media_deadline(
+                    &mut session,
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        stream.get_mut().write_all(&bytes),
+                    ),
+                )
+                .await,
+                Ok(Ok(()))
+            );
         if !delivered && output["saved"] == true {
             if let Some(path) = screenshot_path {
                 let _ = tokio::fs::remove_file(path).await;
@@ -1043,12 +1155,15 @@ mod tests {
         PHONE.with(|slot| *slot.borrow_mut() = Some(sender));
         // An earlier input left the media session open, so the tap goes straight to the touch service.
         let (display, _display_phone) = tokio::io::duplex(1 << 16);
+        let now = tokio::time::Instant::now();
         let media = InputMedia {
             client: DisplayServiceClient::from_stream(Box::new(display))
                 .await
                 .unwrap(),
             receivers: tokio::task::JoinSet::new(),
-            ready_at: tokio::time::Instant::now(),
+            ready_at: now,
+            last_input: now,
+            last_activity: now,
         };
         let (mut connection, phone) = tunnel();
         connection.media = Some(media);
@@ -1105,5 +1220,199 @@ mod tests {
             .as_ref()
             .expect("the live tunnel was dropped");
         assert_eq!(kept.rsd.uuid, "live tunnel");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_session_releases_input_media_and_keeps_the_tunnel() {
+        use tokio::io::AsyncBufReadExt;
+        let (sender, mut phones) = mpsc::unbounded_channel();
+        PHONE.with(|slot| *slot.borrow_mut() = Some(sender));
+        let make_media = |now: tokio::time::Instant| async move {
+            let (display, display_phone) = tokio::io::duplex(1 << 16);
+            let (media_open, media_closed) = mpsc::unbounded_channel::<()>();
+            let mut receivers = tokio::task::JoinSet::new();
+            receivers.spawn(async move {
+                let _open = media_open;
+                std::future::pending::<()>().await;
+            });
+            let media = InputMedia {
+                client: DisplayServiceClient::from_stream(Box::new(display))
+                    .await
+                    .unwrap(),
+                receivers,
+                ready_at: now,
+                last_input: now,
+                last_activity: now,
+            };
+            drop(display_phone);
+            (media, media_closed)
+        };
+
+        // 1. In-flight read-only operation crossing INPUT_MEDIA_MAX_READ_HOLD releases media at 15s
+        // while keeping the live tunnel intact.
+        let start = tokio::time::Instant::now();
+        let (media, mut slow_read_closed) = make_media(start).await;
+        let (mut connection, phone) = tunnel();
+        connection.rsd.uuid = "live tunnel".into();
+        connection.media = Some(media);
+        let rsd_port = connection.rsd_port;
+        let ax_port =
+            connection.rsd.services["com.apple.accessibility.axAuditDaemon.remoteAXService"].port;
+        tokio::spawn(answer(phone, vec![rsd_port, ax_port], None));
+        let mut session = Session {
+            transport: Transport::Local("fixture-phone".into()),
+            control: None,
+            connection: Some(connection),
+        };
+        tokio::time::advance(Duration::from_secs(14)).await;
+        session
+            .connection
+            .as_mut()
+            .unwrap()
+            .media
+            .as_mut()
+            .unwrap()
+            .last_activity = tokio::time::Instant::now();
+        assert_eq!(
+            session.input_media_deadline(),
+            Some(start + INPUT_MEDIA_MAX_READ_HOLD)
+        );
+        let closed_at = tokio::spawn(async move {
+            assert!(slow_read_closed.recv().await.is_none());
+            start.elapsed()
+        });
+        assert!(session.request(json!({"op":"ax_tree"})).await.is_err());
+        assert_eq!(closed_at.await.unwrap(), INPUT_MEDIA_MAX_READ_HOLD);
+        assert!(start.elapsed() > INPUT_MEDIA_MAX_READ_HOLD);
+        assert!(session.connection.as_ref().unwrap().media.is_none());
+        assert!(
+            session
+                .connection
+                .as_ref()
+                .unwrap()
+                .adapter
+                .bind_udp(0)
+                .await
+                .is_ok()
+        );
+
+        // 2. Refused requests and half-open sockets at 2.9s cannot delay the 3s idle release.
+        let reset_now = tokio::time::Instant::now();
+        let (media, mut media_closed) = make_media(reset_now).await;
+        session.connection.as_mut().unwrap().media = Some(media);
+        let refused = session
+            .request(json!({"op":"tap","x":-1,"y":200}))
+            .await
+            .unwrap();
+        assert_eq!(refused["outcome"], "not_sent");
+        assert_eq!(
+            session.input_media_deadline(),
+            Some(reset_now + INPUT_MEDIA_IDLE_TIMEOUT)
+        );
+        // Reconnect releases open input media immediately while preserving the working tunnel if replacement fails.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let (mut remote_live, _remote_phone) = tunnel();
+        let (remote_media, mut remote_media_closed) = make_media(reset_now).await;
+        remote_live.media = Some(remote_media);
+        let mut remote_session = Session {
+            transport: Transport::Remote(Config {
+                id: "synthetic-phone".into(),
+                host: "127.0.0.1".into(),
+                port: dead_port,
+                pairing_file: "/not-a-real-pairing-file".into(),
+            }),
+            control: None,
+            connection: Some(remote_live),
+        };
+        assert!(
+            remote_session
+                .request(json!({"op":"reconnect"}))
+                .await
+                .is_err()
+        );
+        assert!(remote_media_closed.recv().await.is_none());
+        assert!(remote_session.connection.as_ref().unwrap().media.is_none());
+        assert!(
+            remote_session
+                .connection
+                .as_ref()
+                .unwrap()
+                .adapter
+                .bind_udp(0)
+                .await
+                .is_ok()
+        );
+
+        let reset_now = tokio::time::Instant::now();
+        let (media, mut media_closed) = make_media(reset_now).await;
+        session.connection.as_mut().unwrap().media = Some(media);
+
+        let dir = std::env::temp_dir().join(format!(
+            "poki-idle-media-{}-{}",
+            std::process::id(),
+            reset_now.elapsed().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket_path = dir.join("session.sock");
+        let socket_str = socket_path.to_str().unwrap().to_owned();
+        let client_socket = socket_path.clone();
+        let client = tokio::spawn(async move {
+            while !client_socket.exists() {
+                tokio::task::yield_now().await;
+            }
+            tokio::time::sleep(Duration::from_millis(2900)).await;
+            let stalled = tokio::net::UnixStream::connect(&client_socket)
+                .await
+                .unwrap();
+            let mut stalled_reader = BufReader::new(stalled);
+            let mut greeting = String::new();
+            stalled_reader.read_line(&mut greeting).await.unwrap();
+
+            assert!(
+                media_closed.recv().await.is_none(),
+                "idle input media session was not closed during stalled client read"
+            );
+            assert!(
+                reset_now.elapsed() >= INPUT_MEDIA_IDLE_TIMEOUT
+                    && reset_now.elapsed() < Duration::from_secs(4),
+                "stalled client connection delayed idle media release: {:?}",
+                reset_now.elapsed()
+            );
+            drop(stalled_reader);
+
+            let send = |request: &str| {
+                let socket_path = client_socket.clone();
+                let request = request.to_owned();
+                async move {
+                    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+                    let mut reader = BufReader::new(stream);
+                    let mut greeting = String::new();
+                    reader.read_line(&mut greeting).await.unwrap();
+                    reader
+                        .get_mut()
+                        .write_all(request.as_bytes())
+                        .await
+                        .unwrap();
+                    let mut reply = String::new();
+                    reader.read_line(&mut reply).await.unwrap();
+                    serde_json::from_str::<Value>(&reply).unwrap()
+                }
+            };
+            let connected = send("{\"op\":\"connect\"}\n").await;
+            assert_eq!(connected["connected"], true, "{connected}");
+            let disconnected = send("{\"op\":\"disconnect\"}\n").await;
+            assert_eq!(disconnected["disconnected"], true, "{disconnected}");
+        });
+        let result = serve_session(session, &socket_str).await.unwrap();
+        client.await.unwrap();
+        assert_eq!(result["closed"], true);
+        assert!(
+            phones.try_recv().is_err(),
+            "releasing idle input media dropped the live tunnel"
+        );
+        PHONE.with(|slot| slot.borrow_mut().take());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
