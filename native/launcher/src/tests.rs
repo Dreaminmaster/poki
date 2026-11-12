@@ -74,6 +74,100 @@ fn without_the_loopback_it_waits_for_the_network_and_keeps_trying() {
     std::fs::remove_file(&path).unwrap();
 }
 
+/// What answers at the device address in a launcher test.
+#[derive(Clone, Copy, PartialEq)]
+enum Loopback {
+    /// Nothing listens: the connection is refused, as on cellular (GitHub issue 35).
+    Refuses,
+    /// It takes the connection and closes it: the remote pairing handshake fails (GitHub issue 69).
+    DropsTheHandshake,
+}
+
+/// Starts a launcher against `loopback`, with the developer disk image's marker file on the phone or
+/// not, and returns what it said once `until` holds (or after 5 s).
+fn launch_without_the_device(in_process: bool, mounted: bool, loopback: Loopback, until: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+    let _port = PORT_49152_TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    let name = format!("{in_process}-{mounted}-{}", loopback == Loopback::Refuses);
+    let path = temp(&format!("rp-without-device-{name}.plist"));
+    std::fs::write(&path, RpPairingFile::generate("Poki").to_bytes()).unwrap();
+    let marker = temp(&format!("ddi-marker-{name}"));
+    if mounted {
+        std::fs::write(&marker, b"").unwrap();
+    }
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let listener = (loopback == Loopback::DropsTheHandshake).then(|| {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", crate::remote::REMOTE_PAIRING_PORT)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                if listener.accept().is_err() {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        })
+    });
+    let config: Config =
+        serde_json::from_value(json!({"pairing_file": path, "device_address": "127.0.0.1", "in_process": in_process, "ddi_marker": marker}))
+            .unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let launcher = Arc::new(Launcher::new(config, Box::new(move |e| sink.lock().unwrap().push(e))));
+    launcher.clone().start();
+    wait_for(&events, 5, until);
+    launcher.stop();
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(listener) = listener {
+        listener.join().unwrap();
+    }
+    std::fs::remove_file(&path).unwrap();
+    let _ = std::fs::remove_file(&marker);
+    events.lock().unwrap().clone()
+}
+
+fn settled(events: &[Value]) -> bool {
+    events.iter().any(|v| ["running", "waiting_network", "failed"].contains(&v["state"].as_str().unwrap_or_default()))
+}
+
+/// ESP-448: set up on Wi-Fi, then a new task on cellular. The image is still mounted, so the app's
+/// own session needs no loopback: the launcher hands over to it instead of waiting for the network,
+/// and keeps the refusal's own words for the app's log.
+#[test]
+fn with_the_image_mounted_a_refused_loopback_starts_the_local_session() {
+    let events = launch_without_the_device(true, true, Loopback::Refuses, settled);
+    let running = events.iter().find(|v| v["state"] == "running").unwrap_or_else(|| panic!("no running state: {events:?}"));
+    assert_eq!(running["code"], "local_ddi", "{running}");
+    assert_eq!(running["runner"], "in-process", "{running}");
+    let detail = running["detail"].as_str().unwrap_or_default();
+    assert!(detail.starts_with("remote pairing connect failed"), "{running}");
+    assert!(!events.iter().any(|v| v["state"] == "waiting_network"), "{events:?}");
+}
+
+/// Mounting the image needs the developer services, so without it the loopback error stands.
+#[test]
+fn without_the_image_a_refused_loopback_still_waits_for_the_network() {
+    let events = launch_without_the_device(true, false, Loopback::Refuses, settled);
+    assert!(events.iter().any(|v| v["state"] == "waiting_network" && v["code"] == "loopback" && v["fix"] == LOOPBACK_FIX), "{events:?}");
+    assert!(!events.iter().any(|v| v["state"] == "running"), "{events:?}");
+}
+
+/// Poki Runner (not in-process) needs the developer services to launch its runner, image or not.
+#[test]
+fn the_runner_app_waits_for_the_loopback_with_the_image_mounted() {
+    let events = launch_without_the_device(false, true, Loopback::Refuses, settled);
+    assert!(events.iter().any(|v| v["state"] == "waiting_network" && v["code"] == "loopback"), "{events:?}");
+    assert!(!events.iter().any(|v| v["state"] == "running"), "{events:?}");
+}
+
+/// Only a refused connection means the loopback is not there. One that is taken and then dropped is
+/// a loopback in trouble: its error stands, so the owner and the log still see it.
+#[test]
+fn a_dropped_handshake_is_not_handed_to_the_mounted_image() {
+    let events = launch_without_the_device(true, true, Loopback::DropsTheHandshake, settled);
+    assert!(events.iter().any(|v| v["code"] == "handshake"), "{events:?}");
+    assert!(!events.iter().any(|v| v["state"] == "running"), "{events:?}");
+}
+
 /// GitHub issue 69: the loopback takes the connection, then the phone's remote pairing service never
 /// answers. Developer Mode is on (it cannot go off without a restart), so that is not the fix, and
 /// the pairing was never checked, so the app must not read it as refused.

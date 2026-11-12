@@ -2066,28 +2066,6 @@
         }
       }
     },
-    "Connect to Wi-Fi and open Poki first. Once it is on, you can switch to cellular and keep using it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先连接 Wi-Fi 并打开 Poki。开启后即可切回蜂窝网络继续使用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請先連線 Wi-Fi 並開啟 Poki。開啟後即可切回行動網路繼續使用。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connect to Wi-Fi and open Poki first. Once it’s on, you can switch to cellular."
-          }
-        }
-      }
-    },
     "Connect to Wi-Fi first" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4688,6 +4666,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機 VPN 已連線。上方的檢查會確認開發者服務能否訪問。"
+          }
+        }
+      }
+    },
+    "Local automation ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机自动化可用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機自動化可用"
           }
         }
       }
@@ -11292,6 +11286,22 @@
         }
       }
     },
+    "This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "蜂窝网络下，此 iPhone 在 10.7.0.1 没有应答。开发者磁盘映像仍已装载时，新任务无需回环也能开始；续签、更新和装载映像需要 Wi-Fi。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行動網路下，此 iPhone 在 10.7.0.1 沒有應答。開發者磁碟映像仍已裝載時，新任務無需迴環也能開始；續簽、更新和裝載映像需要 Wi-Fi。"
+          }
+        }
+      }
+    },
     "This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup." : {
       "localizations" : {
         "zh-Hans" : {
@@ -11326,6 +11336,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 iPhone 已可供 Poki 使用"
+          }
+        }
+      }
+    },
+    "This step needs Wi-Fi. Connect and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这一步需要 Wi-Fi，连上后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這一步需要 Wi-Fi，連上後再試。"
           }
         }
       }
@@ -12826,6 +12852,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "https://…/v1"
+          }
+        }
+      }
+    },
+    "iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 要求输入 iPhone 锁屏密码以允许自动化，但未完成输入。先关闭再开启 Poki，然后输入密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 要求輸入 iPhone 鎖屏密碼以允許自動化，但未完成輸入。先關閉再開啟 Poki，然後輸入密碼。"
           }
         }
       }
@@ -16375,6 +16417,22 @@
         }
       }
     },
+    "The network loopback is unavailable." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络回环当前不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網路迴環目前無法使用。"
+          }
+        }
+      }
+    },
     "Approved by model" : {
       "localizations" : {
         "zh-Hans" : {
@@ -17305,6 +17363,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自動化"
+          }
+        }
+      }
+    },
+    "Automation did not start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化未启动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動化未啟動"
           }
         }
       }
@@ -18669,6 +18743,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你停止 Poki 後它已關閉。開啟它即可重新開啟。"
+          }
+        }
+      }
+    },
+    "Poki could not open its own automation session (%@), and the loopback refused the connection. Check the loopback in Setup, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能打开自身的自动化会话（%@），回环也拒绝了连接。在配置中检查回环，然后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能開啟自身的自動化會話（%@），迴環也拒絕了連線。在配置中檢查迴環，然後再試。"
+          }
+        }
+      }
+    },
+    "Poki could not open its own automation session (%@). Connect to Wi-Fi and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能打开自身的自动化会话（%@）。连上 Wi-Fi 后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能開啟自身的自動化會話（%@）。連上 Wi-Fi 後再試。"
           }
         }
       }

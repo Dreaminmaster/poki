@@ -26,10 +26,13 @@ struct Health {
 
     @MainActor static func loopback(_ model: AppModel) -> Health {
         let monitor = model.loopback
+        if !monitor.isWorking && model.hasOpenInProcessSession {
+            return Health(word: String(localized: "Local automation ready"), color: off)
+        }
         switch monitor.state {
         case .working: return Health(word: String(localized: "On"), color: Site.ok)
         case .checking: return Health(word: String(localized: "Checking…"), color: .white)
-        case .noAnswer: return Health(word: monitor.cellularRefused ? String(localized: "Needs Wi-Fi") : String(localized: "No Answer"), color: Site.bad)
+        case .noAnswer: return Health(word: String(localized: "No Answer"), color: Site.bad)
         case .off: return Health(word: String(localized: "Off"), color: Site.bad)
         }
     }
@@ -79,12 +82,15 @@ struct Issue: Identifiable {
                                  text: fix.isEmpty ? (runner.detail.map { "\($0.prefix(1).uppercased())\($0.dropFirst())." } ?? String(localized: "Poki starts it again on the next agent request.")) : local(fix), fix: kind))
             } else if runner.state == "waiting_network", let fix = runner.fix, fix.contains("internet") {
                 out.append(Issue(id: "network", title: String(localized: "Waiting for the internet"), text: local(fix), fix: .none))
+            } else if let trouble = model.localSessionTrouble {
+                out.append(Issue(id: "local", title: String(localized: "Automation did not start"), text: trouble.text, fix: trouble.opensSetup ? .setup : .none))
             } else if model.loopback.cellularRefused {
-                // A session already running keeps going on cellular; only a start from cellular is refused.
-                if !runner.isRunning {
-                    out.append(Issue(id: "cellular", title: String(localized: "Connect to Wi-Fi first"), text: LoopbackMonitor.cellularHint, fix: .none))
+                // On the mounted image a new task starts without the loopback; only the mount needs Wi-Fi.
+                if model.cellularNeedsWiFi, !runner.isRunning {
+                    out.append(Issue(id: "cellular", title: String(localized: "Connect to Wi-Fi first"), text: LoopbackMonitor.needsWiFi, fix: .none))
                 }
-            } else if runner.state == "waiting_network" || !model.loopback.isWorking && model.loopback.state != .checking {
+            } else if !model.hasOpenInProcessSession, runner.code != "local_ddi",
+                      runner.state == "waiting_network" || !model.loopback.isWorking && model.loopback.state != .checking {
                 out.append(Issue(id: "loopback", title: String(localized: "Loopback is off"),
                                  text: String(localized: "Turn on your proxy app with the Poki module, or connect LocalDevVPN."), fix: .setup))
             }
@@ -111,9 +117,8 @@ struct Issue: Identifiable {
                                  text: String(localized: "Allow location access for Poki (Settings › Poki › Location › Always). Poki uses it only to keep running; it never records where you are."), fix: .settings))
             }
         }
-        // With Poki off, the old Home said this in its subtitle: a start from cellular alone is refused.
-        if !model.sessionOn, model.loopback.cellularRefused {
-            out.append(Issue(id: "cellular", title: String(localized: "Connect to Wi-Fi first"), text: LoopbackMonitor.cellularHint, fix: .none))
+        if !model.sessionOn, model.cellularNeedsWiFi {
+            out.append(Issue(id: "cellular", title: String(localized: "Connect to Wi-Fi first"), text: LoopbackMonitor.needsWiFi, fix: .none))
         }
         if let problem = model.problem {
             out.append(Issue(id: "problem", title: String(localized: "Needs attention"), text: local(problem), fix: problem.contains("Pair") || problem.contains("disk image") || problem.contains("Setup") ? .setup : .none))
