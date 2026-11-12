@@ -77,7 +77,8 @@ struct SavedSession: Codable, Identifiable, Equatable {
 }
 
 /// The saved sessions, newest first, one JSON file each in Application Support/Poki/Sessions. They stay on
-/// this iPhone; the routines thread's backup can carry them (`all()` / `restore(_:)`). At most 200 are kept.
+/// this iPhone; the routines thread's backup can carry them (`all()` / `restore(_:)`). At most 200 are kept in the list; archived
+/// ones do not count and are never deleted for it.
 @MainActor
 @Observable
 final class SessionStore {
@@ -86,6 +87,7 @@ final class SessionStore {
         let sample = UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil
         return SessionStore(folder: base.appendingPathComponent("Poki/Sessions", isDirectory: true), defaults: .standard, samples: sample)
     }()
+    /// The most conversations the list keeps; archived ones are not counted.
     static let limit = 200
     /// Set once the conversations saved before archiving existed have been archived.
     static let archivedEarlierKey = "sessions.archivedEarlier"
@@ -446,11 +448,14 @@ final class SessionStore {
         pendingWrites = []
     }
 
+    /// Past the limit, the oldest conversations in the list go. An archived one is never deleted here: only
+    /// the owner's Delete in Settings > Conversations removes it.
     private func trim() {
-        guard sessions.count > Self.limit else { return }
-        let sorted = sessions.sorted { $0.updated > $1.updated }
-        for old in sorted[Self.limit...] { try? FileManager.default.removeItem(at: file(old.id)) }
-        sessions = Array(sorted.prefix(Self.limit))
+        let listed = sessions.filter { $0.archived == nil }
+        guard listed.count > Self.limit else { return }
+        let gone = Set(listed.sorted { $0.updated > $1.updated }[Self.limit...].map(\.id))
+        for id in gone { try? FileManager.default.removeItem(at: file(id)) }
+        sessions.removeAll { gone.contains($0.id) }
     }
 
     private func file(_ id: String) -> URL {

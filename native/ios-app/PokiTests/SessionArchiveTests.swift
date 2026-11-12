@@ -23,13 +23,18 @@ final class SessionArchiveTests: XCTestCase {
 
     /// A session as an earlier version wrote it: no archived field.
     private func saveEarlier(_ id: String, lines: [String]) throws -> SavedSession {
-        let session = SavedSession(id: id, kind: .poki, client: nil, title: lines.first ?? "", started: Date(timeIntervalSinceReferenceDate: 800_000_000),
-                                   updated: Date(timeIntervalSinceReferenceDate: 800_000_000), live: false, outcome: .done,
+        let session = try save(id, lines: lines, updated: Date(timeIntervalSinceReferenceDate: 800_000_000))
+        XCTAssertFalse(String(decoding: try Data(contentsOf: folder.appendingPathComponent("\(id).json")), as: UTF8.self).contains("archived"))
+        return session
+    }
+
+    @discardableResult
+    private func save(_ id: String, lines: [String], updated: Date, archived: Date? = nil) throws -> SavedSession {
+        var session = SavedSession(id: id, kind: .poki, client: nil, title: lines.first ?? "", started: updated, updated: updated, live: false, outcome: .done,
                                    entries: lines.enumerated().map { ChatEntry($0.offset.isMultiple(of: 2) ? .you($0.element, delivered: true) : .poki($0.element)) },
                                    calls: [])
-        let data = try JSONEncoder().encode(session)
-        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("archived"))
-        try data.write(to: folder.appendingPathComponent("\(id).json"))
+        session.archived = archived
+        try JSONEncoder().encode(session).write(to: folder.appendingPathComponent("\(id).json"))
         return session
     }
 
@@ -87,5 +92,22 @@ final class SessionArchiveTests: XCTestCase {
         relaunched.unarchive("chat")
         relaunched.flush()
         XCTAssertEqual(launch().session("chat")?.entries, saved.entries)
+    }
+
+    /// The limit is on the conversations list only: past it, the oldest listed conversation goes, and an
+    /// archived one, older than all of them, stays with every line.
+    func testTheLimitNeverTakesAnArchivedConversation() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let archived = try (0..<5).map { try save("archived-\($0)", lines: ["Old task \($0)", "Done."], updated: start.addingTimeInterval(Double($0)), archived: start) }
+        for i in 0...SessionStore.limit { try save("listed-\(i)", lines: ["Task \(i)"], updated: start.addingTimeInterval(1000 + Double(i))) }
+
+        let store = launch()
+        XCTAssertEqual(store.listed.count, SessionStore.limit)
+        XCTAssertNil(store.session("listed-0"), "the oldest listed conversation is the one over the limit")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("listed-0.json").path))
+        XCTAssertEqual(Set(store.archivedSessions.map(\.id)), Set(archived.map(\.id)), "no archived conversation is taken")
+        let relaunched = launch()
+        for session in archived { XCTAssertEqual(relaunched.session(session.id)?.entries, session.entries) }
     }
 }
