@@ -11464,6 +11464,22 @@
         }
       }
     },
+    "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS: Poki can’t see or read what you enter, and it asks only once until the next restart." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是 iPhone 重新启动后 Poki 首次启动自动化，因此 iOS 会在下一个屏幕要求输入锁屏密码。该屏幕属于 iOS。Poki 无法看到或读取你输入的内容，并且在下次重新启动前只会询问一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這是 iPhone 重新啟動後 Poki 首次啟動自動化，因此 iOS 會在下一個螢幕要求輸入鎖屏密碼。該螢幕屬於 iOS。Poki 無法看到或讀取你輸入的內容，並且在下次重新啟動前只會詢問一次。"
+          }
+        }
+      }
+    },
     "Timeout" : {
       "extractionState" : "manual",
       "localizations" : {

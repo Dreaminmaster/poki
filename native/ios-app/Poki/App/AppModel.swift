@@ -828,6 +828,14 @@ final class AppModel {
         standBy(reason: nil)
         if let relay { core.start(relay: relay) }
         idleTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkIdle() } }
+        // Where iOS will ask for the passcode, the session opens now, while the owner who just tapped
+        // Continue on the passcode note is here, not at an agent's first request (ESP-451). The
+        // launcher starts, and once it runs, warmInProcess opens the session. It stands by again
+        // after the idle time, as after any task.
+        if passcodeExpected, inFront, !Self.onSimulator {
+            log.add("runner", "turned on by the owner: opening the automation session now, so iOS asks for the passcode while they are here")
+            wakeRunner()
+        }
     }
 
     /// Turned on again after a session of this launch was closed: Poki starts over as a new process
