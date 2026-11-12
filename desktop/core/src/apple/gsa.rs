@@ -129,6 +129,25 @@ fn apple_error(st: &Status) -> Error {
     Error::apple(st.ec, text)
 }
 
+// A transport success or an unparseable response is not proof that Apple's code check succeeded.
+// Only the explicit ec=0 acknowledgement allows the final sign-in attempt.
+fn validate_trusted_device_code(http: reqwest::StatusCode, bytes: &[u8]) -> Result<()> {
+    if !http.is_success() {
+        return Err(Error::msg(format!("Apple did not confirm the trusted-device code (HTTP {http}). Try again or use another verification method.")));
+    }
+    let v: plist::Value = plist::from_bytes(bytes).map_err(|_| Error::msg("Apple's trusted-device verification response was not a valid property list. The code was not confirmed."))?;
+    let ec = dict(&v, "ec").and_then(|e| e.as_signed_integer())
+        .ok_or_else(|| Error::msg("Apple's trusted-device verification response had no status code. The code was not confirmed."))?;
+    if ec != 0 {
+        let em = s(&v, "em").unwrap_or("");
+        return Err(match ec {
+            -21669 => Error::NeedsPerson("That code was not right. Try again.".into()),
+            _ => Error::apple(ec, if em.is_empty() { format!("Apple rejected the code ({ec}).") } else { em.to_string() }),
+        });
+    }
+    Ok(())
+}
+
 impl Client {
     pub fn new(anisette: Provider) -> Result<Client> { Ok(Client { http: super::http_client()?, anisette }) }
 
@@ -357,17 +376,9 @@ impl Client {
 
     async fn check_device_code(&self, pending: &Pending, anisette: &Anisette, code: &str) -> Result<()> {
         let res = self.twofa_request(self.http.get(VALIDATE), &pending.session, anisette).header("security-code", code).send().await?;
+        let status = res.status();
         let bytes = res.bytes().await?;
-        let v: plist::Value = plist::from_bytes(&bytes).unwrap_or(plist::Value::Dictionary(Default::default()));
-        let ec = dict(&v, "ec").and_then(|e| e.as_signed_integer()).unwrap_or(0);
-        if ec != 0 {
-            let em = s(&v, "em").unwrap_or("");
-            return Err(match ec {
-                -21669 => Error::NeedsPerson("That code was not right. Try again.".into()),
-                _ => Error::apple(ec, if em.is_empty() { format!("Apple rejected the code ({ec}).") } else { em.to_string() }),
-            });
-        }
-        Ok(())
+        validate_trusted_device_code(status, &bytes)
     }
 
     async fn check_sms_code(&self, pending: &Pending, anisette: &Anisette, code: &str) -> Result<()> {
@@ -479,6 +490,30 @@ fn decrypt_gcm(sk: &[u8], et: &[u8]) -> Result<plist::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn device_code_reply(ec: Option<i64>) -> Vec<u8> {
+        let mut dict = plist::Dictionary::new();
+        if let Some(ec) = ec { dict.insert("ec".into(), plist::Value::Integer(ec.into())); }
+        let mut bytes = Vec::new();
+        plist::to_writer_xml(&mut bytes, &plist::Value::Dictionary(dict)).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn trusted_device_code_requires_explicit_success() {
+        let ok = device_code_reply(Some(0));
+        assert!(validate_trusted_device_code(reqwest::StatusCode::OK, &ok).is_ok());
+        assert!(validate_trusted_device_code(reqwest::StatusCode::SERVICE_UNAVAILABLE, &ok).is_err(), "HTTP 503 must not be accepted even if its body says ec=0");
+        assert!(validate_trusted_device_code(reqwest::StatusCode::OK, b"<html>busy</html>").is_err(), "Malformed HTML must not become an empty successful plist");
+        assert!(validate_trusted_device_code(reqwest::StatusCode::OK, &device_code_reply(None)).is_err(), "Missing ec is not proof of approval");
+    }
+
+    #[test]
+    fn trusted_device_code_preserves_apples_rejection() {
+        let bad = device_code_reply(Some(-21669));
+        assert!(matches!(validate_trusted_device_code(reqwest::StatusCode::OK, &bad), Err(Error::NeedsPerson(_))));
+        assert!(validate_trusted_device_code(reqwest::StatusCode::OK, &device_code_reply(Some(-22421))).is_err());
+    }
 
     #[test]
     fn spd_round_trip() {
