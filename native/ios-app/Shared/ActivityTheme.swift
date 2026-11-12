@@ -167,6 +167,9 @@ struct ActivityTheme {
     var title: Font { Self.font("Geist-Bold", .bold, 20) }
     /// What the step under way does, and a finished run's title: 19 points, semibold.
     var step: Font { Self.font("Geist-SemiBold", .semibold, 19) }
+    /// What Poki is up to on a short Lock Screen card ("Poki's asleep", "Poki's done"): the card's main
+    /// line, large enough to read at a glance on the Lock Screen (ESP-467).
+    var status: Font { Self.font("Geist-Bold", .bold, 24) }
     var titleTracking: CGFloat { Self.usesGeist ? -0.2 : 0 }
     var subtitle: Font { Self.font("Geist-Medium", .medium, 13) }
     var button: Font { Self.font("Geist-SemiBold", .semibold, 15) }

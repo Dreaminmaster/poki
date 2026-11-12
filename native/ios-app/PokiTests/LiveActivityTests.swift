@@ -66,7 +66,7 @@ final class LiveActivityTests: XCTestCase {
         state.plan = nil
         state.caller = "Claude Code"
         face = state.face
-        XCTAssertEqual(face.content, "Working on it")
+        XCTAssertEqual(face.content, "Poki’s on it")
         XCTAssertFalse(face.compact.says("Tap"))
         XCTAssertTrue(face.compact.counts("Step 4"))
     }

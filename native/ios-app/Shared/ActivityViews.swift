@@ -172,7 +172,7 @@ struct LockScreenCard: View {
                     }
                     .frame(height: 16)
                 }
-                Title(face: face, palette: palette).padding(.top, hasKicker ? 3 : 0)
+                Title(face: face, palette: palette, large: face.size == .low).padding(.top, hasKicker ? 3 : 0)
                 if face.subtitle != nil || !hasKicker && !metaBesideControl {
                     Group {
                         if hasKicker || metaBesideControl {
@@ -558,6 +558,8 @@ private struct Kicker: View {
 private struct Title: View {
     var face: ActivityFace
     var palette: ActivityPalette
+    /// The Lock Screen's short cards say Poki's state in large type.
+    var large = false
     private let theme = ActivityTheme.current
     var body: some View {
         if face.contentIsCode {
@@ -567,14 +569,15 @@ private struct Title: View {
                 .frame(height: 46)
                 .contentTransition(.numericText())
         } else {
-            // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do.
+            // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do,
+            // 24 bold for Poki's state on a short Lock Screen card.
             let stepLike = face.size == .working || face.size == .low
             Text(face.content)
-                .font(stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
+                .font(large ? theme.status : stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
                 .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                .lineLimit(1).minimumScaleFactor(0.8)
+                .lineLimit(1).minimumScaleFactor(large ? 0.65 : 0.8)
                 .contentTransition(.interpolate)
-                .frame(height: stepLike ? 24 : 25, alignment: .leading)
+                .frame(height: large ? 30 : stepLike ? 24 : 25, alignment: .leading)
         }
     }
 }

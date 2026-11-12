@@ -241,7 +241,7 @@ final class ActivityController {
         }
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
-            alert = critical(String(activity: "Allow this step?"), approval.question)
+            alert = critical(String(activity: "Poki needs you"), approval.question)
         }
         if state.approval == nil, let was = old.approval {
             state.decision = nil
@@ -260,7 +260,7 @@ final class ActivityController {
         }
         if old.phase == .pairing, state.phase == .idle, state.headline == "Paired" {
             setEvent(.paired, "Paired")
-            alert = critical(String(activity: "Paired"), String(activity: "This iPhone is ready for Poki"))
+            alert = critical(String(activity: "Poki’s paired"), String(activity: "This iPhone is ready for Poki"))
         }
 
         // A step began (AppModel sets the headline to the step's words): shown, never popped up.

@@ -182,7 +182,7 @@ extension PokiState {
         if let plan {
             if let text = planStep(progress.step) { return text }
             if let title = plan.title?.nonBlank { return title }
-            if let to = plan.to?.nonBlank { return String(activity: "Message \(to)") }
+            if let to = plan.to?.nonBlank { return String(activity: "Poki’s messaging \(to)") }
         }
         return ActivityWords.statusLines.contains(headline) ? ActivityWords.local(headline) : nil
     }
@@ -234,7 +234,7 @@ extension PokiState {
                 kicker: total.map { String(activity: "Step \(step) of \($0)") } ?? String(activity: "Step \(step)"),
                 place: name,
                 meta: since.map { ActivityFace.Meta.elapsed($0) } ?? ActivityFace.Meta.none,
-                content: doing ?? String(activity: "Working on it"),
+                content: doing ?? String(activity: "Poki’s on it"),
                 previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
