@@ -238,6 +238,18 @@ final class PasscodeTests: XCTestCase {
         XCTAssertFalse(model.passcodeHint)
         XCTAssertTrue(model.host.currentRunner.isRunning)
     }
+
+    /// ESP-451: in 0.3.1 the passcode note's title was Chinese and its body English, because the
+    /// catalog had no entry for the body's exact text. Looked up in the built app's own tables.
+    func testPasscodeNoteBodyIsTranslated() throws {
+        let key = AppModel.passcodeHeadsUpMessage.key
+        for language in ["zh-Hans", "zh-Hant"] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: language, ofType: "lproj"), language)
+            let table = try XCTUnwrap(Bundle(path: path), language)
+            let text = table.localizedString(forKey: key, value: "untranslated", table: nil)
+            XCTAssertNotEqual(text, "untranslated", "\(language) has no entry for the passcode note's body")
+        }
+    }
 }
 
 /// iOS asks the owner for the passcode before it allows automation, after Poki restarts and 8 hours

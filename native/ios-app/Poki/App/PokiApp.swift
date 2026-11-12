@@ -185,7 +185,7 @@ struct RootView: View {
             Button("Cancel", role: .cancel) { model.passcodeHeadsUp = false }
             Button("Continue") { model.continueAfterPasscodeHeadsUp() }
         } message: {
-            Text("This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS: Poki can’t see or read what you enter, and it asks only once until the next restart.")
+            Text(AppModel.passcodeHeadsUpMessage)
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
