@@ -50,7 +50,7 @@ final class LiveActivityTests: XCTestCase {
 
     /// ESP-467: the island and the Lock Screen say what the task is doing, never the single tap under
     /// it. With the chat's plan, the step under way in the plan's words (and the one before it, ticked);
-    /// without a plan, a line of Poki's own, and the compact island the count alone.
+    /// without a plan, a line of Poki's own. The compact island never shows a tap either.
     func testTheIslandSaysThePlansStepNotTheTap() {
         var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
         state.stepCount = 3
@@ -59,7 +59,7 @@ final class LiveActivityTests: XCTestCase {
         var face = state.face
         XCTAssertEqual(face.content, "Send “On my way”")
         XCTAssertEqual(face.previous, "Open the chat with Mom")
-        XCTAssertTrue(face.compact.says("Send “On my way”"))
+        XCTAssertFalse(face.compact.says("Tap"))
         XCTAssertTrue(face.compact.counts("2/2"))
 
         // An outside agent's run has no plan: no tap on any presentation.
@@ -69,6 +69,23 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(face.content, "Poki’s on it")
         XCTAssertFalse(face.compact.says("Tap"))
         XCTAssertTrue(face.compact.counts("Step 4"))
+    }
+
+    /// ESP-467: the compact island's 52 points cut a plan's step to a few characters, so it names the app
+    /// the step is in over the count ("Messages" over "2/2"), and with no app the count alone.
+    func testTheCompactIslandNamesTheAppOverTheCount() {
+        var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
+        state.app = "Messages"
+        state.plan = .init(steps: ["Open the chat with Mom", "Send “On my way”"], current: 2, title: "Text Mom", to: "Mom")
+        var face = state.face
+        XCTAssertTrue(face.compact.says("Messages"))
+        XCTAssertFalse(face.compact.says("On my way"))
+        XCTAssertTrue(face.compact.counts("2/2"))
+
+        state.app = nil
+        face = state.face
+        XCTAssertFalse(face.compact.says("Mom"))
+        XCTAssertTrue(face.compact.counts("2/2"))
     }
 
     /// ESP-467: when iOS folds an approval's island back, the compact island says Poki waits for your

@@ -45,8 +45,8 @@ struct ActivityFace: Hashable {
         case symbol(String, ActivityTone)
     }
     enum Compact: Hashable {
-        /// Two lines: what the task is doing ("Open Messages") over its count ("2/5", "Step 7"). A run
-        /// that has nothing to say about it shows the count alone.
+        /// Two lines: the app the step is in ("Messages") over its count ("2/5", "Step 7"). Without an
+        /// app, the count alone. A plan's step does not fit the compact island's 52 points (ESP-467).
         case steps(text: String?, count: String)
         /// Words and short counts ("2/6", "Stalled").
         case text(String, ActivityTone)
@@ -184,10 +184,8 @@ extension PokiState {
         return ActivityWords.statusLines.contains(headline) ? ActivityWords.local(headline) : nil
     }
 
-    /// The task's own words, for the compact island: the plan's step under way, else the task's name.
-    /// Poki's own lines ("Poki's thinking") would be cut to "Poki…" in its 52 points, so with none of
-    /// these the compact island shows the count alone.
-    var taskWords: String? {
+    /// The task's own words: the plan's step under way, else the task's name.
+    private var taskWords: String? {
         guard let plan else { return nil }
         return planStep(progress.step) ?? plan.title?.nonBlank
     }
@@ -243,7 +241,7 @@ extension PokiState {
                 previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
-                compact: .steps(text: taskWords, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
+                compact: .steps(text: name, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:
             guard let approval else { return quietFace }
             let question = approval.question
