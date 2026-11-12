@@ -2,6 +2,7 @@
 // - agent-system.md is agent/prompts/system.md (the same text as agent/prompts/pi-app.md, which
 //   agent/task-runner.mjs loads), except two sentences that named tools the app lacks: a locked phone
 //   is the owner's to unlock and a password prompt is handed to them, and a purchase is a plain tap;
+//   and the Return sentence names the type answer's read-back as the check before Return (ESP-465);
 // - the instructions put PokiCore's own MCP instructions first, as task-runner.mjs puts the MCP server's
 //   instructions first;
 // - look, do and status are PokiCore's tools with their MCP descriptions;
