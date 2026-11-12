@@ -18,9 +18,9 @@ final class LiveCore: CoreSession {
         var config = CoreConfig()
         // Signing tools may rename the app; its own id is Poki too.
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
-        // Never applies to optional questions. Payments, deletions and guarded apps still wait.
+        // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
+        // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
-        sensitiveRulesOn = config.sensitive.enabled
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation
@@ -30,13 +30,8 @@ final class LiveCore: CoreSession {
         core.onSession { signal in continuation.yield(.session(signal)) }
     }
 
-    /// Whether PokiCore holds sensitive steps back: what Agents › Approvals said when Poki started.
-    let sensitiveRulesOn: Bool
-
-    /// Agents › Approvals › Ask Before Sensitive Steps. Read when Poki starts.
+    /// 0.3.1's Ask Before Sensitive Steps switch, which `ApprovalChoice.resolve` still reads.
     static let askKey = "approvals.ask"
-    /// On unless the owner turned it off: a phone that never chose asks.
-    static var asksBeforeSensitiveSteps: Bool { UserDefaults.standard.object(forKey: askKey) as? Bool ?? true }
 
     deinit { pump?.cancel() }
 

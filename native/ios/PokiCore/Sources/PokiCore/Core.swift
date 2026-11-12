@@ -4,8 +4,10 @@ public struct CoreConfig: Sendable {
     public var runnerURL: URL
     public var sensitive: SensitivityRules
     /// The owner's way of asking (the app's Approvals page), which `sensitive` is narrowed by
-    /// (`SensitivityRules.asked`). Read when PokiCore starts.
+    /// (`SensitivityRules.asked`). Read at each step, so a change counts from the next one.
     public var approvalMode: @Sendable () -> ApprovalMode = { .confirm }
+    /// The rules a step is judged by now: `sensitive` as the way of asking narrows it.
+    var rules: SensitivityRules { sensitive.asked(approvalMode()) }
     /// How long `do` holds for an approval before answering approval_required. Owners took 42 to 47 s
     /// to approve on the phone, so this is as long as a request lives (`Approvals.lifetime`, 120 s)
     /// less a margin; a relay that gives up sooner shortens it for the call (`RelayRequest.answerBy`).
@@ -295,8 +297,6 @@ public final class PokiCore: @unchecked Sendable {
     public func onSession(_ handler: @escaping @Sendable (SessionSignal) -> Void) { sessionSignal.value = handler }
 
     public init(config: CoreConfig, host: CoreHost, transport: HTTPTransport = URLSessionTransport()) {
-        var config = config
-        config.sensitive = config.sensitive.asked(config.approvalMode())
         self.config = config
         self.host = host
         var c: AsyncStream<CoreEvent>.Continuation!
@@ -370,7 +370,7 @@ public final class PokiCore: @unchecked Sendable {
         let element = Element(type: "Other", label: text, value: nil, identifier: nil, frame: Rect(x: 0, y: 0, width: 0, height: 0), depth: 0)
         // No readable text: the rules cannot tell what it does, so the owner is asked.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.sensitive.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
+        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
         let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, fingerprint: "tap:\(UUID().uuidString)")
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:

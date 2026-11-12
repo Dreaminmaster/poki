@@ -487,7 +487,7 @@ struct ApprovalsSettingsView: View {
                         case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
                         }
                         Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                        Text("Turning asking on or off takes effect the next time Poki opens.")
+                        Text("Changes apply right away, starting from Poki’s next step.")
                     } else {
                         Button("Learn More") { withAnimation(.snappy) { more = true } }
                             .font(.footnote.weight(.semibold))

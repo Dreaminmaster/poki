@@ -1852,6 +1852,22 @@
         }
       }
     },
+    "Changes apply right away, starting from Poki’s next step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改立即生效，自 Poki 的下一步操作开始。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "變更立即生效，自 Poki 的下一步操作開始。"
+          }
+        }
+      }
+    },
     "Check that Developer Mode is on (Settings → Privacy & Security → Developer Mode) and that iOS is 17.4 or later." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17891,22 +17907,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "透過 Poki 控制此 iPhone 的智慧體"
-          }
-        }
-      }
-    },
-    "Turning asking on or off takes effect the next time Poki opens." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开启或关闭询问会在下次打开 Poki 时生效。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟或關閉詢問會在下次開啟 Poki 時生效。"
           }
         }
       }
