@@ -24,11 +24,12 @@ struct PokiDetailsView: View {
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiDetailsSample") }
 
     var body: some View {
-        let status = isSample ? PokiStatus(.ready) : PokiStatus.current(model: model, chat: chat)
+        let power = isSample ? PowerTile.pause : PowerTile.card(model: model)
+        let status = isSample ? PokiStatus(.ready) : PokiStatusCopy.card(PokiStatus.current(model: model, chat: chat), power: power)
         NavigationStack(path: $path) {
             List {
                 Section {
-                    PokiSettingsCard(status: status, power: isSample ? .pause : PowerTile(model: model, running: chat.running),
+                    PokiSettingsCard(status: status, power: power,
                                      act: { $0.act(model: model, chat: chat) },
                                      openVoice: { dismiss(); openVoice() },
                                      openActivity: { path.append(DetailsRoute.history) })
@@ -291,7 +292,7 @@ struct HandsView: View {
         Form {
             Section {
                 Toggle(isOn: Binding(get: { on }, set: set)) {
-                    Label("Automation", systemImage: "hand.tap")
+                    SettingsLabel("Automation", systemImage: "hand.tap")
                 }
                 .accessibilityIdentifier("hands.on")
             } footer: {
@@ -309,7 +310,7 @@ struct HandsView: View {
                         Text(model.setupComplete || done == total ? String(localized: "Done") : String(localized: "\(done) of \(total)"))
                             .foregroundStyle(model.setupComplete || done == total ? Color(.secondaryLabel) : Tint.amberInk)
                     } label: {
-                        Label("Setup", systemImage: "checklist")
+                        SettingsLabel("Setup", systemImage: "checklist")
                     }
                 }
                 .accessibilityIdentifier("moreSettings.setup")
@@ -391,7 +392,7 @@ struct HealthView: View {
                             Text(verbatim: "\(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         }
                     } label: {
-                        Label("Updates", systemImage: "arrow.down.circle")
+                        SettingsLabel("Updates", systemImage: "arrow.down.circle")
                     }
                 }
                 .accessibilityIdentifier("moreSettings.updates")
@@ -404,7 +405,7 @@ struct HealthView: View {
                     LabeledContent {
                         Image(systemName: "arrow.up.forward").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
                     } label: {
-                        Label("Notifications", systemImage: "bell.badge")
+                        SettingsLabel("Notifications", systemImage: "bell.badge")
                     }
                 }
                 .foregroundStyle(Color(.label))
@@ -415,17 +416,17 @@ struct HealthView: View {
 
             Section {
                 NavigationLink(value: SettingsRoute.diagnostics) {
-                    Label("Diagnostics", systemImage: "stethoscope")
+                    SettingsLabel("Diagnostics", systemImage: "stethoscope")
                 }
                 .accessibilityIdentifier("moreSettings.diagnostics")
 
                 NavigationLink(value: SettingsRoute.log) {
-                    Label("Log", systemImage: "doc.text")
+                    SettingsLabel("Log", systemImage: "doc.text")
                 }
                 .accessibilityIdentifier("moreSettings.log")
 
                 NavigationLink { TestingOptionsView().settingsPage() } label: {
-                    Label("Testing Options", systemImage: "testtube.2")
+                    SettingsLabel("Testing Options", systemImage: "testtube.2")
                 }
                 .accessibilityIdentifier("moreSettings.testingOptions")
             } header: {
@@ -444,6 +445,8 @@ struct HealthView: View {
 /// choices, the sensitivity's four levels as segments in their own order, least asking first.
 struct ApprovalsSettingsView: View {
     @Environment(AppModel.self) private var model
+    /// The way of asking says itself in one line; Learn More opens the whole of it.
+    @State private var more = false
 
     var body: some View {
         @Bindable var model = model
@@ -473,12 +476,25 @@ struct ApprovalsSettingsView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     switch model.approvalMode {
-                    case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
-                    case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                    case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                    case .reply: Text("Poki asks in the chat and proceeds after you reply.")
+                    case .confirm: Text("Tap Allow or Don’t Allow in the Live Activity, a notification, or Poki.")
+                    case .off: Text("Optional steps run automatically without asking.")
                     }
-                    Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                    Text("Turning asking on or off takes effect the next time Poki opens.")
+                    if more {
+                        switch model.approvalMode {
+                        case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
+                        case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
+                        case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                        }
+                        Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
+                        Text("Turning asking on or off takes effect the next time Poki opens.")
+                    } else {
+                        Button("Learn More") { withAnimation(.snappy) { more = true } }
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Tint.blueText)
+                            .buttonStyle(.borderless)
+                            .accessibilityIdentifier("approvals.learnMore")
+                    }
                 }
             }
             .accessibilityIdentifier("approvals.mode")
@@ -534,14 +550,14 @@ struct AgentsAndRelayView: View {
                         LabeledContent {
                             Text(last.map { ChatTime.row($0.updated) } ?? String(localized: "Not Used Yet"))
                         } label: {
-                            Label {
-                                Text(verbatim: secret.name)
-                            } icon: {
-                                if let client = secret.agent ?? last?.client {
-                                    AgentBadge(name: client, size: 28)
-                                } else {
-                                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                            // An agent's own badge is its picture; only the generic symbol takes the round ground.
+                            if let client = secret.agent ?? last?.client {
+                                HStack(spacing: 12) {
+                                    AgentBadge(name: client, size: 30)
+                                    Text(verbatim: secret.name)
                                 }
+                            } else {
+                                SettingsLabel { Text(verbatim: secret.name) } icon: { Image(systemName: "point.3.connected.trianglepath.dotted") }
                             }
                         }
                     }
@@ -550,11 +566,7 @@ struct AgentsAndRelayView: View {
                     .contextMenu { Button("Revoke Access", systemImage: "xmark.circle", role: .destructive) { model.revoke(secret) } }
                 }
                 Button(action: add) {
-                    Label {
-                        Text("Add Agent")
-                    } icon: {
-                        Image(systemName: "plus.circle.fill").foregroundStyle(.blue)
-                    }
+                    SettingsLabel { Text("Add Agent") } icon: { Image(systemName: "plus") }
                 }
                 .disabled(model.relayAddress == nil)
             } header: {
@@ -567,7 +579,7 @@ struct AgentsAndRelayView: View {
 
             Section {
                 Toggle(isOn: Binding(get: { model.relayEnabled && model.relayAddress != nil }, set: { model.setRelayEnabled($0) })) {
-                    Label {
+                    SettingsLabel {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("MCP Relay")
                             Text(relayLine)
@@ -584,7 +596,7 @@ struct AgentsAndRelayView: View {
                         Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? String(localized: "Not Set"))
                             .foregroundStyle(model.relayAddress == nil ? Color.orange : Color.secondary)
                     } label: {
-                        Label("Address", systemImage: "network")
+                        SettingsLabel("Address", systemImage: "network")
                     }
                 }
             } header: {

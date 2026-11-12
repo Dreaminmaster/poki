@@ -93,6 +93,31 @@ struct SettingsLabelStyle: LabelStyle {
     }
 }
 
+/// A label with its symbol on the round ground, for rows where the system's own label style does not
+/// reach (inside a Toggle, a LabeledContent or a NavigationLink, a List draws its labels its own way).
+struct SettingsLabel<Title: View, Icon: View>: View {
+    var title: Title
+    var icon: Icon
+
+    init(@ViewBuilder title: () -> Title, @ViewBuilder icon: () -> Icon) {
+        self.title = title()
+        self.icon = icon()
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsLabelIcon { icon }
+            title
+        }
+    }
+}
+
+extension SettingsLabel where Title == Text, Icon == Image {
+    init(_ title: LocalizedStringKey, systemImage: String) {
+        self.init(title: { Text(title) }, icon: { Image(systemName: systemImage) })
+    }
+}
+
 private struct SettingsLabelIcon<Icon: View>: View {
     @Environment(\.isEnabled) private var isEnabled
     @ScaledMetric(relativeTo: .body) private var size = 30.0

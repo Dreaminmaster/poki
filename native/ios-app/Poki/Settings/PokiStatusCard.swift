@@ -25,20 +25,34 @@ enum PokiStatusCopy {
         return word
     }
 
-    /// Poki saying, in the first person, whether it can work now and what starts it.
-    /// Read from the status, so it never says otherwise than the words above it.
-    @MainActor static func line(_ status: PokiStatus, model: AppModel) -> String {
-        if status.mood == .paused, !(model.sessionOn || model.wantsOn) {
-            return String(localized: "I’m off right now, so agents can’t connect. Turn me on when you need me.")
+    /// The status a card shows beside its button: off and paused come from the switch itself, so the
+    /// words never say otherwise than the button (Turn On under "Poki’s off", Resume under "Poki’s asleep").
+    @MainActor static func card(_ status: PokiStatus, power: PowerTile) -> PokiStatus {
+        switch power {
+        case .turnOn: PokiStatus(.paused, word: String(localized: "Poki’s off"))
+        case .resume: status.mood == .paused ? status : PokiStatus(.paused)
+        case .pause: status.mood == .paused ? PokiStatus(.ready) : status
         }
-        if status.mood == .paused {
-            return String(localized: "I’m taking a break. Send a task or an agent request, and I’ll wake right up.")
+    }
+
+    /// The plain line under the status (ESP-467: only the status words are in Poki's voice): what Poki
+    /// can do now and what starts it.
+    static func line(_ power: PowerTile) -> String {
+        switch power {
+        case .turnOn: String(localized: "Poki is off. Agents can’t connect to this iPhone until you turn it on.")
+        case .resume: String(localized: "Poki is paused. It resumes automatically upon a new task or agent request.")
+        case .pause: String(localized: "Poki can tap and type on this iPhone when you send a task or an agent requests it.")
         }
-        return String(localized: "I’m ready to help. Send a task or an agent request, and I’ll get started.")
     }
 }
 
 extension PowerTile {
+    /// The cards' button by what Poki is: off, Turn On; paused by you, Resume; otherwise Pause.
+    @MainActor static func card(model: AppModel) -> PowerTile {
+        if !(model.sessionOn || model.wantsOn) { return .turnOn }
+        return model.ownerPaused ? .resume : .pause
+    }
+
     var title: LocalizedStringKey {
         switch self {
         case .pause: "Pause"
@@ -66,7 +80,8 @@ extension PowerTile {
 
     @MainActor func act(model: AppModel, chat: ChatModel) {
         switch self {
-        case .pause: chat.stop(); model.pauseRunner()
+        // Your pause, also while the runner stands by: Poki shows asleep until you or an agent wakes it.
+        case .pause: chat.stop(); model.pauseByOwner()
         case .resume: model.wakeRunner()
         case .turnOn: model.startSession()
         }
@@ -82,8 +97,8 @@ struct PokiStatusCard: View {
     var openSettings: () -> Void
 
     var body: some View {
-        let status = PokiStatusCopy.current(model: model, chat: chat)
-        let power = PowerTile(model: model, running: chat.running)
+        let power = PowerTile.card(model: model)
+        let status = PokiStatusCopy.card(PokiStatusCopy.current(model: model, chat: chat), power: power)
         let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
@@ -95,7 +110,7 @@ struct PokiStatusCard: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            Text(verbatim: PokiStatusCopy.line(status, model: model))
+            Text(verbatim: PokiStatusCopy.line(power))
                 .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
@@ -133,7 +148,11 @@ private struct PokiStatusCardOverlay: ViewModifier {
         content.overlay(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 if isPresented {
-                    Color.black.opacity(0.28).ignoresSafeArea()
+                    // The chat blurs and dims behind the card, so none of its words read beside it.
+                    Rectangle().fill(.ultraThinMaterial)
+                        .overlay(Color.black.opacity(0.2))
+                        .ignoresSafeArea()
+                        .contentShape(.rect)
                         .onTapGesture { isPresented = false }
                         .accessibilityLabel(Text("Close"))
                         .accessibilityAddTraits(.isButton)

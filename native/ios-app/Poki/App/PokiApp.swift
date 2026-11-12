@@ -149,9 +149,12 @@ struct RootView: View {
             // Settings opens from the bottom of the conversations and from the status card (ESP-469).
             .environment(\.openPokiSettings, { openDetails() })
             .pokiStatusCard(isPresented: $statusOpen, leading: width == .regular ? 391 : 16, openSettings: { openDetails() })
-            // Poki's profile rises from the bottom (ESP-376): a full-height sheet on iPhone, a sheet at a
-            // page's width beside the list on iPad, as the system's own are.
-            .sheet(isPresented: $detailsOpen) {
+            // Settings covers the whole screen on iPhone (ESP-469: nothing of the chat shows around it), with
+            // its Close button; beside the list on iPad it stays a sheet at a page's width (ESP-376).
+            .fullScreenCover(isPresented: Binding(get: { detailsOpen && width != .regular }, set: { detailsOpen = $0 })) {
+                profilePage
+            }
+            .sheet(isPresented: Binding(get: { detailsOpen && width == .regular }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
     }

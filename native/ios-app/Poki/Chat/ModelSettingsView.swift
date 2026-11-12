@@ -171,13 +171,13 @@ private struct AccountDetail: View {
                 NavigationLink { TextChatFeature(provider: provider) } label: {
                     LabeledContent {
                         Text(ModelKeys.selectedProvider == provider ? ModelKeys.selectedModelName : ModelAccounts.canChat(provider) ? String(localized: "Off") : String(localized: "Not Supported"))
-                    } label: { Label("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
+                    } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
                 }
                 .disabled(!ModelAccounts.canChat(provider))
                 NavigationLink { LiveVoiceFeature() } label: {
                     LabeledContent {
                         Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.enabled ? VoiceDirect.model : String(localized: "Off")) : String(localized: "Not Supported"))
-                    } label: { Label("Live Voice", systemImage: "waveform") }
+                    } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
                 }
                 .disabled(!ModelAccounts.canTalkLive(provider))
             } header: {

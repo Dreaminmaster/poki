@@ -30096,54 +30096,6 @@
         }
       }
     },
-    "I’m ready to help. Send a task or an agent request, and I’ll get started." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我准备好啦，你发任务或智能体发来请求时，我就开始操作。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我準備好啦，你發任務或智慧體發來請求時，我就開始操作。"
-          }
-        }
-      }
-    },
-    "I’m taking a break. Send a task or an agent request, and I’ll wake right up." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我在休息呢，你发任务或智能体发来请求时，我就会醒来干活。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我在休息呢，你發任務或智慧體發來請求時，我就會醒來幹活。"
-          }
-        }
-      }
-    },
-    "I’m off right now, so agents can’t connect. Turn me on when you need me." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我已关闭，智能体暂时连不上，打开我就能干活。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "我已關閉，智慧體暫時連不上，打開我就能幹活。"
-          }
-        }
-      }
-    },
     "Poki’s ready" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30462,6 +30414,118 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 關著"
+          }
+        }
+      }
+    },
+    "Poki can tap and type on this iPhone when you send a task or an agent requests it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送任务或智能体请求时，Poki 可在此 iPhone 上点按和输入。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳送任務或智慧體請求時，Poki 可在此 iPhone 上點按和輸入。"
+          }
+        }
+      }
+    },
+    "Poki is paused. It resumes automatically upon a new task or agent request." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已暂停，收到新任务或智能体请求后自动继续。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已暫停，收到新任務或智慧體請求後自動繼續。"
+          }
+        }
+      }
+    },
+    "Poki is off. Agents can’t connect to this iPhone until you turn it on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已关闭，开启前智能体无法连接此 iPhone。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已關閉，開啟前智慧體無法連線此 iPhone。"
+          }
+        }
+      }
+    },
+    "Poki asks in the chat and proceeds after you reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 在对话中请求确认，收到回复后继续执行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 在對話中請求確認，收到回覆後繼續執行。"
+          }
+        }
+      }
+    },
+    "Tap Allow or Don’t Allow in the Live Activity, a notification, or Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在实时活动、通知或 Poki 中点按“允许”或“不允许”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在即時動態、通知或 Poki 中點按「允許」或「不允許」。"
+          }
+        }
+      }
+    },
+    "Optional steps run automatically without asking." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非必需步骤将自动执行，不再询问。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非必要步驟將自動執行，不再詢問。"
+          }
+        }
+      }
+    },
+    "Learn More" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "了解更多"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "瞭解更多"
           }
         }
       }
