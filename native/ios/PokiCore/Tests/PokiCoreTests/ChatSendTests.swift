@@ -46,6 +46,24 @@ final class ChatSendTests: XCTestCase {
         XCTAssertEqual(store.routine(named: "reply")?.steps.count, 3)
     }
 
+    /// Typing into one field, then a tap on another field of the same kind and Return there: that tap
+    /// moves the focus, so the routine keeps it.
+    func testATapOnAnotherFieldOfTheSameKindStays() async {
+        let store = RoutineStore(url: nil)
+        let wda = FakeWDA()
+        wda.tree([Node("StaticText", "表单", [20, 100, 200, 30]), Node("TextField", "姓名", [20, 200, 350, 40], value: ""), Node("TextField", "电话", [20, 300, 350, 40], value: "")], app: "表单")
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.example.form", "name": "表单"]]) }
+        let (core, _, _) = makeCore(wda) { $0.memory = store; $0.sensitive.enabled = false }
+        let looked = await core.call("look", [:])
+        guard let name = number(of: "姓名", in: looked.text), let phone = number(of: "电话", in: looked.text) else { return XCTFail(looked.text) }
+        _ = await core.call("do", ["actions": [["tap": .number(Double(name))], ["type": "张三"]]])
+        _ = await core.call("do", ["actions": [["tap": .number(Double(phone))], ["key": "return"]]])
+        _ = await core.call("routines", ["action": "save", "name": "form", "description": "fill the form"])
+        let steps = store.routine(named: "form")?.steps ?? []
+        XCTAssertEqual(steps.count, 4, "\(steps.map { $0.action.serialized() })")
+        XCTAssertEqual(steps[2].target?.label, "电话")
+    }
+
     func chat(_ app: ChatApp = ChatApp()) -> (PokiCore, ChatApp) {
         let wda = FakeWDA()
         app.install(wda)
