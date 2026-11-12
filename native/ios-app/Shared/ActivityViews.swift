@@ -66,8 +66,9 @@ enum ActivityMetrics {
         case .low:
             Sizes(island: 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
         case .working:
-            // Without a plan there is no line of segments; a ticked previous step adds a line.
-            Sizes(island: (face.bottom.hasLine ? 118 : 106) + (face.previous == nil ? 0 : 18), islandBear: 96, islandLeft: 104,
+            // Without a plan there is no line of segments. The ticked previous step's line is kept from the
+            // first step on, so the island keeps its height and the bear its place from step to step.
+            Sizes(island: (face.bottom.hasLine ? 118 : 106) + 18, islandBear: 96, islandLeft: 104,
                   lock: face.bottom.hasLine ? 134 : 124, lockBear: 116, lockLeft: 122, lockBearInset: 4)
         case .asking:
             Sizes(island: 150, islandBear: 128, islandLeft: 130, lock: 154, lockBear: 134, lockLeft: 138, lockBearInset: 0)
@@ -281,22 +282,22 @@ struct IslandBottom: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1)
                     Title(face: face, palette: palette).padding(.top, 2)
-                    if let previous = face.previous {
-                        HStack(spacing: 5) {
+                    // Held empty on the first step (see `sizes`): a new step never grows the island.
+                    HStack(spacing: 5) {
+                        if let previous = face.previous {
                             Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
                             Text(previous).font(theme.subtitle).lineLimit(1).contentTransition(.interpolate)
                         }
-                        .foregroundStyle(palette.quiet)
-                        .frame(height: 16).padding(.top, 2)
-                        .transition(.opacity)
                     }
+                    .foregroundStyle(palette.quiet)
+                    .frame(height: 16).padding(.top, 2)
                     if let total { SegmentLine(step: step, total: total, palette: palette).padding(.top, 11) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if stop {
                     // In the lowest island the circle sits a little higher, clear of the corner.
                     StopButton(surface: .island)
-                        .padding(.top, (total == nil ? 6 : 16) + (face.previous == nil ? 0 : 9))
+                        .padding(.top, (total == nil ? 6 : 16) + 9)
                         .transition(.opacity)
                 }
             }
