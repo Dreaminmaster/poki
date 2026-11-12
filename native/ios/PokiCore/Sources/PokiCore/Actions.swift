@@ -288,6 +288,7 @@ extension Computer {
             let readBack = reads.map { hidden ? "; the field now holds \($0.count) characters" : "; the field now reads \"\($0.count > 200 ? String($0.prefix(190)) + "…" : $0)\"" }
                 ?? "; the field could not be read back (no focused field answered in time), so check the elements or the picture"
             if let ref = action["ref"]?.int { typedInto = (ref, text) }
+            typedText = hidden ? nil : text
             return ("type", "\(describe(action)) (\(via))\(readBack)\(focusNote(reads.map { $0.contains(text) } ?? false))\(note)\(safariAddressNote(target, text))")
         }
         if action["back"] != nil {

@@ -63,6 +63,8 @@ final class Computer: @unchecked Sendable {
     /// The element the last type went to and its text, so the read after it can say which number the
     /// field has now when the app replaced it (Settings' search field is a new element in search mode).
     var typedInto: (ref: Int, text: String)?
+    /// The text this task last typed (not a password), for the send check after Return in a chat app.
+    var typedText: String?
     /// How much of the picture changed in the latest read while the elements did not (nil when the
     /// elements changed too, or nothing did): a whole new picture over an unchanged tree is the old
     /// app's tree under the new app's screen (gym: Photos launched from Safari).
@@ -419,7 +421,7 @@ final class Computer: @unchecked Sendable {
         let until = now() + config.toolDeadline
         if let blocked = await waitForRunner(until: until) { return blocked }
         let begins = beginsTask()
-        if begins { beginRecording() }
+        if begins { beginRecording(); typedText = nil }
         async let locked = isLocked()
         var result = restartNote(await readAndReply(until: until, full: full))
         if begins, let app = lastForeground { origin = (app, session, now()) } else { origin?.lastCall = now() }
@@ -516,6 +518,7 @@ final class Computer: @unchecked Sendable {
         // The app the owner is in before anything is sent: the read before may be another task's.
         if beginsTask() {
             beginRecording()
+            typedText = nil
             if let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), let bundle = front["bundleId"]?.string {
                 origin = (Foreground(bundleID: bundle, name: front["name"]?.string), session, now())
             }
@@ -711,6 +714,7 @@ final class Computer: @unchecked Sendable {
             lastPicture = seenPicture
             result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["\(app) answered no element tree (no accessibility server in its process: kAXErrorServerNotFound); \(how), so its earlier page is gone"])
         }
+        if let line = sendCheck(toRun, error: error) { result.text += "\n" + line }
         // A call that took far longer than its parts says where the time went (gym: a wait_until
         // whose parts said 5 s answered after 29.8 s).
         let total = now() - callStarted
@@ -731,6 +735,46 @@ final class Computer: @unchecked Sendable {
             result.text = lines.joined(separator: "\n")
         }
         return result
+    }
+
+    /// Chat apps, where Return sends what the message field holds. The approval rules' own list may be
+    /// emptied (Approvals off); this one stays.
+    static let chatApps = Set(SensitivityRules().messagingApps)
+
+    /// After Return in a chat app: whether the text this task typed went out, judged from the read just
+    /// made. Sent: the message field (the lowest text field) no longer holds the text, and the last
+    /// message above it (the lowest element with text) shows it. Anything else is not confirmed, with
+    /// what the read showed (ESP-465: the model spent one to three turns after Return verifying the send).
+    func sendCheck(_ actions: [JSON], error: String?) -> String? {
+        let sends = actions.contains { a in
+            if let key = a["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
+            return a["type"]?.text?.hasSuffix("\n") == true
+        }
+        guard sends, error == nil, let app = lastForeground?.bundleID, Self.chatApps.contains(app),
+              let text = typedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        let keyboard = lastAll.first { $0.type == "Keyboard" }
+        let read = lastAll.filter { !$0.fromPicture && !(keyboard?.contains($0) ?? false) && $0.frame.width > 0 && $0.frame.height > 0 }
+        let quoted = "\"\(text.count > 60 ? String(text.prefix(59)) + "…" : text)\""
+        func notConfirmed(_ why: String) -> String {
+            "send check: not confirmed: \(why). Read the screen to verify the send before finish_task."
+        }
+        guard let field = read.filter({ Self.fieldTypes.contains($0.type) }).max(by: { $0.frame.y < $1.frame.y }) else {
+            return notConfirmed("no message field was read")
+        }
+        if (field.value ?? "").contains(text) { return notConfirmed("the message field still holds the text") }
+        let frames: Set<String> = ["Keyboard", "NavigationBar", "Toolbar", "TabBar", "Application", "Window", "StatusBar"]
+        let messages = read.filter { e in
+            !Self.fieldTypes.contains(e.type) && !frames.contains(e.type) && !e.text.isEmpty && e.frame.y + e.frame.height <= field.frame.y + 1
+        }
+        guard let last = messages.max(by: { a, b in
+            let (ab, bb) = (a.frame.y + a.frame.height, b.frame.y + b.frame.height)
+            return ab != bb ? ab < bb : a.frame.width * a.frame.height > b.frame.width * b.frame.height
+        }) else { return notConfirmed("no message was read above the message field") }
+        guard [last.label ?? "", last.value ?? ""].contains(where: { $0.contains(text) }) else {
+            return notConfirmed("the message field is empty, and the last message on screen reads \"\(last.text.prefix(60))\"")
+        }
+        typedText = nil
+        return "send check: sent: the message field is empty and the last message on screen reads \(quoted). This read verifies the send."
     }
 
     /// A call with no task open, or after `taskGap` without one, begins a task.

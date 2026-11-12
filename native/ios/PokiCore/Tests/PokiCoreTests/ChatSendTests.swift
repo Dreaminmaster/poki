@@ -45,4 +45,56 @@ final class ChatSendTests: XCTestCase {
         _ = await core.call("routines", ["action": "save", "name": "reply", "description": "reply in the chat"])
         XCTAssertEqual(store.routine(named: "reply")?.steps.count, 3)
     }
+
+    func chat(_ app: ChatApp = ChatApp()) -> (PokiCore, ChatApp) {
+        let wda = FakeWDA()
+        app.install(wda)
+        let (core, _, _) = makeCore(wda) { $0.sensitive.enabled = false }
+        return (core, app)
+    }
+
+    /// After Return the model looked again, or spent a turn, to see whether the message went (the gap
+    /// from Return to done was 14 to 26 s in the log). The Return answer now says so from its own read.
+    func testTheReturnAnswerSaysTheMessageWasSent() async {
+        let (core, app) = chat()
+        _ = await core.call("look", [:])
+        _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
+        let sent = await core.call("do", ["actions": [["key": "return"]]])
+        XCTAssertEqual(app.messages.value.last, "收到")
+        XCTAssertTrue(sent.text.contains("send check: sent"), sent.text)
+        XCTAssertTrue(sent.text.contains("\"收到\""), sent.text)
+    }
+
+    func testTypeAndReturnInOneCallAreCheckedToo() async {
+        let (core, _) = chat()
+        _ = await core.call("look", [:])
+        let sent = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"], ["key": "return"]]])
+        XCTAssertTrue(sent.text.contains("send check: sent"), sent.text)
+    }
+
+    /// The send key did nothing: the text is still in the field, and the answer says the send is not
+    /// confirmed, so the model looks before it reports.
+    func testAReturnThatSentNothingIsNotConfirmed() async {
+        let app = ChatApp()
+        app.sends.value = false
+        let (core, _) = chat(app)
+        _ = await core.call("look", [:])
+        _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
+        let tried = await core.call("do", ["actions": [["key": "return"]]])
+        XCTAssertTrue(tried.text.contains("send check: not confirmed"), tried.text)
+        XCTAssertTrue(tried.text.contains("the message field still holds the text"), tried.text)
+    }
+
+    /// The field emptied but the last message is another one: not confirmed either.
+    func testAnEmptiedFieldWithAnotherLastMessageIsNotConfirmed() async {
+        let app = ChatApp()
+        let (core, _) = chat(app)
+        _ = await core.call("look", [:])
+        _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
+        app.sends.value = false
+        app.field.value = ""
+        let tried = await core.call("do", ["actions": [["key": "return"]]])
+        XCTAssertTrue(tried.text.contains("send check: not confirmed"), tried.text)
+        XCTAssertTrue(tried.text.contains("the last message on screen reads \"明天见\""), tried.text)
+    }
 }
