@@ -844,9 +844,11 @@ final class AppModel {
     /// shallow read of the app in front and a screenshot (`prepare`), not paid by the first step.
     /// Not after the owner paused it, nor after they cancelled iOS's passcode screen (no new screen
     /// until they turn Poki on again), nor once this launch's session was closed (opening Poki again
-    /// starts a new process).
+    /// starts a new process). `inFront` starts true, so a launch iOS makes in the background (for
+    /// location) is told apart by the app's own state; a launch in front opens on becoming active.
     private func openWhileInFront(_ why: String) {
-        guard sessionOn, runnerPaused, !ownerPaused, inFront, !Self.onSimulator, !inProcessUsedUp, !InProcessWDA.automationDeclined else { return }
+        guard sessionOn, runnerPaused, !ownerPaused, inFront, UIApplication.shared.applicationState == .active, !Self.onSimulator,
+              !inProcessUsedUp, !InProcessWDA.automationDeclined else { return }
         wakeRunner(asked: why)
     }
 
