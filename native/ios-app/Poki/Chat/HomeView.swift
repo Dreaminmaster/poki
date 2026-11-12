@@ -400,13 +400,39 @@ enum HomeIdea {
         return HomeShortcut(key: HomeShortcuts.normalize(text), app: shown.id, appName: shown.name, text: text,
                             prompt: CapsuleText.prefill(app: capsule, sentence: text))
     }
+    /// An app by its bundle ID, the action its pill shows and the whole request a tap puts in the field.
+    private static func idea(app: String, _ text: String, prompt: String) -> HomeShortcut? {
+        guard let shown = ShortcutApp.named(app) else { return nil }
+        return HomeShortcut(key: HomeShortcuts.normalize(prompt), app: shown.id, appName: shown.name, text: text, prompt: prompt)
+    }
+
     static var examples: [HomeShortcut] {
+        AppLanguage.current == .simplifiedChinese ? simplifiedChinese : english
+    }
+
+    private static var english: [HomeShortcut] {
         [idea("Slack", String(localized: "Tell the team I’m late")),
          idea("Messages", String(localized: "Text Mom I’m on my way")),
          idea("Uber", String(localized: "Book a ride home")),
          idea("Starbucks", String(localized: "Order my usual coffee")),
          idea("Notes", String(localized: "Add milk to my list")),
          idea("Instagram", String(localized: "Post today’s photo"))].compactMap { $0 }
+    }
+
+    /// The apps people in mainland China use every day, written in Chinese rather than translated from
+    /// the English set. A tap only fills the field and the caret lands at the end, so a request that
+    /// needs a contact, a topic, a product or a place ends where that goes, for the owner to finish.
+    private static var simplifiedChinese: [HomeShortcut] {
+        [idea(app: "com.tencent.xin", "发消息", prompt: "用微信发一条消息给"),
+         idea(app: "com.taobao.taobao4iphone", "查物流", prompt: "打开淘宝，看看我最近一单的物流到哪了"),
+         idea(app: "com.dianping.dpscope", "找附近餐厅", prompt: "用大众点评找附近评分高的餐厅"),
+         idea(app: "com.meituan.itakeaway", "点外卖", prompt: "打开美团外卖，帮我看看附近有什么好吃的"),
+         idea(app: "com.xunmeng.pinduoduo", "查订单", prompt: "打开拼多多，看看我的订单到哪了"),
+         idea(app: "com.xingin.discover", "搜攻略", prompt: "在小红书搜一下攻略："),
+         idea(app: "com.taobao.fleamarket", "看我的闲置", prompt: "打开闲鱼，看看我发布的闲置有没有新消息"),
+         idea(app: "com.360buy.jdmobile", "查价格", prompt: "在京东查一下价格："),
+         idea(app: "com.baidu.map", "导航回家", prompt: "打开百度地图，导航回家"),
+         idea(app: "com.autonavi.amap", "查路线", prompt: "打开高德地图，查一下路线，目的地是")].compactMap { $0 }
     }
 }
 
@@ -505,8 +531,10 @@ struct HomePage<Footer: View>: View {
                     if !writing {
                         VStack(spacing: 8) {
                             let shortcuts = shortcutStore.shortcuts
-                            row(Array(shortcuts.prefix(3)), speed: HomeMotion.pillSpeeds.top, start: 64)
-                            if shortcuts.count > 3 { row(Array(shortcuts.dropFirst(3)), speed: HomeMotion.pillSpeeds.bottom, start: 0) }
+                            // Three on top, or the larger half of more than six.
+                            let top = max(3, (shortcuts.count + 1) / 2)
+                            row(Array(shortcuts.prefix(top)), speed: HomeMotion.pillSpeeds.top, start: 64)
+                            if shortcuts.count > top { row(Array(shortcuts.dropFirst(top)), speed: HomeMotion.pillSpeeds.bottom, start: 0) }
                         }
                         .padding(.top, 2)
                         // A sideways drag on the rows scrolls them; it does not pull the drawer out.
