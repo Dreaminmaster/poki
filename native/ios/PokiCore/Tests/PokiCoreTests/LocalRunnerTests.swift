@@ -44,11 +44,11 @@ final class Phone: @unchecked Sendable {
 }
 
 final class LocalRunnerTests: XCTestCase {
-    private func makeLocalCore(_ phone: Phone, heldFor: Double = 60) -> (PokiCore, FakeHost) {
+    private func makeLocalCore(_ phone: Phone, heldFor: Double = 60, unanswered: @escaping LocalRunner.Unanswered = { nil }) -> (PokiCore, FakeHost) {
         let host = FakeHost()
         var config = CoreConfig(approvalWait: 0.3, toolDeadline: 6, actionCap: 2, readTimeout: 1, busyWait: 0.2, treeFormat: "json", humanize: false)
         config.sensitive.enabled = false
-        let lanes = LocalRunner(serve: phone.serve)
+        let lanes = LocalRunner(serve: phone.serve, unanswered: unanswered)
         lanes.heldFor = heldFor
         return (PokiCore(config: config, host: host, transport: lanes), host)
     }
@@ -64,7 +64,10 @@ final class LocalRunnerTests: XCTestCase {
         core.runner.wedgedAfter = 1
         _ = await core.call("look", [:])
         phone.silentUntil.value = now() + 8
+        let began = now()
         _ = await core.call("look", [:])
+        // The read's 1.5 s, and up to 3 s waiting for a smaller re-read, not the 8 s of the app.
+        XCTAssertLessThan(now() - began, 5.5, "the look returns within its own bounds")
         try await Task.sleep(nanoseconds: 6_000_000_000)
         XCTAssertEqual(host.restarts.value, 0, "a queue waiting on an app that does not answer is not wedged")
         try await Task.sleep(nanoseconds: 2_500_000_000)
@@ -85,16 +88,44 @@ final class LocalRunnerTests: XCTestCase {
         phone.silentUntil.value = answers
         _ = await core.call("look", [:])
         var replies: [String] = []
+        var slowest = 0.0
         while now() < answers - 2 {
+            let began = now()
             let tap = await core.call("do", ["actions": [["tap": [100, 300]]]])
+            slowest = max(slowest, now() - began)
             replies.append(String(tap.text.prefix(120)))
             try await Task.sleep(nanoseconds: 500_000_000)
         }
+        // Each waits at most the action's cap (2 s here) for the earlier request, then says not sent
+        // with a picture, which waits at most a read's time and half a second (1.5 s here) when testmanagerd is held too.
+        XCTAssertLessThan(slowest, 4.5, "a tap refused while a request is held answers within the action's cap and one picture")
         try await Task.sleep(nanoseconds: UInt64((answers - now() + 1) * 1_000_000_000))
         XCTAssertEqual(phone.touches.value.count, 0, "no touch landed after its call had answered: \(replies)")
         let later = await core.call("do", ["actions": [["tap": [100, 300]]]])
         XCTAssertFalse(later.isError, later.text)
         XCTAssertEqual(phone.touches.value.count, 1, "once the app answers, a tap goes through: \(later.text)")
+    }
+
+    /// On the phone, Poki's own process gives up on an app that does not answer before the request's
+    /// caller does (the front-app lookup after 2 s, a snapshot after 6 s), so the request answers and
+    /// nothing is held on the queue; that process still says what it waits on. Nothing that needs
+    /// testmanagerd is sent meanwhile, at once and without a touch landing later; once it is through,
+    /// a tap goes through.
+    func testWhatThePhoneSideStillWaitsOnKeepsTouchesBack() async throws {
+        let phone = Phone()
+        let since = LockedBox<Double?>(nil)
+        let (core, _) = makeLocalCore(phone, unanswered: { since.value.map { ("a lookup of the app in front", now() - $0) } })
+        _ = await core.call("look", [:])
+        since.value = now()
+        let began = now()
+        let tap = await core.call("do", ["actions": [["tap": [100, 300]]]])
+        XCTAssertLessThan(now() - began, 1.5, "refused at once: \(tap.text)")
+        XCTAssertTrue(tap.text.contains("not sent") || tap.text.contains("not_sent"), tap.text)
+        XCTAssertEqual(phone.touches.value.count, 0, "nothing reached the screen")
+        since.value = nil
+        let later = await core.call("do", ["actions": [["tap": [100, 300]]]])
+        XCTAssertFalse(later.isError, later.text)
+        XCTAssertEqual(phone.touches.value.count, 1, "once it is through, a tap goes through: \(later.text)")
     }
 
     /// What must not get looser: a request still not through past testmanagerd's own limit (60 s on the
