@@ -414,6 +414,27 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(homeIssues(), [])
     }
 
+    /// ESP-448 on the redesigned home: once the launcher hands a task to the mounted image, the chat,
+    /// Home's line and the bear stop saying Local Connection is off. If the session then fails to open,
+    /// the chat says that instead and links to Setup.
+    func testOnCellularTheChatTalksAboutTheLocalSessionNotTheLoopback() async {
+        await handOverToTheMountedImage()
+        // Set up on Wi-Fi before: only the loopback is missing now.
+        model.setup.developerMode = true
+        model.setup.uiAutomation = true
+        let chat = ChatModel(app: model)
+        XCTAssertNotEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "the chat while the session opens")
+        XCTAssertNotEqual(SetupIssueHint.home(model: model)?.target, .step(.loopback), "Home while the session opens")
+        XCTAssertNotEqual(PokiStatus.current(model: model, chat: chat).mood, .hello, "the bear while the session opens")
+
+        session.answer(["ok": false, "code": "missing_framework"])
+        await waitFor("the local failure is reported") { self.model.host.currentRunner.describe.contains("missing_framework") }
+        XCTAssertNotNil(model.localSessionTrouble)
+        let hint = SetupIssueHint.first(model: model)
+        XCTAssertEqual(hint?.message, model.localSessionTrouble?.text)
+        XCTAssertEqual(hint?.target, .setup)
+    }
+
     /// A local open that fails waits for the loopback; when it answers again the launcher goes the
     /// normal way once, as before the hand-over.
     func testAFailedLocalOpenRetriesOverTheLoopbackOnce() async {
