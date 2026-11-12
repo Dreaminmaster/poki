@@ -336,12 +336,16 @@ final class ApprovalFitTests: XCTestCase {
         host.view.frame = CGRect(origin: .zero, size: size)
         host.view.layoutIfNeeded()
         var seen: [Seen] = []
-        // The elements take their frames once SwiftUI has committed the layout, a turn of the run loop later.
-        for _ in 0..<10 {
+        // The elements take their frames once SwiftUI has committed the layout, and a scroll view's
+        // a turn or two later: collected until the same elements come back twice with their frames.
+        var previous: [String] = []
+        for _ in 0..<20 {
             seen = []
             var visited = Set<ObjectIdentifier>()
             collect(host.view, into: &seen, in: host.view, visited: &visited)
-            if seen.contains(where: { !$0.frame.isEmpty }) { break }
+            let labels = seen.map { "\($0.label)\($0.frame)" }
+            if !seen.isEmpty, labels == previous, !seen.contains(where: { $0.frame.isEmpty }) { break }
+            previous = labels
             RunLoop.main.run(until: Date().addingTimeInterval(0.005))
         }
         window.isHidden = true
