@@ -138,9 +138,12 @@ final class ChatModel {
     private var lastTyped: String?
     private var typedAtDo = 0
     private var doCalls = 0
-    /// The app this task's last phone step was in, for its card. A task that has taken no step has
-    /// none: its card never shows the app the task before it ended in.
+    /// The app this task is for (`TaskApps`), for its card and its conversation's row. A task that has
+    /// opened or acted in no app has none: its card never shows the app the task before it ended in.
     private(set) var taskApp: String?
+    /// What the task under way opened and acted in, and what it was asked, for `taskApp`.
+    private var taskApps = TaskApps()
+    private var taskRequest = ""
     /// The whole plan the model published, for the task card's steps still to come.
     var planSteps: [String]? { modelPlan }
     private var task: Task<Void, Never>?
@@ -321,6 +324,7 @@ final class ChatModel {
         stopAsked = false
         planID = nil; noteID = nil; modelPlan = nil
         sendTo = nil; lastTyped = nil; typedAtDo = 0; doCalls = 0; askWords = [:]; taskApp = nil
+        taskApps = TaskApps(); taskRequest = text
         let instructions = Harness.instructions(for: text)
         let images = lastImages
         if Self.direct, provider == .anthropic || provider == .openai {
@@ -537,6 +541,11 @@ final class ChatModel {
         awaitingModel = false
         let started = Date()
         let answer = await performCall(call)
+        // A launch that went through says which app the task is for; a refused one says nothing.
+        if call.name == "do", !answer.isError {
+            for app in TaskApps.launches(inArguments: call.arguments) { taskApps.launch(app) }
+            taskApp = taskApps.target(request: taskRequest)
+        }
         calls.append(CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError))
         if !stopAsked, running { awaitingModel = true }
         persist()
@@ -643,7 +652,10 @@ final class ChatModel {
             }
         case .toolFinished(let summary, let delivery, let stepApp, _, _, let session):
             guard session == nil else { return }
-            if let stepApp { taskApp = stepApp }
+            if summary != "Look at the screen" {
+                taskApps.step(in: stepApp)
+                taskApp = taskApps.target(request: taskRequest)
+            }
             guard summary != "Look at the screen", modelPlan == nil else { return }
             let failed = delivery.hasPrefix("failed")
             let waiting = delivery.contains("approval_required")

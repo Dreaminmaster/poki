@@ -105,6 +105,23 @@ final class AppIconStore {
         }
     }
 
+    /// The bundle IDs of the apps `text` names, in any of their names: "打开美团外卖点下酒菜" names Meituan
+    /// Waimai. A Latin name counts only as a whole word, and one-letter names ("X") never.
+    static func bundleIDs(namedIn text: String) -> [String] {
+        let lower = text.lowercased()
+        guard !lower.isEmpty else { return [] }
+        return apps.filter { app in
+            app.names.contains { name in
+                let name = name.lowercased()
+                guard name.count >= 2, let range = lower.range(of: name) else { return false }
+                guard name.unicodeScalars.allSatisfy(\.isASCII) else { return true }
+                let before = range.lowerBound == lower.startIndex ? nil : lower[lower.index(before: range.lowerBound)]
+                let after = range.upperBound == lower.endIndex ? nil : lower[range.upperBound]
+                return !(before?.isLetter ?? false) && !(after?.isLetter ?? false)
+            }
+        }.map(\.id)
+    }
+
     /// Apps Poki's tasks often work in: bundle ID, the asset Poki carries (if any), and their names as
     /// the iPhone shows them in English, Simplified and Traditional Chinese.
     private static let apps: [(id: String, asset: String?, names: [String])] = [
