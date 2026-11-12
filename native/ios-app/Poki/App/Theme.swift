@@ -39,6 +39,15 @@ enum Tint {
     static let blueShadow = Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor(hex: 0x0177FD).withAlphaComponent(0.22) })
     /// The conversation's page (ESP-376): a cool paper white in light, a blue-black in dark.
     static let page = Color(light: 0xF5F8FC, dark: 0x05070D)
+    /// The conversations drawer, in the home light's own colours and still: a pale blue white in light,
+    /// the deep blue of the home page's dark middle in dark.
+    static let sidebar = Color(light: 0xEFF4FC, dark: 0x081329)
+    /// The drawer's selected row, a breath of Poki's blue.
+    static let sidebarSelected = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x3A8CFE).withAlphaComponent(0.18) : UIColor(hex: 0x0177FD).withAlphaComponent(0.08) })
+    /// The drawer's faint day headings, a blue grey.
+    static let sidebarHeading = Color(light: 0x7D8BA6, dark: 0x6F82AA)
+    /// The Settings gear in the drawer: a deep navy in light, a pale blue in dark.
+    static let sidebarInk = Color(light: 0x1B2F57, dark: 0xC9D7F2)
     /// The round ground of Poki's picture in the top bar.
     static let portrait = Color(light: 0xE3EEFF, dark: 0x0C2748)
     /// The shadow under Poki's white bubble (0 2 12, ink at 5 %); none in dark.

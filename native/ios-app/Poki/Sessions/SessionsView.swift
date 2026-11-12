@@ -50,7 +50,7 @@ struct SessionsView: View {
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { controls }
-        .background(ThreadsDrawerLayout.ground.ignoresSafeArea())
+        .background(Tint.sidebar.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
@@ -71,7 +71,7 @@ struct SessionsView: View {
             Spacer()
         }
         .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 12)
-        .background(ThreadsDrawerLayout.ground)
+        .background(Tint.sidebar)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
@@ -107,7 +107,7 @@ struct SessionsView: View {
     }
 
     private func heading(_ day: Day) -> some View {
-        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Color(.tertiaryLabel))
+        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Tint.sidebarHeading)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
@@ -123,7 +123,7 @@ struct SessionsView: View {
     /// The selected row's soft fill; every other row stands on the list's ground.
     @ViewBuilder private func ground(_ session: SavedSession) -> some View {
         if current(session) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(scheme == .dark ? 0.1 : 0.05)).padding(.horizontal, 16)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected).padding(.horizontal, 16)
         } else {
             Color.clear
         }

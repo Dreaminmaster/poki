@@ -25,7 +25,7 @@ struct SettingsEntryButton: View {
             Button { if !sliding { open() } } label: {
                 // The dot inside the label, so the glass draws it rather than covering it.
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: "gearshape").font(.system(size: 20, weight: .medium)).foregroundStyle(Color(.label))
+                    Image(systemName: "gearshape").font(.system(size: 20, weight: .medium)).foregroundStyle(Tint.sidebarInk)
                         .frame(width: 48, height: 48)
                     if needsYou {
                         Circle().fill(Tint.amber).frame(width: 9, height: 9).offset(x: -8, y: 8)

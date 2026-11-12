@@ -66,7 +66,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             card(content).zIndex(1)
         }
         .simultaneousGesture(drag, including: (enabled || isOpen) ? .all : .subviews)
-        .background(ThreadsDrawerLayout.ground.ignoresSafeArea())
+        .background(Tint.sidebar.ignoresSafeArea())
         // The safe area, read where it is kept (a reader that ignores it reads none).
         .background {
             GeometryReader { geometry in
@@ -111,7 +111,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .overlay {
                 if !hidden, !reduceMotion {
                     ZStack {
-                        CardCorners(radius: radius).fill(ThreadsDrawerLayout.ground)
+                        CardCorners(radius: radius).fill(Tint.sidebar)
                         RoundedRectangle(cornerRadius: radius).strokeBorder(Color.primary.opacity((dark ? 0.16 : 0.08) * settled), lineWidth: 0.5)
                     }
                     .ignoresSafeArea()
@@ -218,9 +218,6 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
 struct ThreadsDrawerLayout {
     var screen: CGSize
     var insets: EdgeInsets
-
-    /// The drawer's ground: the page's own white in light, black in dark.
-    static let ground = Color(.systemBackground)
 
     /// The strip of the chat left showing when open: a little over a fifth of the screen.
     var strip: CGFloat { max(72, (screen.width * 0.22).rounded()) }
