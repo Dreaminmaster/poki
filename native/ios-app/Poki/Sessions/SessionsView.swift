@@ -63,7 +63,9 @@ struct SessionsView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
+            // The home page's own picture of Poki, small: the bear's face for its state.
+            PokiPortrait(mood: PokiStatus.current(model: model, chat: chat).mood, side: 32)
             Text(verbatim: "Poki").font(Prominent.font(size: 28, relativeTo: .title, .bold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Spacer()
@@ -83,7 +85,7 @@ struct SessionsView: View {
             } label: {
                 Label("New Conversation", systemImage: "square.and.pencil")
                     .labelStyle(PillLabelStyle())
-                    .font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
+                    .font(.body.weight(.semibold)).foregroundStyle(.white)
                     // One line: "New Conversation" in English is the longest, and in a narrow drawer it
                     // shrinks a little rather than wrapping.
                     .lineLimit(1).minimumScaleFactor(0.8)
@@ -91,7 +93,8 @@ struct SessionsView: View {
                     .contentShape(.capsule)
             }
             .buttonStyle(.plain)
-            .glassSurface(in: Capsule(), tint: Tint.solid, interactive: true)
+            // Poki's blue, the send button's own.
+            .glassSurface(in: Capsule(), tint: Tint.blue, interactive: true)
             .opacity(chat.running ? 0.5 : 1)
             .disabled(chat.running)
             .accessibilityIdentifier("threads.newChat")
