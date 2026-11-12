@@ -394,7 +394,7 @@ final class InProcessProbe: ObservableObject {
     }
 }
 
-/// Health › Testing Options: the automation path switch and the probes (752 had them in Settings ›
+/// General › Testing Options: the automation path switch and the probes (752 had them in Settings ›
 /// Diagnostics; ESP-152 removed them on a line where they had no caller).
 struct InProcessSection: View {
     @ObservedObject var probe = InProcessProbe.shared

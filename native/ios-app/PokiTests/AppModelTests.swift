@@ -240,7 +240,7 @@ final class ApprovalDefaultTests: XCTestCase {
         }
     }
 
-    /// An owner who never chose, then picks how to be asked in Rules, keeps the sensitivity Rules shows:
+    /// An owner who never chose, then picks how to be asked in Approvals, keeps the sensitivity Approvals shows:
     /// Ask for Everything. Saving the way of asking must not move the sensitivity to Balanced, where the
     /// chat model's yes lets a step through, behind a slider that still reads Ask for Everything.
     func testChoosingHowToBeAskedKeepsTheSensitivityRulesShows() {

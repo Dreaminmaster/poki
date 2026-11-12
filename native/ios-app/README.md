@@ -9,7 +9,7 @@ Poki automates the phone in its own process: it opens the XCTest automation sess
 (`Poki/Native/InProcess.m`, answered to PokiCore by `Poki/Runtime/InProcessWDA.swift`), so Poki is
 the only app to install. The older Runner path (WebDriverAgent as a second bundle, built by
 `.github/workflows/ios-runner.yml`; `docs/single-bundle.md` is the earlier study) stays in the code
-and is chosen per launch with `-automationPath runner`, or in Health › Testing Options, which also
+and is chosen per launch with `-automationPath runner`, or in General › Testing Options, which also
 has the in-process probes and the Background Hold experiment (752 had them in Diagnostics).
 
 A third path, **Native services**, is the default from iOS 27; earlier iOS versions default to the

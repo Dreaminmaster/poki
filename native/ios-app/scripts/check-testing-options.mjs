@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // check-testing-options.mjs POKI_MCP_ROOT SIMULATOR_NAME OUTPUT_DIR: drives Poki on a simulator through Poki MCP and
-// checks that Health › Testing Options still has 752's Diagnostics tools: the automation path switch with its
+// checks that General › Testing Options still has 752's Diagnostics tools: the automation path switch with its
 // probes and the Background Hold experiment, and that the switch moves Poki to Poki Runner after a restart.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -74,7 +74,7 @@ function openTestingOptions() {
   const alert = elements().find(e => e.type === 'Button' && /^(Allow|允许)$/.test(e.label ?? ''));
   if (alert) tap(alert);
   const row = elements().find(e => e.identifier === 'moreSettings.testingOptions');
-  assert(row, 'Health must offer Testing Options');
+  assert(row, 'General must offer Testing Options');
   tap(row);
 }
 
