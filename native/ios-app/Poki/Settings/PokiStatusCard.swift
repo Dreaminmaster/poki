@@ -88,6 +88,7 @@ extension PowerTile {
 /// the one setting Settings › Approvals reads. Each acts at once; one row is open at a time.
 struct PokiStatusCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(ChatModel.self) private var chat
     @Environment(\.colorScheme) private var scheme
     /// Settings › Models, for Add Model.
     var openModel: () -> Void
