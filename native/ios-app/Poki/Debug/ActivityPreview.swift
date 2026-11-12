@@ -320,8 +320,11 @@ private struct IslandExpandedFrame: View {
 /// The compact island: the bear's block, the camera, the words, and the minimal circle beside it.
 private struct IslandCompactFrame: View {
     var state: PokiState
+    /// `-pokiActivityClip YES`: the line the system cuts at, dashed red, to compare with the design.
+    private let clip = UserDefaults.standard.bool(forKey: "pokiActivityClip")
     var body: some View {
         let face = state.face
+        let inset = ActivityMetrics.compactClip
         HStack(spacing: 12) {
             HStack(spacing: 0) {
                 CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
@@ -332,9 +335,11 @@ private struct IslandCompactFrame: View {
             .background(.black, in: .capsule)
             .clipShape(.capsule)
             .overlay { Capsule().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
+            .overlay { if clip { Capsule().inset(by: inset).stroke(.red, style: StrokeStyle(lineWidth: 0.75, dash: [2, 2])) } }
             MinimalView(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
                 .background(.black, in: .circle)
                 .overlay { Circle().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
+                .overlay { if clip { Circle().inset(by: inset).stroke(.red, style: StrokeStyle(lineWidth: 0.75, dash: [2, 2])) } }
             // Short of room (the phone on its side, a second Live Activity): each block in a 28-point circle.
             HStack(spacing: 4) {
                 CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)

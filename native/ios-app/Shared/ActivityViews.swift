@@ -39,18 +39,21 @@ enum ActivityMetrics {
     static let islandClip: CGFloat = 12.33
     static let islandClipCorner: CGFloat = 36
     static let compactHeight: CGFloat = 36.67
+    /// What the system cuts off the compact island's and the minimal circle's edge: the bear stays
+    /// whole inside it. Measured at the bottom edge on the iOS 27 simulator; the other sides are taken
+    /// to be the same. Not yet measured on a phone.
+    static let compactClip: CGFloat = 4.33
     /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
-    static let compactBear: CGFloat = 39
+    static let compactBear: CGFloat = 27.2
     /// The compact island's right block during a run: one width from step to step, so the island
     /// keeps its size while the words change.
     static let compactWords: CGFloat = 52
-    /// Short of room, every block fits a circle this wide; the bear's whole picture is then this long a side.
+    /// Short of room, every block fits a circle this wide.
     static let narrowCircle: CGFloat = 28
-    static let narrowBear: CGFloat = 31.6
-    /// The minimal circle's bear: the whole picture's side, the same for every pose, so the bear
-    /// does not grow or shrink when the state changes.
-    static let minimalBear: CGFloat = 36.7
+    /// The bear's whole picture in that circle and in the minimal circle: one side for every pose, so
+    /// the bear does not grow or shrink when the state changes.
+    static let circleBear: CGFloat = 22.6
     static let button: CGFloat = 38
     static let stopCircle: CGFloat = 46
     static let stopCapsule: CGFloat = 34
@@ -328,14 +331,15 @@ struct IslandBottom: View {
 
 // MARK: Dynamic Island, compact and minimal
 
-/// Direction three's small bear (ESP-344 board F-06, A): head, hands and what they hold, the picture's
-/// lower edge 3 points under the island's. Every mouth sits above the 4.33 points the system cuts off.
-/// A new state changes the pose where the bear stands. Short of room, the bear in a circle 28 points across.
+/// The whole small bear (ESP-503): ears, head and outline inside the 4.33 points the system cuts off,
+/// a soft shade over its lower edge. A new state changes the pose where the bear stands. Short of
+/// room, the bear in a circle 28 points across.
 struct CompactLeading: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
         let side = ActivityMetrics.compactBear
+        let origin = face.bear.compactOrigin
         LimitedWidth { narrow in
             if narrow {
                 NarrowBear(bear: face.bear)
@@ -343,7 +347,8 @@ struct CompactLeading: View {
                 ZStack {
                     Image(face.bear.image).resizable().interpolation(.high)
                         .frame(width: side, height: side)
-                        .offset(x: 11, y: ActivityMetrics.compactHeight + 3 - side)
+                        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 6) }
+                        .offset(x: origin.x, y: origin.y)
                         .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
                         .id(face.bear)
                         .transition(.opacity)
@@ -441,37 +446,37 @@ struct CompactTrailing: View {
     }
 }
 
-/// The bear where the island is short of room, and the minimal circle there: in a circle 28 points
-/// across, set by the middle of its head and hand, its body cut by the lower edge.
+/// The bear where the island is short of room: the whole bear in a circle 28 points across, placed
+/// per pose (`ActivityBear.circleOrigin`).
 private struct NarrowBear: View {
     var bear: ActivityBear
     var body: some View {
-        let side = ActivityMetrics.narrowBear
-        let middle = bear.middle
-        let radius = ActivityMetrics.narrowCircle / 2
+        let side = ActivityMetrics.circleBear
+        let origin = bear.circleOrigin
+        let circle = ActivityMetrics.narrowCircle
         ZStack {
             Image(bear.image).resizable().interpolation(.high)
                 .frame(width: side, height: side)
-                .offset(x: radius - middle.x * side, y: radius - middle.y * side)
-                .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                .offset(x: origin.x, y: origin.y)
+                .frame(width: circle, height: circle, alignment: .topLeading)
                 .id(bear)
                 .transition(.opacity)
         }
-        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 5) }
-        .frame(width: radius * 2, height: radius * 2)
+        .frame(width: circle, height: circle)
         .clipShape(.circle)
     }
 }
 
-/// Another app's activity shares the island: only the bear, no ring, set by the middle of its head
-/// and hand so every pose sits the same way in the circle, its body cut by the lower edge.
+/// Another app's activity shares the island: only the bear, no ring, the whole bear inside the
+/// circle's visible part (the circle less the 4.33 points the system cuts off), placed per pose.
 struct MinimalView: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
-        let side = ActivityMetrics.minimalBear
-        let middle = face.bear.middle
-        let radius = ActivityMetrics.compactHeight / 2
+        let side = ActivityMetrics.circleBear
+        let inset = ActivityMetrics.compactClip
+        let origin = face.bear.circleOrigin
+        let circle = ActivityMetrics.compactHeight
         LimitedWidth { narrow in
             if narrow {
                 NarrowBear(bear: face.bear)
@@ -479,13 +484,12 @@ struct MinimalView: View {
                 ZStack {
                     Image(face.bear.image).resizable().interpolation(.high)
                         .frame(width: side, height: side)
-                        .offset(x: radius - middle.x * side, y: radius - middle.y * side)
-                        .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                        .offset(x: inset + origin.x, y: inset + origin.y)
+                        .frame(width: circle, height: circle, alignment: .topLeading)
                         .id(face.bear)
                         .transition(.opacity)
                 }
-                .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
-                .frame(width: radius * 2, height: radius * 2)
+                .frame(width: circle, height: circle)
                 .clipShape(.circle)
             }
         }
