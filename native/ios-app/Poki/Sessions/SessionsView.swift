@@ -39,7 +39,7 @@ struct SessionsView: View {
                     row(session)
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
-                        .listRowBackground(ground(session))
+                        .listRowBackground(Color.clear)
                 }
             }
             if groups.isEmpty { empty }
@@ -120,13 +120,11 @@ struct SessionsView: View {
         session.kind == .poki && session.id == chat.sessionID && sampleHome == nil
     }
 
-    /// The selected row's soft fill; every other row stands on the list's ground.
-    @ViewBuilder private func ground(_ session: SavedSession) -> some View {
-        if current(session) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected).padding(.horizontal, 16)
-        } else {
-            Color.clear
-        }
+    /// The row's own ground, the drawer's colour (the selected row's soft blue over it): a long press
+    /// lifts a clean card, not the row's words over a grey shadow.
+    private func ground(_ session: SavedSession) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebar)
+            .overlay { if current(session) { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected) } }
     }
 
     /// The app it worked in: for the chat's own task under way, the app it is in now.
@@ -154,6 +152,7 @@ struct SessionsView: View {
                 if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
             }
             .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 48)
+            .background(ground(session))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
