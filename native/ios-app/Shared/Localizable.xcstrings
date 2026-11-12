@@ -3720,19 +3720,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 可在应用中协助发消息、查信息并完成点击与输入。输入或说出请求，或点选示例开始。"
+            "value" : "在应用中替你点击、输入，处理发消息与查信息。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki sends messages, looks up info, and completes taps and typing in apps. Type or speak a request, or pick an example."
+            "value" : "Sends messages, finds info, and acts in apps."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 可在應用程式中協助傳訊息、查資訊並完成點擊與輸入。輸入或說出請求，或點選範例開始。"
+            "value" : "在應用程式中替你點擊、輸入，處理傳訊息與查資訊。"
           }
         }
       }
@@ -4156,19 +4156,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "执行不可撤销的操作前，Poki 会先请求确认。"
+            "value" : "不可撤销的操作会先问你。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "執行不可撤銷的操作前，Poki 會先請求確認。"
+            "value" : "不可撤銷的操作會先問你。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki asks for confirmation before actions that can’t be undone."
+            "value" : "Asks before irreversible steps."
           }
         }
       }

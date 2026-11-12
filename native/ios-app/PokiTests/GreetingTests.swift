@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class GreetingTests: XCTestCase {
     private var saved: Any?
-    private static let promise = "Poki asks for confirmation before actions that can’t be undone."
+    private static let promise = "Asks before irreversible steps."
 
     override func setUp() async throws { saved = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey) }
     override func tearDown() async throws { UserDefaults.standard.set(saved, forKey: ApprovalClassifier.modeKey) }
