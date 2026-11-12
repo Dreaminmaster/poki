@@ -157,7 +157,7 @@ struct PokiDetailsView: View {
             return String(localized: "\(steps.filter(model.isDone).count) of \(steps.count)")
         }
         if !model.sessionOn { return String(localized: "Off") }
-        return model.ownerPaused ? String(localized: "Resting") : String(localized: "On")
+        return model.ownerPaused ? String(localized: "Paused") : String(localized: "On")
     }
 
     private var voiceValue: String {
