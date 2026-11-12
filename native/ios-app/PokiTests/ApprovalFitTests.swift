@@ -27,6 +27,8 @@ final class ApprovalFitTests: XCTestCase {
     /// and the room over the message field that leaves the top bar and the last message in sight.
     private enum System {
         static let width: CGFloat = 371
+        /// The Lock Screen card on a 375-point iPhone without the island, as the reviews measured it.
+        static let narrowWidth: CGFloat = 353
         static let maxHeight: CGFloat = 160
         static let lockCorner: CGFloat = 24
         static let cameraRow: CGFloat = 36.67
@@ -38,7 +40,7 @@ final class ApprovalFitTests: XCTestCase {
         static let cardCorner: CGFloat = 30
     }
 
-    private enum Surface: String, CaseIterable { case lock, island, compact, card }
+    private enum Surface: String, CaseIterable { case lock, narrowLock = "lock 353", island, compact, card }
     private enum Sentence: String { case rules, agent }
 
     /// What the rules saw, as PokiCore hands it over: one step per kind, or one kind pressed again and again.
@@ -143,43 +145,59 @@ final class ApprovalFitTests: XCTestCase {
     }
 
     func testAllowShowsOnlyWithEveryKindWholeOnScreen() {
+        if !Self.chinese { XCTAssertNotNil(UIFont(name: "Geist-SemiBold", size: 11), "Geist is not loaded: the English widths would be another typeface's") }
         var failures: [String] = []
+        var withoutAllow: [String: Int] = [:]
         var cells = 0
         for size in DynamicTypeSize.allCases {
             for batch in Self.batches {
                 for sentence in [Sentence.rules, .agent] {
                     for surface in Surface.allCases {
                         // Only the Lock Screen card shows the screenshot.
-                        for shot in surface == .lock ? [false, true] : [false] {
+                        for shot in surface == .lock || surface == .narrowLock ? [false, true] : [false] {
                             let cell = Cell(size: size, batch: batch, shot: shot, sentence: sentence, surface: surface)
                             cells += 1
-                            failures += check(cell).map { "FIT\t\(cell)\t\($0)" }
+                            let (problems, allows) = check(cell)
+                            failures += problems.map { "FIT\t\(cell)\t\($0)" }
+                            if !allows, surface != .compact {
+                                withoutAllow[surface.rawValue, default: 0] += 1
+                                print("NOALLOW\t\(cell)")
+                            }
                         }
                     }
                 }
             }
         }
-        // The approval the design draws: one kind, the default size, the rules' sentence.
+        // What the design draws, and the usual batches at the default size, keep Allow: a surface that
+        // gave it up everywhere would pass the rule above.
         let drawn = Batch(kinds: ["deleting"], steps: ["deleting"], name: "the design's one deletion")
-        for surface in [Surface.lock, .island, .card] {
-            let cell = Cell(size: .large, batch: drawn, shot: false, sentence: .rules, surface: surface)
-            if !measure(cell).seen.contains(where: isAllow) { failures.append("FIT\t\(cell)\tno Allow on the design's own approval") }
-        }
-        for batch in Self.batches {
+        for batch in [drawn] + Self.batches.prefix(2) {
             for sentence in [Sentence.rules, .agent] {
-                let body = ApprovalNotice.content(Self.approval(batch, sentence: sentence)).body
-                cells += 1
-                for kind in batch.kinds where !body.contains(Self.word(kind)) {
-                    failures.append("FIT\t\(Locale.preferredLanguages.first ?? "?")\t-\t\(batch.name)\t-\t\(sentence)\tnotification\t\(Self.word(kind)) not in the body")
+                for surface in [Surface.lock, .narrowLock, .island, .card] {
+                    let cell = Cell(size: .large, batch: batch, shot: false, sentence: sentence, surface: surface)
+                    if !measure(cell).seen.contains(where: isAllow) { failures.append("FIT\t\(cell)\tno Allow at the default size") }
                 }
             }
         }
-        print("FIT\t\(Locale.preferredLanguages.first ?? "?")\t\(cells) cells\t\(failures.count) failures")
+        for batch in Self.batches {
+            for sentence in [Sentence.rules, .agent] {
+                let approval = Self.approval(batch, sentence: sentence)
+                let body = ApprovalNotice.content(approval).body
+                // The banner cuts a long body: the kinds come before the sentence.
+                let lead = body.range(of: approval.sentence).map { String(body[..<$0.lowerBound]) } ?? body
+                cells += 1
+                for kind in batch.kinds where !lead.contains(Self.word(kind)) {
+                    failures.append("FIT\t\(Locale.preferredLanguages.first ?? "?")\t-\t\(batch.name)\t-\t\(sentence)\tnotification\t\(Self.word(kind)) not before the sentence in the body")
+                }
+            }
+        }
+        print("FIT\t\(Locale.preferredLanguages.first ?? "?")\t\(cells) cells\t\(failures.count) failures\twithout Allow: \(withoutAllow.sorted { $0.key < $1.key })")
         failures.forEach { print($0) }
         XCTAssertTrue(failures.isEmpty, "\(failures.count) approval cells do not fit; see the FIT lines")
     }
 
-    private func check(_ cell: Cell) -> [String] {
+    /// The cell's problems, and whether it shows Allow.
+    private func check(_ cell: Cell) -> ([String], Bool) {
         let measured = measure(cell)
         let seen = measured.seen
         var problems: [String] = []
@@ -194,7 +212,7 @@ final class ApprovalFitTests: XCTestCase {
             for element in seen where outside(element.frame, area) > 0.5 {
                 problems.append(String(format: "“%@” %.2f outside the compact island", element.label, outside(element.frame, area)))
             }
-            return problems
+            return (problems, false)
         }
 
         guard let allow = seen.first(where: isAllow) else {
@@ -202,7 +220,7 @@ final class ApprovalFitTests: XCTestCase {
             else if !seen.contains(where: { ($0.traits.contains(.button) || $0.traits.contains(.link)) && outside($0.frame, area, capsule: true) <= 0.5 }) {
                 problems.append("no Allow and no button into Poki")
             }
-            return problems
+            return (problems, false)
         }
         for (name, button) in [("Allow", Optional(allow)), ("Don’t Allow", seen.first { Self.dontAllowWords.contains($0.label) })] {
             guard let button else { problems.append("\(name) missing"); continue }
@@ -233,11 +251,25 @@ final class ApprovalFitTests: XCTestCase {
         }
         if cell.surface == .card {
             let text = seen.map(\.label).joined(separator: "\n")
-            for kind in Set(cell.batch.steps) where !text.contains(Self.step(kind).said) {
-                problems.append("step “\(Self.step(kind).said)” not on the card")
+            for kind in Set(cell.batch.steps) {
+                let said = Self.step(kind).said
+                let shown = text.components(separatedBy: said).count - 1, pressed = cell.batch.steps.filter { $0 == kind }.count
+                if shown < pressed { problems.append("step “\(said)” on the card \(shown) of \(pressed) times") }
             }
         }
-        return problems
+        // Tags, the answers and the countdown never lie over one another.
+        let timer = String(localized: "Time left")
+        let solid = seen.filter { words.contains($0.label) || Self.allowWords.contains($0.label) || Self.dontAllowWords.contains($0.label)
+            || $0.label == timer || $0.label.range(of: #"^\d+:\d\d$"#, options: .regularExpression) != nil }
+        for (i, a) in solid.enumerated() {
+            for b in solid[(i + 1)...] {
+                let overlap = a.frame.intersection(b.frame)
+                if !overlap.isNull, overlap.width > 0.5, overlap.height > 0.5 {
+                    problems.append(String(format: "“%@” and “%@” overlap by %.2f", a.label, b.label, min(overlap.width, overlap.height)))
+                }
+            }
+        }
+        return (problems, true)
     }
 
     private func isAllow(_ element: Seen) -> Bool {
@@ -258,8 +290,9 @@ final class ApprovalFitTests: XCTestCase {
         let root: AnyView
         var proposed = CGSize(width: width ?? System.width, height: System.maxHeight)
         switch cell.surface {
-        case .lock:
+        case .lock, .narrowLock:
             root = AnyView(LockScreenCard(face: face).environment(\.cardDark, true))
+            if cell.surface == .narrowLock { proposed.width = width ?? System.narrowWidth }
         case .island:
             root = AnyView(VStack(spacing: 0) {
                 Color.clear.frame(height: System.cameraRow)
@@ -320,7 +353,7 @@ final class ApprovalFitTests: XCTestCase {
     private func area(_ surface: Surface, size: CGSize) -> Area {
         let rect = CGRect(origin: .zero, size: size)
         return switch surface {
-        case .lock: Area(rect: rect, corner: System.lockCorner)
+        case .lock, .narrowLock: Area(rect: rect, corner: System.lockCorner)
         case .island: Area(rect: rect.insetBy(dx: System.islandClip, dy: System.islandClip), corner: System.islandClipCorner, top: System.cameraRow)
         case .compact: Area(rect: rect, corner: 0)
         case .card: Area(rect: rect, corner: System.cardCorner)

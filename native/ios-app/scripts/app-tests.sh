@@ -31,5 +31,5 @@ SIMCTL_CHILD_XCTestBundlePath="$APP/PlugIns/PokiTests.xctest" \
 SIMCTL_CHILD_DYLD_FRAMEWORK_PATH="$X/Library/Frameworks:$X/Library/PrivateFrameworks" \
 SIMCTL_CHILD_DYLD_LIBRARY_PATH="$X/usr/lib" \
   timeout 300 xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -AppleLanguages "($LANGUAGE)" -AppleLocale "${LANGUAGE/-/_}" ${ONLY[@]+"${ONLY[@]}"} >"$LOG" 2>&1 || true
-grep -E "^Test Case|error:|Executed|^FIT" "$LOG" || true
+grep -E "^Test Case|error:|Executed|^FIT|^NOALLOW" "$LOG" || true
 grep -qE "Test Suite '(All|Selected) tests' passed" "$LOG"
