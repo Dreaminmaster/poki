@@ -84,7 +84,10 @@ struct SessionsView: View {
                 Label("New Conversation", systemImage: "square.and.pencil")
                     .labelStyle(PillLabelStyle())
                     .font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
-                    .padding(.horizontal, 20).frame(minHeight: 48)
+                    // One line: "New Conversation" in English is the longest, and in a narrow drawer it
+                    // shrinks a little rather than wrapping.
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 18).frame(minHeight: 48)
                     .contentShape(.capsule)
             }
             .buttonStyle(.plain)
@@ -96,7 +99,7 @@ struct SessionsView: View {
             SettingsEntryButton()
         }
         .glassGroup(spacing: 8)
-        .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 4)
+        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
