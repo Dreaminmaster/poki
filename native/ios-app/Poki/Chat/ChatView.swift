@@ -370,8 +370,8 @@ struct SetupIssueHint: Equatable {
         if let runnerHint = runnerIssue(model: model) {
             return runnerHint
         }
-        if let trouble = model.localSessionTrouble {
-            return SetupIssueHint(message: trouble.text, link: String(localized: "Open Setup ›"), target: .setup)
+        if let localHint = localSessionIssue(model: model) {
+            return localHint
         }
         let done: (SetupStep) -> Bool = looks ? model.looksDone : model.isDone
         let steps = model.canStartTasks ? SetupStep.shown.filter { $0 != .loopback } : SetupStep.shown
@@ -426,14 +426,21 @@ struct SetupIssueHint: Equatable {
         }
         return nil
     }
+
+    /// Poki's own session did not open on the mounted image (ESP-448).
+    @MainActor static func localSessionIssue(model: AppModel) -> SetupIssueHint? {
+        model.localSessionTrouble.map { SetupIssueHint(message: $0.text, link: String(localized: "Open Setup ›"), target: .setup) }
+    }
 }
 
 extension SetupIssueHint {
-    /// The home page's line: in the last two days of signing, that Poki stops opening (main's home
-    /// warning, ESP-222) ahead of everything else, since nothing works once it does; then the chat's.
+    /// The home page's line. In the last two days of signing it says Poki stops opening (main's home
+    /// warning, ESP-222): after what keeps the current task from running, ahead of open setup steps.
     @MainActor static func homeLine(model: AppModel) -> SetupIssueHint? {
+        if let now = runnerIssue(model: model) ?? localSessionIssue(model: model) { return now }
         if let warning = ExpiryWarning(expiry: model.signer.expiry) {
-            return SetupIssueHint(message: warning.message, link: String(localized: "Open Updates ›"), target: .updates)
+            return SetupIssueHint(message: String(localized: "Poki’s signing ends soon") + "\n" + warning.message,
+                                  link: String(localized: "Open Updates ›"), target: .updates)
         }
         return first(model: model)
     }

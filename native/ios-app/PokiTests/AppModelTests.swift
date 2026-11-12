@@ -572,8 +572,9 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertFalse(model.ownerPaused, "off is off, not resting")
     }
 
-    /// 752's home warned in the last two days of signing (ESP-222), and the redesigned home lost it.
-    /// The home line says it again, ahead of an open setup step, and links to Updates.
+    /// 752's home warned in the last two days of signing (ESP-222); the redesigned home only notifies.
+    /// The home line says it again, under 752's headline and ahead of an open setup step, and links to
+    /// Updates.
     func testHomeLineWarnsInTheLastTwoDaysOfSigning() {
         defer { UserDefaults.standard.removeObject(forKey: "pokiSigningDays") }
         UserDefaults.standard.set(1.0, forKey: "pokiSigningDays")
@@ -581,7 +582,8 @@ final class FrontendSubtractionTests: XCTestCase {
         ending.setup.loopback = .none
         let hint = SetupIssueHint.homeLine(model: ending)
         XCTAssertEqual(hint?.target, .updates)
-        XCTAssertEqual(hint?.message, ExpiryWarning(expiry: ending.signer.expiry)?.message)
+        let warning = ExpiryWarning(expiry: ending.signer.expiry)?.message ?? "no warning"
+        XCTAssertEqual(hint?.message, "Poki’s signing ends soon\n" + warning)
 
         UserDefaults.standard.set(3.0, forKey: "pokiSigningDays")
         let later = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
