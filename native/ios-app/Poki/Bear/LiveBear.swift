@@ -38,7 +38,7 @@ final class BearModel {
             do {
                 // `-pokiBearLoad slow` or `fail`: the late and the broken model, to see the flat bear stand in.
                 let test = UserDefaults.standard.string(forKey: "pokiBearLoad")
-                if test == "slow" { try await Task.sleep(for: .seconds(1.5)) }
+                if test == "slow" { try await Task.sleep(for: .seconds(5)) }
                 guard test != "fail",
                       let model = Bundle.main.url(forResource: "PokiBear", withExtension: "usdz"),
                       let clipsURL = Bundle.main.url(forResource: "PokiBear-clips", withExtension: "json"),
@@ -86,10 +86,10 @@ struct BearClips {
         hello = min(max(top, wave.lowerBound), wave.upperBound)
     }
 
-    /// How long a move takes.
+    /// How long a move takes; idle lasts until the next one.
     func length(_ move: BearMove) -> TimeInterval {
         switch move {
-        case .idle: idle.upperBound - idle.lowerBound
+        case .idle: .infinity
         case .blink: blink.upperBound - blink.lowerBound
         case .hi: 2 * (hello - wave.lowerBound) / BearMove.hiPace
         }
@@ -99,8 +99,9 @@ struct BearClips {
     func time(_ move: BearMove, after elapsed: TimeInterval) -> TimeInterval {
         switch move {
         case .idle:
-            let length = length(.idle)
-            return idle.lowerBound + (length > 0 ? elapsed.truncatingRemainder(dividingBy: length) : 0)
+            // The idle clip is the bear standing still: its frames differ by less than a pixel at the
+            // picture's size, so it holds the first one and draws nothing until it blinks.
+            return idle.lowerBound
         case .blink:
             return blink.lowerBound + min(max(elapsed, 0), length(.blink))
         case .hi:
@@ -118,7 +119,7 @@ enum BearMove {
 }
 
 /// What the bear is doing and since when: a move plays once, then the next one queued, then idle,
-/// which loops. Every few seconds of idle it blinks, now and then twice (as `BlinkingFace` does).
+/// which holds. Every few seconds of idle it blinks, now and then twice (as `BlinkingFace` does).
 struct BearPlayback {
     private(set) var move: BearMove = .idle
     private var since: TimeInterval = 0
@@ -299,11 +300,14 @@ private final class BearCanvas: UIView {
         isUserInteractionEnabled = false
         let layer = layer as! CAMetalLayer
         layer.device = MTLCreateSystemDefaultDevice()
-        layer.pixelFormat = .bgra8Unorm_srgb
+        // Linear half floats: RealityRenderer premultiplies its edges in linear light, and a layer
+        // in linear light blends them so. In an sRGB layer the compositor took those edges for
+        // premultiplied in sRGB, and they came out as a bright, stepped rim against the circle.
+        layer.pixelFormat = .rgba16Float
         layer.framebufferOnly = false
         layer.isOpaque = false
         // RealityRenderer writes Display P3 values, as the phone's screen shows them.
-        layer.colorspace = CGColorSpace(name: CGColorSpace.displayP3)
+        layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
         layer.drawableSize = CGSize(width: max(pixels, 1), height: max(pixels, 1))
         guard let renderer else { return }
 
