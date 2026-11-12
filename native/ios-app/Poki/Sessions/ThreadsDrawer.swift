@@ -9,6 +9,8 @@ import UIKit
 // light blur. Changed from OpenBot: there the chat slides away and the drawer lies under it, here the
 // panel is Liquid Glass and floats over the chat so the chat's colours show through it; the spring
 // bounces a little (OpenBot clamps its overshoot); a drag past fully open stretches with resistance.
+// OpenBot: https://github.com/nightly-labs/openbot at commit a74951c.
+// Required Notice: Copyright 2026 Synthetify Labs spółka z ograniczoną odpowiedzialnością.
 
 /// The conversations as a drawer from the leading edge of the chat (iPhone): a floating Liquid Glass
 /// panel that follows the finger, while the chat behind it dims and moves back a little. A tap or a
