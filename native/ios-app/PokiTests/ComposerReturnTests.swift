@@ -132,7 +132,7 @@ final class ComposerReturnTests: XCTestCase {
         @ObservedObject var draft: Draft
         var body: some View {
             ComposerInputView(input: $draft.text, focused: $draft.focused, running: false,
-                              send: { draft.sent.append($0) }, stop: {}, openVoice: {}, openModel: {}, newConversation: {})
+                              send: { text, _ in draft.sent.append(text) }, stop: {}, openVoice: {})
         }
     }
 }
