@@ -59,6 +59,7 @@ struct RootView: View {
     /// Poki's card under its picture: the model, the way of asking, Pause or Resume.
     @State private var statusOpen = false
     @State private var detailsPath = NavigationPath()
+    @State private var searchJump: ConversationSearchJump?
     @Namespace private var profile
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
@@ -93,6 +94,7 @@ struct RootView: View {
                 if split { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home.append(step) }
             },
             openModel: { openDetails([DetailsRoute.model]) },
+            searchJump: searchJump?.sessionID == chat.sessionID ? searchJump : nil,
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
             openUpdates: { openDetails([DetailsRoute.updates]) }
         )
@@ -113,7 +115,7 @@ struct RootView: View {
             .background(Site.blue.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         case .session(let id):
-            SessionView(id: id, back: { show(.chat) })
+            SessionView(id: id, back: { show(.chat) }, searchJump: searchJump?.sessionID == id ? searchJump : nil)
         case .setup:
             SetupChecklist().toolbar(.visible, for: .navigationBar)
         }
@@ -171,9 +173,9 @@ struct RootView: View {
                 next.append(DetailsRoute.setup)
                 detailsPath = next
             },
-            openSession: { id in
+            openSession: { id, entryID in
                 detailsOpen = false
-                openRun(id)
+                openRun(id, entryID: entryID)
             },
             path: $detailsPath
         )
@@ -262,7 +264,8 @@ struct RootView: View {
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.
-    private func openRun(_ id: String) {
+    private func openRun(_ id: String, entryID: UUID? = nil) {
+        searchJump = entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }
         if let session = SessionStore.shared.session(id), session.kind == .poki {
             if session.id != chat.sessionID { chat.restore(session) }
             show(.chat)
