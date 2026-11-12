@@ -25,8 +25,11 @@ struct SessionsView: View {
 
     var body: some View {
         List {
-            ForEach(shown) { session in row(session) }
-            if shown.isEmpty { empty }
+            Section {
+                ForEach(shown) { session in row(session) }
+                if shown.isEmpty { empty }
+            }
+            .listSectionSeparator(.hidden)
         }
         .listStyle(.plain)
         .scrollDismissesKeyboard(.immediately)
