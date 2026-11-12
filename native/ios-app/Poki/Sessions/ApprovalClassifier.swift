@@ -1,5 +1,6 @@
 import Foundation
 import PiSwiftAI
+import PokiCore
 
 /// Agents › Approvals. A step PokiCore's rules hold back (a payment, a message, a delete) is answered
 /// one of three ways, by the two selectors there:
@@ -15,32 +16,16 @@ import PiSwiftAI
 /// A tap anywhere is not taken as the owner's intent.
 @MainActor
 enum ApprovalClassifier {
-    nonisolated static let onKey = "approvals.classifier"
-    nonisolated static let levelKey = "approvals.classifier.level"
-    nonisolated static let modeKey = "approvals.mode"
+    nonisolated static let onKey = ApprovalChoice.classifierKey
+    nonisolated static let levelKey = ApprovalChoice.levelKey
+    nonisolated static let modeKey = ApprovalChoice.modeKey
 
     /// How optional approvals are answered. Mandatory approvals always go to the owner.
-    enum Mode: String, CaseIterable, Identifiable {
-        case reply, confirm, off
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .reply: String(localized: "With Message Reply")
-            case .confirm: String(localized: "With Confirmation")
-            case .off: String(localized: "Never Ask")
-            }
-        }
-    }
+    typealias Mode = ApprovalMode
+    typealias Level = ApprovalLevel
 
-    /// The saved choice; before there was one, what 752's two switches did (ESP-460): the auto-classifier
-    /// on let the model judge, asking off asked nothing, and otherwise the owner allowed every step.
-    nonisolated static var mode: Mode {
-        let defaults = UserDefaults.standard
-        if let raw = defaults.string(forKey: modeKey), let mode = Mode(rawValue: raw) { return mode }
-        if defaults.object(forKey: onKey) as? Bool == true { return .reply }
-        let asked = defaults.object(forKey: "approvals.ask") as? Bool ?? true
-        return asked ? .confirm : .off
-    }
+    /// The saved choice; before there was one, what 752's two switches did (`ApprovalChoice.resolve`).
+    nonisolated static var mode: Mode { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).mode }
 
     /// A chat model with a key: without one there is nobody to ask.
     static var hasModel: Bool {
@@ -94,36 +79,6 @@ enum ApprovalClassifier {
     }
 
     static let deadline: Double = 12
-
-    enum Level: String, CaseIterable, Identifiable {
-        case permissive, balanced, strict, everything
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .strict: String(localized: "Strict")
-            case .balanced: String(localized: "Balanced")
-            case .permissive: String(localized: "Permissive")
-            case .everything: String(localized: "Ask for Everything")
-            }
-        }
-        /// The saved sensitivity; before there was one, Balanced for an owner who already let the model
-        /// judge or chose a mode here, and Ask for Everything, as 752 did, for everyone else.
-        static var saved: Level {
-            let defaults = UserDefaults.standard
-            if let level = Level(rawValue: defaults.string(forKey: levelKey) ?? "") { return level }
-            let chose = defaults.string(forKey: modeKey) != nil || defaults.object(forKey: onKey) as? Bool == true
-            return chose ? .balanced : .everything
-        }
-        var rule: String {
-            switch self {
-            case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."
-            case .balanced: "ALLOW if the action directly serves what the owner asked for in this conversation. REFUSE if it is unrelated, goes further than the request, or the owner said no."
-            case .permissive: "ALLOW unless the action is clearly unrelated to what the owner asked, or the owner said no or not to do it."
-            // No auto-approval: only the owner's own yes to this step lets it through.
-            case .everything: "ALLOW only if the owner answered yes to a question about this exact step in this conversation. Their original request alone is never enough. Otherwise REFUSE."
-            }
-        }
-    }
 
     struct Verdict { let allowed: Bool; let reason: String }
 
@@ -188,6 +143,38 @@ enum ApprovalClassifier {
         return Verdict(allowed: allowed, reason: why.isEmpty ? (allowed ? "allowed" : "refused") : String(why.prefix(120)))
     }
 
+}
+
+extension ApprovalMode {
+    var title: String {
+        switch self {
+        case .reply: String(localized: "With Message Reply")
+        case .confirm: String(localized: "With Confirmation")
+        case .off: String(localized: "Never Ask")
+        }
+    }
+}
+
+extension ApprovalLevel {
+    var title: String {
+        switch self {
+        case .strict: String(localized: "Strict")
+        case .balanced: String(localized: "Balanced")
+        case .permissive: String(localized: "Permissive")
+        case .everything: String(localized: "Ask for Everything")
+        }
+    }
+    /// The saved sensitivity (`ApprovalChoice.resolve`).
+    static var saved: ApprovalLevel { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).level }
+    var rule: String {
+        switch self {
+        case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."
+        case .balanced: "ALLOW if the action directly serves what the owner asked for in this conversation. REFUSE if it is unrelated, goes further than the request, or the owner said no."
+        case .permissive: "ALLOW unless the action is clearly unrelated to what the owner asked, or the owner said no or not to do it."
+        // No auto-approval: only the owner's own yes to this step lets it through.
+        case .everything: "ALLOW only if the owner answered yes to a question about this exact step in this conversation. Their original request alone is never enough. Otherwise REFUSE."
+        }
+    }
 }
 
 /// Resumes a continuation once.

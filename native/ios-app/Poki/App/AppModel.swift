@@ -70,12 +70,12 @@ final class AppModel {
     /// reads on or off when Poki starts; the way of asking changes at once.
     var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
         didSet {
-            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
-            // The sensitivity Rules shows is saved with the first choice: a saved mode alone would move
-            // the default sensitivity to Balanced behind a slider that reads Ask for Everything.
-            if UserDefaults.standard.string(forKey: ApprovalClassifier.levelKey) == nil {
+            // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
+            // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
+            if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
                 UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
             }
+            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
             for observer in approvalModeObservers { observer() }
         }
     }
@@ -85,7 +85,13 @@ final class AppModel {
     private var approvalModeObservers: [() -> Void] = []
     func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
-        didSet { UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)") }
+        didSet {
+            UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
+            // Likewise the way of asking Rules shows, so the sensitivity counts as chosen here.
+            if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
+            }
+        }
     }
     /// Lists ask_poki for outside agents. Testing only, off.
     var askPokiTool: Bool = UserDefaults.standard.bool(forKey: AskPoki.onKey) {

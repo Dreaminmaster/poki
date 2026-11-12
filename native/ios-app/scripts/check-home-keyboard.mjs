@@ -17,7 +17,7 @@ function call(name, args = {}) {
 const ideas = elements => elements.filter(e => /Messages|Starbucks|Instagram|Slack|Notes/.test(e.label ?? e.text ?? ''));
 const input = elements => elements.find(e => /TextArea|TextField/.test(e.type) && /Poki/.test(e.label ?? ''));
 try {
-  call('launch_app', { bundle_id: 'nz.zheha.poki', arguments: ['-pokiChat', 'empty', '-approvals.mode', 'off',
+  call('launch_app', { bundle_id: 'nz.zheha.poki', arguments: ['-pokiChat', 'empty', '-approvals.mode.v2', 'off',
     '-AppleLanguages', '(zh-Hans)', '-AppleLocale', 'zh_CN'] });
   const before = call('list_elements', { source: 'ocr' });
   assert(ideas(before.elements).length > 0, 'Home must show suggestions before typing');

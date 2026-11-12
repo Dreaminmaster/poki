@@ -27,7 +27,7 @@ const tap = e => { call('tap', centre(e)); pause(1200); };
 
 function launch() {
   call('launch_app', { bundle_id: 'nz.zheha.poki', arguments: ['-pokiSessions', 'sample', '-pokiChat', 'empty',
-    '-approvals.mode', 'off', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US'] });
+    '-approvals.mode.v2', 'off', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US'] });
   pause(2500);
 }
 

@@ -216,28 +216,15 @@ final class ApprovalDefaultTests: XCTestCase {
         for key in keys { UserDefaults.standard.set(saved[key], forKey: key) }
     }
 
-    /// Rules as an owner finds them after installing over 752 (ESP-460). 752 asked the owner to allow
-    /// every message, call and password unless they had turned asking off or the auto-classifier on.
-    /// Who never chose lands on the same: With Confirmation at Ask for Everything, so no step goes out
-    /// on the chat model's word alone. Who turned asking off stays off; who turned the classifier on
-    /// keeps the model's judgement at the sensitivity they had.
-    func testRulesAfterInstallingOver752KeepWhatEachOwnerHad() {
-        let owners: [(name: String, ask: Bool?, classifier: Bool?, level: String?, mode: ApprovalClassifier.Mode, sensitivity: ApprovalClassifier.Level)] = [
-            ("never chose", nil, nil, nil, .confirm, .everything),
-            ("turned the classifier off, asking on", true, false, nil, .confirm, .everything),
-            ("turned asking off", false, nil, nil, .off, .everything),
-            ("turned the classifier on", nil, true, nil, .reply, .balanced),
-            ("turned the classifier on at Strict", true, true, "strict", .reply, .strict),
-        ]
-        for owner in owners {
-            let defaults = UserDefaults.standard
-            defaults.set(owner.ask, forKey: LiveCore.askKey)
-            defaults.set(owner.classifier, forKey: ApprovalClassifier.onKey)
-            defaults.set(owner.level, forKey: ApprovalClassifier.levelKey)
-            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
-            XCTAssertEqual(model.approvalMode, owner.mode, owner.name)
-            XCTAssertEqual(model.classifierLevel, owner.sensitivity, owner.name)
-        }
+    /// Where each owner lands after installing over 752 is `ApprovalChoiceTests` in PokiCore. Here: a
+    /// sensitivity picked on its own, with no way of asking chosen yet, is kept after a restart.
+    func testASensitivityPickedAloneIsKept() {
+        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.onKey)
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        model.classifierLevel = .strict
+        XCTAssertEqual(ApprovalClassifier.Level.saved, .strict, "what route() reads")
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).classifierLevel, .strict, "after a restart")
     }
 
     /// An owner who never chose, then picks how to be asked in Approvals, keeps the sensitivity Approvals shows:
