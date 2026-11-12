@@ -3439,18 +3439,18 @@
         }
       }
     },
-    "Good afternoon. What’s next?" : {
+    "Good afternoon. Need help?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下午好，要我帮你办点什么？"
+            "value" : "下午好，要我办点什么？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "午安，要我幫你辦點什麼？"
+            "value" : "午安，要我辦點什麼？"
           }
         }
       }
@@ -3460,29 +3460,29 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "晚上好，还有什么要办的？"
+            "value" : "晚上好，还有什么要办？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "晚上好，還有什麼要辦的？"
+            "value" : "晚上好，還有什麼要辦？"
           }
         }
       }
     },
-    "Good morning. What’s first?" : {
+    "Good morning. Need a hand?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "早上好，今天要办点什么？"
+            "value" : "早安，今天办点什么？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "早安，今天要辦點什麼？"
+            "value" : "早安，今天辦點什麼？"
           }
         }
       }
@@ -12418,13 +12418,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这么晚了，有事交给我。"
+            "value" : "夜深了，有事交给我。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "這麼晚了，有事交給我。"
+            "value" : "夜深了，有事交給我。"
           }
         }
       }
