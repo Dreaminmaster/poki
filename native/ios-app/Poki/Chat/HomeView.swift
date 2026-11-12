@@ -392,8 +392,8 @@ enum HomeIdea {
 enum HomeGreeting {
     static func line(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
-        case 5..<11: String(localized: "Good morning. What’s first?")
-        case 11..<18: String(localized: "Good afternoon. What’s next?")
+        case 5..<11: String(localized: "Good morning. Need a hand?")
+        case 11..<18: String(localized: "Good afternoon. Need help?")
         case 18..<23: String(localized: "Good evening. Anything left?")
         default: String(localized: "Up late? Leave it to me.")
         }
@@ -446,7 +446,7 @@ struct HomePage<Footer: View>: View {
                 VStack(spacing: 0) {
                     Spacer(minLength: 8)
                     VStack(spacing: 8) {
-                        // One line on the narrowest iPhone (375 points): the longest, in English, is 319
+                        // One line on the narrowest iPhone (375 points): the longest, in English, is 311
                         // points at this size. Larger text shrinks it rather than wrap it.
                         Text(verbatim: greeting)
                             .font(Prominent.font(size: 24, relativeTo: .title2, .bold)).tracking(-0.4)
