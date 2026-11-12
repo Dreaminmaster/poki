@@ -22,9 +22,12 @@ final class GreetingTests: XCTestCase {
         return (app, chat)
     }
 
+    /// With Never Ask the line under the bear says what still asks, as the top of Approvals has it:
+    /// payments, deletions and Wallet need the owner, and the other sensitive steps go ahead.
     func testTheGreetingPromisesToAskOnlyWhenAskingIsOn() {
         let (_, off) = newChat(asking: .off)
         XCTAssertFalse(greeting(off).contains(Self.promise), "\(greeting(off))")
+        XCTAssertEqual(greeting(off).last, "Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking.")
         let (_, on) = newChat(asking: .confirm)
         XCTAssertTrue(greeting(on).contains(Self.promise), "\(greeting(on))")
     }

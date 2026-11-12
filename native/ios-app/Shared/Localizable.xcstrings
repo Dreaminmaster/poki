@@ -9024,28 +9024,6 @@
         }
       }
     },
-    "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, open Settings, then Approvals." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前付款、删除、发送等敏感步骤不会先询问。如需更改，请打开设置，再选择“审批”。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sensitive steps such as paying, deleting, or sending currently proceed without asking first. To change this, open Settings, then Approvals."
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目前付款、刪除、傳送等敏感步驟不會先詢問。如需更改，請打開設定，再選擇「審批」。"
-          }
-        }
-      }
-    },
     "Run Checks" : {
       "localizations" : {
         "zh-Hans" : {
@@ -29106,6 +29084,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Payments, deletions, and Wallet actions always require your confirmation."
+          }
+        }
+      }
+    },
+    "Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "付款、删除及“钱包”操作始终需要你确认，其他敏感步骤直接进行。"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "付款、刪除及「錢包」操作始終需要你確認，其他敏感步驟直接進行。"
           }
         }
       }
