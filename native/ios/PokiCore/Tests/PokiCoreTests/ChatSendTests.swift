@@ -54,22 +54,23 @@ final class ChatSendTests: XCTestCase {
     }
 
     /// After Return the model looked again, or spent a turn, to see whether the message went (the gap
-    /// from Return to done was 14 to 26 s in the log). The Return answer now says so from its own read.
-    func testTheReturnAnswerSaysTheMessageWasSent() async {
+    /// from Return to done was 14 to 26 s in the log). The Return answer says what its own read shows
+    /// and what to look for next; it does not say sent.
+    func testTheReturnAnswerSaysWhatTheReadShows() async {
         let (core, app) = chat()
         _ = await core.call("look", [:])
         _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
         let sent = await core.call("do", ["actions": [["key": "return"]]])
         XCTAssertEqual(app.messages.value.last, "收到")
-        XCTAssertTrue(sent.text.contains("send check: sent"), sent.text)
-        XCTAssertTrue(sent.text.contains("\"收到\""), sent.text)
+        XCTAssertTrue(sent.text.contains("send check: not confirmed: the message field is empty and the last message on screen now reads \"收到\""), sent.text)
+        XCTAssertTrue(sent.text.contains("a failure or sending mark beside that message"), sent.text)
     }
 
     func testTypeAndReturnInOneCallAreCheckedToo() async {
         let (core, _) = chat()
         _ = await core.call("look", [:])
         let sent = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"], ["key": "return"]]])
-        XCTAssertTrue(sent.text.contains("send check: sent"), sent.text)
+        XCTAssertTrue(sent.text.contains("send check: not confirmed: the message field is empty and the last message on screen now reads \"收到\""), sent.text)
     }
 
     /// The send key did nothing: the text is still in the field, and the answer says the send is not

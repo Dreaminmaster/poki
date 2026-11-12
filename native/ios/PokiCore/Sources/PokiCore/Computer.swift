@@ -743,12 +743,12 @@ final class Computer: @unchecked Sendable {
     /// emptied (Approvals off); this one stays.
     static let chatApps = Set(SensitivityRules().messagingApps)
 
-    /// After Return in a chat app: whether the text this task typed went out, judged from the read just
-    /// made. Sent: the message field (the lowest text field) no longer holds the text, the last message
-    /// above it (the lowest element with text) reads exactly that text, and the screen shows that text
-    /// more times than before the actions, so an earlier message with the same words does not count.
-    /// Anything else is not confirmed, with what the read showed (ESP-465: the model spent one to three
-    /// turns after Return verifying the send).
+    /// After Return in a chat app: what the read just made shows of the text this task typed, so the
+    /// model knows what to check (it had spent one to three turns after Return working that out).
+    /// The message field is the lowest text field; the last message is the lowest element with text
+    /// above it. The answer is never "sent": a message that failed or is still sending reads the same
+    /// in the field and the last message, and no app's element tree has been checked for the marks
+    /// that tell them apart, so the model reads the screen again.
     func sendCheck(_ actions: [JSON], error: String?, textsBefore: [String]) -> String? {
         let sends = actions.contains { a in
             if let key = a["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
@@ -783,7 +783,7 @@ final class Computer: @unchecked Sendable {
             return notConfirmed("the last message reads the same text, but it was on screen before Return")
         }
         typedText = nil
-        return "send check: sent: the message field is empty and the last message on screen reads \(quoted). This read verifies the send."
+        return "send check: not confirmed: the message field is empty and the last message on screen now reads \(quoted), but a message that failed or is still sending reads the same here. Look again before finish_task: a failure or sending mark beside that message (a red exclamation mark, a retry button, a spinner) means it has not gone."
     }
 
     /// A call with no task open, or after `taskGap` without one, begins a task.
