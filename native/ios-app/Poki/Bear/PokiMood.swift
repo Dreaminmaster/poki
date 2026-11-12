@@ -134,7 +134,7 @@ struct PokiStatus: Equatable {
     private static func sample() -> PokiStatus? {
         guard let scene = UserDefaults.standard.string(forKey: "pokiChat") else { return nil }
         switch scene {
-        case "empty": return PokiStatus(.ready)
+        case "empty", "rested": return PokiStatus(.ready)
         case "working": return PokiStatus(.onYourPhone)
         case "approval": return PokiStatus(.needsYou)
         case "handoff": return PokiStatus(.yourTurn)

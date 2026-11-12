@@ -20,6 +20,11 @@ struct ChatView: View {
     var openThreads: (() -> Void)? = nil
     /// Opens Updates, from the home page's hint.
     var openUpdates: () -> Void = {}
+    /// Poki's picture in the top bar was tapped. The bear answers by itself; this is for what the tap
+    /// opens beside it.
+    var tapPortrait: () -> Void = {}
+    /// Counts the taps on Poki's picture, for the bear to answer.
+    @State private var bearPokes = 0
 
     private var voice: VoiceModel { model.voice }
     /// `-pokiDraft <text>` starts with a message already written, for recordings.
@@ -132,7 +137,7 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: chat.newConversation, openDetails: openDetails,
+                           newConversation: chat.newConversation, openDetails: openDetails, pokeBear: { bearPokes += 1; tapPortrait() },
                            update: update, openUpdates: openUpdates)
             }
         }
@@ -150,7 +155,8 @@ struct ChatView: View {
         .overlay {
             BearFollow(hero: heroFrame) { hero in
                 BearFlight(progress: home ? 0 : 1, landed: !home, hero: hero, avatar: avatarFrame,
-                           face: home ? HomeBear.face(status.mood) : launchFace, mood: status.mood, still: reduceMotion)
+                           face: home ? HomeBear.face(status.mood) : launchFace, mood: status.mood, still: reduceMotion,
+                           pokes: bearPokes)
                     .animation(HomeMotion.flight(home, reduceMotion), value: home)
             }
             .opacity(bare ? 0 : 1)

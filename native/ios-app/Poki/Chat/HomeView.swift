@@ -113,21 +113,30 @@ struct HomeBear: View {
     }
 }
 
-/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground. The
-/// face blinks and hops when the state changes (`BlinkingFace`).
+/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground. Ready,
+/// it is the three-dimensional bear, blinking, and a tap on it makes it say hi (`ModelBear`); the
+/// other faces are not modelled yet and are the flat ones, which blink and hop when the state
+/// changes (`BlinkingFace`).
 struct PokiPortrait: View {
     var mood: PokiMood
     /// The circle's side. Given, not measured: measured inside the flight, the bear in it lagged a
     /// beat behind its circle.
     var side: CGFloat = HomeMotion.avatar
+    /// In sight: the model draws only then.
+    var live = true
+    /// Counts the taps on the picture.
+    var pokes = 0
 
     var body: some View {
         ZStack {
             Circle().fill(Tint.portrait)
             // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
             // cuts it at the chest.
-            BlinkingFace(mood: mood, side: side * 50 / 56)
-                .offset(y: side * 3 / 56)
+            ModelBear(modelled: mood == .ready, side: HomeMotion.avatar * 50 / 56, live: live, pokes: pokes) {
+                BlinkingFace(mood: mood, side: side * 50 / 56)
+            }
+            .frame(width: side * 50 / 56, height: side * 50 / 56)
+            .offset(y: side * 3 / 56)
         }
         .frame(width: side, height: side)
         .clipShape(.circle)
@@ -172,6 +181,8 @@ struct BearFlight: View, Animatable {
     var mood: PokiMood
     /// Reduce Motion: no flight, the two cross-fade where they are.
     var still: Bool
+    /// Counts the taps on Poki's picture.
+    var pokes = 0
 
     var animatableData: CGFloat {
         get { progress }
@@ -186,7 +197,7 @@ struct BearFlight: View, Animatable {
             ZStack {
                 HomeBear(face: face).frame(width: hero.width, height: hero.height)
                     .position(x: hero.midX, y: hero.midY).opacity(1 - p)
-                PokiPortrait(mood: mood, side: avatar.width)
+                PokiPortrait(mood: mood, side: avatar.width, live: p > 0, pokes: pokes)
                     .position(x: avatar.midX, y: avatar.midY).opacity(p)
             }
             .allowsHitTesting(false)
@@ -203,7 +214,7 @@ struct BearFlight: View, Animatable {
             let change = min(max((p - 0.67) / 0.28, 0), 1)
             ZStack {
                 HomeBear(face: face).opacity(1 - change)
-                PokiPortrait(mood: mood, side: side).opacity(change)
+                PokiPortrait(mood: mood, side: side, live: change > 0, pokes: pokes).opacity(change)
             }
             .frame(width: side, height: side)
             // Each of the two gestures has its own clock, and that clock drives the gesture alone. As
@@ -285,6 +296,8 @@ struct ChatTopBar: View {
     var openThreads: (() -> Void)?
     var newConversation: () -> Void
     var openDetails: () -> Void
+    /// Poki's picture was tapped: the bear answers (its name under it opens the details).
+    var pokeBear: () -> Void = {}
     /// A newer Poki waits (its version): the home page says so between the two buttons, where the
     /// conversation has Poki's name, and a tap opens Updates.
     var update: String? = nil
@@ -319,22 +332,25 @@ struct ChatTopBar: View {
                 .accessibilityIdentifier("home.newChat")
             }
             .padding(.top, (HomeMotion.avatar - HomeMotion.button) / 2)
-            Button(action: openDetails) {
-                VStack(spacing: 4) {
-                    // Poki's picture is drawn by the flight over the page; here is its place.
-                    Color.clear.frame(width: HomeMotion.avatar, height: HomeMotion.avatar).reportsBearFrame(.avatar)
+            VStack(spacing: 4) {
+                // Poki's picture is drawn by the flight over the page; here is its place, and its touch.
+                Color.clear.frame(width: HomeMotion.avatar, height: HomeMotion.avatar).reportsBearFrame(.avatar)
+                    .contentShape(.circle)
+                    .onTapGesture(perform: pokeBear)
+                    .allowsHitTesting(!home)
+                    .accessibilityHidden(true)
+                Button(action: openDetails) {
                     // Glass ignores an opacity around it, so on the home page the capsule is not there at all.
                     if !home { name.transition(.opacity) }
                 }
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+                .allowsHitTesting(!home)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Poki, \(state ?? status.word), details"))
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHidden(home)
+                .accessibilityIdentifier("chat.header.details")
             }
-            .buttonStyle(.plain)
-            .allowsHitTesting(!home)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("Poki, \(state ?? status.word), details"))
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHidden(home)
-            .accessibilityIdentifier("chat.header.details")
             .padding(.horizontal, HomeMotion.button + 12)
         }
         .overlay(alignment: .top) {

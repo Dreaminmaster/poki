@@ -773,7 +773,7 @@ final class ChatModel {
         }
     }
 
-    /// `-pokiChat empty|working|approval|handoff|failed|approved|demo`: the boards' conversations, for
+    /// `-pokiChat empty|working|approval|handoff|failed|approved|rested|demo`: the boards' conversations, for
     /// the build's screenshots only. Nothing is sent.
     private func loadSample(_ scene: String) {
         let start = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: Date()) ?? Date()

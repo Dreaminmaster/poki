@@ -26,6 +26,8 @@ struct PokiApp: App {
         #endif
         // A memory backup Poki Setup put back (Documents/AgentBackup) is merged in before any agent asks.
         _ = RoutineStore.shared.importRestoredBackup()
+        // The three-dimensional bear loads while the app starts, to be there when Poki's picture first shows.
+        BearModel.shared.load()
         let model = AppModel()
         _model = State(initialValue: model)
         let chat = ChatModel(app: model)
@@ -96,6 +98,7 @@ struct RootView: View {
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
             openUpdates: { openDetails([DetailsRoute.updates]) }
         )
+        .environment(\.bearCovered, threadsOpen || statusOpen)
     }
 
     @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
