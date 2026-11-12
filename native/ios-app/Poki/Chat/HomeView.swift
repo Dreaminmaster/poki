@@ -428,7 +428,7 @@ struct HomePage<Footer: View>: View {
     var status: PokiStatus
     var promise: String?
     var bear: () -> Void
-    /// The message field has the keyboard: the suggestions stand still meanwhile.
+    /// Suggestions yield their space while the message field has focus.
     var writing = false
     var pick: (String) -> Void
     @ViewBuilder var footer: () -> Footer
@@ -491,16 +491,18 @@ struct HomePage<Footer: View>: View {
                             .padding(.bottom, 8)
                             .opacity(home ? 1 : 0)
                     }
-                    VStack(spacing: 8) {
-                        row(HomeIdea.first, speed: HomeMotion.pillSpeeds.top, start: 64)
-                        row(HomeIdea.second, speed: HomeMotion.pillSpeeds.bottom, start: 0)
+                    if !writing {
+                        VStack(spacing: 8) {
+                            row(HomeIdea.first, speed: HomeMotion.pillSpeeds.top, start: 64)
+                            row(HomeIdea.second, speed: HomeMotion.pillSpeeds.bottom, start: 0)
+                        }
+                        .padding(.top, 2)
+                        // A sideways drag on the rows scrolls them; it does not pull the drawer out.
+                        .scrollsSideways(home)
+                        .opacity(home ? 1 : 0)
+                        .offset(y: home || reduceMotion ? 0 : 14)
+                        .animation(HomeMotion.pills(home, reduceMotion), value: home)
                     }
-                    .padding(.top, 2)
-                    // A sideways drag on the rows scrolls them; it does not pull the drawer out.
-                    .scrollsSideways(home)
-                    .opacity(home ? 1 : 0)
-                    .offset(y: home || reduceMotion ? 0 : 14)
-                    .animation(HomeMotion.pills(home, reduceMotion), value: home)
                     Spacer().frame(height: 34)
                 }
                 .frame(maxWidth: .infinity, minHeight: geometry.size.height)
