@@ -94,10 +94,12 @@ struct LogView: View {
     }
 }
 
-/// Poki › Health › Testing Options: switches being tried, all in one place. Ask Before Sensitive
-/// Steps and the Auto-Classifier are in Poki › Rules.
+/// Poki › Health › Testing Options: switches being tried, all in one place, and 752's Diagnostics
+/// tools for testers: the automation path switch with its probes, and the background hold experiment.
+/// Ask Before Sensitive Steps and the Auto-Classifier are in Poki › Rules.
 struct TestingOptionsView: View {
     @Environment(AppModel.self) private var model
+    @StateObject private var hold = Hold()
     var body: some View {
         @Bindable var model = model
         Form {
@@ -107,6 +109,30 @@ struct TestingOptionsView: View {
                 Text("Agents")
             } footer: {
                 Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Rules.")
+            }
+            // The in-process path's switch and probes (ESP-173, ESP-175).
+            InProcessSection()
+            Section {
+                LabeledContent("Port on 10.7.0.1") {
+                    TextField(text: $hold.port, prompt: Text(verbatim: "49152")) { Text("Port on 10.7.0.1") }
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).monospacedDigit()
+                }
+                Picker("Experiment", selection: $hold.experiment) {
+                    ForEach(Hold.Experiment.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
+                }
+                .disabled(hold.holding)
+                Button("Start Hold") { hold.start() }.disabled(hold.holding)
+                Button("Stop", role: .destructive) { hold.stop() }.disabled(!hold.holding)
+                if !hold.log.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(hold.log.indices, id: \.self) { i in Text(verbatim: hold.log[i]).font(.caption2.monospaced()) }
+                    }
+                    .textSelection(.enabled)
+                }
+            } header: {
+                Text("Background Hold")
+            } footer: {
+                Text("Tap Start, leave the app for a while, then return. The log records suspension gaps and connection closures.")
             }
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }
