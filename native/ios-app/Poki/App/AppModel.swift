@@ -1605,7 +1605,7 @@ final class AppModel {
                 do { try importPairingFile(data, how: "received by link") } catch { pairingNote = String(localized: "Invalid Pairing File. \(error.localizedDescription)") }
             } else if let from = item("url").flatMap(URL.init(string:)), ["http", "https"].contains(from.scheme ?? "") {
                 let expected = item("sha256")?.lowercased()
-                pairingNote = String(localized: "Fetching the pairing file from \(from.host() ?? "your computer")…")
+                pairingNote = String(localized: "Fetching the pairing file from \(from.host() ?? String(localized: "your computer"))…")
                 Task {
                     do {
                         let (data, _) = try await URLSession.shared.data(from: from)
