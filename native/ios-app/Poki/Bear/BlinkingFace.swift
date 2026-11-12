@@ -35,7 +35,7 @@ struct BlinkingFace: View {
                                 .offset(x: eye.minX * side, y: eye.minY * side)
                         }
                         // The lids close toward the lower part of the eye, as the sleeping face's do.
-                        .scaleEffect(x: 1, y: 1 - 0.92 * shut, anchor: UnitPoint(x: eye.midX, y: eye.minY + eye.height * 0.62))
+                        .modifier(EyeShut(shut: shut, anchor: UnitPoint(x: eye.midX, y: eye.minY + eye.height * 0.62)))
                 }
             } else if let face = PokiMood.cutout(mood, small: true) {
                 Image(uiImage: face).resizable().interpolation(.high)
@@ -69,6 +69,26 @@ struct BlinkingFace: View {
                 try? await Task.sleep(for: .milliseconds(200))
             }
         }
+    }
+}
+
+/// One eye closing: squeezed toward its anchor, and over the last few frames darkened to the brown
+/// of the sleeping face's line, so the shut eye is a brown line, not a white sliver with the pupil in it.
+/// Animatable, so the colour follows each frame of the blink.
+private struct EyeShut: ViewModifier, Animatable {
+    var shut: Double
+    var anchor: UnitPoint
+    var animatableData: Double {
+        get { shut }
+        set { shut = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        // The pupils' and the sleeping line's brown: rgb(65, 34, 25).
+        let dark = max(0, (shut - 0.85) / 0.15)
+        content
+            .colorMultiply(Color(red: 1 - 0.745 * dark, green: 1 - 0.867 * dark, blue: 1 - 0.902 * dark))
+            .scaleEffect(x: 1, y: 1 - 0.92 * shut, anchor: anchor)
     }
 }
 
