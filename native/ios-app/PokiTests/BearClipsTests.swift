@@ -11,11 +11,13 @@ final class BearClipsTests: XCTestCase {
 
     func testTheBlinkShowsWholeFramesOnly() {
         // 2.5 frames in: between the line (frame 7) and the smile (frame 8), where the eyes are gone.
-        XCTAssertEqual(clips.time(.blink, after: 2.5 / 30) * 30, 7, accuracy: 1e-9)
+        XCTAssertEqual(clips.time(.blink, after: 2.5 / 30), 7.0 / 30)
         for step in 0...40 {
             let frame = clips.time(.blink, after: Double(step) / 160) * 30
             XCTAssertEqual(frame, frame.rounded(), accuracy: 1e-6, "after \(step)/160 s")
         }
         XCTAssertEqual(clips.time(.blink, after: 1) * 30, 12, accuracy: 1e-9)
+        // Exactly the frame's time, as the model's renderer sets it: the smile is there from frame 8 on.
+        XCTAssertEqual(clips.time(.blink, after: 3.2 / 30), 8.0 / 30)
     }
 }

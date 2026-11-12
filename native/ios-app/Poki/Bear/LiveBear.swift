@@ -62,8 +62,8 @@ struct BearClips {
     let idle, wave, blink: ClosedRange<TimeInterval>
     /// The top of the wave, where it matches the design's hello picture.
     let hello: TimeInterval
-    /// One frame of the model's timeline.
-    let frame: TimeInterval
+    /// Frames a second on the model's timeline.
+    let fps: Double
 
     /// Reads `{"fps": 30, "clips": {"idle": [95, 105], "wave": [20, 94], "blink": [5, 12]},
     /// "design_hello_frame": 42}`. A file without the three gestures is not a bear; without the hello
@@ -81,7 +81,7 @@ struct BearClips {
             }
             return Double(frames[0]) / file.fps...Double(frames[1]) / file.fps
         }
-        frame = 1 / file.fps
+        fps = file.fps
         idle = try span("idle")
         wave = try span("wave")
         blink = try span("blink")
@@ -104,12 +104,18 @@ struct BearClips {
         case .idle:
             // The idle clip is the bear standing still: its frames differ by less than a pixel at the
             // picture's size, so it holds the first one and draws nothing until it blinks.
+            #if DEBUG
+            // `-pokiBearFrame <frame>` holds that frame of the timeline instead, to look at one pose.
+            if let frame = UserDefaults.standard.string(forKey: "pokiBearFrame").flatMap(Double.init) { return frame / fps }
+            #endif
             return idle.lowerBound
         case .blink:
             // Whole frames only: the eyes are swapped between frames (the open pupils, the line, the
             // smile), and between two of them neither shows, which left the eye pads blank and white.
+            // The time is a frame's number over the rate, as the modeller's renderer has it: an eye
+            // shape is there at its frame exactly, and a sum of frame lengths may fall a hair short.
             let x = min(max(elapsed, 0), length(.blink))
-            return blink.lowerBound + (x / frame + 1e-6).rounded(.down) * frame
+            return ((blink.lowerBound * fps).rounded() + (x * fps + 1e-6).rounded(.down)) / fps
         case .hi:
             let rise = hello - wave.lowerBound, x = min(max(elapsed * BearMove.hiPace, 0), 2 * rise)
             return wave.lowerBound + (x <= rise ? x : 2 * rise - x)
@@ -398,9 +404,30 @@ private final class BearCanvas: UIView {
                 settling = 3
             }
             guard let drawable = layer.nextDrawable() else { return }
-            BearLog.note(now, playback.move)
+            BearLog.note(now, playback.move, time * clips.fps)
             lastPose = pose
             rendering = true
+            nonisolated(unsafe) let shown = drawable
+            // The eyes' shapes are a flip book in the mesh, and on screen it trails the time by a pass:
+            // drawn once, the frame after the blink's line was the white of the eye pads with neither
+            // the line nor the smile. One pass into a texture never shown, finished before the picture
+            // is drawn, as the modeller's renderer draws three for one picture.
+            if let spare = spare(like: drawable.texture) {
+                let warm = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: spare))
+                try renderer.updateAndRender(deltaTime: 0, cameraOutput: warm, onComplete: { [weak self] _ in
+                    DispatchQueue.main.async { self?.draw(into: shown) }
+                })
+            } else {
+                draw(into: shown)
+            }
+        } catch {
+            rendering = false
+        }
+    }
+
+    private func draw(into drawable: CAMetalDrawable) {
+        guard let renderer else { rendering = false; return }
+        do {
             let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: drawable.texture))
             nonisolated(unsafe) let shown = drawable
             try renderer.updateAndRender(deltaTime: 0, cameraOutput: output, onComplete: { [weak self] _ in
@@ -410,6 +437,19 @@ private final class BearCanvas: UIView {
         } catch {
             rendering = false
         }
+    }
+
+    private var spareTexture: MTLTexture?
+
+    /// A texture the size of the picture, never shown, for the pass that lets the mesh catch up.
+    private func spare(like texture: MTLTexture) -> MTLTexture? {
+        if let spareTexture, spareTexture.width == texture.width, spareTexture.height == texture.height { return spareTexture }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: texture.pixelFormat, width: texture.width,
+                                                                  height: texture.height, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .private
+        spareTexture = texture.device.makeTexture(descriptor: descriptor)
+        return spareTexture
     }
 
     /// Two poses a pixel cannot tell apart: the idle clip's frames differ by rounding only.
@@ -457,13 +497,13 @@ enum BearLog {
     #if DEBUG
     private static let on = UserDefaults.standard.bool(forKey: "pokiBearLog")
     private static var lines: [String] = []
-    static func note(_ now: TimeInterval, _ move: BearMove) {
+    static func note(_ now: TimeInterval, _ move: BearMove, _ frame: Double) {
         guard on else { return }
-        lines.append(String(format: "%.4f %@", now, String(describing: move)))
+        lines.append(String(format: "%.4f %@ %.3f", now, String(describing: move), frame))
         guard let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
         try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("bear.log"), atomically: true, encoding: .utf8)
     }
     #else
-    @inline(__always) static func note(_ now: TimeInterval, _ move: BearMove) {}
+    @inline(__always) static func note(_ now: TimeInterval, _ move: BearMove, _ frame: Double) {}
     #endif
 }
