@@ -69,10 +69,18 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// chat's plan bubble does, not the single taps under them.
         var plan: Plan?
     }
+    /// report_plan's plan, in the model's own words: the Live Activity says the step under way as the
+    /// plan words it ("Open the chat with Mom"), not the tap under it.
     struct Plan: Codable, Hashable {
-        var total: Int
+        var steps: [String]
         /// The step under way, from 1.
         var current: Int
+        /// The task in a few words ("Text Mom"), from report_plan's `title`.
+        var title: String? = nil
+        /// Who the task's message goes to ("Mom"), from report_plan's `to`.
+        var to: String? = nil
+
+        var total: Int { steps.count }
     }
     struct Event: Codable, Hashable {
         enum Kind: String, Codable, Hashable { case started, app, finished, approved, denied, expired, problem, paired, code, handoff, resumed }

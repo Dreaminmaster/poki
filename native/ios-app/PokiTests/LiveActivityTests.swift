@@ -9,20 +9,20 @@ final class LiveActivityTests: XCTestCase {
     func testTheChatsPlanCountsFromItsFirstStepAndEndsWithItsRun() {
         let chat = ActivityController()
         chat.update { $0.plan = nil }
-        chat.update { $0.plan = .init(total: 2, current: 1) }
+        chat.update { $0.plan = .init(steps: ["Open Notes", "Write the list"], current: 1) }
         chat.update { $0.phase = .working; $0.caller = nil; $0.headline = "Open Notes" }
-        XCTAssertEqual(chat.state.plan, .init(total: 2, current: 1))
+        XCTAssertEqual(chat.state.plan, .init(steps: ["Open Notes", "Write the list"], current: 1))
 
         // The next chat task, while the last run still shows as finished.
         chat.finishNow(alert: false)
         XCTAssertEqual(chat.state.phase, .done)
         chat.update { $0.plan = nil }
-        chat.update { $0.plan = .init(total: 3, current: 1) }
+        chat.update { $0.plan = .init(steps: ["Open Clock", "Open Alarms", "Add an alarm"], current: 1) }
         chat.update { $0.phase = .working; $0.headline = "Open Clock" }
-        XCTAssertEqual(chat.state.plan, .init(total: 3, current: 1))
+        XCTAssertEqual(chat.state.plan, .init(steps: ["Open Clock", "Open Alarms", "Add an alarm"], current: 1))
 
         let agent = ActivityController()
-        agent.update { $0.plan = .init(total: 2, current: 2); $0.phase = .working; $0.caller = nil }
+        agent.update { $0.plan = .init(steps: ["Open Notes", "Write the list"], current: 2); $0.phase = .working; $0.caller = nil }
         agent.finishNow(alert: false)
         agent.update { $0.phase = .working; $0.caller = "Claude Code"; $0.headline = "Open Notes" }
         XCTAssertNil(agent.state.plan)
@@ -35,16 +35,48 @@ final class LiveActivityTests: XCTestCase {
     func testEveryPresentationShowsTheSameStep() {
         var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
         state.stepCount = 7
-        state.plan = .init(total: 5, current: 2)
+        state.plan = .init(steps: ["Open Messages", "Open the chat", "Write it", "Check it", "Send it"], current: 2)
         var face = state.face
         XCTAssertEqual(face.kicker, "Step 2 of 5")
-        XCTAssertEqual(face.compact, .steps(verb: "Tap", count: "2/5"))
+        XCTAssertTrue(face.compact.counts("2/5"))
         XCTAssertEqual(face.bottom, .progress(step: 2, total: 5, stop: true))
 
         state.plan = nil
         face = state.face
         XCTAssertEqual(face.kicker, "Step 8")
-        XCTAssertEqual(face.compact, .steps(verb: "Tap", count: "Step 8"))
+        XCTAssertTrue(face.compact.counts("Step 8"))
         XCTAssertEqual(face.bottom, .progress(step: 8, total: nil, stop: true))
     }
+
+    /// ESP-467: the island and the Lock Screen say what the task is doing, never the single tap under
+    /// it. With the chat's plan, the step under way in the plan's words (and the one before it, ticked);
+    /// without a plan, a line of Poki's own, and the compact island the count alone.
+    func testTheIslandSaysThePlansStepNotTheTap() {
+        var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
+        state.stepCount = 3
+        state.previous = "Tap “Messages”"
+        state.plan = .init(steps: ["Open the chat with Mom", "Send “On my way”"], current: 2, title: "Text Mom", to: "Mom")
+        var face = state.face
+        XCTAssertEqual(face.content, "Send “On my way”")
+        XCTAssertEqual(face.previous, "Open the chat with Mom")
+        XCTAssertTrue(face.compact.says("Send “On my way”"))
+        XCTAssertTrue(face.compact.counts("2/2"))
+
+        // An outside agent's run has no plan: no tap on any presentation.
+        state.plan = nil
+        state.caller = "Claude Code"
+        face = state.face
+        XCTAssertEqual(face.content, "Working on it")
+        XCTAssertFalse(face.compact.says("Tap"))
+        XCTAssertTrue(face.compact.counts("Step 4"))
+    }
+}
+
+private extension ActivityFace.Compact {
+    /// The compact island shows this text, in whichever form it draws it.
+    func says(_ text: String) -> Bool {
+        let words = Mirror(reflecting: self).children.first.map { String(describing: $0.value) } ?? ""
+        return words.contains(text)
+    }
+    func counts(_ count: String) -> Bool { says(count) }
 }

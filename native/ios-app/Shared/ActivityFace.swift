@@ -45,9 +45,9 @@ struct ActivityFace: Hashable {
         case symbol(String, ActivityTone)
     }
     enum Compact: Hashable {
-        /// Two lines: the step's verb ("Tap") over its count ("2/5", "Step 7"). A step whose verb is
-        /// not known shows the count alone.
-        case steps(verb: String?, count: String)
+        /// Two lines: what the task is doing ("Open Messages") over its count ("2/5", "Step 7"). A run
+        /// that has nothing to say about it shows the count alone.
+        case steps(text: String?, count: String)
         /// Words and short counts ("2/6", "Stalled").
         case text(String, ActivityTone)
         /// The pairing code, tabular digits.
@@ -170,6 +170,25 @@ extension PokiState {
         return (stepCount + 1, nil)
     }
 
+    /// What the run is doing, worded so a glance at the island says which part of the task this is
+    /// (ESP-467): the plan's step under way in the model's words, else the task's name, else a line of
+    /// Poki's own ("Thinking"). Never the action under it ("Tap “Send”"): on its own that says nothing
+    /// about the task. nil when none of these is known.
+    var doing: String? {
+        if let plan {
+            if let text = planStep(progress.step) { return text }
+            if let title = plan.title?.nonBlank { return title }
+            if let to = plan.to?.nonBlank { return String(activity: "Message \(to)") }
+        }
+        return ActivityWords.statusLines.contains(headline) ? ActivityWords.local(headline) : nil
+    }
+
+    /// The plan's step `number`, from 1, in the model's words.
+    private func planStep(_ number: Int) -> String? {
+        guard let plan, plan.steps.indices.contains(number - 1) else { return nil }
+        return plan.steps[number - 1].nonBlank
+    }
+
     var face: ActivityFace { face(stale: false) }
 
     /// The face for the widget: `stale` when ActivityKit says the content is past its stale date.
@@ -211,11 +230,11 @@ extension PokiState {
                 kicker: total.map { String(activity: "Step \(step) of \($0)") } ?? String(activity: "Step \(step)"),
                 place: name,
                 meta: since.map { ActivityFace.Meta.elapsed($0) } ?? ActivityFace.Meta.none,
-                content: ActivityWords.step(headline),
-                previous: previous.map { ActivityWords.step($0) },
+                content: doing ?? String(activity: "Working on it"),
+                previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
-                compact: .steps(verb: ActivityWords.verb(headline), count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
+                compact: .steps(text: doing, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:
             guard let approval else { return quietFace }
             let question = approval.question
@@ -427,5 +446,12 @@ extension PokiActivityAttributes.Handoff {
         case .payment: "creditcard.fill"
         case .other: "person.fill"
         }
+    }
+}
+
+private extension String {
+    var nonBlank: String? {
+        let text = trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 }

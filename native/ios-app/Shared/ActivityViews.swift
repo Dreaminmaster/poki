@@ -39,6 +39,9 @@ enum ActivityMetrics {
     /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
     static let compactBear: CGFloat = 39
+    /// The compact island's right block during a run: one width from step to step, so the island
+    /// keeps its size while the words change.
+    static let compactWords: CGFloat = 52
     /// Short of room, every block fits a circle this wide; the bear's whole picture is then this long a side.
     static let narrowCircle: CGFloat = 28
     static let narrowBear: CGFloat = 31.6
@@ -281,7 +284,7 @@ struct IslandBottom: View {
                     if let previous = face.previous {
                         HStack(spacing: 5) {
                             Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
-                            Text(previous).font(theme.subtitle).lineLimit(1)
+                            Text(previous).font(theme.subtitle).lineLimit(1).contentTransition(.interpolate)
                         }
                         .foregroundStyle(palette.quiet)
                         .frame(height: 16).padding(.top, 2)
@@ -323,7 +326,7 @@ struct IslandBottom: View {
 
 /// Direction three's small bear (ESP-344 board F-06, A): head, hands and what they hold, the picture's
 /// lower edge 3 points under the island's. Every mouth sits above the 4.33 points the system cuts off.
-/// A new state sinks the old bear and raises the new one. Short of room, the bear in a circle 28 points across.
+/// A new state changes the pose where the bear stands. Short of room, the bear in a circle 28 points across.
 struct CompactLeading: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -339,18 +342,18 @@ struct CompactLeading: View {
                         .offset(x: 11, y: ActivityMetrics.compactHeight + 3 - side)
                         .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
                         .id(face.bear)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                 }
                 .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
                 .clipped()
             }
         }
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .animation(dimmed ? nil : ActivityMotion.pose, value: face.bear)
         .accessibilityHidden(true)
     }
 }
 
-/// Two short lines rather than a sentence, so it never truncates: the step's verb over its count.
+/// Two short lines: what the task is doing, made smaller or cut to fit, over its count.
 struct CompactTrailing: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -389,18 +392,21 @@ struct CompactTrailing: View {
     private func wide(_ palette: ActivityPalette) -> some View {
         ZStack {
             switch face.compact {
-            case .steps(let verb, let count):
+            case .steps(let text, let count):
                 VStack(alignment: .trailing, spacing: 0) {
-                    if let verb {
-                        Text(verb).font(theme.compact).foregroundStyle(palette.text).frame(height: 15)
+                    if let text {
+                        Text(text).font(theme.compact).foregroundStyle(palette.text).frame(height: 15)
+                            .truncationMode(.tail)
+                            .contentTransition(.interpolate)
                         Text(count).font(theme.compactCount).foregroundStyle(palette.quiet).frame(height: 13)
+                            .contentTransition(.numericText())
                     } else {
                         Text(count).font(theme.compact.monospacedDigit()).foregroundStyle(palette.text)
+                            .contentTransition(.numericText())
                     }
                 }
                 .lineLimit(1).minimumScaleFactor(0.7)
-                .id("\(verb ?? "") \(count)")
-                .transition(.push(from: .bottom))
+                .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
             case .text(let text, let tone):
                 Text(text).font(theme.compact).foregroundStyle(palette.color(tone))
                     .lineLimit(1).minimumScaleFactor(0.8)
@@ -434,7 +440,7 @@ private struct NarrowBear: View {
                 .offset(x: radius - middle.x * side, y: radius - middle.y * side)
                 .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
                 .id(bear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity)
         }
         .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 5) }
         .frame(width: radius * 2, height: radius * 2)
@@ -461,14 +467,14 @@ struct MinimalView: View {
                         .offset(x: radius - middle.x * side, y: radius - middle.y * side)
                         .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
                         .id(face.bear)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                 }
                 .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
                 .frame(width: radius * 2, height: radius * 2)
                 .clipShape(.circle)
             }
         }
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .animation(dimmed ? nil : ActivityMotion.pose, value: face.bear)
         .accessibilityHidden(true)
     }
 }
@@ -476,7 +482,7 @@ struct MinimalView: View {
 // MARK: Pieces
 
 /// The bear in a corner: the whole square picture, its lower edge on the surface's, darkening
-/// towards that edge as if it came up from inside. A new state sinks the old bear and raises the new.
+/// towards that edge as if it came up from inside. A new state changes the pose where the bear stands.
 private struct RisingBear: View {
     var bear: ActivityBear
     var side: CGFloat
@@ -489,10 +495,10 @@ private struct RisingBear: View {
             Image(bear.image).resizable().interpolation(.high)
                 .frame(width: side, height: side)
                 .id(bear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity)
         }
         // The shade covers the bear alone: over a gradient a whole strip would show as a rectangle
-        // beside it. While one bear sinks and the next rises, it follows the next one's outline.
+        // beside it. While one pose fades into the next, it follows the next one's outline.
         .overlay(alignment: .bottom) {
             Rim(colour: colour, height: rim).padding(.bottom, lift)
                 .mask(alignment: .bottom) { Image(bear.image).resizable().interpolation(.high).frame(width: side, height: side) }
@@ -536,7 +542,7 @@ private struct Kicker: View {
     }
 }
 
-/// The main line. A new step pushes the old one up and out.
+/// The main line. A new step's words blend into the old ones where they stand.
 private struct Title: View {
     var face: ActivityFace
     var palette: ActivityPalette
@@ -551,16 +557,12 @@ private struct Title: View {
         } else {
             // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do.
             let stepLike = face.size == .working || face.size == .low
-            ZStack(alignment: .leading) {
-                Text(face.content)
-                    .font(stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
-                    .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .id(face.content)
-                    .transition(face.bottom.isProgress ? .push(from: .bottom) : .opacity)
-            }
-            .frame(height: stepLike ? 24 : 25, alignment: .leading)
-            .clipped()
+            Text(face.content)
+                .font(stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
+                .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .contentTransition(.interpolate)
+                .frame(height: stepLike ? 24 : 25, alignment: .leading)
         }
     }
 }

@@ -1436,9 +1436,14 @@ final class AppModel {
         }
     }
 
-    /// The chat's model published its plan: the Live Activity counts the same steps as the chat.
-    func chatPlan(total: Int, current: Int) {
-        activity.update { $0.plan = .init(total: total, current: current) }
+    /// The chat's model published its plan: the Live Activity counts the same steps as the chat and
+    /// says the one under way in the plan's words. A later report_plan that leaves out the title or
+    /// the recipient keeps the first one's.
+    func chatPlan(steps: [String], current: Int, title: String?, to: String?) {
+        activity.update { state in
+            let old = state.plan
+            state.plan = .init(steps: steps.map { String($0.prefix(60)) }, current: current, title: title ?? old?.title, to: to ?? old?.to)
+        }
     }
 
     /// End the task, return to Poki and finish its Live Activity.

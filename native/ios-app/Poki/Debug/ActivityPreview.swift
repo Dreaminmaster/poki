@@ -99,6 +99,7 @@ struct ActivityPreview: View {
         case "passcode": String(localized: "Passcode")
         case "done": String(localized: "Done")
         case "plan": String(localized: "Chat Plan")
+        case "plannext": "\(String(localized: "Chat Plan")) › \(String(localized: "Next Step"))"
         case "plandone": String(localized: "Chat Plan Done")
         case "ready": String(localized: "Ready")
         case "idle": String(localized: "Runner Asleep")
@@ -156,11 +157,20 @@ struct ActivityPreview: View {
         done.since = now.addingTimeInterval(-84); done.endedAt = now
         done.stepCount = 12; done.failedCount = 1
 
-        // A task from Poki's own chat counts its plan's steps ("2/5"), not the taps under them (main #150).
+        // A two-step task from Poki's own chat counts its plan's steps ("1/2"), not the taps under them
+        // (main #150), and says the step under way in the plan's words, not the tap (ESP-467).
+        let steps = [String(localized: "Open Messages"), String(localized: "Open the chat with Mom")]
         var plan = working
-        plan.plan = .init(total: 5, current: 2)
+        plan.headline = "Tap “Messages”"
+        plan.previous = nil
+        plan.plan = .init(steps: steps, current: 1, title: String(localized: "Text Mom"), to: String(localized: "Mom"))
+        var planNext = plan
+        planNext.headline = "Tap “Send”"
+        planNext.previous = "Tap “Messages”"
+        planNext.stepCount = 7
+        planNext.plan?.current = 2
         var planDone = done
-        planDone.plan = .init(total: 5, current: 5)
+        planDone.plan = .init(steps: steps, current: 2)
 
         var ready = PokiState(phase: .idle, headline: "Waiting for agent", thumbnailVersion: 0)
         var idle = PokiState(phase: .idle, headline: "Runner asleep", thumbnailVersion: 0)
@@ -183,7 +193,7 @@ struct ActivityPreview: View {
         voice.voice = .listening
 
         let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
-                   ("plan", plan), ("plandone", planDone),
+                   ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
         guard let caller = UserDefaults.standard.string(forKey: "pokiActivityCaller") else { return all }

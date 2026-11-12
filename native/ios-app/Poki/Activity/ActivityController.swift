@@ -424,6 +424,7 @@ final class ActivityController {
         guard size() > 3_500 else { return }
         state.headline = String(state.headline.prefix(80))
         state.previous = nil
+        if let steps = state.plan?.steps { state.plan?.steps = steps.map { String($0.prefix(30)) } }
         if var approval = state.approval {
             approval.summary = String(approval.summary.prefix(80)); approval.reason = String(approval.reason.prefix(60))
             state.approval = approval

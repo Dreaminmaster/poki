@@ -170,9 +170,9 @@ struct ActivityTheme {
     var titleTracking: CGFloat { Self.usesGeist ? -0.2 : 0 }
     var subtitle: Font { Self.font("Geist-Medium", .medium, 13) }
     var button: Font { Self.font("Geist-SemiBold", .semibold, 15) }
-    /// The compact island's verb ("Tap"), or its count when no verb is known.
+    /// The compact island's top line (what the task is doing), or its count when nothing is said.
     var compact: Font { Self.font("Geist-SemiBold", .semibold, 13) }
-    /// Under the verb: the count ("2/5", "Step 7").
+    /// Under it: the count ("2/5", "Step 7").
     var compactCount: Font { Self.font("Geist-Medium", .medium, 11).monospacedDigit() }
     /// The pairing code in the compact island, with tabular digits.
     /// Short of room: the count and the countdown inside the 28-point circle.
@@ -200,8 +200,11 @@ enum ActivityMotion {
     /// A phase change (working, needs you, done): a soft spring that finishes well inside the 2 s iOS
     /// gives Live Activity updates.
     static let phase = Animation.spring(duration: 0.6, bounce: 0.3)
-    /// A new step within the same phase: its words push the old ones up and out. No bounce.
+    /// A new step within the same phase: its words blend into the old ones where they stand. No bounce.
     static let step = Animation.easeOut(duration: 0.35)
+    /// A new pose: the bear stays where it stands and the new pose fades in over the old one (ESP-467).
+    /// No movement and no bounce, which on the phone read as the bear dropping and pressing.
+    static let pose = Animation.easeInOut(duration: 0.35)
 }
 
 extension AnyTransition {
