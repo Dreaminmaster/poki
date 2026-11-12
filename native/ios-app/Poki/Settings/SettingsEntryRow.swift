@@ -1,8 +1,8 @@
 import PokiCore
 import SwiftUI
 
-// Settings opens only from the conversations: a round button in the trailing corner of their foot,
-// beside the new-conversation button. Where it opens is the app's (PokiApp).
+// Settings opens from the conversations: a round button in the trailing corner of their foot, beside
+// the new-conversation button (and from Poki's status card). Where it opens is the app's (PokiApp).
 
 extension EnvironmentValues {
     /// Opens Settings (Poki's profile sheet). Nil where nothing has set it: then the entry is not shown.
