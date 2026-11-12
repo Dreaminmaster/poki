@@ -508,7 +508,9 @@ extension Computer {
             let step = steps[i]
             guard step.action["tap"] != nil, let target = step.target, fieldTypes.contains(target.type),
                   i > 0, steps[i - 1].action["type"] != nil, i + 1 < steps.count, isReturn(steps[i + 1].action) else { return step }
-            if let typedInto = steps[i - 1].target, typedInto.type != target.type { return step }
+            // The field typed into: the type's own target, else the tap that came before the type.
+            let typedInto = steps[i - 1].target ?? (i > 1 && steps[i - 2].action["tap"] != nil ? steps[i - 2].target : nil)
+            if let typedInto, typedInto.type != target.type || typedInto.label != target.label || typedInto.identifier != target.identifier { return step }
             return nil
         }
     }
