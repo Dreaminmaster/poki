@@ -1684,6 +1684,23 @@
         }
       }
     },
+    "Asked you to allow: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待确认：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待確認：%@"
+          }
+        }
+      }
+    },
     "BACKGROUND HOLD" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5063,50 +5080,6 @@
         }
       }
     },
-    "Making a payment" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在付款"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paying"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在付款"
-          }
-        }
-      }
-    },
-    "Making a payment in %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 中付款"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paying in %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 中付款"
-          }
-        }
-      }
-    },
     "Message Poki" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5935,6 +5908,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OR USE AN AGENT YOU ALREADY RUN"
+          }
+        }
+      }
+    },
+    "Order lunch from Sample Noodles, ¥38 in total" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在示例面馆订购午餐，合计 38 元"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在示例麵館訂購午餐，合計 38 元"
+          }
+        }
+      }
+    },
+    "Order my usual lunch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "订购常用午餐"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訂購常用午餐"
           }
         }
       }
@@ -7299,28 +7306,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "支付 $5.40"
-          }
-        }
-      }
-    },
-    "Pay in %@?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要在 %@ 中付款吗？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pay in %@?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要在 %@ 中付款嗎？"
           }
         }
       }
@@ -9089,50 +9074,6 @@
         }
       }
     },
-    "Send a message?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许发消息？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Send message?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允許傳訊息？"
-          }
-        }
-      }
-    },
-    "Send in %@?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 中发送？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Send in %@?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 中傳送？"
-          }
-        }
-      }
-    },
     "Send it" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9233,50 +9174,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "給媽媽傳「晚到 10 分鐘，留個位子！」"
-          }
-        }
-      }
-    },
-    "Sending a message" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在发消息"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sending message"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在傳訊息"
-          }
-        }
-      }
-    },
-    "Sending a message in %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 发消息"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sending in %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 傳訊息"
           }
         }
       }
@@ -12311,50 +12208,6 @@
         }
       }
     },
-    "Typing a password" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在输密码"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Typing password"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在輸密碼"
-          }
-        }
-      }
-    },
-    "Typing a password in %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 输密码"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Typing password in %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 %@ 輸密碼"
-          }
-        }
-      }
-    },
     "Typing “On my way”" : {
       "localizations" : {
         "zh-Hans" : {
@@ -12590,28 +12443,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新、通知、診斷"
-          }
-        }
-      }
-    },
-    "Use %@?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用 %@？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use %@?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用 %@？"
           }
         }
       }
@@ -13877,28 +13708,6 @@
         }
       }
     },
-    "Make a payment?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许付款？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Make payment?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允許付款？"
-          }
-        }
-      }
-    },
     "Save Address" : {
       "localizations" : {
         "zh-Hans" : {
@@ -14079,22 +13888,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ needs approval"
-          }
-        }
-      }
-    },
-    "%@ in %@. Touch and hold to allow or deny." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在“%2$@”中%1$@。按住通知即可允许或拒绝。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在「%2$@」中%1$@。按住通知即可允許或拒絕。"
           }
         }
       }
@@ -15951,28 +15744,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輸入 %lld 個隱藏字元"
-          }
-        }
-      }
-    },
-    "Type a password?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许输入密码？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Type password?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允許輸入密碼？"
           }
         }
       }
@@ -20609,22 +20380,6 @@
         }
       }
     },
-    "Asked you to allow %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请求你允许 %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請求你允許 %@"
-          }
-        }
-      }
-    },
     "Text Mom “On my way”, tell me when it’s sent." : {
       "localizations" : {
         "zh-Hans" : {
@@ -23371,94 +23126,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Delete Account"
-          }
-        }
-      }
-    },
-    "Delete in %@?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要在 %@ 中删除吗？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete in %@?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要在 %@ 中刪除嗎？"
-          }
-        }
-      }
-    },
-    "Delete this?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许删除？"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete this?"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允許刪除？"
-          }
-        }
-      }
-    },
-    "Deleting" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在删除"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Deleting"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在刪除"
-          }
-        }
-      }
-    },
-    "Deleting in %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在 %@ 中删除"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Deleting in %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在 %@ 中刪除"
           }
         }
       }

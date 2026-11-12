@@ -61,7 +61,7 @@ struct ChatView: View {
 
     /// Poki is at work (or the sample scene shows it at work): the message field offers Stop.
     private var busy: Bool {
-        chat.running || ["working", "approval", "handoff"].contains(sampleScene ?? "")
+        chat.running || ["working", "approval", "lunch", "handoff"].contains(sampleScene ?? "")
     }
 
     /// A newer Poki is on the channel, or downloaded and ready to install: its version, for the home
@@ -89,7 +89,7 @@ struct ChatView: View {
         let home = isGreeting
         ZStack {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
-                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
+                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || sampleScene == "lunch" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
                            shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
@@ -153,6 +153,9 @@ struct ChatView: View {
         if sampleScene == "approval" {
             let sample = ChatModel.Sample.approval, words = ChatModel.Sample.approvalWords
             ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: sample.expires, answer: { _ in })
+        } else if sampleScene == "lunch" {
+            let sample = ChatModel.Sample.lunchApproval
+            ApprovalAskCard(title: sample.sentence, detail: sample.kindLine ?? "", quote: "", expires: sample.expires, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
         } else if let ask = chat.demoAsk {
@@ -160,10 +163,10 @@ struct ChatView: View {
             ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: ask.expires, answer: chat.answerDemo)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let approval = model.approvals.first {
-            // A message of this chat's own task: who it goes to and the words. Any other step: the step.
+            // A message of this chat's own task: who it goes to and the words. Any other step: its one sentence.
             let words = chat.askWords[approval.id]
-            ApprovalAskCard(title: words?.title ?? approval.question, detail: words?.detail ?? approval.reasonLine,
-                            quote: words?.quote ?? ActivityWords.label(approval.summary), expires: approval.expires,
+            ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? approval.kindLine ?? "",
+                            quote: words?.quote ?? "", expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let text = model.handoffText {
@@ -996,7 +999,7 @@ private struct NoteLine: View {
         case .declined: String(localized: "Not approved, so Poki skipped that step")
         case .expired: String(localized: "The approval ran out, so Poki skipped that step")
         case .problem(let text): text
-        case .approval(let note): ActivityWords.label(note.summary)
+        case .approval(let note): note.asked?.sentence ?? String(activity: "Allow this step?")
         case .modelChecking: String(localized: "The model is checking this step")
         case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model, \(why)")
         case .modelDeclined(let why):
@@ -1040,11 +1043,10 @@ struct ApprovalNoteCard: View {
         }
     }
 
-    /// "Messages · sending a message": the app and PokiCore's reason, without its quoted word.
-    private var context: String {
-        let why = ActivityWords.reason(note.why)
-        let app = note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : note.app
-        return [app, why.isEmpty ? nil : why].compactMap { $0 }.joined(separator: ", ")
+    /// The rules' kinds beside the agent's own sentence; a note saved before the sentence names its app.
+    private var context: String? {
+        if let asked = note.asked { return asked.kindLine }
+        return note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : ActivityWords.local(note.app)
     }
 
     var body: some View {
@@ -1059,9 +1061,11 @@ struct ApprovalNoteCard: View {
                     Text(at.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(Color(.secondaryLabel))
                 }
             }
-            Text(verbatim: ActivityWords.label(note.summary)).font(.subheadline).foregroundStyle(Color(.label))
-                .fixedSize(horizontal: false, vertical: true)
-            if !context.isEmpty {
+            if let sentence = note.asked?.sentence {
+                Text(verbatim: sentence).font(.subheadline).foregroundStyle(Color(.label))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let context {
                 Text(verbatim: context).font(.caption).foregroundStyle(Color(.secondaryLabel))
             }
             if !note.reason.isEmpty {

@@ -707,7 +707,7 @@ final class AppModel {
         ]
         activityText = String(localized: "Tap “Send”")
         approvals = [PendingApproval(id: "sample", app: messages, summary: String(localized: "Send “On my way” to Mom"),
-                                     reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))]
+                                     reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25), ask: "Send a message in \(messages)", kinds: ["sending"])]
     }
 
     // MARK: Session
@@ -1535,7 +1535,7 @@ final class AppModel {
     /// Each request is answered by the owner on its own card or notification.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
-        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
+        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary) (\(approval.reason)); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
         // The Live Activity pops up for it, but iOS folds the island back after a few seconds and a tap

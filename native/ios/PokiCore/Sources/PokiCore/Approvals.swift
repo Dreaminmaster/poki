@@ -91,15 +91,61 @@ public enum TapClearance: Sendable, Equatable {
     }
 }
 
+/// What a rule saw in an action that needs the owner, for the owner's eyes. Most serious first: the
+/// question names a batch's first kind.
+public enum ApprovalKind: String, Sendable, Equatable, CaseIterable {
+    case payment, deleting, sending, call, password, input
+    /// The rules could not read what the press does (a screen not read yet, a point that may have moved).
+    case unread
+
+    public init(reason: String) {
+        if reason.hasPrefix("a payment") { self = .payment }
+        else if reason.hasPrefix("deleting") { self = .deleting }
+        else if reason.hasPrefix("sending a message") { self = .sending }
+        else if reason.hasPrefix("a call") { self = .call }
+        else if reason.hasPrefix("typing into a password") || reason.hasPrefix("submitting a password") { self = .password }
+        else if reason.hasPrefix("input in") { self = .input }
+        else { self = .unread }
+    }
+}
+
 public struct Approval: Sendable, Equatable {
     public var id: String
     public var app: String
+    /// The actions, as step labels ("Tap “Delete”, then tap “Delete”"): for logs and the auto-check.
     public var summary: String
     public var reason: String
+    /// What the rules saw, each kind once, most serious first.
+    public var kinds: [ApprovalKind]
+    /// The agent's own sentence for what the actions get done (`do`'s `purpose`).
+    public var purpose: String?
     public var requested: Date
     public var expires: Date
     /// The actions it covers, as a fingerprint: the same actions sent again run once it is granted.
     var fingerprint: String
+
+    /// The one sentence the owner is asked: the agent's own words, or what the rules saw and where.
+    /// Never the actions or the reason (seen on the phone: four taps on a shop's row asked as four
+    /// "Tap" labels over "multiple sensitive actions: action 1: deleting").
+    public var ask: String {
+        if let purpose { return purpose }
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : app
+        switch kinds.first ?? .unread {
+        case .payment: return place.map { "Pay in \($0)" } ?? "Make a payment"
+        case .deleting: return place.map { "Delete in \($0)" } ?? "Delete something"
+        case .sending: return place.map { "Send a message in \($0)" } ?? "Send a message"
+        case .call: return place.map { "Place a call in \($0)" } ?? "Place a call"
+        case .password: return place.map { "Type a password in \($0)" } ?? "Type a password"
+        case .input: return place.map { "Use \($0)" } ?? "Use this app"
+        case .unread: return place.map { "Go on in \($0)" } ?? "Go on with this step"
+        }
+    }
+
+    /// The agent's sentence as the owner reads it: its first line, at most 120 characters; nil when empty.
+    static func purpose(_ text: String?) -> String? {
+        guard let line = text?.split(whereSeparator: \.isNewline).first?.trimmingCharacters(in: .whitespaces), !line.isEmpty else { return nil }
+        return line.count > 120 ? String(line.prefix(119)) + "…" : line
+    }
 }
 
 /// Pending and granted approvals. At most one is pending; it is granted or declined only from the app
@@ -156,9 +202,12 @@ final class Approvals: @unchecked Sendable {
         return found?.value.approval
     }
 
-    func request(app: String, summary: String, reason: String, fingerprint: String) -> Approval {
+    func request(app: String, summary: String, reason: String, kinds: [ApprovalKind]? = nil, purpose: String? = nil, fingerprint: String) -> Approval {
         let date = Date()
-        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint)
+        let seen = Set(kinds ?? [ApprovalKind(reason: reason)])
+        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason,
+                                kinds: ApprovalKind.allCases.filter(seen.contains), purpose: Approval.purpose(purpose),
+                                requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint)
         lock.lock()
         // One pending at a time: a new request replaces an older one, which ends unanswered.
         let replaced = entries.values.filter { $0.decision == nil }

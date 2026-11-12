@@ -394,7 +394,9 @@ struct ApprovalAskCard: View {
                 PokiAvatar(size: 48, mood: .needsYou)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
-                    Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                    if !detail.isEmpty {
+                        Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if let expires, expires > Date() {
