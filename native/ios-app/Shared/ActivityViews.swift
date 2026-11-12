@@ -189,7 +189,7 @@ struct LockScreenCard: View {
     private func tagged(_ palette: ActivityPalette, shot: UIImage?, size: CGSize?, lines: Int) -> some View {
         let reserved = size.map { $0.width + 12 } ?? 0
         let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
-                               badge: face.badgePlace(.lockScreen) == .besideValue, timer: shot == nil ? 46 : 38)
+                               badge: face.badgePlace(.lockScreen) == .besideValue)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 8) {
