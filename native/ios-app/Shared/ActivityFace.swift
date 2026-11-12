@@ -179,12 +179,17 @@ extension PokiState {
     /// Poki's own ("Thinking"). Never the action under it ("Tap “Send”"): on its own that says nothing
     /// about the task. nil when none of these is known.
     var doing: String? {
-        if let plan {
-            if let text = planStep(progress.step) { return text }
-            if let title = plan.title?.nonBlank { return title }
-            if let to = plan.to?.nonBlank { return String(activity: "Poki’s messaging \(to)") }
-        }
+        if let words = taskWords { return words }
+        if let to = plan?.to?.nonBlank { return String(activity: "Poki’s messaging \(to)") }
         return ActivityWords.statusLines.contains(headline) ? ActivityWords.local(headline) : nil
+    }
+
+    /// The task's own words, for the compact island: the plan's step under way, else the task's name.
+    /// Poki's own lines ("Poki's thinking") would be cut to "Poki…" in its 52 points, so with none of
+    /// these the compact island shows the count alone.
+    var taskWords: String? {
+        guard let plan else { return nil }
+        return planStep(progress.step) ?? plan.title?.nonBlank
     }
 
     /// The plan's step `number`, from 1, in the model's words.
@@ -238,7 +243,7 @@ extension PokiState {
                 previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
-                compact: .steps(text: doing, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
+                compact: .steps(text: taskWords, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:
             guard let approval else { return quietFace }
             let question = approval.question
