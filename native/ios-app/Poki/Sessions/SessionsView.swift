@@ -135,6 +135,8 @@ struct SessionsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
+        .accessibilityValue(app(session).flatMap(AppIconStore.name) ?? "")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !session.live, sampleHome == nil {
                 Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
