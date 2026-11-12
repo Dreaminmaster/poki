@@ -387,6 +387,17 @@ struct ApprovalAskCard: View {
     var answer: (Bool) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    /// The card for a step waiting in PokiCore: its one sentence and the rules' kinds, or for a message
+    /// this chat's task is about to send, who it goes to and the words.
+    init(approval: PendingApproval, words: ChatModel.AskWords?, answer: @escaping (Bool) -> Void) {
+        self.init(title: words?.title ?? approval.sentence, detail: words?.detail ?? "", tags: approval.tags,
+                  quote: words?.quote ?? "", expires: approval.expires, answer: answer)
+    }
+
+    init(title: String, detail: String, tags: [ApprovalTag] = [], quote: String, expires: Date?, answer: @escaping (Bool) -> Void) {
+        self.title = title; self.detail = detail; self.tags = tags; self.quote = quote; self.expires = expires; self.answer = answer
+    }
+
     var body: some View {
         // Side by side with Allow the wider, or one above the other at the accessibility text sizes,
         // as an alert's buttons.

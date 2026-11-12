@@ -165,9 +165,7 @@ struct ChatView: View {
         } else if let approval = model.approvals.first {
             // A message of this chat's own task: who it goes to and the words. Any other step: its one sentence.
             let words = chat.askWords[approval.id]
-            ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? "", tags: approval.tags,
-                            quote: words?.quote ?? "", expires: approval.expires,
-                            answer: { approved in model.resolve(approval, approved: approved) })
+            ApprovalAskCard(approval: approval, words: words, answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let text = model.handoffText {
             TurnCard(text: Self.local(text), done: model.handoffDoneInApp)
