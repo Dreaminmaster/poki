@@ -155,7 +155,7 @@ struct ChatView: View {
             ApprovalAskCard(title: words.title, detail: words.detail, tags: sample.tags, quote: words.quote, expires: sample.expires, answer: { _ in })
         } else if let scene = sampleScene, ChatModel.Sample.approvalScenes.contains(scene) {
             let sample = ChatModel.Sample.approval(scene)
-            ApprovalAskCard(title: sample.sentence, detail: "", tags: sample.tags, quote: "", expires: sample.expires, answer: { _ in })
+            ApprovalAskCard(approval: sample, words: nil, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
         } else if let ask = chat.demoAsk {

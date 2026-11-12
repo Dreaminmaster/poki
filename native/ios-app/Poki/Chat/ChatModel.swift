@@ -819,14 +819,14 @@ final class ChatModel {
         /// A payment the agent words as nothing to approve: the rules' tag still says Payment.
         /// A Delete, then a press the rules could not read: the review's widest pair of tags in English.
         static var uncheckedApproval: PendingApproval {
-            PendingApproval(id: "unchecked", app: "Lunch", summary: "Tap “Delete”, then tap at (200, 640)",
+            PendingApproval(id: "unchecked", app: "Lunch", summary: "Tap “Delete”, then tap at 200, 640",
                             reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: unread", expires: Date().addingTimeInterval(48),
                             ask: "In Lunch, delete something and take a step Poki could not check", kinds: ["deleting", "unread"])
         }
 
         /// Four kinds in one batch: the tags take more than one line wherever they are.
         static var wideApproval: PendingApproval {
-            PendingApproval(id: "wide", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”, then tap “Send”, then tap at (200, 640)",
+            PendingApproval(id: "wide", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”, then tap “Send”, then tap at 200, 640",
                             reason: "multiple sensitive actions", expires: Date().addingTimeInterval(48),
                             ask: "In Lunch, pay, delete something, send a message, and take a step Poki could not check",
                             kinds: ["payment", "deleting", "sending", "unread"])
