@@ -428,6 +428,7 @@ struct SessionView: View {
     @Environment(AppModel.self) private var model
     var id: String
     var back: () -> Void
+    var searchJump: ConversationSearchJump? = nil
 
     @State private var renaming = false
     @State private var newName = ""
@@ -441,6 +442,7 @@ struct SessionView: View {
         // The live task's card shows what Poki last saw of the screen, as in the chat.
         let shot: Image? = sample ? SampleShot.image(dark: scheme == .dark) : live ? model.lastShot.map { Image(uiImage: $0) } : nil
         ChatTranscript(entries: sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? [],
+                       jump: searchJump,
                        typing: running?.awaitingModel ?? false, canRetry: false, retry: {}, session: id,
                        live: live, waiting: live && !model.approvals.isEmpty, handedOver: live && model.handoffText != nil,
                        plan: sample ? GuestSample.plan : running?.planSteps, app: sample ? "TestFlight" : running.map(\.taskApp) ?? model.currentApp, shot: shot) { EmptyView() }
