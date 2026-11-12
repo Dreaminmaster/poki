@@ -239,7 +239,7 @@ final class ActivityController {
             attention = (handoff.title, handoff.detail)
         }
         if state.handoff == nil, old.handoff != nil, state.phase == .working {
-            setEvent(.resumed, "Carrying on")
+            setEvent(.resumed, "Resumed")
         }
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
@@ -262,7 +262,7 @@ final class ActivityController {
             alert = critical(String(activity: "Pairing code \(pin)"), String(activity: "Type it on the Pair with Poki screen in Settings"))
         }
         if old.phase == .pairing, state.phase == .idle, state.headline == "Paired" {
-            setEvent(.paired, "Paired")
+            setEvent(.paired, "Pairing complete")
             alert = critical(String(activity: "Poki’s paired"), String(activity: "This iPhone is ready for Poki"))
         }
 
@@ -331,7 +331,7 @@ final class ActivityController {
         state.endedAt = Date()
         state.previous = nil
         state.headline = "Finished"
-        setEvent(.finished, "Finished")
+        setEvent(.finished, "Run finished")
         let summary = state.runSummary
         send(alert: alert ? ordinary(String(activity: "Agent finished"), summary) : nil, critical: true)
         armFold()

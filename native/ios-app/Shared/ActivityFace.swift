@@ -351,16 +351,28 @@ extension PokiState {
         }
     }
 
-    /// Ready (the runner is up) and Idle (it sleeps until an agent asks).
+    /// The runner's start-up stages (`RunnerStatus.title`). Each says the same main line, Poki waking
+    /// up, and names its stage in the small line under it (ESP-467).
+    static let wakingStages: Set<String> = ["Connecting", "Checking pairing", "Opening tunnel", "Preparing", "Starting"]
+
+    /// Ready (the runner is up), Idle (it sleeps until an agent asks), and the runner on its way up.
     private var quietFace: ActivityFace {
-        ActivityFace(
+        let (title, subtitle): (String, String) =
+            if Self.wakingStages.contains(headline) {
+                (String(activity: "Poki’s waking up"), ActivityWords.local(headline))
+            } else if headline == "Needs loopback" {
+                (String(activity: "Poki can’t reach iPhone"), ActivityWords.local(headline))
+            } else {
+                (ActivityWords.local(headline), runnerPaused
+                    ? String(activity: "The runner wakes when an agent asks.")
+                    : String(activity: "Runner on. Waiting for the agent."))
+            }
+        return ActivityFace(
             symbol: runnerPaused ? "zzz" : "checkmark",
             bear: runnerPaused ? .paused : .ready, size: .low,
             meta: .none,
-            content: ActivityWords.local(headline),
-            subtitle: runnerPaused
-                ? String(activity: "The runner wakes when an agent asks.")
-                : String(activity: "Runner on. Waiting for the agent."),
+            content: title,
+            subtitle: subtitle,
             bottom: .none,
             compact: .symbol(runnerPaused ? "zzz" : "checkmark", runnerPaused ? .quiet : .accent))
     }

@@ -189,12 +189,15 @@ struct ActivityPreview: View {
         var setup = PokiState(phase: .setup, headline: "Setting up Poki", thumbnailVersion: 0)
         setup.guide = .init(number: 2, count: 6, title: SetupStep.developerMode.activityTitle)
 
+        // The runner on its way up: one main line, the stage under it.
+        let waking = PokiState(phase: .idle, headline: "Checking pairing", thumbnailVersion: 0)
+
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
 
         let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
-                   ("ready", ready), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
+                   ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
         guard let caller = UserDefaults.standard.string(forKey: "pokiActivityCaller") else { return all }
         return all.map { name, state in var state = state; state.caller = caller; return (name, state) }

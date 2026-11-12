@@ -6689,13 +6689,13 @@
         }
       }
     },
-    "Poki can’t reach the phone" : {
+    "Poki can’t reach iPhone" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki can’t reach the phone"
+            "value" : "Poki can’t reach iPhone"
           }
         },
         "zh-Hans" : {
@@ -6735,25 +6735,25 @@
         }
       }
     },
-    "Poki needs a hand" : {
+    "Poki isn’t set up yet" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki needs a hand"
+            "value" : "Poki isn’t set up yet"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 需要你搭把手"
+            "value" : "Poki 还没设置好"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 需要你搭把手"
+            "value" : "Poki 還沒設定好"
           }
         }
       }
@@ -6781,25 +6781,25 @@
         }
       }
     },
-    "Poki says hi" : {
+    "Poki needs your help" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki says hi"
+            "value" : "Poki needs your help"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 来打个招呼"
+            "value" : "Poki 需要你接手"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 來打個招呼"
+            "value" : "Poki 需要你接手"
           }
         }
       }
@@ -6908,13 +6908,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 关着"
+            "value" : "Poki 已关闭"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 關著"
+            "value" : "Poki 已關閉"
           }
         }
       }
@@ -8029,6 +8029,12 @@
     },
     "Poki needs your OK" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approval Needed"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -8039,12 +8045,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待批准"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Approval needed"
           }
         }
       }

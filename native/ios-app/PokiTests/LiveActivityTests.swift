@@ -88,6 +88,15 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertTrue(face.compact.counts("2/2"))
     }
 
+    /// ESP-467: while the runner starts, every stage says one main line (Poki waking up) and names the
+    /// stage in the small line under it, instead of a new main line per stage.
+    func testTheStartUpStagesShareOneLineAndNameTheStageBelow() {
+        let stages = ["Connecting", "Checking pairing", "Opening tunnel", "Preparing", "Starting"]
+        let faces = stages.map { PokiState(phase: .idle, headline: $0, thumbnailVersion: 0).face }
+        XCTAssertEqual(Set(faces.map(\.content)).count, 1)
+        XCTAssertEqual(faces.map(\.subtitle), stages.map { ActivityWords.local($0) })
+    }
+
     /// ESP-467: when iOS folds an approval's island back, the compact island says Poki waits for your
     /// answer, beside the time left, not a bare countdown.
     func testTheFoldedIslandSaysItWaitsForYourAnswer() {
