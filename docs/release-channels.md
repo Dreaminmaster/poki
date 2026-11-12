@@ -87,7 +87,44 @@ is tried on a phone before it reaches any channel.
   `poki-setup preview on`, `poki-setup preview 180`, `poki-setup preview none`.
 - **Pre-alpha needs the same sign-in.** The Pre-alpha channel is offered only to signed-in GitHub
   users. Without a sign-in, a saved Pre-alpha choice behaves as Alpha.
-- **Going back.** Choose None. The next update check follows the release channel again.
+- **Going back.** Choose None. The next update check follows the release channel again. A preview
+  build that was already downloaded and signed is not installed after that: Poki drops it, and the
+  signer refuses to install a prepared build that is no longer the one chosen.
+- **When GitHub cannot be read.** If the check for the chosen preview fails (no connection, a GitHub
+  error, or the request limit), the choice is kept and nothing is installed. Poki and Poki Setup say
+  so; try again later. Only a preview that GitHub confirms is gone (its pull request was closed or
+  merged, the label came off, or the build expired) sends you back to the channel.
+
+### Trying a preview build on a phone
+
+Do this once per pull request you test, after its preview build has finished (the PR preview run
+is green and lists a `Poki-preview-pr<N>-...` artifact).
+
+Poki needs a Poki with the GitHub sign-in on the phone, its Apple Account signed in under Build
+Options (to sign the download), and the loopback on (Setup lists it). Without those, use Poki Setup
+on a Mac instead (below).
+
+1. **Sign in to GitHub.** Setup › Build Options › GitHub Account › Sign In with GitHub. Tap Copy
+   Code and Open GitHub, sign in on github.com, paste the code and approve. Back in Poki the page
+   shows your GitHub name.
+2. **Turn on preview builds.** On the same page, turn on Preview Builds.
+3. **Choose the pull request.** Go back to Build Options. Under Preview Build, choose the PR, for
+   example `0.3.1 (762) PR 206`. Newest Preview Build shows the same build.
+4. **Install.** Go back to Setup. Under Signing, tap Download and Install Update. Poki downloads,
+   signs and installs the preview, closes, and opens again from the notification.
+5. **Check.** Setup › Signing › Poki Version shows `<version> (<build>) PR <N>`.
+6. **Go back to the channel.** Build Options › Preview Build › None. If a preview update had been
+   prepared but not installed, Install Update disappears. The next channel update installs as
+   usual.
+
+With Poki Setup on a Mac: Account › GitHub › Sign In with GitHub, then Preview Builds on. On the
+Setup page choose the PR under Preview Build, then Install. From the command line:
+`poki-setup preview sign-in`, `poki-setup preview on`, `poki-setup preview <N>`, then install or
+renew as usual, and `poki-setup preview none` to go back.
+
+What to report: the build line Poki shows, whether the install finished, and any message the
+GitHub Account page, Build Options or Setup showed. For a failed GitHub check, also say whether
+the choice was still there afterwards.
 
 The sign-in uses GitHub's device flow under a GitHub App that can only read Actions and pull
 requests. Its client ID is the `GITHUB_CLIENT_ID` constant in `desktop/core/src/release.rs`
