@@ -116,6 +116,29 @@ final class AppIconStore {
         return known.name(in: .current)
     }
 
+    /// The bundle IDs of the apps `text` names, in any of their names: "打开美团外卖点下酒菜" names Meituan
+    /// Waimai and not Meituan, as the longest name wins where one starts another. A Latin name counts
+    /// only as a whole word, and one-letter names ("X") never.
+    static func bundleIDs(namedIn text: String) -> [String] {
+        let text = Array(text.lowercased())
+        var found: [String] = []
+        var i = 0
+        while i < text.count {
+            let hit = namesLongestFirst.first { name in
+                let chars = Array(name)
+                guard i + chars.count <= text.count, Array(text[i..<i + chars.count]) == chars else { return false }
+                guard chars.allSatisfy(\.isASCII) else { return true }
+                return (i == 0 || !text[i - 1].isLetter) && (i + chars.count == text.count || !text[i + chars.count].isLetter)
+            }
+            guard let hit, let id = KnownApps.byName[hit] else { i += 1; continue }
+            if !found.contains(id) { found.append(id) }
+            i += hit.count
+        }
+        return found
+    }
+
+    private static let namesLongestFirst: [String] = KnownApps.byName.keys.filter { $0.count >= 2 }.sorted { $0.count > $1.count }
+
     /// A picture with something in it: not empty, not fully transparent.
     private static func isVisible(_ image: UIImage) -> Bool {
         guard let cg = image.cgImage, cg.width > 0, cg.height > 0 else { return false }

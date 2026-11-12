@@ -4,16 +4,12 @@ import SwiftUI
 // Starbucks, WeChat), found by AppIconStore.
 
 extension SavedSession {
-    /// The app the conversation last worked in: the app its last task ended in, or the app an outside
-    /// agent's last step ran in. Nil before any step in an app, for the home screen, and for
-    /// conversations saved before steps kept their app.
-    var app: String? {
-        for entry in entries.reversed() {
-            guard let app = entry.app?.trimmingCharacters(in: .whitespaces), !app.isEmpty else { continue }
-            // PokiCore names the home screen, the App Switcher and system alerts "Home screen (…)".
-            if app.hasPrefix("Home screen") || app == "unknown" || app == "com.apple.springboard" { continue }
-            return app
+    /// The app the conversation worked in: its newest task's app (`TaskApps`, kept on the task's card),
+    /// or for an outside agent's own steps, the app most of them ran in. Nil before any step in an app.
+    @MainActor var app: String? {
+        if let task = entries.last(where: { if case .plan = $0.kind { TaskApps.key($0.app) != nil } else { false } }) {
+            return TaskApps.key(task.app)
         }
-        return nil
+        return TaskApps.mostStepped(entries.map { if case .step = $0.kind { $0.app } else { nil } })
     }
 }
