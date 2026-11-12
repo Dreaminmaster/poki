@@ -546,6 +546,14 @@ struct ChatTranscript<Footer: View>: View {
     /// wait until the page has changed (600 ms, ESP-376).
     private var opening: Bool { rise != nil && entries.count <= 2 }
 
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var follow = ChatFollow.newest
+
+    /// Your newest message: when it changes you have just sent one.
+    private var lastSent: UUID? {
+        entries.last { if case .you = $0.kind { true } else { false } }?.id
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 4) {
@@ -572,13 +580,46 @@ struct ChatTranscript<Footer: View>: View {
             .animation(PlanMotion.enter, value: entries)
             .animation(.easeOut(duration: 0.2), value: typing)
         }
-        // Opens at the newest message and follows new lines (the live voice transcript grows below the
-        // messages) while the content itself scrolls freely; a short chat starts under the top bar, as
-        // the boards draw it (ESP-376). A frame fixed to the screen's height here cut off everything above it.
+        // Opens at the newest message; a short chat starts under the top bar, as the boards draw it
+        // (ESP-376). A frame fixed to the screen's height here cut off everything above it.
+        .scrollPosition($position)
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.top, for: .alignment)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        // At the newest message, every reply, step, card and keyboard keeps it in view; read back and
+        // nothing moves under you (ESP-468). The bottom anchor alone did neither: a new conversation,
+        // still shorter than the screen, stayed at its top while the keyboard and the approval card
+        // covered its task card, and a reader further up was dragged down by every reply.
+        .defaultScrollAnchor(follow == .reading ? nil : .bottom, for: .sizeChanges)
+        .onScrollGeometryChange(for: ChatFollow.Frame.self, of: ChatFollow.Frame.init) { old, new in
+            let next = follow.after(old, new)
+            follow = next.follow
+            if next.scroll { position.scrollTo(edge: .bottom) }
+        }
+        // Your finger stops the chat on its way down to the newest: from there on you are reading.
+        .onScrollPhaseChange { _, phase, context in
+            if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
+        }
+        .onChange(of: lastSent) { _, sent in
+            if sent != nil { toNewest(animated: false) }
+        }
+        .overlay(alignment: .bottom) {
+            if follow == .reading {
+                NewestButton { toNewest(animated: true) }
+                    .padding(.bottom, 10)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: follow)
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func toNewest(animated: Bool) {
+        follow = .reaching
+        if animated {
+            withAnimation(.snappy(duration: 0.35)) { position.scrollTo(edge: .bottom) }
+        } else {
+            position.scrollTo(edge: .bottom)
+        }
     }
 
     @ViewBuilder private func row(_ entry: ChatEntry, at i: Int) -> some View {
@@ -693,6 +734,63 @@ struct ChatTranscript<Footer: View>: View {
             }
         }
         return false
+    }
+}
+
+/// Whether the conversation keeps its newest message in view, is on its way down to it, or you are
+/// reading further up.
+enum ChatFollow: Equatable {
+    case newest, reaching, reading
+
+    /// What of the scroll view's geometry decides it. The container is the part between the top bar
+    /// and the message field (with the keyboard and any card over it); the insets are those bars.
+    struct Frame: Equatable {
+        var offset: CGFloat
+        var top: CGFloat
+        var content: CGFloat
+        var visible: CGFloat
+
+        init(_ geometry: ScrollGeometry) {
+            offset = geometry.contentOffset.y
+            top = geometry.contentInsets.top
+            content = geometry.contentSize.height
+            visible = geometry.containerSize.height
+        }
+
+        /// The end of the conversation is within a few points of the message field.
+        var atEnd: Bool { offset + top + visible >= content - 24 }
+    }
+
+    /// After the geometry changed. What grew or shrank (a reply, a card, the keyboard) brings the newest
+    /// back into view unless you are reading; a scroll that leaves the end is yours, unless the chat
+    /// itself is on its way down.
+    func after(_ old: Frame, _ new: Frame) -> (follow: ChatFollow, scroll: Bool) {
+        if new.atEnd { return (.newest, false) }
+        let resized = old.content != new.content || old.visible != new.visible
+        switch self {
+        case .reading: return (.reading, false)
+        case .reaching: return (.reaching, resized)
+        case .newest: return resized ? (.reaching, true) : (.reading, false)
+        }
+    }
+}
+
+/// Back to the newest message, over the bottom of a conversation you have scrolled up in.
+private struct NewestButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color(.label))
+                .frame(width: 40, height: 40)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassSurface(in: Circle(), interactive: true)
+        .accessibilityLabel(Text("Newest Messages", tableName: "Chat"))
+        .accessibilityIdentifier("chat.latest")
     }
 }
 
