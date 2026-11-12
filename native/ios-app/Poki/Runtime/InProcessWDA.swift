@@ -115,7 +115,6 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     init(screen: CGSize) {
         self.screen = screen
         routes = [
-            "GET /status": { _, _ in ["ready": true, "message": "in-process"] },
             "POST /session": { [unowned self] _, _ in
                 // The owner cancelled iOS's passcode screen: no new open (and no new screen) until they
                 // turn Poki on again.
@@ -236,9 +235,15 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 return .null
             },
         ]
-        lanes = LocalRunner { [unowned self] request in
-            self.answer(request.key, session: request.session, element: request.element, body: request.body, route: self.routes[request.key])
-        }
+        // The phone side's own request it gave up on (a pid that has not answered), which testmanagerd
+        // still serves: LocalRunner sends nothing that needs testmanagerd until it is through.
+        lanes = LocalRunner(serve: { [unowned self] request in
+            self.answer(request.key, session: request.session, element: request.element, body: request.body, route: self.routes[request.key], refreshViewport: !request.whileHeld)
+        }, unanswered: { [unowned self] in
+            guard let held = self.native.unanswered(), let seconds = held["seconds"] as? Double else { return nil }
+            let pid = held["pid"] as? Int ?? 0
+            return (pid < 0 ? "a lookup of the app in front" : pid == 0 ? "a request to the accessibility server" : "an accessibility request (pid \(pid))", seconds)
+        })
     }
 
     private struct Refusal: Error {
@@ -251,7 +256,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         try await lanes.send(method: method, url: url, body: body, timeout: timeout)
     }
 
-    private func answer(_ key: String, session: String?, element: String?, body: JSON?, route: Route?) -> (status: Int, body: Data) {
+    private func answer(_ key: String, session: String?, element: String?, body: JSON?, route: Route?, refreshViewport: Bool) -> (status: Int, body: Data) {
         func refused(_ status: Int, _ code: String, _ message: String) -> (Int, Data) {
             (status, (["value": ["error": .string(code), "message": .string(message)]] as JSON).data())
         }
@@ -261,7 +266,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         do {
             if key == "GET /screenshot" {
                 var code: NSString?
-                guard let png = native.screenshot(&code) else { throw Refusal("unable to capture screen", "no screenshot: \(code ?? "unknown")") }
+                guard let png = native.screenshot(&code, refreshViewport: refreshViewport) else { throw Refusal("unable to capture screen", "no screenshot: \(code ?? "unknown")") }
                 return (200, (["value": .string(png.base64EncodedString())] as JSON).data())
             }
             guard let route else { return refused(404, "unknown command", "not answered in-process: \(key)") }
