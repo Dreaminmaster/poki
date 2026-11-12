@@ -137,6 +137,8 @@ final class AppModel {
     var passcodeExpected: Bool { UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current }
     /// The note before iOS's passcode screen is showing; Continue turns Poki on.
     var passcodeHeadsUp = false
+    /// The note's text (PokiApp's alert). Its translations are looked up by this exact English key.
+    static let passcodeHeadsUpMessage: LocalizedStringResource = "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart."
     private var passcodeHeadsUpReconnect = true
     private var passcodeHeadsUpSeen = 0.0
     private static let automationBootKey = "automationStartedBoot"
@@ -843,6 +845,14 @@ final class AppModel {
         standBy(reason: nil)
         if let relay { core.start(relay: relay) }
         idleTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkIdle() } }
+        // Where iOS will ask for the passcode, the session opens now, while the owner who just tapped
+        // Continue on the passcode note is here, not at an agent's first request (ESP-451). The
+        // launcher starts, and once it runs, warmInProcess opens the session. It stands by again
+        // after the idle time, as after any task.
+        if passcodeExpected, inFront, !Self.onSimulator {
+            log.add("runner", "turned on by the owner: opening the automation session now, so iOS asks for the passcode while they are here")
+            wakeRunner()
+        }
     }
 
     /// Turned on again after a session of this launch was closed: Poki starts over as a new process
