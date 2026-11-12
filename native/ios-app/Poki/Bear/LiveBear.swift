@@ -169,32 +169,48 @@ struct BearPlayback {
 /// The white pads behind the bear's eyes, shut with the eyes. In the model they are fixed to the head,
 /// so a blink drew its line, and the smile its arc, on two whole white discs: the white-painted eyes
 /// the flat bear was faulted for. Here each pad is drawn apart from the bear and follows its eye's
-/// joint, which squeezes it with the pupil as the eye shuts, and it fades as it shuts, so a shut eye
-/// leaves a faint trace of its pad round the line, as the flat bear's does. The model is unchanged:
-/// its own pads are only not drawn. A bear without parts named `EyePad_L…` and `EyePad_R…` and joints
-/// ending in `Eye_L` and `Eye_R` keeps its pads as they are.
+/// joint, which squeezes it with the pupil; as soon as the eye starts to shut the pad narrows to about
+/// the pupil's width and fades to a faint trace. The model's own pads are no longer drawn but still
+/// hide what is behind them, as they always did: a shutting pupil sinks behind them at the top, and
+/// that flat upper edge is the lid coming down. The highlight goes while the eye is not open. The model
+/// is unchanged. A bear without parts named `EyePad_…`, `Pupil_…` and `Catchlight_…` and joints ending
+/// in `Eye_L` and `Eye_R` keeps its eyes as they are.
 @MainActor
 private struct EyePads {
-    /// How much of a pad shows once its eye is shut.
-    static let shut: Float = 0.3
+    /// How much of a pad shows once its eye has started to shut.
+    static let shut: Float = 0.2
+    /// How wide a pad is then, against its width open: about the pupil's.
+    static let narrow: Float = 0.65
+    /// The eye's joint scale under which the eye counts as shutting; the blink's first step is 0.7.
+    static let shutting: Float = 0.75
+    /// How far a pad sits in front of the model's own, so the two never fight over the same depth.
+    static let lift: Float = 0.0025
 
     private let pads: [(entity: ModelEntity, joint: Int)]
     private let bear: ModelEntity
     private let parents: [Int?]
     private let inverseBind: [simd_float4x4]
     private let material: PhysicallyBasedMaterial
+    private let highlight: Int
+    private let shown: PhysicallyBasedMaterial
+    private let hidden: PhysicallyBasedMaterial
 
     init?(bear: ModelEntity) {
         guard var model = bear.model, let skeleton = model.mesh.contents.skeletons.first else { return nil }
         let contents = model.mesh.contents
         let names = skeleton.joints.map(\.name)
+        func materialIndex(_ prefix: String) -> Int? {
+            let indices = Set(contents.models.filter { $0.id.hasPrefix(prefix) }.flatMap { $0.parts.map(\.materialIndex) })
+            return indices.count == 1 ? indices.first : nil
+        }
+        guard let padIndex = materialIndex("EyePad_"), let pupil = materialIndex("Pupil_"), let highlight = materialIndex("Catchlight_"),
+              let white = model.materials[padIndex] as? PhysicallyBasedMaterial,
+              var pupilMaterial = model.materials[pupil] as? PhysicallyBasedMaterial,
+              var highlightMaterial = model.materials[highlight] as? PhysicallyBasedMaterial else { return nil }
         var pads: [(entity: ModelEntity, joint: Int)] = []
-        var padMaterial: Int?
         for side in ["L", "R"] {
             let models = contents.models.filter { $0.id.hasPrefix("EyePad_\(side)") }
-            guard let joint = names.firstIndex(where: { $0.hasSuffix("Eye_\(side)") }),
-                  let index = models.first?.parts.first?.materialIndex,
-                  let material = model.materials[index] as? PhysicallyBasedMaterial else { return nil }
+            guard !models.isEmpty, let joint = names.firstIndex(where: { $0.hasSuffix("Eye_\(side)") }) else { return nil }
             var pad = MeshResource.Contents()
             pad.models = MeshModelCollection(models.map { model in
                 var model = model
@@ -209,15 +225,28 @@ private struct EyePads {
             })
             pad.instances = MeshInstanceCollection(contents.instances.filter { instance in models.contains { $0.id == instance.model } })
             guard let mesh = try? MeshResource.generate(from: pad) else { return nil }
-            pads.append((ModelEntity(mesh: mesh, materials: [material]), joint))
-            padMaterial = index
+            pads.append((ModelEntity(mesh: mesh, materials: [white]), joint))
         }
-        guard let padMaterial, var hidden = model.materials[padMaterial] as? PhysicallyBasedMaterial else { return nil }
-        material = hidden
-        // The model's own pads are kept but not drawn, not even into depth.
-        hidden.blending = .transparent(opacity: .init(scale: 0))
-        hidden.opacityThreshold = 0.5
-        model.materials[padMaterial] = hidden
+        // The drawn pads hide nothing; the model's own hide without being seen.
+        var drawn = white
+        drawn.writesDepth = false
+        material = drawn
+        var unseen = white
+        unseen.blending = .transparent(opacity: .init(scale: 0.001))
+        unseen.writesDepth = true
+        model.materials[padIndex] = unseen
+        // The pupil and its highlight are drawn with the pads, after them, so that the pads can hide them.
+        pupilMaterial.blending = .transparent(opacity: .init(scale: 1))
+        pupilMaterial.writesDepth = true
+        model.materials[pupil] = pupilMaterial
+        highlightMaterial.blending = .transparent(opacity: .init(scale: 1))
+        highlightMaterial.writesDepth = true
+        model.materials[highlight] = highlightMaterial
+        shown = highlightMaterial
+        highlightMaterial.blending = .transparent(opacity: .init(scale: 0))
+        highlightMaterial.writesDepth = false
+        hidden = highlightMaterial
+        self.highlight = highlight
         bear.model = model
         pads.forEach { bear.addChild($0.entity) }
         self.pads = pads
@@ -226,19 +255,36 @@ private struct EyePads {
         inverseBind = skeleton.joints.map(\.inverseBindPoseMatrix)
     }
 
-    /// Puts each pad where its eye's joint has it at the pose just updated, and fades it as it shuts.
+    /// Puts each pad where its eye's joint has it at the pose just updated, and shuts it with the eye.
     func follow() {
         let local = bear.jointTransforms.map(\.matrix)
         guard local.count == parents.count else { return }
         func placed(_ joint: Int) -> simd_float4x4 { parents[joint].map { placed($0) * local[joint] } ?? local[joint] }
+        var allOpen = true
         for (entity, joint) in pads {
-            entity.transform = Transform(matrix: placed(joint) * inverseBind[joint])
-            let open = min(max((bear.jointTransforms[joint].scale.y - 0.1) / 0.9, 0), 1)
+            let x = min(max((bear.jointTransforms[joint].scale.y - Self.shutting) / (1 - Self.shutting), 0), 1)
+            let open = x * x * (3 - 2 * x)
+            allOpen = allOpen && open == 1
+            let eye = placed(joint)
+            let width = 1 - (1 - Self.narrow) * (1 - open)
+            var squeeze = matrix_identity_float4x4
+            squeeze.columns.0.x = width
+            squeeze.columns.3 = SIMD4(eye.columns.3.x * (1 - width), 0, 0, 1)
+            // Lifted along the eye's own forward, which turns with the head.
+            var lift = matrix_identity_float4x4
+            lift.columns.3.z = Self.lift
+            entity.transform = Transform(matrix: squeeze * eye * lift * inverseBind[joint])
             var material = material
             if case .transparent(let opacity) = material.blending {
                 material.blending = .transparent(opacity: .init(scale: opacity.scale * (Self.shut + (1 - Self.shut) * open), texture: opacity.texture))
             }
             entity.model?.materials = [material]
+        }
+        guard var model = bear.model, let now = model.materials[highlight] as? PhysicallyBasedMaterial else { return }
+        let showing: Bool = if case .transparent(let opacity) = now.blending { opacity.scale > 0 } else { true }
+        if showing != allOpen {
+            model.materials[highlight] = allOpen ? shown : hidden
+            bear.model = model
         }
     }
 }
