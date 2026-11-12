@@ -10,47 +10,47 @@
 import SwiftUI
 import UIKit
 
-/// The drawer contains conversations and the action for starting a new one.
+/// The conversations, in the drawer under the chat (iPhone) and beside it (iPad): Poki's name on
+/// top, then one line per conversation, the newest first, and floating over the list the button for a
+/// new conversation and the way into Settings.
 struct SessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     var openChat: () -> Void
     var openSession: (String) -> Void
     @State private var renaming: SavedSession?
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.drawerOnGlass) private var onGlass
-    @Environment(\.colorScheme) private var scheme
-
-    /// The time and the summary line. On the drawer's glass in dark mode a step lighter than the
-    /// system's secondary label, so they still read where a bright part of the chat (the home page's
-    /// bear) shows through, without a ground under the row.
-    private var secondary: Color {
-        onGlass && scheme == .dark ? Color(white: 0.92, opacity: 0.9) : Color(.secondaryLabel)
-    }
     @State private var newName = ""
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.inThreadsDrawer) private var inDrawer
+    @Environment(\.drawerSliding) private var sliding
+    /// The conversation's name: a step larger than the body, as a list of names only reads well.
+    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
 
     private var store: SessionStore { SessionStore.shared }
     private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
 
     var body: some View {
+        let groups = grouped
         List {
-            Section {
-                ForEach(shown) { session in
+            ForEach(groups, id: \.day) { group in
+                if groups.count > 1 { heading(group.day) }
+                ForEach(group.sessions) { session in
                     row(session)
-                        .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
-                        .listRowBackground(rowGround(session))
+                        .listRowBackground(ground(session))
                 }
-                if shown.isEmpty { empty }
             }
-            .listSectionSeparator(.hidden)
+            if groups.isEmpty { empty }
         }
         .listStyle(.plain)
-        .scrollContentBackground(onGlass ? .hidden : .automatic)
+        .environment(\.defaultMinListRowHeight, 0)
+        .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
-        .safeAreaInset(edge: .bottom, spacing: 0) { SettingsEntryRow() }
-        .background(onGlass ? Color.clear : Color(.systemBackground))
+        .safeAreaInset(edge: .bottom, spacing: 0) { controls }
+        .background(ThreadsDrawerLayout.ground.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
@@ -64,37 +64,62 @@ struct SessionsView: View {
 
     private var header: some View {
         HStack {
+            Text(verbatim: "Poki").font(Prominent.font(size: 28, relativeTo: .title, .bold)).foregroundStyle(Color(.label))
+                .accessibilityAddTraits(.isHeader)
             Spacer()
-            Button {
-                if !chat.running { chat.newConversation() }
-                openChat()
-            } label: {
-                Image(systemName: "square.and.pencil").font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
-                    .frame(width: 40, height: 40).background(Tint.solid, in: .circle)
-            }
-            .buttonStyle(.plain)
-            .disabled(chat.running)
-            .accessibilityLabel(Text("New Conversation"))
-            .accessibilityIdentifier("threads.newChat")
         }
-        .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
-        .background(onGlass ? Color.clear : Color(.systemBackground))
+        .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 12)
+        .background(ThreadsDrawerLayout.ground)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
-    private var big: Bool { typeSize.isAccessibilitySize }
+    /// Floating over the list's foot: a new conversation, in the leading corner, and Settings in the trailing one.
+    private var controls: some View {
+        HStack(alignment: .center) {
+            Button {
+                guard !sliding else { return }
+                if !chat.running { chat.newConversation() }
+                openChat()
+            } label: {
+                Label("New Conversation", systemImage: "square.and.pencil")
+                    .labelStyle(PillLabelStyle())
+                    .font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
+                    .padding(.horizontal, 20).frame(minHeight: 48)
+                    .contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .glassSurface(in: Capsule(), tint: Tint.solid, interactive: true)
+            .opacity(chat.running ? 0.5 : 1)
+            .disabled(chat.running)
+            .accessibilityIdentifier("threads.newChat")
+            Spacer(minLength: 12)
+            SettingsEntryButton()
+        }
+        .glassGroup(spacing: 8)
+        .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 4)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    private func heading(_ day: Day) -> some View {
+        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Color(.tertiaryLabel))
+            .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .accessibilityAddTraits(.isHeader)
+    }
 
     /// The conversation on screen in the chat, marked as the selected row.
     private func current(_ session: SavedSession) -> Bool {
         session.kind == .poki && session.id == chat.sessionID && sampleHome == nil
     }
 
-    /// The selected row's soft fill; on glass every other row is clear, elsewhere the list's own ground.
-    @ViewBuilder private func rowGround(_ session: SavedSession) -> some View {
+    /// The selected row's soft fill; every other row stands on the list's ground.
+    @ViewBuilder private func ground(_ session: SavedSession) -> some View {
         if current(session) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)).padding(.horizontal, 8)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(scheme == .dark ? 0.1 : 0.05)).padding(.horizontal, 16)
         } else {
-            onGlass ? Color.clear : Color(.systemBackground)
+            Color.clear
         }
     }
 
@@ -104,44 +129,41 @@ struct SessionsView: View {
         return session.app
     }
 
-    /// One conversation: its app's icon, the name and the time on the first line, one line of what
-    /// happened last under it, amber with a dot while a step waits for you. The chat's own type
-    /// sizes: the body for the name as for a bubble, the footnote for the time as for a bubble's.
+    /// The app whose icon the row shows: only once the icon is at hand, so a row without one starts at the
+    /// same place as the heading rather than leaving a gap.
+    private func icon(_ session: SavedSession) -> String? {
+        app(session).flatMap { AppIconStore.shared.icon($0, dark: scheme == .dark) != nil ? $0 : nil }
+    }
+
+    /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for you.
     private func row(_ session: SavedSession) -> some View {
         let needs = needsYou(session)
+        let app = app(session)
         return Button { open(session) } label: {
-            HStack(alignment: .center, spacing: 12) {
-                SessionAvatar(session: session, app: app(session), size: 40)
-                VStack(alignment: .leading, spacing: 3) {
-                    if big {
-                        Text(verbatim: session.name).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(2)
-                    } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: session.name).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(verbatim: stamp(session)).font(.footnote).monospacedDigit().foregroundStyle(secondary)
-                        }
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: line(session))
-                            .font(.subheadline).foregroundStyle(needs ? Tint.amberInk : secondary)
-                            .lineLimit(big ? 2 : 1).frame(maxWidth: .infinity, alignment: .leading)
-                        if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
-                    }
-                    if big { Text(verbatim: stamp(session)).font(.footnote).foregroundStyle(secondary) }
-                }
+            HStack(spacing: 12) {
+                if let icon = icon(session) { AppIconView(app: icon, size: 22) }
+                Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
+                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                Spacer(minLength: 8)
+                if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
             }
-            .padding(.horizontal, 10).padding(.vertical, 10)
+            .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 48)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
+        .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
-        .accessibilityValue(app(session).flatMap(AppIconStore.name) ?? "")
+        .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil]
+            .compactMap { $0 }.joined(separator: ", ")))
+        // In the drawer a sideways drag closes it, so Rename and Delete are only in the menu there.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if !session.live, sampleHome == nil {
-                Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+            if !inDrawer {
+                if !session.live, sampleHome == nil {
+                    Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+                }
+                Button("Rename", systemImage: "pencil") { startRename(session) }
             }
-            Button("Rename", systemImage: "pencil") { startRename(session) }
         }
         .contextMenu {
             Button("Rename", systemImage: "pencil") { startRename(session) }
@@ -149,17 +171,45 @@ struct SessionsView: View {
                 Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
             }
         }
-        .accessibilityElement(children: .combine)
     }
 
     private var empty: some View {
         ContentUnavailableView("No Conversations Yet", systemImage: "bubble.left.and.bubble.right")
             .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 
     private var shown: [SavedSession] {
         if sampleHome == "paused" { return [] }
         return sampleHome == "sessions" ? Self.sampleSessions : store.ordered
+    }
+
+    /// When a conversation last moved, for the faint headings between the days.
+    enum Day: CaseIterable {
+        case today, yesterday, earlier
+
+        var title: String {
+            switch self {
+            case .today: String(localized: "Today")
+            case .yesterday: String(localized: "Yesterday")
+            case .earlier: String(localized: "Earlier")
+            }
+        }
+
+        static func of(_ session: SavedSession) -> Day {
+            let calendar = Calendar.current
+            if session.live || calendar.isDateInToday(session.updated) { return .today }
+            return calendar.isDateInYesterday(session.updated) ? .yesterday : .earlier
+        }
+    }
+
+    /// The conversations by day, each day keeping the store's order.
+    private var grouped: [(day: Day, sessions: [SavedSession])] {
+        let all = shown
+        return Day.allCases.compactMap { day in
+            let sessions = all.filter { Day.of($0) == day }
+            return sessions.isEmpty ? nil : (day, sessions)
+        }
     }
 
     /// Held by a step that waits for the owner: its own last plan says so, or it is the conversation
@@ -169,25 +219,6 @@ struct SessionsView: View {
         guard session.live, session.id == chat.sessionID || session.id == store.activeSessionID else { return false }
         return !model.approvals.isEmpty || model.handoffText != nil
     }
-
-    private func line(_ session: SavedSession) -> String {
-        let line = session.lastLine
-        if session.kind != .poki, line.isEmpty { return session.title }
-        return line
-    }
-
-    private func stamp(_ session: SavedSession) -> String {
-        if sampleHome == "sessions" {
-            switch session.id {
-            case "sample-1": return String(localized: "now")
-            case "sample-2": return "12:23 PM"
-            case "sample-3": return "11:22 AM"
-            default: return String(localized: "Yesterday")
-            }
-        }
-        return session.live ? String(localized: "now") : ChatTime.row(session.updated)
-    }
-
     private static var sampleSessions: [SavedSession] {
         let now = Date()
         let yesterday = now.addingTimeInterval(-86400)
@@ -265,12 +296,20 @@ struct SessionsView: View {
     }
 
     private func open(_ session: SavedSession) {
+        guard !sliding else { return }
         if session.kind == .poki {
             if session.id != chat.sessionID, sampleHome == nil { chat.restore(session) }
             openChat()
         } else {
             openSession(session.id)
         }
+    }
+}
+
+/// A label in a pill: the icon and the title side by side, a little apart.
+private struct PillLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 8) { configuration.icon; configuration.title }
     }
 }
 
@@ -405,8 +444,8 @@ struct SessionView: View {
                     if session?.live == true, let approval = model.approvals.first {
                         // A message of the handed-over task: who it goes to and the words, as in the chat.
                         let words = running?.askWords[approval.id]
-                        ApprovalAskCard(title: words?.title ?? approval.question, detail: words?.detail ?? approval.reasonLine,
-                                        quote: words?.quote ?? ActivityWords.label(approval.summary), expires: approval.expires,
+                        ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? approval.kindLine ?? "",
+                                        quote: words?.quote ?? "", expires: approval.expires,
                                         answer: { approved in model.resolve(approval, approved: approved) })
                     } else if session?.live == true, let text = model.handoffText {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)

@@ -16,6 +16,7 @@ struct BlinkingFace: View {
     /// lagged a beat behind its circle.
     var side: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.coveredByDrawer) private var covered
     /// 0 with the eyes open, 1 shut.
     @State private var shut = 0.0
     @State private var hop = 0
@@ -49,13 +50,14 @@ struct BlinkingFace: View {
             SpringKeyframe(1.0, duration: 0.4, spring: .bouncy(duration: 0.4, extraBounce: 0.2))
         }
         .onChange(of: mood) { if !reduceMotion { hop += 1 } }
-        .task(id: reduceMotion) { await blink() }
+        .task(id: reduceMotion || covered) { await blink() }
         .accessibilityHidden(true)
     }
 
-    /// Blinks until the view goes: every 2.5 to 5.5 seconds, one time in four twice in a row.
+    /// Blinks until the view goes or the drawer opens over it: every 2.5 to 5.5 seconds, one time in
+    /// four twice in a row.
     private func blink() async {
-        guard !reduceMotion else { return }
+        guard !reduceMotion, !covered else { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(Double.random(in: 2.5...5.5)))
             for _ in 0..<(Int.random(in: 0..<4) == 0 ? 2 : 1) {

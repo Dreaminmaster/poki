@@ -56,7 +56,7 @@ struct RootView: View {
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
-    /// The status card under Poki's picture (ESP-469): the picture shows where Poki stands; Settings is on the card.
+    /// Poki's card under its picture: the model, the way of asking, Pause or Resume.
     @State private var statusOpen = false
     @State private var detailsPath = NavigationPath()
     @Namespace private var profile
@@ -146,9 +146,9 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
-            // Settings opens from the bottom of the conversations and from the status card (ESP-469).
+            // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
-            .pokiStatusCard(isPresented: $statusOpen, leading: width == .regular ? 391 : 16, openSettings: { openDetails() })
+            .pokiStatusCard(isPresented: $statusOpen, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
             // Settings covers the whole screen on iPhone (ESP-469: nothing of the chat shows around it), with
             // its Close button; beside the list on iPad it stays a sheet at a page's width (ESP-376).
             .fullScreenCover(isPresented: Binding(get: { detailsOpen && width != .regular }, set: { detailsOpen = $0 })) {

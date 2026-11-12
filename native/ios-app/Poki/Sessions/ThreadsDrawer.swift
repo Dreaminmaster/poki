@@ -1,28 +1,33 @@
 import SwiftUI
 import UIKit
 
-// The drawer's motion follows OpenBot's app drawer (OpenBot, apps/mobile/src/features/servers/components/
-// app-drawer-shell.tsx, PolyForm Noncommercial License 1.0.0), moved from React Native to SwiftUI:
-// one progress value from 0 (closed) to 1 (open) that the finger moves directly; on release the
-// progress plus a sixth of a second of the finger's speed decides open or closed, past 0.45 when opening
-// and 0.55 when closing; the spring starts at the finger's speed; the uncovered chat gets a dim and a
-// light blur. Changed from OpenBot: there the chat slides away and the drawer lies under it, here the
-// panel is Liquid Glass and floats over the chat so the chat's colours show through it; the spring
-// bounces a little (OpenBot clamps its overshoot); a drag past fully open stretches with resistance.
+// The drawer follows OpenBot's app drawer (OpenBot, apps/mobile/src/features/servers/components/
+// app-drawer-shell.tsx, PolyForm Noncommercial License 1.0.0), moved from React Native to SwiftUI: the
+// drawer lies under the page and the page slides away to uncover it; one progress value from 0 (closed)
+// to 1 (open) that the finger moves directly; on release the progress plus a sixth of a second of the
+// finger's speed decides open or closed, past 0.45 when opening and 0.55 when closing; the spring starts
+// at the finger's speed; the page's corners round within the first 15 % of the way, to the larger of
+// 34 points and the safe area; the drawer comes in from 24 points to the leading side and from 55 %
+// opacity; the uncovered page dims and a tap on it closes. Changed from OpenBot: the uncovered strip is
+// a little over a fifth of the screen, as in ChatGPT's iPhone app; no blur over the page; the spring
+// bounces a little; a drag past fully open stretches with resistance.
 // OpenBot: https://github.com/nightly-labs/openbot at commit a74951c.
 // Required Notice: Copyright 2026 Synthetify Labs spółka z ograniczoną odpowiedzialnością.
+//
+// The page as a card with a hairline edge and a shadow on the drawer follows DrawerSideBar
+// (shubhamKachhiya/DrawerSideBar at commit 93370a0, Sources/DrawerSideBar/SideBarNavigationView.swift,
+// MIT License, Copyright (c) 2026 shubhamKachhiya). Changed from it: no scaling of the page, and its corners are drawn
+// with the drawer's own colour rather than by clipping the page.
 
-/// The conversations as a drawer from the leading edge of the chat (iPhone): a floating Liquid Glass
-/// panel that follows the finger, while the chat behind it dims and moves back a little. A tap or a
-/// drag on the uncovered chat closes it. iOS has no drawer of its own on iPhone, so this one is drawn;
-/// what is inside it is a system List.
+/// The conversations as a drawer under the chat (iPhone): the chat is a card that slides to the
+/// trailing side with the finger and uncovers them, a strip of it left showing. A tap on that strip or a
+/// drag back toward the leading side closes it. iOS has no drawer of its own on iPhone, so this one is
+/// drawn; what is inside it is a system List.
 ///
 /// A drag opens it only while the chat itself is in front (`enabled`): with a page pushed over the
-/// chat, the leading edge belongs to the system's swipe back. The drawer's own rows keep their swipe
-/// actions, so a drag closes it from the uncovered chat, not from the list.
+/// chat, the leading edge belongs to the system's swipe back. Open, a sideways drag anywhere closes it.
 ///
-/// Reduce Motion: the panel fades in and out where it rests, and the chat stays put. Reduce
-/// Transparency: the panel is the opaque system background instead of glass.
+/// Reduce Motion: nothing slides; the conversations fade in over the chat where they rest.
 struct ThreadsDrawer<Drawer: View>: ViewModifier {
     @Binding var isOpen: Bool
     var enabled: Bool
@@ -32,18 +37,18 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     @State private var progress: CGFloat = 0
     /// The progress when the drawer's current drag began; nil while none is under way.
     @State private var dragStart: CGFloat?
-    /// True once the panel has closed all the way. Set when the closing spring ends, not with the progress
-    /// itself: the progress jumps to its target and the spring only draws the way there, so a panel hidden
-    /// by the progress would fade out on its way closed instead of sliding out.
+    /// True once the drawer has closed all the way. Set when the closing spring ends, not with the progress
+    /// itself: the progress jumps to its target and the spring only draws the way there.
     @State private var hidden = true
-    /// The panel is open and at rest: what moves on the page under it stops (`drawerCovers`).
-    @State private var covering = false
+    /// From the moment a drag takes the drawer until its spring has settled. The list's buttons ignore
+    /// their taps meanwhile (`drawerSliding`): a row lets its tap through when the finger lifts inside it,
+    /// however far it went sideways.
+    @State private var sliding = false
     /// True while a drag is under way, so a drag the system cancels (no `onEnded`) still settles.
     @GestureState private var dragging = false
     @State private var screen = CGSize(width: 402, height: 874)
     @State private var insets = EdgeInsets()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
 
     /// Where the content scrolls sideways by itself (`scrollsSideways`), in screen coordinates.
@@ -55,117 +60,116 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     private var settled: CGFloat { min(shown, 1) }
 
     func body(content: Content) -> some View {
-        content
-            .environment(\.drawerCovers, covering)
-            // Under the panel's clear glass the chat itself blurs, so its colours and shapes show as soft outlines.
-            .blur(radius: DrawerGlass.current == .soft && !reduceTransparency && !PerfSwitch.on(.drawerNoBlur) ? DrawerGlass.blur * settled : 0)
-            // The chat moves back a little to the trailing side, as the panel comes in from the leading one.
-            .offset(x: reduceMotion ? 0 : ThreadsDrawerMotion.chatShift * settled)
-            .accessibilityHidden(isOpen)
-            .simultaneousGesture(drag, including: enabled && !isOpen ? .all : .subviews)
-            .onPreferenceChange(SidewaysScrollAreas.self) { sideways = $0 }
-            // What shows where the chat has moved from: the chat's own page colour.
-            .background(Tint.page.ignoresSafeArea())
-            // The safe area, read where it is kept (a reader that ignores it reads none).
-            .overlay {
-                GeometryReader { geometry in
-                    Color.clear
-                        .onAppear { insets = geometry.safeAreaInsets }
-                        .onChange(of: geometry.safeAreaInsets) { _, new in insets = new }
-                }
-                .ignoresSafeArea(.keyboard)
-                .allowsHitTesting(false)
+        ZStack(alignment: .topLeading) {
+            menu.zIndex(reduceMotion ? 2 : 0)
+            card(content).zIndex(1)
+        }
+        .simultaneousGesture(drag, including: (enabled || isOpen) ? .all : .subviews)
+        .background(ThreadsDrawerLayout.ground.ignoresSafeArea())
+        // The safe area, read where it is kept (a reader that ignores it reads none).
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { insets = geometry.safeAreaInsets }
+                    .onChange(of: geometry.safeAreaInsets) { _, new in insets = new }
             }
-            .overlay {
-                GeometryReader { geometry in
-                    ZStack(alignment: .topLeading) {
-                        scrim
-                        panel
-                    }
+            .ignoresSafeArea(.keyboard)
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
                     .onAppear { screen = geometry.size }
                     .onChange(of: geometry.size) { _, new in screen = new }
-                }
-                .ignoresSafeArea()
             }
-            .sensoryFeedback(.impact(weight: .light), trigger: isOpen)
-            .onChange(of: isOpen) { _, open in
-                // The keyboard belongs to the chat's message field, not to the list over it.
-                if open { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
-                // Opened or closed from elsewhere (the chat's button, a row, a launch argument): the same spring.
-                if dragStart == nil, progress != (open ? 1 : 0) { settle(open, speed: 0) }
-            }
-            .onChange(of: dragging) { _, now in
-                // The system took the drag away before it ended: go back to where it was.
-                if !now, dragStart != nil { dragStart = nil; settle(isOpen, speed: 0) }
-            }
-            .onAppear { progress = isOpen ? 1 : 0; hidden = !isOpen }
-    }
-
-    /// The uncovered chat: dimmed and lightly blurred, so its own buttons do not look like they can be
-    /// tapped; a tap or a drag here closes the drawer. Everything but the panel, so the glass shows the
-    /// chat's own colours rather than the dim.
-    private var scrim: some View {
-        let cutout = Rectangle().subtracting(layout.shape.offset(x: panelOffset).path(in: layout.panel))
-        return ZStack {
-            if reduceTransparency {
-                // Without the blur (Reduce Transparency) the page's own colour covers most of the chat, so
-                // the chat's buttons in the strip don't look tappable.
-                Rectangle().fill(Color(.systemBackground).opacity(ThreadsDrawerMotion.cover * settled))
-            } else if !PerfSwitch.on(.drawerNoScrim) {
-                Rectangle().fill(.ultraThinMaterial).opacity(settled)
-            }
-            Rectangle().fill(Color.black.opacity((reduceTransparency ? ThreadsDrawerMotion.dimOpaque : ThreadsDrawerMotion.dim) * settled))
+            .ignoresSafeArea()
         }
-        .mask(cutout)
-        .contentShape(cutout)
-        .onTapGesture { settle(false, speed: 0) }
-        .gesture(drag)
-        .allowsHitTesting(isOpen)
-        .accessibilityHidden(true)
+        .sensoryFeedback(.impact(weight: .light), trigger: isOpen)
+        .onChange(of: isOpen) { _, open in
+            // The keyboard belongs to the chat's message field, not to the list beside it.
+            if open { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
+            // Opened or closed from elsewhere (the chat's button, a row, a launch argument): the same spring.
+            if dragStart == nil, progress != (open ? 1 : 0) { settle(open, speed: 0) }
+        }
+        .onChange(of: dragging) { _, now in
+            // The system took the drag away before it ended: go back to where it was.
+            if !now, dragStart != nil { dragStart = nil; settle(isOpen, speed: 0) }
+        }
+        .onAppear { progress = isOpen ? 1 : 0; hidden = !isOpen }
     }
 
-    /// Where the panel is drawn, from its resting place: off to the leading side when closed.
-    private var panelOffset: CGFloat {
-        reduceMotion ? 0 : (shown - 1) * layout.travel
+    /// The chat as the card on top: it slides to the trailing side, its leading corners round, its edge
+    /// and shadow show against the drawer, and it dims. Open, it takes every touch for itself: a tap closes.
+    private func card(_ content: Content) -> some View {
+        let radius = layout.corner(settled)
+        let dark = scheme == .dark
+        return content
+            .environment(\.coveredByDrawer, isOpen)
+            .accessibilityHidden(isOpen)
+            .onPreferenceChange(SidewaysScrollAreas.self) { sideways = $0 }
+            .overlay { cover(dark: dark) }
+            .overlay {
+                if !hidden, !reduceMotion {
+                    ZStack {
+                        CardCorners(radius: radius).fill(ThreadsDrawerLayout.ground)
+                        RoundedRectangle(cornerRadius: radius).strokeBorder(Color.primary.opacity((dark ? 0.16 : 0.08) * settled), lineWidth: 0.5)
+                    }
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                }
+            }
+            .background {
+                if !hidden, !reduceMotion {
+                    RoundedRectangle(cornerRadius: radius).fill(Tint.page)
+                        .shadow(color: .black.opacity((dark ? 0.5 : 0.07) * settled), radius: 20, x: -2)
+                        .ignoresSafeArea()
+                }
+            }
+            .offset(x: reduceMotion ? 0 : shown * layout.travel)
     }
 
-    private var panel: some View {
-        let shape = layout.shape
-        return drawer()
-            .environment(\.drawerOnGlass, true)
-            .frame(width: layout.panel.width, height: layout.panel.height)
-            .clipShape(shape)
-            .background { panelSurface(shape) }
-            .unless(.drawerNoShadow) { $0.shadow(color: .black.opacity(0.12 * settled), radius: 24, x: 4, y: 8) }
-            .offset(x: panelOffset)
-            // Placed with padding, not an offset, so the list inside gets the safe area of where it really is.
-            .padding(.leading, layout.panel.minX).padding(.top, layout.panel.minY)
-            .opacity(reduceMotion ? settled : (hidden ? 0 : 1))
+    /// Over the uncovered chat: a dim, so its own buttons do not look like they can be tapped, and the
+    /// touch that closes the drawer.
+    private func cover(dark: Bool) -> some View {
+        Color.black.opacity((dark ? ThreadsDrawerMotion.dimDark : ThreadsDrawerMotion.dim) * settled)
+            .ignoresSafeArea()
+            .contentShape(.rect)
+            .onTapGesture { settle(false, speed: 0) }
+            .allowsHitTesting(isOpen)
+            .accessibilityElement()
+            .accessibilityLabel(Text("Close Conversations"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { settle(false, speed: 0) }
+            .accessibilityHidden(!isOpen)
+    }
+
+    /// The conversations, on the drawer's own ground, under the card.
+    private var menu: some View {
+        drawer()
+            .environment(\.inThreadsDrawer, true)
+            .frame(width: layout.travel)
+            .overlay(alignment: .trailing) {
+                // With Reduce Motion the list lies over the chat: a hairline where it ends.
+                if reduceMotion { Rectangle().fill(Color(.separator)).frame(width: 0.5).ignoresSafeArea() }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .offset(x: reduceMotion ? 0 : (settled - 1) * ThreadsDrawerMotion.menuShift)
+            .opacity(reduceMotion ? settled : (hidden ? 0 : 0.55 + 0.45 * settled))
+            .environment(\.drawerSliding, sliding)
             .allowsHitTesting(isOpen)
             .accessibilityHidden(!isOpen)
-            .accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { settle(false, speed: 0) }
     }
 
-    @ViewBuilder private func panelSurface(_ shape: RoundedRectangle) -> some View {
-        if reduceTransparency || PerfSwitch.on(.drawerSolid) {
-            shape.fill(Color(.systemBackground)).overlay(shape.strokeBorder(Color(.separator), lineWidth: 0.5))
-        } else if #available(iOS 26.0, *), DrawerGlass.current != .regular {
-            // Clear glass, veiled a little in the page's colour so the list reads over any chat.
-            Color.clear.glassEffect(DrawerGlass.current == .soft ? .clear.tint(Color(.systemBackground).opacity(DrawerGlass.veil(dark: scheme == .dark))) : .clear, in: shape)
-        } else {
-            Color.clear.glassSurface(in: shape, fallback: .card)
-        }
-    }
-
-    /// Opens or closes with the drawer's spring, starting at `speed` (progress per second).
+    /// Opens or closes with the drawer's spring, starting at `speed` (progress per second). With Reduce
+    /// Motion a fade.
     private func settle(_ open: Bool, speed: CGFloat) {
         let target: CGFloat = open ? 1 : 0
         let animation = reduceMotion ? ThreadsDrawerMotion.fade : ThreadsDrawerMotion.spring(from: progress, to: target, speed: speed)
-        if open { hidden = false } else { covering = false }
+        if open { hidden = false }
         withAnimation(animation, completionCriteria: .removed) { progress = target } completion: {
-            if progress == 0, dragStart == nil { hidden = true }
-            if progress == 1, dragStart == nil { covering = true }
+            guard dragStart == nil else { return }
+            sliding = false
+            if progress == 0 { hidden = true }
         }
         if isOpen != open { isOpen = open }
     }
@@ -185,11 +189,11 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                     // A mostly sideways drag in the drawer's direction; an up or down one belongs to the scroll view.
                     guard abs(dx) > abs(value.translation.height) * 1.5, isOpen ? dx < 0 : dx > 0, !scrolls(value) else { return }
                     dragStart = progress
-                    covering = false
+                    sliding = true
                 }
                 guard let start = dragStart else { return }
                 var next = start + dx / layout.travel
-                // Past fully open the panel stretches with resistance.
+                // Past fully open the card stretches with resistance.
                 if next > 1 { next = 1 + (next - 1) * 0.12 }
                 var instant = Transaction()
                 instant.disablesAnimations = true
@@ -205,47 +209,64 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     }
 }
 
-/// Where the panel rests, from the screen's size and safe area: a floating panel inset from the
-/// leading edge, below the status bar so it never runs through its icons, with a strip of the chat
-/// left to tap; no wider than a comfortable list.
+/// Where the card rests when open, from the screen's size and safe area.
 struct ThreadsDrawerLayout {
     var screen: CGSize
     var insets: EdgeInsets
 
-    static let margin: CGFloat = 8
-    /// The strip of the chat left uncovered, at least.
-    static let strip: CGFloat = 52
+    /// The drawer's ground: the page's own white in light, black in dark.
+    static let ground = Color(.systemBackground)
 
-    var panel: CGRect {
-        let width = max(240, min(screen.width - Self.margin - Self.strip, 360))
-        let top = max(insets.top, Self.margin)
-        return CGRect(x: Self.margin, y: top, width: width, height: max(0, screen.height - top - Self.margin))
+    /// The strip of the chat left showing when open: a little over a fifth of the screen.
+    var strip: CGFloat { max(72, (screen.width * 0.22).rounded()) }
+
+    /// How far the card moves from closed to open, and how far the finger moves it: the same distance, so
+    /// the card stays under the finger. Also the drawer's width.
+    var travel: CGFloat { max(min(screen.width - strip, 420), 1) }
+
+    /// The card's corners at `progress`: square when closed, round within the first 15 % of the way, as
+    /// round as the iPhone's own where it has round corners.
+    func corner(_ progress: CGFloat) -> CGFloat {
+        max(34, insets.top, insets.bottom) * min(1, max(0, progress) / 0.15)
+    }
+}
+
+/// The two leading corners outside a rounded card, filled with the drawer's colour: the card looks
+/// rounded without the whole chat being clipped on every frame.
+struct CardCorners: Shape {
+    var radius: CGFloat
+
+    var animatableData: CGFloat {
+        get { radius }
+        set { radius = newValue }
     }
 
-    /// The panel's corners: as round as the iPhone's own where it has round corners.
-    var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: insets.bottom > 0 ? 34 : 18, style: .continuous)
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let r = min(radius, rect.width / 2, rect.height / 2)
+        guard r > 0 else { return path }
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX + r, y: rect.minY))
+        path.addArc(center: CGPoint(x: rect.minX + r, y: rect.minY + r), radius: r, startAngle: .degrees(270), endAngle: .degrees(180), clockwise: true)
+        path.closeSubpath()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - r))
+        path.addArc(center: CGPoint(x: rect.minX + r, y: rect.maxY - r), radius: r, startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
+        path.closeSubpath()
+        return path
     }
-
-    /// How far the finger moves the drawer from closed to open, and how far the panel moves with it: the
-    /// same distance, so the panel stays under the finger. Closed, its trailing edge is at the screen's edge
-    /// (its shadow fades out with it, and it is hidden there).
-    var travel: CGFloat { max(panel.maxX, 1) }
 }
 
 enum ThreadsDrawerMotion {
     /// The spring the drawer settles with when opened or closed by a button or a tap.
-    static let settle = Animation.interpolatingSpring(duration: 0.42, bounce: 0.16)
+    static let settle = Animation.interpolatingSpring(duration: 0.42, bounce: 0.12)
     /// With Reduce Motion: a plain fade.
     static let fade = Animation.easeInOut(duration: 0.22)
-    /// The chat's dim at fully open, under the blur.
-    static let dim: CGFloat = 0.22
-    /// The dim with Reduce Transparency, where there is no blur.
-    static let dimOpaque: CGFloat = 0.3
-    /// How much of the page's colour covers the chat under Reduce Transparency.
-    static let cover: CGFloat = 0.8
-    /// How far the chat moves back to the trailing side at fully open.
-    static let chatShift: CGFloat = 24
+    /// The uncovered chat's dim at fully open, in light and in dark.
+    static let dim: CGFloat = 0.06
+    static let dimDark: CGFloat = 0.3
+    /// How far to the leading side the list starts as the card begins to move.
+    static let menuShift: CGFloat = 24
 
     /// The spring from `from` to `to`, starting at the finger's `speed` (progress per second).
     /// SwiftUI takes the starting speed as a share of the distance to go.
@@ -253,36 +274,19 @@ enum ThreadsDrawerMotion {
         let distance = to - from
         guard abs(distance) > 0.01, speed != 0 else { return settle }
         let share = max(-4, min(12, speed / distance))
-        return .interpolatingSpring(duration: 0.42, bounce: 0.16, initialVelocity: share)
+        return .interpolatingSpring(duration: 0.42, bounce: 0.12, initialVelocity: share)
     }
 }
 
-/// The panel's glass. Soft: the system's clear glass, lightly veiled, over the chat blurred by the drawer
-/// itself; the chat's colours and the bear's outline show through, softly. The regular glass frosts so
-/// much that a pale page (the home page's bear) all but disappears behind it, though it is the system's
-/// own choice for a sidebar. `-pokiDrawerGlass regular|clear` shows the others, to compare.
-enum DrawerGlass: String {
-    case soft, regular, clear
-
-    static let current: DrawerGlass = {
-        // Before iOS 26 there is no glass: the regular case draws the system's material.
-        guard #available(iOS 26.0, *), !GlassSwitch.forcedOff else { return .regular }
-        return UserDefaults.standard.string(forKey: "pokiDrawerGlass").flatMap(DrawerGlass.init(rawValue:)) ?? .soft
-    }()
-    /// How much the chat blurs under the soft glass when fully open, in points.
-    static let blur: CGFloat = 8
-    /// The page colour in the soft glass. Deeper in dark mode, where the list's light text would
-    /// otherwise sit on a bright part of the chat (the home page's bear) with too little contrast; the
-    /// chat's colours and outlines still show through.
-    static func veil(dark: Bool) -> CGFloat { dark ? 0.6 : 0.26 }
-}
-
 extension EnvironmentValues {
-    /// True inside the drawer's glass panel: the list and its bars draw no opaque ground of their own.
-    @Entry var drawerOnGlass = false
-    /// True while the drawer is open and at rest over this view: the blurred, dimmed page shows only at
-    /// its edge, so what goes on by itself there (the home light, the suggestion rows) stops in place.
-    @Entry var drawerCovers = false
+    /// True while the drawer is open over this page: its own motion (the light's breathing, the bear's
+    /// blinking, the suggestion rows) stands still until it closes.
+    @Entry var coveredByDrawer = false
+    /// True inside the drawer, where a sideways drag over the list closes it rather than swiping a row.
+    @Entry var inThreadsDrawer = false
+    /// True while a drag moves the drawer: a button in it that the finger lifts from does nothing. Not
+    /// `disabled`, which greys the list as it moves.
+    @Entry var drawerSliding = false
 }
 
 /// Where on the screen a sideways drag belongs to the content: such a view says where it is, and the

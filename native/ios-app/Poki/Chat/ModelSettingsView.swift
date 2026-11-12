@@ -14,18 +14,17 @@ import SwiftUI
 /// live voice needs OpenAI's Realtime API, so only an OpenAI API key can run it.
 struct ModelSettingsView: View {
     @State private var adding = false
-    @State private var changing = false
     @State private var version = ModelKeys.saved
 
     var body: some View {
         List {
             // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
             Section {
-                InUseCard(add: { adding = true }, change: { changing = true })
+                InUseCard(add: { adding = true })
             } header: {
                 Text("In Use").textCase(nil)
             } footer: {
-                Text("Open an account to choose what it is used for. Dictation in the message field needs no account.")
+                Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
             }
 
             // With no account yet the card above has Add Account, and an empty group would only be a heading.
@@ -49,17 +48,16 @@ struct ModelSettingsView: View {
         .listSectionSpacing(16)
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $changing) { TextChatFeature(provider: ModelKeys.selectedProvider) }
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
     }
 }
 
 /// What runs now: the chat's model and its account, what the text chat, live voice and dictation each
-/// use (main's In Use rows), and Change Chat Model (or Add Account while there is none).
+/// use (main's In Use rows), and Add Account while there is none. The chat model is changed on Poki's
+/// card, its one place.
 private struct InUseCard: View {
     var add: () -> Void
-    var change: () -> Void
 
     var body: some View {
         let has = ModelKeys.hasUsableKey
@@ -78,9 +76,10 @@ private struct InUseCard: View {
                 HStack(spacing: 6) { uses(has: has, provider: provider) }
                 VStack(alignment: .leading, spacing: 6) { uses(has: has, provider: provider) }
             }
-            SettingsPill(title: has ? "Change Chat Model" : "Add Account", symbol: has ? "arrow.triangle.2.circlepath" : "plus",
-                         prominent: true, action: has ? change : add)
-                .accessibilityIdentifier("model.inUse.action")
+            if !has {
+                SettingsPill(title: "Add Account", symbol: "plus", prominent: true, action: add)
+                    .accessibilityIdentifier("model.inUse.action")
+            }
         }
         .padding(.vertical, 8)
     }
@@ -216,8 +215,7 @@ private struct AccountDetail: View {
     }
 }
 
-/// Account › Text Chat: whether this account runs the chat, its model, and which of its models the
-/// chat's model menu offers.
+/// Account › Text Chat: which of its models Poki's card offers. Which one answers is chosen on the card.
 private struct TextChatFeature: View {
     var provider: ModelProvider
     @State private var version = ModelKeys.saved
@@ -226,21 +224,6 @@ private struct TextChatFeature: View {
 
     var body: some View {
         Form {
-            Section {
-                Toggle("Use for Text Chat", isOn: Binding(get: { ModelKeys.selectedProvider == provider }, set: { on in
-                    if on { ModelKeys.selectedProvider = provider }
-                    else if let other = ModelProvider.allCases.first(where: { $0 != provider && ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
-                        ModelKeys.selectedProvider = other
-                    }
-                }))
-                if ModelKeys.selectedProvider == provider {
-                    Picker("Chat Model", selection: Binding(get: { ModelKeys.selectedModel }, set: { ModelKeys.selectedModel = $0; ModelKeys.saved += 1 })) {
-                        ForEach(ModelCatalog.available(provider)) { Text($0.name).tag($0.id) }
-                    }
-                }
-            } footer: {
-                Text("Only one account runs the text chat at a time.")
-            }
             Section {
                 ForEach(ModelCatalog.all(provider)) { choice in
                     Toggle(isOn: Binding(get: { ModelCatalog.enabled(provider).contains(choice.id) }, set: { ModelCatalog.set(choice.id, on: $0, for: provider) })) {

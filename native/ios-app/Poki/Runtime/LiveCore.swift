@@ -18,15 +18,9 @@ final class LiveCore: CoreSession {
         var config = CoreConfig()
         // Signing tools may rename the app; its own id is Poki too.
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
-        // Never applies to optional questions. Payments, deletions and guarded apps still wait.
-        if ApprovalClassifier.mode == .off {
-            config.sensitive.secureFields = false
-            config.sensitive.sending = []
-            config.sensitive.messagingApps = []
-            config.sensitive.calling = []
-            config.sensitive.callingApps = []
-        }
-        sensitiveRulesOn = config.sensitive.enabled
+        // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
+        // steps go; payments, deletions and guarded apps still wait.
+        config.approvalMode = { ApprovalClassifier.mode }
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation
@@ -36,13 +30,8 @@ final class LiveCore: CoreSession {
         core.onSession { signal in continuation.yield(.session(signal)) }
     }
 
-    /// Whether PokiCore holds sensitive steps back: what Agents › Approvals said when Poki started.
-    let sensitiveRulesOn: Bool
-
-    /// Agents › Approvals › Ask Before Sensitive Steps. Read when Poki starts.
+    /// 0.3.1's Ask Before Sensitive Steps switch, which `ApprovalChoice.resolve` still reads.
     static let askKey = "approvals.ask"
-    /// On unless the owner turned it off: a phone that never chose asks.
-    static var asksBeforeSensitiveSteps: Bool { UserDefaults.standard.object(forKey: askKey) as? Bool ?? true }
 
     deinit { pump?.cancel() }
 
@@ -76,7 +65,8 @@ final class LiveCore: CoreSession {
             switch outcome { case .done(let text): delivery = text; case .failed(let text): delivery = "failed: \(text)" }
             return .toolFinished(summary: activity.summary, delivery: delivery, app: facts.app, thumbnail: facts.thumbnail, error: facts.error, session: activity.session)
         case .approvalRequested(let approval):
-            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires))
+            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires,
+                                                      ask: approval.ask, byAgent: approval.purpose != nil, kinds: approval.kinds.map(\.rawValue)))
         case .approvalEnded(let id, let approved): return .approvalEnded(id: id, approved: approved)
         case .handoffRequested(let id, let kind, let text, let app): return .handoffRequested(id: id, kind: kind, text: text, app: app)
         case .handoffEnded(let id, let how): return .handoffEnded(id: id, how: how)

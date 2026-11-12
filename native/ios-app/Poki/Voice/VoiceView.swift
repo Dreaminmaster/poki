@@ -12,6 +12,7 @@ struct VoiceView: View {
     @State private var editingBridge = false
     @State private var bridgeRejected = false
     @State private var micDenied = false
+    @AppStorage(FieldDictation.buttonKey) private var dictationButton = false
 
     private var voice: VoiceModel { app.voice }
 
@@ -29,7 +30,9 @@ struct VoiceView: View {
                         Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? String(localized: "OpenAI key") : String(localized: "Voice bridge")) : String(localized: "Not Available"))
                             .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
                     }
-                    LabeledContent("Dictation", value: String(localized: "On this iPhone"))
+                    // Dictation runs on this iPhone with every model; its microphone sits beside Send.
+                    Toggle("Show Dictation Button in Message Field", isOn: $dictationButton)
+                        .accessibilityIdentifier("voice.dictationButton")
                     Toggle("Mute Poki’s Voice", isOn: $voice.muted)
                 } footer: {
                     if micDenied { Text("Poki can't use the microphone. Allow it in Settings, Privacy, Microphone.").foregroundStyle(.orange) }
