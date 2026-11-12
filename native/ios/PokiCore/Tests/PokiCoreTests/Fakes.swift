@@ -222,19 +222,35 @@ func makeCore(_ wda: FakeWDA = FakeWDA(), host: FakeHost = FakeHost(), configure
 /// A chat app's conversation (a stand-in for WeChat, ESP-465): the messages as static texts, the
 /// message field (a TextView with no label, its value what is typed) above the keyboard, whose own
 /// return key is "发送". The send key sends what the field holds (a new last message, the field
-/// emptied) unless `sends` is off.
+/// emptied) unless `sends` is off. With `drafts` on, the send key keeps the text as a draft instead:
+/// the app goes back to its list of chats, where the chat's row reads "[草稿]" and the text.
 final class ChatApp: @unchecked Sendable {
     static let bundle = "com.tencent.xin"
     let messages = LockedBox(["在吗", "明天见"])
     let field = LockedBox("")
     let sends = LockedBox(true)
+    let drafts = LockedBox(false)
+    /// An element the app draws beside the last message, such as a failed send's retry button or a
+    /// sending spinner.
+    let mark = LockedBox<Node?>(nil)
+    let draft = LockedBox<String?>(nil)
     static let sendKey: [Double] = [300, 800, 80, 40]
 
     func tree() -> JSON {
-        var nodes: [Node] = [Node("NavigationBar", "朋友", [0, 50, 390, 44])]
-        for (i, m) in messages.value.enumerated() { nodes.append(Node("StaticText", m, [60, Double(120 + i * 50), 270, 40])) }
-        nodes.append(Node("TextView", nil, [50, 450, 280, 36], value: field.value))
-        nodes.append(Node("Keyboard", nil, [0, 500, 390, 344], [Node("Key", "空格", [100, 800, 190, 40]), Node("Button", "发送", Self.sendKey)]))
+        var nodes: [Node]
+        if let draft = draft.value {
+            nodes = [Node("NavigationBar", "微信", [0, 50, 390, 44]), Node("SearchField", "搜索", [10, 100, 370, 36], value: ""),
+                     Node("StaticText", "朋友", [70, 150, 200, 24]), Node("StaticText", "[草稿] \(draft)", [70, 176, 260, 20])]
+        } else {
+            nodes = [Node("NavigationBar", "朋友", [0, 50, 390, 44])]
+            for (i, m) in messages.value.enumerated() { nodes.append(Node("StaticText", m, [60, Double(120 + i * 50), 270, 40])) }
+            if var mark = mark.value {
+                mark.frame = [20, Double(120 + (messages.value.count - 1) * 50 + 8), 24, 24]
+                nodes.append(mark)
+            }
+            nodes.append(Node("TextView", nil, [50, 450, 280, 36], value: field.value))
+            nodes.append(Node("Keyboard", nil, [0, 500, 390, 344], [Node("Key", "空格", [100, 800, 190, 40]), Node("Button", "发送", Self.sendKey)]))
+        }
         func json(_ n: Node) -> JSON {
             ["type": .string("XCUIElementType\(n.type)"), "label": n.label.map(JSON.string) ?? .null, "value": n.value.map(JSON.string) ?? .null, "rect": ["x": .number(n.frame[0]), "y": .number(n.frame[1]), "width": .number(n.frame[2]), "height": .number(n.frame[3])], "children": .array(n.children.map(json))]
         }
@@ -244,7 +260,7 @@ final class ChatApp: @unchecked Sendable {
     func send() {
         guard sends.value, !field.value.isEmpty else { return }
         let text = field.value
-        messages.update { $0.append(text) }
+        if drafts.value { draft.value = text } else { messages.update { $0.append(text) } }
         field.value = ""
     }
 

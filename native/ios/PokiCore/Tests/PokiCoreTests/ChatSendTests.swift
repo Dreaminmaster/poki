@@ -98,6 +98,37 @@ final class ChatSendTests: XCTestCase {
         XCTAssertTrue(tried.text.contains("the last message on screen reads \"明天见\""), tried.text)
     }
 
+    /// A message that failed (a retry button beside it, as WeChat shows a failed send) or is still
+    /// sending (a spinner beside it) reads the same as a sent one in the field and the last message,
+    /// so the Return answer never says it went.
+    func testAFailedOrSendingMessageIsNotCalledSent() async {
+        for mark in [Node("Button", "重新发送", []), Node("ActivityIndicator", nil, [])] {
+            let app = ChatApp()
+            let (core, _) = chat(app)
+            _ = await core.call("look", [:])
+            _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
+            app.mark.value = mark
+            let tried = await core.call("do", ["actions": [["key": "return"]]])
+            XCTAssertEqual(app.messages.value.last, "收到")
+            XCTAssertFalse(tried.text.contains("send check: sent"), "\(mark.type): \(tried.text)")
+            XCTAssertTrue(tried.text.contains("send check: not confirmed"), "\(mark.type): \(tried.text)")
+        }
+    }
+
+    /// Return kept the text as a draft: the field is empty, the app is back in its list of chats, and
+    /// the chat's row shows the text after "[草稿]".
+    func testATextKeptAsADraftIsNotCalledSent() async {
+        let app = ChatApp()
+        app.drafts.value = true
+        let (core, _) = chat(app)
+        _ = await core.call("look", [:])
+        _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
+        let tried = await core.call("do", ["actions": [["key": "return"]]])
+        XCTAssertEqual(app.messages.value, ["在吗", "明天见"])
+        XCTAssertFalse(tried.text.contains("send check: sent"), tried.text)
+        XCTAssertTrue(tried.text.contains("send check: not confirmed"), tried.text)
+    }
+
     /// The field emptied without a send, and the last message happens to read the same words as the
     /// one typed (sent earlier): not confirmed, since that message was there before Return.
     func testTheSameWordsAlreadyOnScreenAreNotASend() async {
