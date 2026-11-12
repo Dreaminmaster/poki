@@ -40,7 +40,7 @@ final class AppIconStore {
         if let hit = memory[look] ?? memory[key] { return hit }
         if unknown.contains(key) { return nil }
         let id = Self.bundleID(app)
-        if let installed = id.flatMap(SystemIcons.icon) {
+        if let installed = id.flatMap({ SystemIcons.icon($0, dark: dark) }) {
             memory[look] = installed
             return installed
         }
@@ -164,11 +164,14 @@ final class AppIconStore {
 struct AppIconView: View {
     var app: String
     var size: CGFloat
+    /// The icon in its light look whatever the page's: the home page's pills (the owner: their icons
+    /// should not change with dark mode).
+    var alwaysLight = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-        let image = AppIconStore.shared.icon(app, dark: scheme == .dark)
+        let image = AppIconStore.shared.icon(app, dark: !alwaysLight && scheme == .dark)
         Group {
             if let image {
                 Image(uiImage: image).resizable().interpolation(.high).scaledToFill()
@@ -199,17 +202,25 @@ private enum SystemIcons {
         return unsafeBitCast(method_getImplementation(method), to: Call.self)
     }()
 
-    /// The generic icon iOS draws for an app it does not know: what a made-up bundle ID gets.
-    private static let generic: Data? = raw("nz.zheha.poki.no-such-app")?.pngData()
+    /// The generic icon iOS draws for an app it does not know, in each look: what a made-up bundle ID gets.
+    private static let generic: [Bool: Data] = Dictionary(uniqueKeysWithValues: [false, true].compactMap { dark in
+        raw("nz.zheha.poki.no-such-app", dark: dark)?.pngData().map { (dark, $0) }
+    })
 
-    static func icon(_ id: String) -> UIImage? {
-        guard enabled, let image = raw(id), let data = image.pngData() else { return nil }
-        return data == generic ? nil : image
+    /// The installed icon in the light or the dark look, whichever the page itself is in.
+    static func icon(_ id: String, dark: Bool) -> UIImage? {
+        guard enabled, let image = raw(id, dark: dark), let data = image.pngData() else { return nil }
+        return data == generic[dark] ? nil : image
     }
 
-    /// Format 2 is the Home Screen's 60-point icon.
-    private static func raw(_ id: String) -> UIImage? {
-        call?(UIImage.self, selector, id as NSString, 2, 3)?.takeUnretainedValue()
+    /// Format 2 is the Home Screen's 60-point icon. iOS draws it in the look of the current trait
+    /// collection, so the call runs under the look asked for, not the app's.
+    private static func raw(_ id: String, dark: Bool) -> UIImage? {
+        var image: UIImage?
+        UITraitCollection(userInterfaceStyle: dark ? .dark : .light).performAsCurrent {
+            image = call?(UIImage.self, selector, id as NSString, 2, 3)?.takeUnretainedValue()
+        }
+        return image
     }
 }
 

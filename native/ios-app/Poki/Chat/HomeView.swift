@@ -533,7 +533,7 @@ struct HomePage<Footer: View>: View {
     /// apart by weight and shade (the owner: the name and the words after it did not match).
     private func pill(_ idea: HomeShortcut) -> some View {
         HStack(spacing: 8) {
-            AppIconView(app: idea.app, size: 24)
+            AppIconView(app: idea.app, size: 24, alwaysLight: true)
             HStack(spacing: 5) {
                 Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
                 Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
