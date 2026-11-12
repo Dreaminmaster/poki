@@ -12,8 +12,9 @@ import SwiftUI
 // What this file keeps to, and where each rule comes from:
 // - Glass is the layer of controls and navigation that floats over content. Human Interface
 //   Guidelines: "Don't use Liquid Glass in the content layer." So the round buttons of the top bar,
-//   the suggestion pills, the message field and a card that asks for an answer are glass; bubbles, the
-//   task card and the settings cards are not.
+//   the message field and a card that asks for an answer are glass; bubbles, the task card and the
+//   settings cards are not. The suggestion pills look like glass but are drawn (`PillLook`): they move
+//   over a light that never stands still, and live glass resampled it every frame.
 // - "Use Liquid Glass effects sparingly" (the same page): the few controls that matter most.
 // - No glass on glass: the owner's instruction, and WWDC25 session 219 as the research note for
 //   ESP-376 quotes it ("always avoid glass on glass"; I have not read the transcript myself). A
@@ -67,6 +68,11 @@ extension View {
         } else {
             self
         }
+    }
+
+    /// `glassGroup` only when `grouped`.
+    @ViewBuilder func glassGroupIf(_ grouped: Bool, spacing: CGFloat? = nil) -> some View {
+        if grouped { glassGroup(spacing: spacing) } else { self }
     }
 
     /// For a glass surface that comes and goes inside a `glassGroup`: the system's own materialize

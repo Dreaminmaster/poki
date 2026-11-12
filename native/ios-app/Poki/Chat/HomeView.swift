@@ -508,8 +508,8 @@ struct HomePage<Footer: View>: View {
                     if !writing {
                         VStack(spacing: 8) {
                             let shortcuts = shortcutStore.shortcuts
-                            row(Array(shortcuts.prefix(3)), speed: HomeMotion.pillSpeeds.top, start: 64)
-                            if shortcuts.count > 3 { row(Array(shortcuts.dropFirst(3)), speed: HomeMotion.pillSpeeds.bottom, start: 0) }
+                            row(Array(shortcuts.prefix(3)), at: 0, speed: HomeMotion.pillSpeeds.top, start: 64)
+                            if shortcuts.count > 3 { row(Array(shortcuts.dropFirst(3)), at: 1, speed: HomeMotion.pillSpeeds.bottom, start: 0) }
                         }
                         .padding(.top, 2)
                         // A sideways drag on the rows scrolls them; it does not pull the drawer out.
@@ -549,14 +549,14 @@ struct HomePage<Footer: View>: View {
     /// and its clock stops when the page is not in front. With VoiceOver it is a plain row, each pill
     /// once. The two ends fade out over 32 points, glass included. The first row starts a little way
     /// along, so the two rows do not line up.
-    private func row(_ ideas: [HomeShortcut], speed: Double, start: CGFloat) -> some View {
+    private func row(_ ideas: [HomeShortcut], at index: Int, speed: Double, start: CGFloat) -> some View {
         Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !writing && !PerfSwitch.on(.pillsStill),
                 active: home && scenePhase == .active && (!drawerCovers || PerfSwitch.on(.oldUnderDrawer)), loops: !voiceOver, stopped: menuOpen) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
                     pill(idea).contentShape(.capsule)
                 }
-                .buttonStyle(.plain)
+                .pillButtonStyle(row: index)
                 // Under the glass: with the menu on the outside, the glass took the long press and the
                 // pill fired as a tap. The lifted pill is drawn on its own, on a capsule of its own
                 // size: a snapshot of the pill left its glass behind and stood still while the row
@@ -571,13 +571,82 @@ struct HomePage<Footer: View>: View {
                         .onAppear { menuOpen = true }
                         .onDisappear { menuOpen = false }
                 }
-                .unless(.pillsNoGlass) { $0.glassSurface(in: Capsule(), interactive: true) }
+                .livePillGlass()
                 .accessibilityLabel(Text(verbatim: idea.appName + ", " + idea.text))
                 .accessibilityHint(Text("Puts this in the message field"))
                 .accessibilityIdentifier("home.idea." + idea.app)
                 // Said here and not on the row: the pills live in the scroll view's own hosting view.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
+        }
+    }
+}
+
+/// The suggestion pills' surface. They go by over the home light, which is never still, so live glass
+/// on them sampled and refracted a changing picture every frame they moved. Here the surface is drawn
+/// as that glass looks over the light (a sheet of the light's own colour, a bright rim inside the edge) and it
+/// samples nothing, so a pill that only moves is not drawn again. A press lifts the pill a little, as
+/// the glass's own reaction to a touch did. Reduce Transparency makes the sheet opaque and Increase
+/// Contrast gives it a firmer edge. `-pokiPerf oldPillGlass` brings back the live glass in a debug
+/// build; `pillsNoGlass` draws the pills with no surface at all.
+enum PillLook {
+    static var live: Bool { PerfSwitch.on(.oldPillGlass) && !PerfSwitch.on(.pillsNoGlass) }
+    static var drawn: Bool { !PerfSwitch.on(.oldPillGlass) && !PerfSwitch.on(.pillsNoGlass) }
+}
+
+extension View {
+    @ViewBuilder fileprivate func pillButtonStyle(row: Int) -> some View {
+        if PillLook.drawn { buttonStyle(PillButtonStyle(row: row)) } else { buttonStyle(.plain) }
+    }
+
+    @ViewBuilder fileprivate func livePillGlass() -> some View {
+        if PillLook.live { glassSurface(in: Capsule(), interactive: true) } else { self }
+    }
+}
+
+private struct PillButtonStyle: ButtonStyle {
+    /// 0 for the top row, 1 for the bottom one: they sit over different parts of the light.
+    var row: Int
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background { PillSheet(row: row, pressed: configuration.isPressed) }
+            .scaleEffect(configuration.isPressed ? PillSheet.pressScale : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.65), value: configuration.isPressed)
+    }
+}
+
+/// The numbers are read off the live glass over the home light in the simulator (iOS 27, the light
+/// held at one moment): the sheet as the colour and share that, laid over the light, gives the glass's
+/// colour inside the pill; a bright rim three pixels wide inside the edge; in light mode a darker line
+/// two pixels wide just outside it.
+private struct PillSheet: View {
+    var row: Int
+    var pressed: Bool
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    static let pressScale: CGFloat = 1.04
+    /// Light: one sheet for both rows. Dark: the glass brightens the deeper blue under the bottom row more.
+    static let light = (sheet: Color(red: 221 / 255, green: 252 / 255, blue: 1), share: 0.55)
+    static let dark = [(sheet: Color(red: 57 / 255, green: 134 / 255, blue: 1), share: 0.32),
+                       (sheet: Color(red: 24 / 255, green: 109 / 255, blue: 1), share: 0.74)]
+    static let rim = (light: Color.white.opacity(0.75), dark: Color(red: 80 / 255, green: 170 / 255, blue: 1).opacity(0.55))
+    static let outline = Color.black.opacity(0.13)
+
+    var body: some View {
+        let dark = scheme == .dark, shape = Capsule()
+        let tone = dark ? Self.dark[min(max(row, 0), 1)] : Self.light
+        let share = min(1, tone.share + (pressed ? 0.15 : 0))
+        ZStack {
+            if reduceTransparency {
+                shape.fill(Color(.secondarySystemBackground))
+            } else {
+                shape.fill(tone.sheet.opacity(share))
+            }
+            shape.strokeBorder(contrast == .increased ? Color(.separator) : dark ? Self.rim.dark : Self.rim.light, lineWidth: 1)
+            if !dark { shape.inset(by: -1 / 3).stroke(Self.outline, lineWidth: 2 / 3) }
         }
     }
 }
