@@ -113,8 +113,9 @@ static NSMutableDictionary<NSNumber *, NSNumber *> *PKHungSince(void) {
     return since;
 }
 static NSString *PKUnresponsive(int pid, NSTimeInterval seconds) {
+    if (pid < 0) return [NSString stringWithFormat:@"front_app_unresponsive: looking up the app in front has not finished in %.0f s (the app in front or the accessibility server is not answering); the picture still shows the screen", seconds];
     if (pid <= 0) return [NSString stringWithFormat:@"accessibility_unresponsive: the accessibility server has not answered for %.0f s", seconds];
-    return [NSString stringWithFormat:@"app_unresponsive: the app in front (pid %d) has not answered an accessibility request for %.0f s (its main thread is busy); the picture still shows the screen and a tap on a point of it works; the tree comes back when the app answers", pid, seconds];
+    return [NSString stringWithFormat:@"app_unresponsive: the app in front (pid %d) has not answered an accessibility request for %.0f s (its main thread is busy); the picture still shows the screen; the phone serves one such request at a time, so nothing more is read or touched until the app answers (at most a minute), and the tree comes back then", pid, seconds];
 }
 static id PKBounded(int pid, NSTimeInterval seconds, NSString **code, id (^work)(void)) {
     NSObject *lock = PKHungLock();
@@ -417,6 +418,7 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
 @property (nonatomic, strong, nullable) id element;
 @property (nonatomic, strong, nullable) id ax;
 @property (nonatomic, copy, nullable) NSDictionary *info;
+@property (nonatomic, copy, nullable) NSString *code;
 @end
 @implementation PKFrontSearch
 @end
@@ -627,6 +629,10 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
 }
 
 - (nullable NSData *)screenshot:(NSString **)code {
+    return [self screenshot:code refreshViewport:YES];
+}
+
+- (nullable NSData *)screenshot:(NSString **)code refreshViewport:(BOOL)refreshViewport {
     @try {
         NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
         id screen = [NSClassFromString(@"XCUIScreen") mainScreen];
@@ -657,7 +663,7 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
             // and its frame from one shallow snapshot, so the first picture after a change of layout
             // is cut too.
             NSDictionary *info; id ax;
-            id element = [self sharedFront:&info ax:&ax];
+            id element = refreshViewport ? [self sharedFront:&info ax:&ax code:NULL] : nil;
             // An app that does not answer keeps the viewport it had: the picture is the screen anyway.
             id root = element ? PKRequestSnapshotWithin(3, ax, element, 1, 1, NULL) : nil;
             if (root) [self noteViewport:[root frame]];
@@ -712,7 +718,7 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
 /// 150 ms ago with no input since, is waited for and shared (the two requests come together on two
 /// queues, and each searched on its own: ~220 ms of AX round trips twice per read). A poll a while
 /// later searches again.
-- (id)sharedFront:(NSDictionary **)info ax:(id *)client {
+- (id)sharedFront:(NSDictionary **)info ax:(id *)client code:(NSString **)code {
     PKFrontSearch *search;
     BOOL mine = NO;
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
@@ -734,15 +740,17 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
         NSDictionary *found = nil;
         id ax = nil;
         id element = nil;
-        @try { element = [self front:&found ax:&ax]; } @catch (__unused NSException *e) {}
-        search.element = element; search.ax = ax; search.info = found;
+        NSString *why = nil;
+        @try { element = [self front:&found ax:&ax code:&why]; } @catch (__unused NSException *e) {}
+        search.element = element; search.ax = ax; search.info = found; search.code = why;
         search.ended = NSProcessInfo.processInfo.systemUptime;
         dispatch_group_leave(search.done);
     } else if (dispatch_group_wait(search.done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)))) {
-        return [self front:info ax:client];
+        return [self front:info ax:client code:code];
     }
     if (info) *info = search.info;
     if (client) *client = search.ax;
+    if (code && !search.element) *code = search.code;
     return search.element;
 }
 
@@ -797,8 +805,23 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
     return ax;
 }
 
+/// A lookup of the app in front gets 2 s in all: PokiCore waits 2 s for /wda/activeAppInfo, so a longer
+/// lookup is never used, and the 4 s of a tree read keep 2 s for the snapshot. Ordinary lookups take
+/// 0.2 to 0.3 s (the slowest outside a hang in the ESP-464 system log: 1.1 s). Without it the lookup
+/// had no deadline as a whole: on the phone the active applications went unanswered for 4 s, and the
+/// system application, asked after them with no deadline of its own, held the lookup 28 s more (and
+/// with it the read, and Poki's queue). Given up, the lookup goes on on its own thread, and later
+/// lookups answer at once (no app) until it is through. `PKFrontKey` stands for it among the pids.
+static const NSTimeInterval PKFrontSeconds = 2.0;
+static const int PKFrontKey = -1;
+
 /// The front app's AX element, with its bundle id and pid in `info`.
 - (id)front:(NSDictionary **)info ax:(id *)client {
+    return [self front:info ax:client code:NULL];
+}
+
+/// The same, with why there is none in `code`.
+- (id)front:(NSDictionary **)info ax:(id *)client code:(NSString **)code {
     PKOutcome *refused;
     uint64_t generation = 0;
     id session = [self current:&generation outcome:&refused];
@@ -806,11 +829,30 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
     id ax = [self accessibilityFor:generation];
     if (client) *client = ax;
     __weak PKInProcess *weakSelf = self;
-    id chosen = PKForegroundElement(ax, ^NSString *(int pid) { return [weakSelf bundleForPID:pid session:session]; });
-    int pid = PKAXPid(chosen);
-    if (!chosen || pid <= 0) return nil;
-    if (info) *info = @{@"bundleId": [self bundleForPID:pid session:session] ?: @"", @"pid": @(pid)};
-    return chosen;
+    NSString *given = nil;
+    NSDictionary *found = PKBounded(PKFrontKey, PKFrontSeconds, &given, ^id {
+        id chosen = PKForegroundElement(ax, ^NSString *(int pid) { return [weakSelf bundleForPID:pid session:session]; });
+        int pid = PKAXPid(chosen);
+        if (!chosen || pid <= 0) return nil;
+        return @{@"element": chosen, @"bundleId": [weakSelf bundleForPID:pid session:session] ?: @"", @"pid": @(pid)};
+    });
+    if (![found isKindOfClass:NSDictionary.class]) { if (code) *code = given ?: @"no_front_app"; return nil; }
+    if (info) *info = @{@"bundleId": found[@"bundleId"], @"pid": found[@"pid"]};
+    return found[@"element"];
+}
+
+- (NSDictionary<NSString *, id> *)unanswered {
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    // The latest: one that never answers must not hide a newer one past testmanagerd's limit.
+    NSNumber *pid = nil;
+    NSTimeInterval latest = 0;
+    @synchronized (PKHungLock()) {
+        for (NSNumber *key in PKHungSince()) {
+            NSTimeInterval since = PKHungSince()[key].doubleValue;
+            if (!pid || since > latest) { latest = since; pid = key; }
+        }
+    }
+    return pid ? @{@"pid": pid, @"seconds": @(now - latest)} : nil;
 }
 
 - (CGRect)viewport {
@@ -861,8 +903,9 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
         NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
         id ax;
         NSDictionary *info;
-        id app = [self sharedFront:&info ax:&ax];
-        if (!app) { if (code) *code = @"no_front_app"; return nil; }
+        NSString *why = nil;
+        id app = [self sharedFront:&info ax:&ax code:&why];
+        if (!app) { if (code) *code = why ?: @"no_front_app"; return nil; }
         NSTimeInterval frontAt = NSProcessInfo.processInfo.systemUptime;
         id root = PKSnapshotTreeBounded(ax, app, maxDepth, maxChildren, code);
         if (!root) {
