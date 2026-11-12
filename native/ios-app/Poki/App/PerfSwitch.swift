@@ -31,6 +31,8 @@ enum PerfSwitch: String, CaseIterable {
     case oldUnderDrawer
     /// The moving light is drawn as SwiftUI draws any view, at the screen's full size.
     case oldMeshDirect
+    /// The moving light is drawn on the graphics processor, at the screen's full size.
+    case oldMeshFullSize
 
     static func on(_ part: PerfSwitch) -> Bool { active.contains(part) }
 

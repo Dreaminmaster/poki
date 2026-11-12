@@ -251,13 +251,25 @@ private struct DriftingMesh: View, Animatable {
     }
 }
 
-/// How a moving mesh is drawn each time it changes: on the graphics processor (`drawingGroup`).
+/// How a moving mesh is drawn each time it changes: on the graphics processor (`drawingGroup`), at a
+/// third of the screen's pixels across and down, then scaled up to the page. The mesh has no detail
+/// finer than a few dozen points and the grain is laid over it at full size, so the smaller picture
+/// scaled up is the same light for a ninth of the pixels.
 private struct MeshRaster: ViewModifier {
+    static let shrink: CGFloat = 3
+
     func body(content: Content) -> some View {
         if PerfSwitch.on(.oldMeshDirect) {
             content
-        } else {
+        } else if PerfSwitch.on(.oldMeshFullSize) {
             content.drawingGroup()
+        } else {
+            GeometryReader { geometry in
+                content
+                    .frame(width: geometry.size.width / Self.shrink, height: geometry.size.height / Self.shrink)
+                    .drawingGroup()
+                    .scaleEffect(Self.shrink, anchor: .topLeading)
+            }
         }
     }
 }
