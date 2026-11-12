@@ -689,6 +689,7 @@ final class AppModel {
         }
         #endif
         Thumbnail.previewImage = ActivityPreview.sampleScreen()
+        AppIconFile.preview = { AppIconStore.shared.icon($0) }
         sessionOn = true
         relayStatus = .ready
         currentApp = messages

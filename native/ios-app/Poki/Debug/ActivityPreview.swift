@@ -12,7 +12,10 @@ struct ActivityPreview: View {
     @State private var only = UserDefaults.standard.string(forKey: "pokiActivityState")
     private let demo = UserDefaults.standard.string(forKey: "pokiActivityDemo")
 
-    init() { if Thumbnail.previewImage == nil { Thumbnail.previewImage = Self.sampleScreen() } }
+    init() {
+        if Thumbnail.previewImage == nil { Thumbnail.previewImage = Self.sampleScreen() }
+        AppIconFile.preview = { AppIconStore.shared.icon($0) }
+    }
 
     var body: some View {
         let samples = Self.makeSamples()
@@ -157,8 +160,8 @@ struct ActivityPreview: View {
         done.since = now.addingTimeInterval(-84); done.endedAt = now
         done.stepCount = 12; done.failedCount = 1
 
-        // A two-step task from Poki's own chat counts its plan's steps ("1/2"), not the taps under them
-        // (main #150), and says the step under way in the plan's words, not the tap (ESP-467).
+        // A two-step task from Poki's own chat says the step under way in the plan's words, not the tap
+        // (ESP-467), and never how many steps there are.
         let steps = [String(localized: "Open Messages"), String(localized: "Open the chat with Mom")]
         var plan = working
         plan.headline = "Tap “Messages”"
@@ -171,7 +174,7 @@ struct ActivityPreview: View {
         planNext.plan?.current = 2
         planNext.failedSteps = [1]
         var planDone = done
-        planDone.plan = .init(steps: steps, current: 2)
+        planDone.plan = .init(steps: steps, current: 2, title: String(localized: "Text Mom"))
 
         var ready = PokiState(phase: .idle, headline: "Waiting for agent", thumbnailVersion: 0)
         var idle = PokiState(phase: .idle, headline: "Runner asleep", thumbnailVersion: 0)
