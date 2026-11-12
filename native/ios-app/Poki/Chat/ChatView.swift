@@ -1,11 +1,10 @@
 import AVFoundation
 import SwiftUI
 
-/// The chat is the app. Before your first message it is the home page (ESP-376): the fog-blue ground,
-/// one line that says what Poki is for, the bear large in the middle, and what you could ask. Your
-/// first message turns it into the conversation: the bear flies up beside the sidebar button and
-/// becomes Poki's picture, the ground sinks away, your words rise out of the message field. Two round
-/// glass buttons stay where they are through all of it: the conversations on the left, a new
+/// The chat is the app. Before your first message it is the home page: the fog-blue ground, Poki's
+/// picture at the top, one line of greeting and what you could ask. Your first message turns it into
+/// the conversation: the ground sinks away and your words rise out of the message field. The top bar
+/// stays where it is through all of it: the conversations on the left, Poki in the middle, a new
 /// conversation on the right. An approval or a hand-over shows as a card above the message field,
 /// where iOS hides the Dynamic Island while Poki is in front.
 struct ChatView: View {
@@ -26,13 +25,8 @@ struct ChatView: View {
     @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
     /// The message field has the keyboard.
     @State private var writing = false
-    /// Where the bear stands on the home page and where its picture sits in the top bar, in this
-    /// page's own coordinates: the two ends of its flight.
-    @State private var heroFrame = CGRect.zero
-    @State private var avatarFrame = CGRect.zero
-    /// The face the bear had on the home page: it keeps it while it flies, so it does not change its
-    /// pose in the air (it turns into its picture, which shows what it is doing, on the way).
-    @State private var launchFace = PokiMood.hello
+    /// The page's height, for how far your first words rise.
+    @State private var pageHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
 
@@ -50,15 +44,6 @@ struct ChatView: View {
         case .time, .poki: false
         default: true
         }
-    }
-
-    /// The greeting's last line: whether Poki asks before a sensitive step (ChatModel writes it from the
-    /// approval setting). The page says it under the bear.
-    private var promise: String? {
-        for entry in chat.entries.reversed() {
-            if case .poki(let text) = entry.kind { return text }
-        }
-        return nil
     }
 
     /// The conversation without the greeting's lines, which the home page said itself.
@@ -112,9 +97,10 @@ struct ChatView: View {
                 }
                 LiveVoiceTranscript(voice: voice)
             }
-            // The home page stays in the tree while the conversation is in front, so the bear's place
-            // on it is known when a new conversation brings it back; it is neither seen nor touched.
-            HomePage(home: home, status: status, promise: promise, bear: bearTapped, writing: writing, pick: { draft = $0; writing = true }) {
+            // The home page stays in the tree while the conversation is in front, neither seen nor
+            // touched, so a new conversation brings it back on the same animation.
+            HomePage(home: home, writing: writing, pick: { draft = $0; writing = true }) {
+                if home, let update { UpdatePill(version: update, open: openUpdates) }
                 if home, let hint = homeHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel, openUpdates: openUpdates)
                 }
@@ -132,8 +118,7 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: chat.newConversation, openDetails: openDetails,
-                           update: update, openUpdates: openUpdates)
+                           newConversation: chat.newConversation, openDetails: openDetails)
             }
         }
         .bottomBar {
@@ -146,43 +131,20 @@ struct ChatView: View {
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
             .frame(maxWidth: 720) }
         }
-        .background { HomeBackdrop(home: home, working: busy, frozen: bare, still: heroFrame) }
-        .overlay {
-            BearFollow(hero: heroFrame) { hero in
-                BearFlight(progress: home ? 0 : 1, landed: !home, hero: hero, avatar: avatarFrame,
-                           face: home ? HomeBear.face(status.mood) : launchFace, mood: status.mood, still: reduceMotion)
-                    .animation(HomeMotion.flight(home, reduceMotion), value: home)
-            }
-            .opacity(bare ? 0 : 1)
-        }
-        .coordinateSpace(.named(HomeMotion.space))
-        .onPreferenceChange(BearFrameKey.self) { frames in
-            // The bear follows its place as the keyboard comes and goes; the first time it is just there.
-            if let hero = frames[.hero], hero != heroFrame { withAnimation(heroFrame.isEmpty ? nil : .snappy(duration: 0.3)) { heroFrame = hero } }
-            if let avatar = frames[.avatar], avatar != avatarFrame { avatarFrame = avatar }
-        }
+        .background { HomeBackdrop(home: home, working: busy, frozen: bare) }
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { pageHeight = $0 }
         .animation(.snappy, value: voice.isOn)
         .animation(.snappy, value: model.approvals.first?.id)
         .animation(.snappy, value: model.handoffText)
         .animation(.snappy, value: chat.demoAsk?.id)
         .toolbar(.hidden, for: .navigationBar)
-        .onChange(of: HomeBear.face(status.mood), initial: true) { _, face in
-            if isGreeting { launchFace = face }
-        }
         .onChange(of: chat.running) { was, now in
             if was, !now, endedWell { DoneLinger.shared.celebrate() }
         }
     }
 
-    /// How far your first words rise: from the message field, a little under the pills, to their place
-    /// under the top bar.
-    private var rise: CGFloat { max(120, heroFrame.maxY + 176 - avatarFrame.maxY - 66) }
-
-    /// The big bear was tapped: asleep it wakes (the page says so under it); otherwise its profile opens.
-    private func bearTapped() {
-        guard sampleScene == nil, PokiStatus.current(model: model, chat: chat).mood == .paused else { return openDetails() }
-        if model.sessionOn { model.wakeRunner() } else { model.startSession() }
-    }
+    /// How far your first words rise: from the message field to their place under the top bar.
+    private var rise: CGFloat { max(120, pageHeight - 240) }
 
     // MARK: What waits for you
 
