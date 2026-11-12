@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class GreetingTests: XCTestCase {
     private var saved: Any?
-    private static let promise = "I’ll ask before anything you can’t undo."
+    private static let promise = "Asks before irreversible steps."
 
     override func setUp() async throws { saved = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey) }
     override func tearDown() async throws { UserDefaults.standard.set(saved, forKey: ApprovalClassifier.modeKey) }

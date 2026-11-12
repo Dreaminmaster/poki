@@ -24,13 +24,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，%2$lld 步没做成"
+            "value" : "%1$@，%2$lld 步未完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，%2$lld 步沒做成"
+            "value" : "%1$@，%2$lld 步未完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, %lld missed"
           }
         }
       }
@@ -39,6 +45,18 @@
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld/%2$lld"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld of %lld"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld/%2$lld"
@@ -103,13 +121,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "智能体做完了"
+            "value" : "智能体完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "AI 代理做完了"
+            "value" : "智慧體完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent finished"
           }
         }
       }
@@ -137,7 +161,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允许 UI 自动化"
+            "value" : "开启 UI 自动化"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow UI Automation"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 UI 自動化"
           }
         }
       }
@@ -148,7 +184,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "位置权限设为“使用 App 期间”，并保持“实时活动”开启。"
+            "value" : "定位设使用期间，开启实时活动"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Location to While Using, keep Live Activities on."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定位設使用期間，開啟即時動態"
           }
         }
       }
@@ -210,7 +258,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要批准"
+            "value" : "等待批准"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approval Required"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待批准"
           }
         }
       }
@@ -221,13 +281,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "后台运行"
+            "value" : "后台保活"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "後臺執行"
+            "value" : "背景保活"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background"
           }
         }
       }
@@ -238,13 +304,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "连不上这台 iPhone"
+            "value" : "无法连接"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "連不上這臺 iPhone"
+            "value" : "無法連線"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can’t Reach iPhone"
           }
         }
       }
@@ -255,13 +327,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "继续"
+            "value" : "继续执行"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "繼續"
+            "value" : "繼續執行"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carrying on"
           }
         }
       }
@@ -323,7 +401,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "连接互联网"
+            "value" : "请连接网络"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect to the Internet"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請連線網路"
           }
         }
       }
@@ -368,13 +458,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 里删除？"
+            "value" : "在“%@”里删除？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 裡刪除？"
+            "value" : "在「%@」裡刪除？"
           }
         }
       }
@@ -404,6 +494,18 @@
             "state" : "translated",
             "value" : "正在删除"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleting"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在刪除"
+          }
         }
       }
     },
@@ -413,7 +515,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在“%@”中删除"
+            "value" : "在“%@”中删除"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleting in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」中刪除"
           }
         }
       }
@@ -492,7 +606,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开发者 › 启用 UI 自动化。"
+            "value" : "开发者 › 启用 UI 自動化"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer › Enable UI Automation."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開發者 › 啟用 UI 自動化"
           }
         }
       }
@@ -520,13 +646,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请自己完成这一步"
+            "value" : "请亲自完成此步"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請自己完成這一步"
+            "value" : "請親自完成此步"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Do this step yourself"
           }
         }
       }
@@ -554,13 +686,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "完成，继续"
+            "value" : "好了，继续"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "完成，繼續"
+            "value" : "好了，繼續"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done, carry on"
           }
         }
       }
@@ -573,6 +711,18 @@
             "state" : "translated",
             "value" : "不允许"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Don’t Allow"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不允許"
+          }
         }
       }
     },
@@ -582,7 +732,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下载开发者镜像"
+            "value" : "下载磁盘映像"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading Disk Image"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載磁碟映像"
           }
         }
       }
@@ -627,13 +789,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "输入密码以允许自动化"
+            "value" : "输密码允许自动化"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "輸入密碼以允許自動化"
+            "value" : "輸密碼允許自動化"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter passcode for automation"
           }
         }
       }
@@ -644,13 +812,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "输入密码以启动 Runner"
+            "value" : "输密码启动 Runner"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "輸入密碼以啟動 Runner"
+            "value" : "輸密碼啟動 Runner"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter passcode to start runner"
           }
         }
       }
@@ -678,13 +852,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下载映像"
+            "value" : "下载磁盘映像"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在下載映像"
+            "value" : "下載磁碟映像"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fetching Disk Image"
           }
         }
       }
@@ -695,13 +875,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "填写你的密码"
+            "value" : "请填写密码"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "填寫你的密碼"
+            "value" : "請填寫密碼"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill in your password"
           }
         }
       }
@@ -712,13 +898,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请自己完成付款"
+            "value" : "请亲自付款"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請自己完成付款"
+            "value" : "請親自付款"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish payment yourself"
           }
         }
       }
@@ -746,7 +938,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已在“%@”中完成"
+            "value" : "已在“%@”完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finished in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在「%@」完成"
           }
         }
       }
@@ -757,7 +961,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "通用 › VPN 与设备管理。信任 Poki Runner 的开发者。"
+            "value" : "通用 › 设备管理 › 信任开发者"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "General › VPN & Device Management › Trust developer."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一般 › 裝置管理 › 信任開發者"
           }
         }
       }
@@ -769,6 +985,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "长按"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hold"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "長按"
           }
         }
       }
@@ -796,7 +1024,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Poki 的设置中重新配对。"
+            "value" : "在配置中重新配对"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair again in Poki Setup."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在設定精靈中重配"
           }
         }
       }
@@ -807,7 +1047,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中开启，或连接 LocalDevVPN。"
+            "value" : "开启代理或 LocalDevVPN"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable in proxy app or LocalDevVPN."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟代理或 LocalDevVPN"
           }
         }
       }
@@ -818,7 +1070,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中开启，或连接 LocalDevVPN，然后返回 Poki。"
+            "value" : "开代理或 LocalDevVPN 后返回"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable in proxy or LocalDevVPN, then return."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開代理或 LocalDevVPN 後返回"
           }
         }
       }
@@ -829,7 +1093,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中开启，或在 Poki 设置中重新配对。"
+            "value" : "开代理或在配置中重配"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check proxy app, or pair again in Setup."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開代理或在設定精靈重配"
           }
         }
       }
@@ -842,6 +1118,18 @@
             "state" : "translated",
             "value" : "安装 Poki Runner"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install Poki Runner"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝 Poki Runner"
+          }
         }
       }
     },
@@ -851,7 +1139,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "保持 Poki 后台运行"
+            "value" : "后台保活"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let Poki Stay On"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "背景保活"
           }
         }
       }
@@ -862,7 +1162,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在听"
+            "value" : "正在聆听"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在聆聽"
           }
         }
       }
@@ -871,6 +1183,18 @@
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Look"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看"
@@ -971,6 +1295,18 @@
             "state" : "translated",
             "value" : "正在付款"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paying"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在付款"
+          }
         }
       }
     },
@@ -980,7 +1316,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在“%@”中付款"
+            "value" : "在“%@”中付款"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paying in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」中付款"
           }
         }
       }
@@ -992,6 +1340,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "信息"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messages"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訊息"
           }
         }
       }
@@ -1070,7 +1430,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在设置中打开“与 Poki 配对”，配对码将显示在此处。"
+            "value" : "点“与 Poki 配对”看配对码"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap Pair with Poki there. Code appears here."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點「與 Poki 配對」看配對碼"
           }
         }
       }
@@ -1083,6 +1455,18 @@
             "state" : "translated",
             "value" : "打开 Poki"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 Poki"
+          }
         }
       }
     },
@@ -1092,7 +1476,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "打开 Poki 查看解决方法。"
+            "value" : "打开 Poki 处理"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Poki to fix it."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟 Poki 處理"
           }
         }
       }
@@ -1103,7 +1499,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "打开 Poki 设置以自动下载最新镜像。"
+            "value" : "在配置中下载最新映像"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Setup in Poki to download the latest image."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在設定精靈下載最新映像"
           }
         }
       }
@@ -1150,6 +1558,18 @@
             "state" : "translated",
             "value" : "重新配对"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair Again"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新配對"
+          }
         }
       }
     },
@@ -1159,7 +1579,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "配对此 iPhone"
+            "value" : "配对此手机"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair This iPhone"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配對此手機"
           }
         }
       }
@@ -1170,13 +1602,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "去设置里配对"
+            "value" : "前往设置配对"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "去設定裡配對"
+            "value" : "前往設定配對"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair in Settings"
           }
         }
       }
@@ -1289,13 +1727,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请自己完成验证"
+            "value" : "请亲自完成验证"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請自己完成驗證"
+            "value" : "請親自完成驗證"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Complete verification yourself"
           }
         }
       }
@@ -1306,13 +1750,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "为自动化输入密码"
+            "value" : "输密码允许自动化"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "為自動化輸入密碼"
+            "value" : "輸密碼允許自動化"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passcode for automation"
           }
         }
       }
@@ -1323,13 +1773,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "为 Runner 输入密码"
+            "value" : "输密码启动 Runner"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "為 Runner 輸入密碼"
+            "value" : "輸密碼啟動 Runner"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passcode for runner"
           }
         }
       }
@@ -1340,13 +1796,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 里付款？"
+            "value" : "在“%@”里付款？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 裡付款？"
+            "value" : "在「%@」裡付款？"
           }
         }
       }
@@ -1374,13 +1830,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki Runner 没有启动"
+            "value" : "Runner 未启动"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki Runner 沒有啟動"
+            "value" : "Runner 未啟動"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Runner Didn’t Start"
           }
         }
       }
@@ -1408,7 +1870,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 会自动重新下载。"
+            "value" : "Poki 会自动重下"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki retries the download automatically."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會自動重下"
           }
         }
       }
@@ -1419,13 +1893,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 需要你处理"
+            "value" : "待处理"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 需要你處理"
+            "value" : "待處理"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki needs attention"
           }
         }
       }
@@ -1436,7 +1916,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每次重启后 Poki 需要联网一次，随后会自动重试。"
+            "value" : "每次重启后只需联网一次，连上后自动重试。"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki needs internet once after each restart, then retries automatically."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次重啟後只需連線一次，連上後自動重試。"
           }
         }
       }
@@ -1465,6 +1957,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按键"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Press"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按鍵"
           }
         }
       }
@@ -1560,7 +2064,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "隐私与安全性 › 开发者模式 › 与 Poki 配对。"
+            "value" : "隐私与安全性 › 开发者模式配对"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy & Security › Developer Mode › Pair with Poki."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隱私權與安全性 › 開發者模式配對"
           }
         }
       }
@@ -1571,7 +2087,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "隐私与安全性 › 开发者模式，开启后重新启动。"
+            "value" : "开启开发者模式后重启"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy & Security › Developer Mode, then restart."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟開發者模式後重啟"
           }
         }
       }
@@ -1582,7 +2110,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "隐私与安全性 › 开发者模式。重新启动后轻点“打开”。"
+            "value" : "开开发者模式，重启后点打开"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy & Security › Developer Mode, restart, tap Turn On."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開開發者模式，重啟後點開啟"
           }
         }
       }
@@ -1644,13 +2184,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "运行器休眠"
+            "value" : "Runner 休眠"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "執行器休眠"
+            "value" : "Runner 休眠"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runner asleep"
           }
         }
       }
@@ -1661,7 +2207,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runner 已开启，正在等待 Agent。"
+            "value" : "Runner 就绪，等智能体"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runner on. Waiting for agent."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runner 就緒，等智慧體"
           }
         }
       }
@@ -1723,13 +2281,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 里发送？"
+            "value" : "在“%@”里发送？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 裡傳送？"
+            "value" : "在「%@」裡傳送？"
           }
         }
       }
@@ -1740,7 +2298,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在发送信息"
+            "value" : "正在发消息"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending message"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在傳訊息"
           }
         }
       }
@@ -1751,7 +2321,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在“%@”中发送信息"
+            "value" : "在“%@”发消息"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」傳訊息"
           }
         }
       }
@@ -1764,6 +2346,18 @@
             "state" : "translated",
             "value" : "设置"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定"
+          }
         }
       }
     },
@@ -1775,6 +2369,18 @@
             "state" : "translated",
             "value" : "设置 › 开发者模式"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings › Developer Mode"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定 › 開發者模式"
+          }
         }
       }
     },
@@ -1784,13 +2390,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "初始设置"
+            "value" : "配置"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "初始設定"
+            "value" : "設定精靈"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setup"
           }
         }
       }
@@ -1818,7 +2430,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "直接对 Poki 说话，或轻点打开语音。"
+            "value" : "直接说话或点开语音"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speak to Poki, or tap for Voice."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接說話或點開語音"
           }
         }
       }
@@ -1829,7 +2453,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "说话中"
+            "value" : "正在说话"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speaking"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在說話"
           }
         }
       }
@@ -1840,7 +2476,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有进展"
+            "value" : "无进展"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stalled"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無進展"
           }
         }
       }
@@ -1885,13 +2533,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "启动运行器"
+            "value" : "启动 Runner"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "啟動執行器"
+            "value" : "啟動 Runner"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting runner"
           }
         }
       }
@@ -1919,7 +2573,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "第 %1$lld 步（共 %2$lld 步）"
+            "value" : "第 %1$lld/%2$lld 步"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Step %lld of %lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld/%2$lld 步"
           }
         }
       }
@@ -2068,6 +2734,18 @@
             "state" : "translated",
             "value" : "轻点"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輕點"
+          }
         }
       }
     },
@@ -2077,7 +2755,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "轻点“与 Poki 配对”，然后输入此配对码。"
+            "value" : "点“与 Poki 配对”输配对码"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap Pair with Poki, then enter this code."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點「與 Poki 配對」輸配對碼"
           }
         }
       }
@@ -2122,7 +2812,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "轻点返回语音通话。"
+            "value" : "轻点返回语音"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to return to Voice."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輕點返回語音"
           }
         }
       }
@@ -2150,7 +2852,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在告知 Agent"
+            "value" : "告知智能体"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Telling agent"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "告知智慧體"
           }
         }
       }
@@ -2161,13 +2875,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent 无法操作这个页面，正在等你。"
+            "value" : "此页需你操作，等待中"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent 無法操作這個頁面，正在等你。"
+            "value" : "此頁需你操作，等待中"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for you on this screen."
           }
         }
       }
@@ -2178,13 +2898,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent 已自行继续"
+            "value" : "智能体已继续"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent 已自行繼續"
+            "value" : "智慧體已繼續"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent continued"
           }
         }
       }
@@ -2195,13 +2921,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent 不替你付款，等你完成后再继续。"
+            "value" : "不代付款，等你付完继续"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agent 不替你付款，等你完成後再繼續。"
+            "value" : "不代付款，等你付完繼續"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent waits while you pay."
           }
         }
       }
@@ -2212,13 +2944,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "运行器已停止"
+            "value" : "Runner 已停"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "執行器已停止"
+            "value" : "Runner 已停"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runner stopped"
           }
         }
       }
@@ -2229,7 +2967,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "有 Agent 请求时 Runner 会自动唤醒。"
+            "value" : "智能体请求时自动唤醒"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runner wakes on agent request."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智慧體請求時自動喚醒"
           }
         }
       }
@@ -2240,13 +2990,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这台 iPhone 可以用 Poki 了"
+            "value" : "此手机已就绪"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "這臺 iPhone 可以用 Poki 了"
+            "value" : "此手機已就緒"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready for Poki"
           }
         }
       }
@@ -2276,6 +3032,18 @@
             "state" : "translated",
             "value" : "开启开发者模式"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On Developer Mode"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟開發者模式"
+          }
         }
       }
     },
@@ -2287,6 +3055,18 @@
             "state" : "translated",
             "value" : "开启回环"
           }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn On Loopback"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟迴環"
+          }
         }
       }
     },
@@ -2297,6 +3077,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "输入"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入"
           }
         }
       }
@@ -2341,13 +3133,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "到设置里输入这个码"
+            "value" : "去设置输入配对码"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "到設定裡輸入這個碼"
+            "value" : "去設定輸入配對碼"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter code in Settings › Pair with Poki"
           }
         }
       }
@@ -2375,7 +3173,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在输入密码"
+            "value" : "正在输密码"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typing password"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在輸密碼"
           }
         }
       }
@@ -2386,7 +3196,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在“%@”中输入密码"
+            "value" : "在“%@”输密码"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typing password in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」輸密碼"
           }
         }
       }
@@ -2414,13 +3236,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要更新 iOS"
+            "value" : "更新 iOS"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要更新 iOS"
+            "value" : "更新 iOS"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update iOS"
           }
         }
       }
@@ -2431,7 +3259,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更新开发者镜像"
+            "value" : "更新磁盘映像"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update Disk Image"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新磁碟映像"
           }
         }
       }
@@ -2460,6 +3300,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语音"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語音"
           }
         }
       }
@@ -2493,7 +3345,13 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "等待AI 代理"
+            "value" : "等待智慧體"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for agent"
           }
         }
       }
@@ -2504,7 +3362,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用与 Poki 相同的签名工具和 Apple ID 安装。"
+            "value" : "用同款签名工具与账户安装"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use the same signing tool and Apple Account as Poki."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用同款簽名工具與帳號安裝"
           }
         }
       }
@@ -2532,7 +3402,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在思考下一步。"
+            "value" : "规划下一步"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Planning next step."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "規劃下一步"
           }
         }
       }
@@ -2561,6 +3443,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "缩放"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zoom"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "縮放"
           }
         }
       }
@@ -2605,13 +3499,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 重启后或超过 8 小时，iOS 会要一次密码，Agent 会等你。"
+            "value" : "重启或满 8 小时需输密码"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 重啟後或超過 8 小時，iOS 會要一次密碼，Agent 會等你。"
+            "value" : "重啟或滿 8 小時需輸密碼"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Required after restart or 8h; agent waits."
           }
         }
       }
@@ -2622,13 +3522,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重启后 iOS 会要一次密码，Agent 会等你。"
+            "value" : "重启后需输一次密码"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重啟後 iOS 會要一次密碼，Agent 會等你。"
+            "value" : "重啟後需輸一次密碼"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Required once after restart; agent waits."
           }
         }
       }
@@ -2656,7 +3562,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此功能需要更新版本的 iOS。"
+            "value" : "请更新 iOS 版本"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update iOS to use this feature."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請更新 iOS 版本"
           }
         }
       }
@@ -2667,13 +3585,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在处理你的任务"
+            "value" : "正在执行任务"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在處理你的任務"
+            "value" : "正在執行任務"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Working on task"
           }
         }
       }
@@ -2683,13 +3607,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已为智能体准备就绪"
+            "value" : "智能体就绪"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已為AI 代理準備就緒"
+            "value" : "智慧體就緒"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready for agent"
           }
         }
       }
@@ -2699,13 +3629,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在启动原生服务"
+            "value" : "启动原生服务"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在啟動原生服務"
+            "value" : "啟動原生服務"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting services"
           }
         }
       }
@@ -2731,13 +3667,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在配置 Poki"
+            "value" : "正在配置"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在配置 Poki"
+            "value" : "正在設定"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setting up Poki"
           }
         }
       }
@@ -2753,7 +3695,13 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已從實時活動停止"
+            "value" : "已從即時動態停止"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped from Live Activity"
           }
         }
       }
@@ -2763,13 +3711,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "手机要求输入锁屏密码以启动 Runner"
+            "value" : "输锁屏密码启动 Runner"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "手機要求輸入鎖屏密碼以啟動 Runner"
+            "value" : "輸鎖屏密碼啟動 Runner"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passcode needed to start Runner"
           }
         }
       }
@@ -2779,13 +3733,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "手机要求输入锁屏密码以允许自动化"
+            "value" : "输锁屏密码允许自动化"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "手機要求輸入鎖屏密碼以允許自動化"
+            "value" : "輸鎖屏密碼允許自動化"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passcode needed for automation"
           }
         }
       }
@@ -2795,13 +3755,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "屏幕要求输入锁屏密码"
+            "value" : "屏幕需输锁屏密码"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "螢幕要求輸入鎖屏密碼"
+            "value" : "螢幕需輸鎖屏密碼"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passcode needed on screen"
           }
         }
       }
@@ -2811,13 +3777,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "屏幕要求输入密码"
+            "value" : "屏幕需输入密码"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "螢幕要求輸入密碼"
+            "value" : "螢幕需輸入密碼"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password needed on screen"
           }
         }
       }
@@ -2827,13 +3799,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "屏幕要求完成验证"
+            "value" : "屏幕需完成验证"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "螢幕要求完成驗證"
+            "value" : "螢幕需完成驗證"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verification needed"
           }
         }
       }
@@ -2843,13 +3821,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "屏幕要求你确认付款"
+            "value" : "请在屏幕确认付款"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "螢幕要求你確認付款"
+            "value" : "請在螢幕確認付款"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirm payment on screen"
           }
         }
       }
@@ -2859,13 +3843,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "智能体无法在此屏幕上操作，请你完成这一步"
+            "value" : "此步需你亲自完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "AI 代理無法在此螢幕上操作，請你完成這一步"
+            "value" : "此步需你親自完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Complete this step on screen"
           }
         }
       }
@@ -2925,6 +3915,18 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟"
           }
         }
       }
@@ -3022,13 +4024,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中输入"
+            "value" : "在“%@”中输入"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中輸入"
+            "value" : "在「%@」中輸入"
           }
         }
       }
@@ -3090,13 +4092,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，%2$@ 步没做成"
+            "value" : "%1$@，%2$@ 步未完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，%2$@ 步沒做成"
+            "value" : "%1$@，%2$@ 步未完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, %@ missed"
           }
         }
       }
@@ -3107,13 +4115,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld，%2$@ 步没做成"
+            "value" : "%1$lld，%2$@ 步未完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld，%2$@ 步沒做成"
+            "value" : "%1$lld，%2$@ 步未完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld, %@ missed"
           }
         }
       }
@@ -3124,13 +4138,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld，%2$lld 步没做成"
+            "value" : "%1$lld，%2$lld 步未完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld，%2$lld 步沒做成"
+            "value" : "%1$lld，%2$lld 步未完成"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld, %lld missed"
           }
         }
       }
