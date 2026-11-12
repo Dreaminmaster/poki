@@ -27,6 +27,8 @@ struct Marquee<Content: View>: UIViewRepresentable {
     var spacing: CGFloat = 8
     /// How far along its content the row starts.
     var start: CGFloat = 0
+    /// Points over which each end of the row fades out; 0 cuts it at its edges.
+    var edgeFade: CGFloat = 0
     /// Goes by itself. False (Reduce Motion, the keyboard up) lets it come to rest; a finger still moves it.
     var running = true
     /// The page is in front. Otherwise the clock stops.
@@ -58,6 +60,7 @@ struct Marquee<Content: View>: UIViewRepresentable {
             .fixedSize())
         }
         view.speed = speed
+        view.edgeFade = edgeFade
         view.running = running
         view.active = active
         view.stopped = stopped
@@ -77,7 +80,18 @@ final class MarqueeScrollView: UIScrollView {
     var active = true { didSet { if active != oldValue { wake() } } }
     var stopped = false { didSet { if stopped != oldValue { wake() } } }
     var start: CGFloat = 0
+    var edgeFade: CGFloat = 0 { didSet { if edgeFade != oldValue { setNeedsLayout() } } }
     private(set) var stripHeight: CGFloat = 48
+    /// The ends' fade (ESP-474). A mask SwiftUI puts around the row fades the pills' words but not
+    /// their glass, which stood cut off at the screen's edges; on this view's own layer it fades both.
+    /// It is laid over the visible part, so it stays where it is while the row goes by under it.
+    private let fade: CAGradientLayer = {
+        let fade = CAGradientLayer()
+        fade.startPoint = CGPoint(x: 0, y: 0.5)
+        fade.endPoint = CGPoint(x: 1, y: 0.5)
+        fade.colors = [UIColor.clear, .black, .black, .clear].map(\.cgColor)
+        return fade
+    }()
 
     /// How long after the finger has lifted and the row has come to rest it goes on by itself again.
     static let rest: CFTimeInterval = 2
@@ -172,11 +186,24 @@ final class MarqueeScrollView: UIScrollView {
     override func layoutSubviews() {
         super.layoutSubviews()
         if stale || laidWidth != bounds.width { measure() }
+        placeFade()
         guard loops, period > 0 else { return }
         var x = bounds.origin.x
         while x >= 2 * period { x -= period }
         while x < period { x += period }
         if x != bounds.origin.x { bounds.origin.x = x }
+    }
+
+    /// Over the visible part, and past it above and below for the glass's shadow.
+    private func placeFade() {
+        guard edgeFade > 0, bounds.width > 2 * edgeFade else { layer.mask = nil; return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let end = Double(edgeFade / bounds.width)
+        fade.locations = [0, end, 1 - end, 1].map { NSNumber(value: $0) }
+        fade.frame = bounds.insetBy(dx: 0, dy: -24)
+        CATransaction.commit()
+        if layer.mask !== fade { layer.mask = fade }
     }
 
     override func didMoveToWindow() {

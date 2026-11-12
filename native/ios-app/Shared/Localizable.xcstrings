@@ -3417,6 +3417,54 @@
         }
       }
     },
+    "Good afternoon. What’s next?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下午好，要我帮你办点什么？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "午安，要我幫你辦點什麼？"
+          }
+        }
+      }
+    },
+    "Good evening. Anything left?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "晚上好，还有什么要办的？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "晚上好，還有什麼要辦的？"
+          }
+        }
+      }
+    },
+    "Good morning. What’s first?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "早上好，今天要办点什么？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "早安，今天要辦點什麼？"
+          }
+        }
+      }
+    },
     "Guests" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3451,28 +3499,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "訪客 ›"
-          }
-        }
-      }
-    },
-    "Hand me your phone." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 iPhone 上处理日常事项"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Get things done on your iPhone"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 iPhone 上處理日常事項"
           }
         }
       }
@@ -3695,28 +3721,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "I paused after %lld steps. Tell me how you’d like to continue."
-          }
-        }
-      }
-    },
-    "I tap, type, and scroll for you." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在应用中替你点击、输入，处理发消息与查信息。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sends messages, finds info, and acts in apps."
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在應用程式中替你點擊、輸入，處理傳訊息與查資訊。"
           }
         }
       }
@@ -12099,6 +12103,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用你的代理 App"
+          }
+        }
+      }
+    },
+    "Up late? Leave it to me." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这么晚了，有事交给我。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這麼晚了，有事交給我。"
           }
         }
       }

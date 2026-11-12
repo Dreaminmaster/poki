@@ -387,13 +387,28 @@ enum HomeIdea {
     }
 }
 
-/// The home page, before your first message: what Poki is for and whether it asks first, the bear
-/// large in the middle, and things you could ask as two rows of glass pills. A pill fills the message
+/// The home page's one line for the time of day (ESP-474), as a chat app greets you: morning from 5,
+/// afternoon from 11, evening from 18, late from 23.
+enum HomeGreeting {
+    static func line(at date: Date = .now, calendar: Calendar = .current) -> String {
+        switch calendar.component(.hour, from: date) {
+        case 5..<11: String(localized: "Good morning. What’s first?")
+        case 11..<18: String(localized: "Good afternoon. What’s next?")
+        case 18..<23: String(localized: "Good evening. Anything left?")
+        default: String(localized: "Up late? Leave it to me.")
+        }
+    }
+}
+
+/// The home page, before your first message: one line of greeting for the time of day, the bear large
+/// in the middle, and things you could ask as two rows of glass pills. A pill fills the message
 /// field; nothing is sent until you send it. The bear itself is drawn by `BearFlight` over the page:
 /// here is only its place, which is also the button that opens Poki's profile (or wakes it).
 struct HomePage<Footer: View>: View {
     var home: Bool
     var status: PokiStatus
+    /// The greeting's last line, on whether Poki asks before a sensitive step. The page says it only
+    /// when asking is off; that Poki asks is said on the Rules page (ESP-474).
     var promise: String?
     var bear: () -> Void
     /// Suggestions yield their space while the message field has focus.
@@ -403,10 +418,14 @@ struct HomePage<Footer: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(AppModel.self) private var model
     private let shortcutStore = HomeShortcutStore.shared
+    /// Picked as the page comes in, so it does not change while you look at it.
+    @State private var greeting = HomeGreeting.line()
     /// A pill's Forget menu is open: both rows stand still under it.
     @State private var menuOpen = false
-    /// Everything but the bear: the two lines, the pills and the room between them.
+    /// Everything but the bear: the lines over it, the pills and the room between them. Kept as it was
+    /// for two lines of title and two of text, so the bear's size and place stay where they were.
     @ScaledMetric(relativeTo: .title) private var rest: CGFloat = 268
 
     /// Asleep or in trouble, the page says so under the bear; otherwise the bear's face is the status.
@@ -419,13 +438,6 @@ struct HomePage<Footer: View>: View {
         }
     }
 
-    /// Sentences on one line: a space between them, except after a full-width stop, which brings its own.
-    private static func line(_ sentences: [String?]) -> String {
-        sentences.compactMap { $0 }.reduce(into: "") { line, next in
-            line += line.isEmpty || line.hasSuffix("。") ? next : " " + next
-        }
-    }
-
     var body: some View {
         GeometryReader { geometry in
             // The board's bear is 280 points square; a small phone, the keyboard or large text leave it less.
@@ -434,18 +446,24 @@ struct HomePage<Footer: View>: View {
                 VStack(spacing: 0) {
                     Spacer(minLength: 8)
                     VStack(spacing: 8) {
-                        Text("Hand me your phone.")
-                            .font(Prominent.font(size: 30, relativeTo: .largeTitle, .bold)).tracking(-0.6)
+                        // One line on the narrowest iPhone (375 points): the longest, in English, is 319
+                        // points at this size. Larger text shrinks it rather than wrap it.
+                        Text(verbatim: greeting)
+                            .font(Prominent.font(size: 24, relativeTo: .title2, .bold)).tracking(-0.4)
                             .foregroundStyle(Color(.label))
+                            .lineLimit(1).minimumScaleFactor(0.6)
                             .accessibilityAddTraits(.isHeader)
-                        Text(verbatim: Self.line([String(localized: "I tap, type, and scroll for you."), promise]))
-                            .font(.subheadline).lineSpacing(1).foregroundStyle(Tint.homeSecondary).frame(maxWidth: 290)
+                        if !model.asksBeforeSensitiveSteps, let promise {
+                            Text(verbatim: promise)
+                                .font(.subheadline).lineSpacing(1).foregroundStyle(Tint.homeSecondary).frame(maxWidth: 290)
+                        }
                         footer()
                     }
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                     .opacity(home ? 1 : 0)
                     .animation(HomeMotion.words(home, reduceMotion), value: home)
+                    .onChange(of: home) { _, shown in if shown { greeting = HomeGreeting.line() } }
 
                     Button(action: bear) {
                         Color.clear.frame(width: side, height: side).contentShape(.rect)
@@ -499,10 +517,10 @@ struct HomePage<Footer: View>: View {
     /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
     /// moves and flicks (`Marquee`). It stands still with Reduce Motion and while the keyboard is up,
     /// and its clock stops when the page is not in front. With VoiceOver it is a plain row, each pill
-    /// once. The two ends fade out over 20 points. The first row starts a little way along, so the two
-    /// rows do not line up.
+    /// once. The two ends fade out over 32 points, glass included. The first row starts a little way
+    /// along, so the two rows do not line up.
     private func row(_ ideas: [HomeShortcut], speed: Double, start: CGFloat) -> some View {
-        Marquee(speed: speed, spacing: 8, start: start, running: !reduceMotion && !writing,
+        Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !writing,
                 active: home && scenePhase == .active, loops: !voiceOver, stopped: menuOpen) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
@@ -530,14 +548,6 @@ struct HomePage<Footer: View>: View {
                 // Said here and not on the row: the pills live in the scroll view's own hosting view.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
-        }
-        .mask {
-            HStack(spacing: 0) {
-                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 20)
-                Color.black
-                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 20)
-            }
-            .padding(.vertical, -12)
         }
     }
 }
