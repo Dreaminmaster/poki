@@ -61,7 +61,7 @@ struct ChatView: View {
 
     /// Poki is at work (or the sample scene shows it at work): the message field offers Stop.
     private var busy: Bool {
-        chat.running || ["working", "approval", "lunch", "handoff"].contains(sampleScene ?? "")
+        chat.running || ["working", "approval", "handoff"].contains(sampleScene ?? "") || ChatModel.Sample.approvalScenes.contains(sampleScene ?? "")
     }
 
     /// A newer Poki is on the channel, or downloaded and ready to install: its version, for the home
@@ -89,7 +89,7 @@ struct ChatView: View {
         let home = isGreeting
         ZStack {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
-                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || sampleScene == "lunch" || chat.demoAsk != nil,
+                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || ChatModel.Sample.approvalScenes.contains(sampleScene ?? "") || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
                            shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
@@ -152,10 +152,10 @@ struct ChatView: View {
     @ViewBuilder private var asks: some View {
         if sampleScene == "approval" {
             let sample = ChatModel.Sample.approval, words = ChatModel.Sample.approvalWords
-            ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: sample.expires, answer: { _ in })
-        } else if sampleScene == "lunch" {
-            let sample = ChatModel.Sample.lunchApproval
-            ApprovalAskCard(title: sample.sentence, detail: sample.kindLine ?? "", quote: "", expires: sample.expires, answer: { _ in })
+            ApprovalAskCard(title: words.title, detail: words.detail, tags: sample.tags, quote: words.quote, expires: sample.expires, answer: { _ in })
+        } else if let scene = sampleScene, ChatModel.Sample.approvalScenes.contains(scene) {
+            let sample = ChatModel.Sample.approval(scene)
+            ApprovalAskCard(title: sample.sentence, detail: "", tags: sample.tags, quote: "", expires: sample.expires, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
         } else if let ask = chat.demoAsk {
@@ -165,7 +165,7 @@ struct ChatView: View {
         } else if let approval = model.approvals.first {
             // A message of this chat's own task: who it goes to and the words. Any other step: its one sentence.
             let words = chat.askWords[approval.id]
-            ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? approval.kindLine ?? "",
+            ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? "", tags: approval.tags,
                             quote: words?.quote ?? "", expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1043,9 +1043,9 @@ struct ApprovalNoteCard: View {
         }
     }
 
-    /// The rules' kinds beside the agent's own sentence; a note saved before the sentence names its app.
+    /// A note saved before the sentence names its app; a newer one shows the rules' kinds as tags.
     private var context: String? {
-        if let asked = note.asked { return asked.kindLine }
+        if note.asked != nil { return nil }
         return note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : ActivityWords.local(note.app)
     }
 
@@ -1061,6 +1061,7 @@ struct ApprovalNoteCard: View {
                     Text(at.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(Color(.secondaryLabel))
                 }
             }
+            if let tags = note.asked?.tags, !tags.isEmpty { ApprovalKindTags(tags: tags) }
             if let sentence = note.asked?.sentence {
                 Text(verbatim: sentence).font(.subheadline).foregroundStyle(Color(.label))
                     .fixedSize(horizontal: false, vertical: true)
