@@ -320,7 +320,7 @@ struct HandsView: View {
 
             if model.automationPath == .inProcess {
                 Section {
-                    Toggle("Hide Banner When Idle", isOn: $model.closeSessionWhenIdle)
+                    Toggle(isOn: $model.closeSessionWhenIdle) { SettingsLabel("Hide Banner When Idle", systemImage: "rectangle.on.rectangle.slash") }
                 } header: {
                     Text("Automation Banner")
                 } footer: {
@@ -493,6 +493,7 @@ struct ApprovalsSettingsView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Tint.blueText)
                             .buttonStyle(.borderless)
+                            .padding(.top, 2)
                             .accessibilityIdentifier("approvals.learnMore")
                     }
                 }

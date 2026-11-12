@@ -25,7 +25,7 @@ struct SettingsEntryRow: View {
                 Divider().padding(.horizontal, 16)
                 Button(action: open) {
                     HStack(spacing: 12) {
-                        SettingsIcon(symbol: "gearshape", neutral: true, size: 36)
+                        SettingsIcon(symbol: "gearshape", neutral: true, size: 40)
                         Text("Settings").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
                         Spacer(minLength: 8)
                         if needsYou {

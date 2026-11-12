@@ -28,18 +28,18 @@ struct ModelSettingsView: View {
                 Text("Open an account to choose what it is used for. Dictation in the message field needs no account.")
             }
 
+            // With no account yet the card above has Add Account, and an empty group would only be a heading.
+            if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
             Section {
                 ForEach(ModelProvider.allCases.filter(ModelAccounts.isSetUp)) { provider in
                     NavigationLink { AccountDetail(provider: provider) } label: { AccountRow(provider: provider) }
                 }
-                // With no account yet the card above has Add Account already.
-                if ModelKeys.hasUsableKey || ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
-                    Button("Add Account", systemImage: "plus") { adding = true }
-                }
+                Button("Add Account", systemImage: "plus") { adding = true }
             } header: {
                 Text("Accounts").textCase(nil)
             } footer: {
                 Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
+            }
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -97,6 +97,7 @@ private struct InUseCard: View {
             Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Color(.label))
         }
         .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Tint.blueSoft.opacity(0.6), in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)

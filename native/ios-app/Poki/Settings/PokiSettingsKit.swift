@@ -25,7 +25,7 @@ struct SettingsIcon: View {
         self.warns = warns
         self.neutral = neutral
         _size = ScaledMetric(wrappedValue: size, relativeTo: .body)
-        _glyph = ScaledMetric(wrappedValue: size * 0.45, relativeTo: .body)
+        _glyph = ScaledMetric(wrappedValue: size * 0.5, relativeTo: .body)
     }
 
     var body: some View {
@@ -124,7 +124,7 @@ private struct SettingsLabelIcon<Icon: View>: View {
     @ViewBuilder var icon: Icon
     var body: some View {
         icon
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(Tint.blueText)
             .frame(width: size, height: size)
             .background(Tint.blueSoft, in: .circle)
@@ -203,7 +203,7 @@ struct SettingsChoiceCard: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground), in: shape)
-            .overlay(shape.strokeBorder(selected ? Tint.blue : Color(.separator).opacity(0.5), lineWidth: selected ? 2 : 1))
+            .overlay(shape.strokeBorder(selected ? Tint.blue.opacity(0.7) : Color(.separator).opacity(0.5), lineWidth: selected ? 1.5 : 1))
             .contentShape(shape)
         }
         .buttonStyle(PressedDimStyle())
