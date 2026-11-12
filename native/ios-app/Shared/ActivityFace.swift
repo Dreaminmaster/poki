@@ -45,13 +45,17 @@ struct ActivityFace: Hashable {
         case symbol(String, ActivityTone)
     }
     enum Compact: Hashable {
-        /// Two lines: the step's verb ("Tap") over its count ("2/5", "Step 7"). A step whose verb is
-        /// not known shows the count alone.
-        case steps(verb: String?, count: String)
+        /// Two lines: the app the step is in ("Messages") over its count ("2/5", "Step 7"). Without an
+        /// app, the count alone. A plan's step does not fit the compact island's 52 points (ESP-467).
+        case steps(text: String?, count: String)
         /// Words and short counts ("2/6", "Stalled").
         case text(String, ActivityTone)
         /// The pairing code, tabular digits.
         case code(String)
+        /// Poki waits for your answer: a word saying so ("Allow?") over the time left (ESP-467). The
+        /// island opens by itself when the approval comes and folds back after a few seconds; folded,
+        /// it still says what it waits for.
+        case asking(String, Date)
         case countdown(Date)
         case symbol(String, ActivityTone)
     }
@@ -170,6 +174,28 @@ extension PokiState {
         return (stepCount + 1, nil)
     }
 
+    /// What the run is doing, worded so a glance at the island says which part of the task this is
+    /// (ESP-467): the plan's step under way in the model's words, else the task's name, else a line of
+    /// Poki's own ("Thinking"). Never the action under it ("Tap “Send”"): on its own that says nothing
+    /// about the task. nil when none of these is known.
+    var doing: String? {
+        if let words = taskWords { return words }
+        if let to = plan?.to?.nonBlank { return String(activity: "Poki’s messaging \(to)") }
+        return ActivityWords.statusLines.contains(headline) ? ActivityWords.local(headline) : nil
+    }
+
+    /// The task's own words: the plan's step under way, else the task's name.
+    private var taskWords: String? {
+        guard let plan else { return nil }
+        return planStep(progress.step) ?? plan.title?.nonBlank
+    }
+
+    /// The plan's step `number`, from 1, in the model's words.
+    private func planStep(_ number: Int) -> String? {
+        guard let plan, plan.steps.indices.contains(number - 1) else { return nil }
+        return plan.steps[number - 1].nonBlank
+    }
+
     var face: ActivityFace { face(stale: false) }
 
     /// The face for the widget: `stale` when ActivityKit says the content is past its stale date.
@@ -211,11 +237,11 @@ extension PokiState {
                 kicker: total.map { String(activity: "Step \(step) of \($0)") } ?? String(activity: "Step \(step)"),
                 place: name,
                 meta: since.map { ActivityFace.Meta.elapsed($0) } ?? ActivityFace.Meta.none,
-                content: ActivityWords.step(headline),
-                previous: previous.map { ActivityWords.step($0) },
+                content: doing ?? String(activity: "Poki’s on it"),
+                previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
-                compact: .steps(verb: ActivityWords.verb(headline), count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
+                compact: .steps(text: name, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:
             guard let approval else { return quietFace }
             let question = approval.question
@@ -239,7 +265,7 @@ extension PokiState {
                 subtitle: approval.reasonLine,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
-                compact: .countdown(approval.expires))
+                compact: .asking(String(activity: "Allow?"), approval.expires))
         case .done:
             return ActivityFace(
                 symbol: "checkmark.circle.fill",
@@ -325,16 +351,28 @@ extension PokiState {
         }
     }
 
-    /// Ready (the runner is up) and Idle (it sleeps until an agent asks).
+    /// The runner's start-up stages (`RunnerStatus.title`). Each says the same main line, Poki waking
+    /// up, and names its stage in the small line under it (ESP-467).
+    static let wakingStages: Set<String> = ["Connecting", "Checking pairing", "Opening tunnel", "Preparing", "Starting"]
+
+    /// Ready (the runner is up), Idle (it sleeps until an agent asks), and the runner on its way up.
     private var quietFace: ActivityFace {
-        ActivityFace(
+        let (title, subtitle): (String, String) =
+            if Self.wakingStages.contains(headline) {
+                (String(activity: "Poki’s waking up"), ActivityWords.local(headline))
+            } else if headline == "Needs loopback" {
+                (String(activity: "Poki can’t reach iPhone"), ActivityWords.local(headline))
+            } else {
+                (ActivityWords.local(headline), runnerPaused
+                    ? String(activity: "The runner wakes when an agent asks.")
+                    : String(activity: "Runner on. Waiting for the agent."))
+            }
+        return ActivityFace(
             symbol: runnerPaused ? "zzz" : "checkmark",
             bear: runnerPaused ? .paused : .ready, size: .low,
             meta: .none,
-            content: ActivityWords.local(headline),
-            subtitle: runnerPaused
-                ? String(activity: "The runner wakes when an agent asks.")
-                : String(activity: "Runner on. Waiting for the agent."),
+            content: title,
+            subtitle: subtitle,
             bottom: .none,
             compact: .symbol(runnerPaused ? "zzz" : "checkmark", runnerPaused ? .quiet : .accent))
     }
@@ -427,5 +465,12 @@ extension PokiActivityAttributes.Handoff {
         case .payment: "creditcard.fill"
         case .other: "person.fill"
         }
+    }
+}
+
+private extension String {
+    var nonBlank: String? {
+        let text = trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 }

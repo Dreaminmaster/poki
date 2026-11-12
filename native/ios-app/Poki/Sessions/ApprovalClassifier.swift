@@ -27,19 +27,19 @@ enum ApprovalClassifier {
             switch self {
             case .reply: String(localized: "With Message Reply")
             case .confirm: String(localized: "With Confirmation")
-            case .off: String(localized: "Never")
+            case .off: String(localized: "Never Ask")
             }
         }
     }
 
-    /// The saved choice; before there was one, what the two older switches said.
+    /// The saved choice; before there was one, what 752's two switches did (ESP-460): the auto-classifier
+    /// on let the model judge, asking off asked nothing, and otherwise the owner allowed every step.
     nonisolated static var mode: Mode {
         let defaults = UserDefaults.standard
         if let raw = defaults.string(forKey: modeKey), let mode = Mode(rawValue: raw) { return mode }
+        if defaults.object(forKey: onKey) as? Bool == true { return .reply }
         let asked = defaults.object(forKey: "approvals.ask") as? Bool ?? true
-        let classifier = defaults.object(forKey: onKey) as? Bool
-        if !asked, classifier != true { return .off }
-        return classifier == false ? .confirm : .reply
+        return asked ? .confirm : .off
     }
 
     /// A chat model with a key: without one there is nobody to ask.
@@ -106,7 +106,14 @@ enum ApprovalClassifier {
             case .everything: String(localized: "Ask for Everything")
             }
         }
-        static var saved: Level { Level(rawValue: UserDefaults.standard.string(forKey: levelKey) ?? "") ?? .balanced }
+        /// The saved sensitivity; before there was one, Balanced for an owner who already let the model
+        /// judge or chose a mode here, and Ask for Everything, as 752 did, for everyone else.
+        static var saved: Level {
+            let defaults = UserDefaults.standard
+            if let level = Level(rawValue: defaults.string(forKey: levelKey) ?? "") { return level }
+            let chose = defaults.string(forKey: modeKey) != nil || defaults.object(forKey: onKey) as? Bool == true
+            return chose ? .balanced : .everything
+        }
         var rule: String {
             switch self {
             case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."

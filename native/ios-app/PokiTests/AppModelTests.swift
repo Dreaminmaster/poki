@@ -205,16 +205,53 @@ final class AppModelTests: XCTestCase {
 
 @MainActor
 final class ApprovalDefaultTests: XCTestCase {
-    private var saved: Any?
-    private var savedMode: Any?
+    private let keys = [LiveCore.askKey, ApprovalClassifier.modeKey, ApprovalClassifier.onKey, ApprovalClassifier.levelKey]
+    private var saved: [String: Any] = [:]
     override func setUp() {
-        saved = UserDefaults.standard.object(forKey: LiveCore.askKey)
-        savedMode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
+        for key in keys { saved[key] = UserDefaults.standard.object(forKey: key) }
         UserDefaults.standard.removeObject(forKey: ApprovalClassifier.modeKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.levelKey)
     }
     override func tearDown() {
-        UserDefaults.standard.set(saved, forKey: LiveCore.askKey)
-        UserDefaults.standard.set(savedMode, forKey: ApprovalClassifier.modeKey)
+        for key in keys { UserDefaults.standard.set(saved[key], forKey: key) }
+    }
+
+    /// Rules as an owner finds them after installing over 752 (ESP-460). 752 asked the owner to allow
+    /// every message, call and password unless they had turned asking off or the auto-classifier on.
+    /// Who never chose lands on the same: With Confirmation at Ask for Everything, so no step goes out
+    /// on the chat model's word alone. Who turned asking off stays off; who turned the classifier on
+    /// keeps the model's judgement at the sensitivity they had.
+    func testRulesAfterInstallingOver752KeepWhatEachOwnerHad() {
+        let owners: [(name: String, ask: Bool?, classifier: Bool?, level: String?, mode: ApprovalClassifier.Mode, sensitivity: ApprovalClassifier.Level)] = [
+            ("never chose", nil, nil, nil, .confirm, .everything),
+            ("turned the classifier off, asking on", true, false, nil, .confirm, .everything),
+            ("turned asking off", false, nil, nil, .off, .everything),
+            ("turned the classifier on", nil, true, nil, .reply, .balanced),
+            ("turned the classifier on at Strict", true, true, "strict", .reply, .strict),
+        ]
+        for owner in owners {
+            let defaults = UserDefaults.standard
+            defaults.set(owner.ask, forKey: LiveCore.askKey)
+            defaults.set(owner.classifier, forKey: ApprovalClassifier.onKey)
+            defaults.set(owner.level, forKey: ApprovalClassifier.levelKey)
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            XCTAssertEqual(model.approvalMode, owner.mode, owner.name)
+            XCTAssertEqual(model.classifierLevel, owner.sensitivity, owner.name)
+        }
+    }
+
+    /// An owner who never chose, then picks how to be asked in Approvals, keeps the sensitivity Approvals shows:
+    /// Ask for Everything. Saving the way of asking must not move the sensitivity to Balanced, where the
+    /// chat model's yes lets a step through, behind a slider that still reads Ask for Everything.
+    func testChoosingHowToBeAskedKeepsTheSensitivityRulesShows() {
+        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.onKey)
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(model.classifierLevel, .everything)
+        model.approvalMode = .off
+        model.approvalMode = .reply
+        XCTAssertEqual(ApprovalClassifier.Level.saved, .everything, "what route() reads")
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).classifierLevel, .everything, "after a restart")
     }
 
     /// A phone that never chose (a new install, or an alpha tester who left the switch alone) asks the
@@ -572,8 +609,9 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertFalse(model.ownerPaused, "off is off, not resting")
     }
 
-    /// 752's home warned in the last two days of signing (ESP-222), and the redesigned home lost it.
-    /// The home line says it again, ahead of an open setup step, and links to Updates.
+    /// 752's home warned in the last two days of signing (ESP-222); the redesigned home only notifies.
+    /// The home line says it again, under 752's headline and ahead of an open setup step, and links to
+    /// Updates.
     func testHomeLineWarnsInTheLastTwoDaysOfSigning() {
         defer { UserDefaults.standard.removeObject(forKey: "pokiSigningDays") }
         UserDefaults.standard.set(1.0, forKey: "pokiSigningDays")
@@ -581,7 +619,8 @@ final class FrontendSubtractionTests: XCTestCase {
         ending.setup.loopback = .none
         let hint = SetupIssueHint.homeLine(model: ending)
         XCTAssertEqual(hint?.target, .updates)
-        XCTAssertEqual(hint?.message, ExpiryWarning(expiry: ending.signer.expiry)?.message)
+        let warning = ExpiryWarning(expiry: ending.signer.expiry)?.message ?? "no warning"
+        XCTAssertEqual(hint?.message, "Poki’s signing ends soon\n" + warning)
 
         UserDefaults.standard.set(3.0, forKey: "pokiSigningDays")
         let later = AppModel(launcher: FakeLauncher(), pairer: FakePairing())

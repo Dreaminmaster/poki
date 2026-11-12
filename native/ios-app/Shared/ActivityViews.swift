@@ -39,6 +39,9 @@ enum ActivityMetrics {
     /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
     static let compactBear: CGFloat = 39
+    /// The compact island's right block during a run: one width from step to step, so the island
+    /// keeps its size while the words change.
+    static let compactWords: CGFloat = 52
     /// Short of room, every block fits a circle this wide; the bear's whole picture is then this long a side.
     static let narrowCircle: CGFloat = 28
     static let narrowBear: CGFloat = 31.6
@@ -63,8 +66,9 @@ enum ActivityMetrics {
         case .low:
             Sizes(island: 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
         case .working:
-            // Without a plan there is no line of segments; a ticked previous step adds a line.
-            Sizes(island: (face.bottom.hasLine ? 118 : 106) + (face.previous == nil ? 0 : 18), islandBear: 96, islandLeft: 104,
+            // Without a plan there is no line of segments. The ticked previous step's line is kept from the
+            // first step on, so the island keeps its height and the bear its place from step to step.
+            Sizes(island: (face.bottom.hasLine ? 118 : 106) + 18, islandBear: 96, islandLeft: 104,
                   lock: face.bottom.hasLine ? 134 : 124, lockBear: 116, lockLeft: 122, lockBearInset: 4)
         case .asking:
             Sizes(island: 150, islandBear: 128, islandLeft: 130, lock: 154, lockBear: 134, lockLeft: 138, lockBearInset: 0)
@@ -168,7 +172,7 @@ struct LockScreenCard: View {
                     }
                     .frame(height: 16)
                 }
-                Title(face: face, palette: palette).padding(.top, hasKicker ? 3 : 0)
+                Title(face: face, palette: palette, large: face.size == .low).padding(.top, hasKicker ? 3 : 0)
                 if face.subtitle != nil || !hasKicker && !metaBesideControl {
                     Group {
                         if hasKicker || metaBesideControl {
@@ -278,22 +282,22 @@ struct IslandBottom: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1)
                     Title(face: face, palette: palette).padding(.top, 2)
-                    if let previous = face.previous {
-                        HStack(spacing: 5) {
+                    // Held empty on the first step (see `sizes`): a new step never grows the island.
+                    HStack(spacing: 5) {
+                        if let previous = face.previous {
                             Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
-                            Text(previous).font(theme.subtitle).lineLimit(1)
+                            Text(previous).font(theme.subtitle).lineLimit(1).contentTransition(.interpolate)
                         }
-                        .foregroundStyle(palette.quiet)
-                        .frame(height: 16).padding(.top, 2)
-                        .transition(.opacity)
                     }
+                    .foregroundStyle(palette.quiet)
+                    .frame(height: 16).padding(.top, 2)
                     if let total { SegmentLine(step: step, total: total, palette: palette).padding(.top, 11) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if stop {
                     // In the lowest island the circle sits a little higher, clear of the corner.
                     StopButton(surface: .island)
-                        .padding(.top, (total == nil ? 6 : 16) + (face.previous == nil ? 0 : 9))
+                        .padding(.top, (total == nil ? 6 : 16) + 9)
                         .transition(.opacity)
                 }
             }
@@ -323,7 +327,7 @@ struct IslandBottom: View {
 
 /// Direction three's small bear (ESP-344 board F-06, A): head, hands and what they hold, the picture's
 /// lower edge 3 points under the island's. Every mouth sits above the 4.33 points the system cuts off.
-/// A new state sinks the old bear and raises the new one. Short of room, the bear in a circle 28 points across.
+/// A new state changes the pose where the bear stands. Short of room, the bear in a circle 28 points across.
 struct CompactLeading: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -339,18 +343,18 @@ struct CompactLeading: View {
                         .offset(x: 11, y: ActivityMetrics.compactHeight + 3 - side)
                         .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
                         .id(face.bear)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                 }
                 .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
                 .clipped()
             }
         }
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .animation(dimmed ? nil : ActivityMotion.pose, value: face.bear)
         .accessibilityHidden(true)
     }
 }
 
-/// Two short lines rather than a sentence, so it never truncates: the step's verb over its count.
+/// Two short lines: what the task is doing, made smaller or cut to fit, over its count.
 struct CompactTrailing: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -373,7 +377,7 @@ struct CompactTrailing: View {
             Text(count).font(theme.narrowCount).foregroundStyle(palette.text)
                 .lineLimit(1).minimumScaleFactor(0.75)
                 .frame(maxWidth: 26).frame(width: side, height: side)
-        case .countdown(let until):
+        case .countdown(let until), .asking(_, let until):
             Text(timerInterval: Countdown.range(until), countsDown: true)
                 .font(theme.narrowTimer).foregroundStyle(palette.approval)
                 .multilineTextAlignment(.center)
@@ -389,18 +393,21 @@ struct CompactTrailing: View {
     private func wide(_ palette: ActivityPalette) -> some View {
         ZStack {
             switch face.compact {
-            case .steps(let verb, let count):
+            case .steps(let text, let count):
                 VStack(alignment: .trailing, spacing: 0) {
-                    if let verb {
-                        Text(verb).font(theme.compact).foregroundStyle(palette.text).frame(height: 15)
+                    if let text {
+                        Text(text).font(theme.compact).foregroundStyle(palette.text).frame(height: 15)
+                            .truncationMode(.tail)
+                            .contentTransition(.interpolate)
                         Text(count).font(theme.compactCount).foregroundStyle(palette.quiet).frame(height: 13)
+                            .contentTransition(.numericText())
                     } else {
                         Text(count).font(theme.compact.monospacedDigit()).foregroundStyle(palette.text)
+                            .contentTransition(.numericText())
                     }
                 }
                 .lineLimit(1).minimumScaleFactor(0.7)
-                .id("\(verb ?? "") \(count)")
-                .transition(.push(from: .bottom))
+                .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
             case .text(let text, let tone):
                 Text(text).font(theme.compact).foregroundStyle(palette.color(tone))
                     .lineLimit(1).minimumScaleFactor(0.8)
@@ -408,6 +415,17 @@ struct CompactTrailing: View {
             case .code(let code):
                 Text(code).font(theme.compactCode).foregroundStyle(palette.accent)
                     .lineLimit(1).minimumScaleFactor(0.8)
+            case .asking(let text, let until):
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(text).font(theme.compact).foregroundStyle(palette.approval).frame(height: 15)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    // No fixedSize on timer text (see TimerText): a fixed frame instead.
+                    Text(timerInterval: Countdown.range(until), countsDown: true)
+                        .font(theme.compactCount).foregroundStyle(palette.quiet)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: ActivityMetrics.compactWords, height: 13, alignment: .trailing)
+                }
+                .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
             case .countdown(let until):
                 TimerText(range: Countdown.range(until), down: true, colour: palette.approval, width: 42)
             case .symbol(let name, let tone):
@@ -434,7 +452,7 @@ private struct NarrowBear: View {
                 .offset(x: radius - middle.x * side, y: radius - middle.y * side)
                 .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
                 .id(bear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity)
         }
         .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 5) }
         .frame(width: radius * 2, height: radius * 2)
@@ -461,14 +479,14 @@ struct MinimalView: View {
                         .offset(x: radius - middle.x * side, y: radius - middle.y * side)
                         .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
                         .id(face.bear)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.opacity)
                 }
                 .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
                 .frame(width: radius * 2, height: radius * 2)
                 .clipShape(.circle)
             }
         }
-        .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
+        .animation(dimmed ? nil : ActivityMotion.pose, value: face.bear)
         .accessibilityHidden(true)
     }
 }
@@ -476,7 +494,7 @@ struct MinimalView: View {
 // MARK: Pieces
 
 /// The bear in a corner: the whole square picture, its lower edge on the surface's, darkening
-/// towards that edge as if it came up from inside. A new state sinks the old bear and raises the new.
+/// towards that edge as if it came up from inside. A new state changes the pose where the bear stands.
 private struct RisingBear: View {
     var bear: ActivityBear
     var side: CGFloat
@@ -489,10 +507,10 @@ private struct RisingBear: View {
             Image(bear.image).resizable().interpolation(.high)
                 .frame(width: side, height: side)
                 .id(bear)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity)
         }
         // The shade covers the bear alone: over a gradient a whole strip would show as a rectangle
-        // beside it. While one bear sinks and the next rises, it follows the next one's outline.
+        // beside it. While one pose fades into the next, it follows the next one's outline.
         .overlay(alignment: .bottom) {
             Rim(colour: colour, height: rim).padding(.bottom, lift)
                 .mask(alignment: .bottom) { Image(bear.image).resizable().interpolation(.high).frame(width: side, height: side) }
@@ -536,10 +554,12 @@ private struct Kicker: View {
     }
 }
 
-/// The main line. A new step pushes the old one up and out.
+/// The main line. A new step's words blend into the old ones where they stand.
 private struct Title: View {
     var face: ActivityFace
     var palette: ActivityPalette
+    /// The Lock Screen's short cards say Poki's state in large type.
+    var large = false
     private let theme = ActivityTheme.current
     var body: some View {
         if face.contentIsCode {
@@ -549,18 +569,15 @@ private struct Title: View {
                 .frame(height: 46)
                 .contentTransition(.numericText())
         } else {
-            // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do.
+            // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do,
+            // 24 bold for Poki's state on a short Lock Screen card.
             let stepLike = face.size == .working || face.size == .low
-            ZStack(alignment: .leading) {
-                Text(face.content)
-                    .font(stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
-                    .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .id(face.content)
-                    .transition(face.bottom.isProgress ? .push(from: .bottom) : .opacity)
-            }
-            .frame(height: stepLike ? 24 : 25, alignment: .leading)
-            .clipped()
+            Text(face.content)
+                .font(large ? theme.status : stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
+                .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
+                .lineLimit(1).minimumScaleFactor(large ? 0.65 : 0.8)
+                .contentTransition(.interpolate)
+                .frame(height: large ? 30 : stepLike ? 24 : 25, alignment: .leading)
         }
     }
 }

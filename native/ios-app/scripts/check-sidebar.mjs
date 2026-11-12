@@ -47,7 +47,7 @@ try {
   const drawer = openDrawer();
   call('save_screenshot', { path: join(directory, 'drawer.png'), overwrite: true });
   evidence.drawer = drawer.map(e => ({ type: e.type, identifier: e.identifier ?? null, label: e.label ?? null }));
-  const extra = drawer.filter(e => e.type !== 'Application' && e.identifier !== 'threads.newChat'
+  const extra = drawer.filter(e => e.type !== 'Application' && e.identifier !== 'threads.newChat' && e.identifier !== 'threads.settings'
     && !(e.type === 'Button' && !e.identifier && (e.label ?? '').includes(', ')));
   assert.deepEqual(extra.map(e => `${e.type}: ${e.identifier ?? e.label}`), [], 'The drawer must list only conversations');
   assert(row(drawer, 'Codex') && row(drawer, 'What iOS version is this?'), 'The drawer must list the saved conversations');

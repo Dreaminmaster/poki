@@ -168,7 +168,7 @@ final class ChatModel {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
          ChatEntry(.poki(app.asksBeforeSensitiveSteps ? String(localized: "I’ll ask before anything you can’t undo.")
-                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, tap my picture, then Rules.")))]
+                         : String(localized: "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, open Settings, then Approvals.")))]
     }
 
     private func greet() { entries = greeting }
@@ -280,8 +280,8 @@ final class ChatModel {
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
-            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first. Tap my picture, then Brain.")
-                                       : String(localized: "Add a model key first. Tap my picture, then Brain.")))
+            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first. Open Settings, then Models.")
+                                       : String(localized: "Add a model key first. Open Settings, then Models.")))
             return
         }
         let model = ModelKeys.selectedModel
@@ -525,9 +525,10 @@ final class ChatModel {
             guard let steps = args["steps"] as? [String], (1...8).contains(steps.count), let current = args["currentStep"] as? Int, (1...steps.count).contains(current) else {
                 return PokiCore.ToolAnswer(text: Harness.invalidPlan, jpeg: nil, isError: true)
             }
-            showPlan(steps, current: current)
-            if let title = Self.shortTitle(args["title"]) { nameTask(title) }
-            if let to = Self.shortTitle(args["to"]) { sendTo = to }
+            let title = Self.shortTitle(args["title"]), to = Self.shortTitle(args["to"])
+            showPlan(steps, current: current, title: title, to: to)
+            if let title { nameTask(title) }
+            if let to { sendTo = to }
             return PokiCore.ToolAnswer(text: Harness.planPublished, jpeg: nil, isError: false)
         case "finish_task":
             guard let result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
@@ -548,9 +549,9 @@ final class ChatModel {
 
     /// The bubble shows the model's steps up to the current one: those before it done, it under way. A step
     /// appears when the model reaches it, as the board draws them.
-    private func showPlan(_ plan: [String], current: Int) {
+    private func showPlan(_ plan: [String], current: Int, title: String?, to: String?) {
         modelPlan = plan
-        app.chatPlan(total: plan.count, current: current)
+        app.chatPlan(steps: plan, current: current, title: title, to: to)
         updatePlan { steps in
             if steps.count > current { steps.removeLast(steps.count - current) }
             for i in 0..<current {
