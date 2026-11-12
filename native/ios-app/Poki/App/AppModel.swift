@@ -71,6 +71,11 @@ final class AppModel {
     var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
         didSet {
             UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
+            // The sensitivity Rules shows is saved with the first choice: a saved mode alone would move
+            // the default sensitivity to Balanced behind a slider that reads Ask for Everything.
+            if UserDefaults.standard.string(forKey: ApprovalClassifier.levelKey) == nil {
+                UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+            }
             for observer in approvalModeObservers { observer() }
         }
     }
