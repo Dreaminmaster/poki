@@ -121,7 +121,7 @@ final class ActivityController {
                     await MainActor.run { if self?.activity?.id == started.id { self?.activity = nil } }
                 }
             }
-        } catch { lastError = String(localized: "The Live Activity did not start. \(error.localizedDescription)") }
+        } catch { lastError = AppLocalization.text(LocalizedStringResource("The Live Activity did not start. \(error.localizedDescription)")) }
     }
 
     /// Counts a finished step for the step line and the run's summary.
@@ -162,6 +162,12 @@ final class ActivityController {
         self.activity = nil
         let previous = tail
         tail = Task { await previous?.value; await activity.end(nil, dismissalPolicy: .immediate) }
+    }
+
+    /// Language is a presentation update, never an activity transition or a new automation session.
+    func languageChanged() {
+        state.uiLanguage = AppLocalization.language
+        send(alert: nil, critical: true)
     }
 
     func update(_ change: (inout PokiState) -> Void) {

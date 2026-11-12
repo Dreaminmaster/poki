@@ -27,7 +27,7 @@ struct VoiceView: View {
                 // for dictation). This page only says how it runs and keeps its options.
                 Section {
                     LabeledContent("Live Voice") {
-                        Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? String(localized: "OpenAI key") : String(localized: "Voice bridge")) : String(localized: "Not Available"))
+                        Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
                             .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
                     }
                     // Dictation runs on this iPhone with every model; its microphone sits beside Send.
@@ -49,7 +49,7 @@ struct VoiceView: View {
                     }
                 }
             }
-            .navigationTitle("Voice")
+            .navigationTitle(AppLocalization.text("Voice"))
             .navigationBarTitleDisplayMode(.inline)
     }
 

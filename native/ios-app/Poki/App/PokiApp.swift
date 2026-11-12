@@ -15,6 +15,7 @@ struct PokiApp: App {
         // Settings an update, a reinstall or a re-sign lost come back from the Keychain, before anything
         // reads them; from here on every change is mirrored there.
         SettingsVault.restore()
+        AppLocalization.publish()
         SettingsVault.watch()
         // Page titles in Geist, the website's typeface (prominent text only).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
@@ -36,6 +37,13 @@ struct PokiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model).environment(chat)
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)
+                .background(LanguageNavigationFonts())
+                .onChange(of: AppLocalization.shared.preference) { _, _ in
+                    model.languageChanged()
+                    chat.languageChanged()
+                }
         }
     }
 }
@@ -182,7 +190,7 @@ struct RootView: View {
     var body: some View {
         navigation
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
-        .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
+        .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
                presenting: model.connectionAsk) { _ in
             Button("Don’t Allow", role: .cancel) { model.answerConnection(false) }

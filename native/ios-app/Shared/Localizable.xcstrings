@@ -119,6 +119,29 @@
         }
       }
     },
+    "%@ · Coming in an update" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Coming in an update"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 将在后续更新中提供"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 將在後續更新中提供"
+          }
+        }
+      }
+    },
     "%@ · Poki acts only if you allow" : {
       "localizations" : {
         "zh-Hans" : {
@@ -137,6 +160,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@，僅在你允許時執行"
+          }
+        }
+      }
+    },
+    "%@ · Text chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Text chat"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天"
+          }
+        }
+      }
+    },
+    "%@ · Text chat and live voice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Text chat and live voice"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天和实时语音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天和即時語音"
           }
         }
       }
@@ -1751,6 +1820,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回"
+          }
+        }
+      }
+    },
+    "Background Hold" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Hold"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保持"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "背景保持"
           }
         }
       }
@@ -3503,6 +3595,29 @@
         }
       }
     },
+    "Follow System" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow System"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随系统"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨系統"
+          }
+        }
+      }
+    },
     "For a code, first turn on device code sign-in for Codex in ChatGPT › Settings › Security. Then enter the code on auth.openai.com/codex/device." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5076,6 +5191,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "確保該外掛已啟用且 Loon 的 VPN 已開啟。"
+          }
+        }
+      }
+    },
+    "Memory holds the routines and notes every agent shares. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memory holds the routines and notes every agent shares. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记忆保存供所有代理共享的流程和笔记。诊断包含日志、检查、后台保持、地址和实时活动预览。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記憶儲存供所有代理共用的流程與筆記。診斷包含日誌、檢查、背景保持、位址與即時動態預覽。"
           }
         }
       }
@@ -6872,6 +7010,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可選"
+          }
+        }
+      }
+    },
+    "Optional, for live voice without an OpenAI key on this iPhone: run bin/voice-bridge.mjs on your Mac and enter the address it gives." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optional, for live voice without an OpenAI key on this iPhone: run bin/voice-bridge.mjs on your Mac and enter the address it gives."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选：如需在此 iPhone 未配置 OpenAI 密钥时使用实时语音，请在 Mac 上运行 bin/voice-bridge.mjs，并输入其提供的地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選用：如需在此 iPhone 未設定 OpenAI 金鑰時使用即時語音，請在 Mac 上執行 bin/voice-bridge.mjs，並輸入其提供的位址。"
           }
         }
       }
@@ -10696,6 +10857,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "給媽媽發訊息「在路上了」"
+          }
+        }
+      }
+    },
+    "That file could not be imported: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That file could not be imported: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导入此文件：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法匯入此檔案：%@"
           }
         }
       }
@@ -17214,6 +17398,29 @@
         }
       }
     },
+    "Language" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语言"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語言"
+          }
+        }
+      }
+    },
     "Last Action" : {
       "localizations" : {
         "zh-Hans" : {
@@ -19204,6 +19411,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已收到配對檔案。"
+          }
+        }
+      }
+    },
+    "Pairing on the phone itself needs iOS 27; this iPhone runs iOS %@. Pair it from a computer instead." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pairing on the phone itself needs iOS 27; this iPhone runs iOS %@. Pair it from a computer instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在手机上配对需要 iOS 27；此 iPhone 运行的是 iOS %@。请改用电脑配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在手機上配對需要 iOS 27；此 iPhone 執行的是 iOS %@。請改用電腦配對。"
           }
         }
       }
@@ -21246,6 +21476,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自動判斷"
+          }
+        }
+      }
+    },
+    "Agents' actions go through" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agents' actions go through"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理操作可正常执行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理操作可正常執行"
           }
         }
       }
@@ -25130,6 +25383,29 @@
         }
       }
     },
+    "Poki keeps this key; chatting with %@ comes in an update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki keeps this key; chatting with %@ comes in an update."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会保存此密钥；与 %@ 聊天的功能将在后续更新中提供。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會儲存此金鑰；與 %@ 聊天的功能將在後續更新中提供。"
+          }
+        }
+      }
+    },
     "Poki local connection" : {
       "localizations" : {
         "zh-Hans" : {
@@ -26686,6 +26962,29 @@
         }
       }
     },
+    "Dictation to %@; Poki reads the answer aloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dictation to %@; Poki reads the answer aloud"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写发送给 %@；Poki 会朗读回复"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聽寫傳送給 %@；Poki 會朗讀回覆"
+          }
+        }
+      }
+    },
     "Dictation to %lld, Poki reads the answer aloud" : {
       "localizations" : {
         "zh-Hans" : {
@@ -27742,6 +28041,29 @@
         }
       }
     },
+    "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %@, make sure it is connected with the loopback on, then come back; this page updates by itself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %@, make sure it is connected with the loopback on, then come back; this page updates by itself."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择 %@，但 10.7.0.1 目前没有响应。请打开 %@，确认已连接并开启回环，然后返回；此页面会自动更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已選擇 %@，但 10.7.0.1 目前沒有回應。請打開 %@，確認已連線並開啟迴路，然後返回；此頁面會自動更新。"
+          }
+        }
+      }
+    },
     "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %lld, make sure it is connected with the loopback on, then come back. This page updates by itself." : {
       "localizations" : {
         "zh-Hans" : {
@@ -27804,6 +28126,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld is selected, but 10.7.0.1 isn’t answering. Open %lld, connect with Loopback on, then return here. Status updates automatically."
+          }
+        }
+      }
+    },
+    "As reported by users of %@; not checked against its documentation. The status on the Loopback page tells whether it works." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As reported by users of %@; not checked against its documentation. The status on the Loopback page tells whether it works."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据 %@ 用户反馈整理，尚未核对其文档。是否可用请查看“回环”页面的状态。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根據 %@ 使用者回報整理，尚未核對其文件。是否可用請查看「迴路」頁面的狀態。"
           }
         }
       }

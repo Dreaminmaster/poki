@@ -20,6 +20,7 @@ struct PokiLiveActivity: Widget {
             let face = context.face
             LockScreenCard(face: face)
                 .environment(\.colorScheme, .dark)
+                .environment(\.locale, AppLocalization.locale)
                 // Outside the line above, where the system's own appearance can still be read: the flat
                 // colour that goes with the card's gradient, and light or dark handed down to the card.
                 .modifier(CardTint())
@@ -28,15 +29,15 @@ struct PokiLiveActivity: Widget {
         } dynamicIsland: { context in
             let face = context.face
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face) }
-                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face) }
-                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face) }
+                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).environment(\.locale, AppLocalization.locale) }
+                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).environment(\.locale, AppLocalization.locale) }
+                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).environment(\.locale, AppLocalization.locale) }
             } compactLeading: {
-                CompactLeading(face: face)
+                CompactLeading(face: face).environment(\.locale, AppLocalization.locale)
             } compactTrailing: {
-                CompactTrailing(face: face)
+                CompactTrailing(face: face).environment(\.locale, AppLocalization.locale)
             } minimal: {
-                MinimalView(face: face)
+                MinimalView(face: face).environment(\.locale, AppLocalization.locale)
             }
             .widgetURL(face.link)
             // Always Poki's blue; the system draws the outline only over a dark background, at its own width.

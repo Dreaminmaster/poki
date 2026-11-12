@@ -154,8 +154,8 @@ struct ActivityTheme {
     /// characters, and with it the Lock Screen and the island laid Chinese lines out narrower than
     /// they drew them, cutting off their ends (seen on the iPhone 17 Pro simulator).
     static var usesGeist: Bool {
-        let lang = Locale.preferredLanguages.first ?? Bundle.main.preferredLocalizations.first ?? "en"
-        return !lang.hasPrefix("zh")
+        let lang = AppLocalization.language
+        return lang.hasPrefix("en")
     }
     private static func font(_ name: String, _ weight: Font.Weight, _ size: CGFloat) -> Font {
         usesGeist ? .custom(name, size: size) : .system(size: size, weight: weight)

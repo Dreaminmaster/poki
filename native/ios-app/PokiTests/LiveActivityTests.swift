@@ -3,6 +3,15 @@ import XCTest
 
 @MainActor
 final class LiveActivityTests: XCTestCase {
+    private var language = AppLocalization.system
+
+    override func setUp() async throws {
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+    }
+
+    override func tearDown() async throws { AppLocalization.shared.preference = language }
+
     /// The Live Activity counts the chat's plan from the first step on the phone (the chat publishes it
     /// before that step, while the activity is idle or still shows the last run as finished), and a
     /// finished run's plan never carries into the next run.

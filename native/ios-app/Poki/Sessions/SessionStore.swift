@@ -50,11 +50,11 @@ struct SavedSession: Codable, Identifiable, Equatable {
             switch entry.kind {
             case .poki(let text): return text
             case .you(let text, _), .request(let text, _): return text
-            case .step(let text, let ok): return ok == false ? String(localized: "\(text), failed") : text
+            case .step(let text, let ok): return ok == false ? AppLocalization.text(LocalizedStringResource("\(text), failed")) : text
             case .plan(let steps):
-                if let step = steps.last(where: { $0.state == .waiting }) { return String(localized: "\(step.text), waiting for you") }
+                if let step = steps.last(where: { $0.state == .waiting }) { return AppLocalization.text(LocalizedStringResource("\(step.text), waiting for you")) }
                 if let step = steps.last { return step.text }
-            case .note(.waiting): return String(localized: "Waiting for your OK")
+            case .note(.waiting): return AppLocalization.text(LocalizedStringResource("Waiting for your OK"))
             case .note(.problem(let text)): return text
             default: continue
             }
@@ -66,10 +66,10 @@ struct SavedSession: Codable, Identifiable, Equatable {
     var name: String {
         if let customName, !customName.isEmpty { return customName }
         switch kind {
-        case .poki: return autoName ?? (title == String(localized: "New conversation") ? "Poki" : String(title.prefix(40)))
-        case .agent: return client ?? String(localized: "An agent")
-        case .handoff: return autoName.map { "\(client ?? String(localized: "An agent")), \($0)" } ?? "\(client ?? String(localized: "An agent")) → Poki"
-        case .voice: return autoName ?? (title.isEmpty ? String(localized: "Voice chat") : String(title.prefix(40)))
+        case .poki: return autoName ?? (title == AppLocalization.text(LocalizedStringResource("New conversation")) ? "Poki" : String(title.prefix(40)))
+        case .agent: return client ?? AppLocalization.text(LocalizedStringResource("An agent"))
+        case .handoff: return autoName.map { "\(client ?? AppLocalization.text(LocalizedStringResource("An agent"))), \($0)" } ?? "\(client ?? AppLocalization.text(LocalizedStringResource("An agent"))) → Poki"
+        case .voice: return autoName ?? (title.isEmpty ? AppLocalization.text(LocalizedStringResource("Voice chat")) : String(title.prefix(40)))
         }
     }
 }
@@ -300,20 +300,20 @@ final class SessionStore {
             currentSession = nil
         case .approvalRequested(let approval):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow: \(approval.sentence)"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Asked you to allow: \(approval.sentence)")), ok: nil))) }
         case .approvalEnded(_, let approved):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
             update(agent: id) { $0.entries.append(ChatEntry(.note(approved == true ? .approved(Date()) : approved == false ? .declined : .expired))) }
         case .handoffRequested(_, _, let text, _):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Your turn, \(text ?? String(localized: "finish this step"))"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Your turn, \(text ?? AppLocalization.text("finish this step"))")), ok: nil))) }
         case .relay, .handoffEnded: break
         }
     }
 
     /// The outside agent's session, made on its first call; a session idle for 10 minutes is over.
     private func update(agent id: String, _ change: (inout SavedSession) -> Void) {
-        let client = clients[id] ?? String(localized: "An agent")
+        let client = clients[id] ?? AppLocalization.text(LocalizedStringResource("An agent"))
         var session = self.session(id) ?? SavedSession(id: id, kind: .agent, client: client, title: client, started: Date(), updated: Date(), live: true,
                                                          outcome: nil, entries: [ChatEntry(.time(Date()))], calls: [])
         // A hand-off's own session is the in-app agent's (its steps come from ChatModel).
@@ -342,7 +342,7 @@ final class SessionStore {
     func client(of agentSession: String?) -> String {
         if let id = agentSession, let name = clients[id] { return name }
         if let id = agentSession, let name = connectors[id].flatMap({ connectorAgent?($0) }) { return AgentName.pretty(name) }
-        return lastClient.map(AgentName.pretty) ?? String(localized: "An agent")
+        return lastClient.map(AgentName.pretty) ?? AppLocalization.text(LocalizedStringResource("An agent"))
     }
 
     // MARK: Routines and backup (dev/agent-routines)
@@ -411,52 +411,52 @@ final class SessionStore {
         func at(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
         /// An entry that ran in `app`, for the row's app icon.
         func inApp(_ app: String, _ entry: ChatEntry) -> ChatEntry { var entry = entry; entry.app = app; return entry }
-        let mom = String(localized: "Text Mom “On my way”, tell me when it’s sent.")
+        let mom = AppLocalization.text(LocalizedStringResource("Text Mom “On my way”, tell me when it’s sent."))
         return [
             SavedSession(id: "sample-handoff", kind: .handoff, client: "Claude", title: mom, started: at(1), updated: at(0), live: true, outcome: nil, entries: [
                 ChatEntry(.time(at(1))),
-                ChatEntry(.step(String(localized: "Look at the screen"), ok: true)),
-                ChatEntry(.step(String(localized: "Tap “Messages”"), ok: true)),
+                ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Look at the screen")), ok: true)),
+                ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Tap “Messages”")), ok: true)),
                 ChatEntry(.request(mom, from: "Claude")),
-                inApp("Messages", ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done), PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                 PlanStep(String(localized: "Type “On my way”"), state: .done), PlanStep(String(localized: "Tap Send"), state: .waiting)]))),
+                inApp("Messages", ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Messages")), state: .done), PlanStep(AppLocalization.text(LocalizedStringResource("Open the chat with Mom")), state: .done),
+                                 PlanStep(AppLocalization.text(LocalizedStringResource("Type “On my way”")), state: .done), PlanStep(AppLocalization.text(LocalizedStringResource("Tap Send")), state: .waiting)]))),
                 ChatEntry(.note(.waiting)),
             ], calls: []),
-            SavedSession(id: "sample-poki", kind: .poki, client: nil, title: String(localized: "What iOS version is this?"), started: at(32), updated: at(31), live: false, outcome: .done, entries: [
+            SavedSession(id: "sample-poki", kind: .poki, client: nil, title: AppLocalization.text(LocalizedStringResource("What iOS version is this?")), started: at(32), updated: at(31), live: false, outcome: .done, entries: [
                 ChatEntry(.time(at(32))),
-                ChatEntry(.you(String(localized: "What iOS version is this?"), delivered: true)),
+                ChatEntry(.you(AppLocalization.text(LocalizedStringResource("What iOS version is this?")), delivered: true)),
                 // Settings has no icon in Poki/AppIcons: this row shows the placeholder tile.
-                inApp("Settings", ChatEntry(.plan([PlanStep(String(localized: "Open Settings"), state: .done), PlanStep(String(localized: "Open General › About"), state: .done)]))),
-                ChatEntry(.poki(String(localized: "It’s iOS 27.3."))),
+                inApp("Settings", ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Settings")), state: .done), PlanStep(AppLocalization.text(LocalizedStringResource("Open General › About")), state: .done)]))),
+                ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("It’s iOS 27.3.")))),
             ], calls: []),
             SavedSession(id: "sample-codex", kind: .agent, client: "Codex", title: "Codex", started: at(64), updated: at(61), live: false, outcome: .done, entries: [
-                ChatEntry(.time(at(64))), inApp("Photos", ChatEntry(.step(String(localized: "Open Photos"), ok: true))),
-                inApp("Photos", ChatEntry(.step(String(localized: "Look at the screen"), ok: true))),
-                inApp("Photos", ChatEntry(.step(String(localized: "Tap “Albums”"), ok: true))),
+                ChatEntry(.time(at(64))), inApp("Photos", ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Open Photos")), ok: true))),
+                inApp("Photos", ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Look at the screen")), ok: true))),
+                inApp("Photos", ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Tap “Albums”")), ok: true))),
             ], calls: []),
             // The owner's own examples for the rows' app icons: Notes, Starbucks, WeChat.
-            SavedSession(id: "sample-notes", kind: .poki, client: nil, title: String(localized: "Add oat milk to my shopping list"), started: at(96), updated: at(95), live: false, outcome: .done, entries: [
+            SavedSession(id: "sample-notes", kind: .poki, client: nil, title: AppLocalization.text(LocalizedStringResource("Add oat milk to my shopping list")), started: at(96), updated: at(95), live: false, outcome: .done, entries: [
                 ChatEntry(.time(at(96))),
-                ChatEntry(.you(String(localized: "Add oat milk to my shopping list"), delivered: true)),
-                inApp("Notes", ChatEntry(.plan([PlanStep(String(localized: "Open Notes"), state: .done), PlanStep(String(localized: "Open “Shopping”"), state: .done)]))),
-                ChatEntry(.poki(String(localized: "Added “Oat milk” to Shopping in Notes."))),
+                ChatEntry(.you(AppLocalization.text(LocalizedStringResource("Add oat milk to my shopping list")), delivered: true)),
+                inApp("Notes", ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Notes")), state: .done), PlanStep(AppLocalization.text(LocalizedStringResource("Open “Shopping”")), state: .done)]))),
+                ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Added “Oat milk” to Shopping in Notes.")))),
             ], calls: []),
-            SavedSession(id: "sample-starbucks", kind: .poki, client: nil, title: String(localized: "Order my usual coffee"), started: at(180), updated: at(178), live: false, outcome: .done, entries: [
+            SavedSession(id: "sample-starbucks", kind: .poki, client: nil, title: AppLocalization.text(LocalizedStringResource("Order my usual coffee")), started: at(180), updated: at(178), live: false, outcome: .done, entries: [
                 ChatEntry(.time(at(180))),
-                ChatEntry(.you(String(localized: "Order my usual coffee"), delivered: true)),
-                inApp("Starbucks", ChatEntry(.plan([PlanStep(String(localized: "Open Starbucks"), state: .done), PlanStep(String(localized: "Tap Order"), state: .done)]))),
-                ChatEntry(.poki(String(localized: "Ordered a grande oat latte for pickup at 9:10."))),
+                ChatEntry(.you(AppLocalization.text(LocalizedStringResource("Order my usual coffee")), delivered: true)),
+                inApp("Starbucks", ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Starbucks")), state: .done), PlanStep(AppLocalization.text(LocalizedStringResource("Tap Order")), state: .done)]))),
+                ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Ordered a grande oat latte for pickup at 9:10.")))),
             ], calls: []),
-            SavedSession(id: "sample-wechat", kind: .poki, client: nil, title: String(localized: "Tell Alex I’m running late"), started: at(420), updated: at(418), live: false, outcome: .done, entries: [
+            SavedSession(id: "sample-wechat", kind: .poki, client: nil, title: AppLocalization.text(LocalizedStringResource("Tell Alex I’m running late")), started: at(420), updated: at(418), live: false, outcome: .done, entries: [
                 ChatEntry(.time(at(420))),
-                ChatEntry(.you(String(localized: "Tell Alex I’m running late"), delivered: true)),
-                inApp("WeChat", ChatEntry(.plan([PlanStep(String(localized: "Open WeChat"), state: .done), PlanStep(String(localized: "Open the chat with Alex"), state: .done)]))),
-                ChatEntry(.poki(String(localized: "Sent “Running 10 minutes late” to Alex on WeChat."))),
+                ChatEntry(.you(AppLocalization.text(LocalizedStringResource("Tell Alex I’m running late")), delivered: true)),
+                inApp("WeChat", ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open WeChat")), state: .done), PlanStep(AppLocalization.text(LocalizedStringResource("Open the chat with Alex")), state: .done)]))),
+                ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Sent “Running 10 minutes late” to Alex on WeChat.")))),
             ], calls: []),
             SavedSession(id: "sample-cc", kind: .agent, client: "Claude Code", title: "Claude Code", started: at(1500), updated: at(1490), live: false, outcome: .stopped, entries: [
                 // The App Store has no icon in Poki/AppIcons: this row shows the agent's badge.
-                ChatEntry(.time(at(1500))), inApp("App Store", ChatEntry(.step(String(localized: "Open the App Store"), ok: true))),
-                ChatEntry(.step(String(localized: "Your turn, enter your Apple Account password"), ok: nil)),
+                ChatEntry(.time(at(1500))), inApp("App Store", ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Open the App Store")), ok: true))),
+                ChatEntry(.step(AppLocalization.text(LocalizedStringResource("Your turn, enter your Apple Account password")), ok: nil)),
             ], calls: []),
         ]
     }
@@ -474,6 +474,6 @@ enum AgentName {
         if name.contains("gemini") { return "Gemini" }
         if name.contains("poki") { return "Poki Agent" }
         let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ").split(separator: " ")
-        return words.isEmpty ? String(localized: "An agent") : words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+        return words.isEmpty ? AppLocalization.text(LocalizedStringResource("An agent")) : words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 }

@@ -210,12 +210,12 @@ enum HomeIdea {
     }
 
     private static var english: [HomeShortcut] {
-        [idea("Slack", String(localized: "Tell the team I’m late")),
-         idea("Messages", String(localized: "Text Mom I’m on my way")),
-         idea("Uber", String(localized: "Book a ride home")),
-         idea("Starbucks", String(localized: "Order my usual coffee")),
-         idea("Notes", String(localized: "Add milk to my list")),
-         idea("Instagram", String(localized: "Post today’s photo"))].compactMap { $0 }
+        [idea("Slack", AppLocalization.text(LocalizedStringResource("Tell the team I’m late"))),
+         idea("Messages", AppLocalization.text(LocalizedStringResource("Text Mom I’m on my way"))),
+         idea("Uber", AppLocalization.text(LocalizedStringResource("Book a ride home"))),
+         idea("Starbucks", AppLocalization.text(LocalizedStringResource("Order my usual coffee"))),
+         idea("Notes", AppLocalization.text(LocalizedStringResource("Add milk to my list"))),
+         idea("Instagram", AppLocalization.text(LocalizedStringResource("Post today’s photo")))].compactMap { $0 }
     }
 
     /// The apps people in mainland China use every day, written in Chinese rather than translated from
@@ -240,10 +240,10 @@ enum HomeIdea {
 enum HomeGreeting {
     static func line(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
-        case 5..<11: String(localized: "Good morning. Need a hand?")
-        case 11..<18: String(localized: "Good afternoon. Need help?")
-        case 18..<23: String(localized: "Good evening. Anything left?")
-        default: String(localized: "Up late? Leave it to me")
+        case 5..<11: AppLocalization.text(LocalizedStringResource("Good morning. Need a hand?"))
+        case 11..<18: AppLocalization.text(LocalizedStringResource("Good afternoon. Need help?"))
+        case 18..<23: AppLocalization.text(LocalizedStringResource("Good evening. Anything left?"))
+        default: AppLocalization.text(LocalizedStringResource("Up late? Leave it to me"))
         }
     }
 }
@@ -265,7 +265,8 @@ struct HomePage<Footer: View>: View {
     @Environment(\.colorScheme) private var scheme
     private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
-    @State private var greeting = HomeGreeting.line()
+    @State private var greetingDate = Date()
+    private var greeting: String { HomeGreeting.line(at: greetingDate) }
     /// A pill's Forget menu is open: both rows stand still under it.
     @State private var menuOpen = false
     /// The board's greeting: PingFang Semibold 30 on 36, tracked in by 2 %, 184 points under the top bar.
@@ -279,6 +280,7 @@ struct HomePage<Footer: View>: View {
                     VStack(spacing: 12) {
                         // One line in Chinese on the narrowest iPhone; English may take two.
                         Text(verbatim: greeting)
+                            .accessibilityIdentifier("home.greeting")
                             .font(.custom("PingFangSC-Semibold", size: greetingSize))
                             .tracking(-0.02 * greetingSize)
                             .lineSpacing(greetingLine - greetingSize * 1.2)
@@ -292,7 +294,7 @@ struct HomePage<Footer: View>: View {
                     .padding(.top, writing ? 24 : min(184, max(24, geometry.size.height * 0.29)))
                     .opacity(home ? 1 : 0)
                     .animation(HomeMotion.words(home, reduceMotion), value: home)
-                    .onChange(of: home) { _, shown in if shown { greeting = HomeGreeting.line() } }
+                    .onChange(of: home) { _, shown in if shown { greetingDate = Date() } }
 
                     Spacer(minLength: 24)
                     if !writing {
@@ -319,6 +321,9 @@ struct HomePage<Footer: View>: View {
         }
         .animation(.snappy(duration: 0.3), value: writing)
         .task(id: SessionStore.shared.sessions.count) {
+            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+        }
+        .onChange(of: AppLocalization.language) { _, _ in
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }
     }

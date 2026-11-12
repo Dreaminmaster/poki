@@ -98,7 +98,7 @@ struct PokiDetailsView: View {
             .listSectionSpacing(16)
             .contentMargins(.top, 4, for: .scrollContent)
             .settingsPage()
-            .navigationTitle("Settings")
+            .navigationTitle(AppLocalization.text("Settings"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -127,7 +127,7 @@ struct PokiDetailsView: View {
                     SetupLayer2View(path: $path)
                 case .updates:
                     Form { SigningSection() }
-                        .navigationTitle("Updates")
+                        .navigationTitle(AppLocalization.text("Updates"))
                         .navigationBarTitleDisplayMode(.inline)
                 case .approvals:
                     ApprovalsSettingsView()
@@ -146,28 +146,28 @@ struct PokiDetailsView: View {
     private var hasModel: Bool { isSample || ModelKeys.hasUsableKey }
     private var brainValue: String {
         if isSample { return "GPT-6.1 Terra" }
-        return hasModel ? ModelKeys.selectedModelName : String(localized: "Add")
+        return hasModel ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add"))
     }
 
     private var setupDone: Bool { isSample || model.setupComplete }
     private var handsValue: String {
-        if isSample { return String(localized: "On") }
+        if isSample { return AppLocalization.text(LocalizedStringResource("On")) }
         if !model.setupComplete {
             let steps = SetupStep.shown
-            return String(localized: "\(steps.filter(model.isDone).count) of \(steps.count)")
+            return AppLocalization.text(LocalizedStringResource("\(steps.filter(model.isDone).count) of \(steps.count)"))
         }
-        if !model.sessionOn { return String(localized: "Off") }
-        return model.ownerPaused ? String(localized: "Paused") : String(localized: "On")
+        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Off")) }
+        return model.ownerPaused ? AppLocalization.text(LocalizedStringResource("Paused")) : AppLocalization.text(LocalizedStringResource("On"))
     }
 
     private var voiceValue: String {
-        isSample || VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? String(localized: "Live Voice") : String(localized: "Dictation Only")
+        isSample || VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? AppLocalization.text(LocalizedStringResource("Live Voice")) : AppLocalization.text(LocalizedStringResource("Dictation Only"))
     }
 
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
     private var healthValue: String? {
         if isSample { return nil }
-        return updateWaits ? String(localized: "Update Available") : "\(model.signer.installedVersion) (\(model.signer.installedBuild))"
+        return updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : "\(model.signer.installedVersion) (\(model.signer.installedBuild))"
     }
 }
 
@@ -208,7 +208,7 @@ private struct ConversationSearchView: View {
                 ContentUnavailableView.search(text: query)
             }
         }
-        .navigationTitle("Conversations")
+        .navigationTitle(AppLocalization.text("Conversations"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search"))
     }
@@ -307,7 +307,7 @@ struct HandsView: View {
                     let done = SetupStep.shown.filter(model.isDone).count
                     let total = SetupStep.shown.count
                     LabeledContent {
-                        Text(model.setupComplete || done == total ? String(localized: "Done") : String(localized: "\(done) of \(total)"))
+                        Text(model.setupComplete || done == total ? AppLocalization.text(LocalizedStringResource("Done")) : AppLocalization.text(LocalizedStringResource("\(done) of \(total)")))
                             .foregroundStyle(model.setupComplete || done == total ? Color(.secondaryLabel) : Tint.amberInk)
                     } label: {
                         SettingsLabel("Setup", systemImage: "checklist")
@@ -357,7 +357,7 @@ struct HandsView: View {
                 }
             }
         }
-        .navigationTitle("Automation")
+        .navigationTitle(AppLocalization.text("Automation"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -383,6 +383,20 @@ struct HealthView: View {
     var body: some View {
         List {
             Section {
+                Picker(selection: Binding(
+                    get: { AppLocalization.shared.preference },
+                    set: { AppLocalization.shared.preference = $0 }
+                )) {
+                    Text("Follow System").tag(AppLocalization.system)
+                    ForEach(AppLocalization.languages, id: \.self) { language in
+                        Text(verbatim: Locale(identifier: language).localizedString(forIdentifier: language) ?? language)
+                            .tag(language)
+                    }
+                } label: {
+                    SettingsLabel("Language", systemImage: "globe")
+                }
+                .accessibilityIdentifier("general.language")
+
                 // Main's "Updates" (the version, a new build, signing until and Signing Options), by its own name.
                 NavigationLink(value: DetailsRoute.updates) {
                     LabeledContent {
@@ -434,7 +448,7 @@ struct HealthView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("General")
+        .navigationTitle(AppLocalization.text("General"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -515,7 +529,7 @@ struct ApprovalsSettingsView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)
-        .navigationTitle("Approvals")
+        .navigationTitle(AppLocalization.text("Approvals"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -527,9 +541,9 @@ struct AgentsAndRelayView: View {
     @Binding var path: NavigationPath
 
     private var relayLine: String {
-        if model.relayAddress == nil { return String(localized: "Set an address first") }
-        if !model.relayEnabled { return String(localized: "Off, agents can’t reach this iPhone") }
-        if !model.sessionOn { return String(localized: "Waiting for Poki, turn Poki on and agents can connect") }
+        if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
+        if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
+        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
         return Health.relay(model).word
     }
 
@@ -541,7 +555,7 @@ struct AgentsAndRelayView: View {
                     let last = SessionStore.shared.sessions(for: secret, among: model.identity.secrets).first
                     NavigationLink(value: SettingsRoute.connector(secret)) {
                         LabeledContent {
-                            Text(last.map { ChatTime.row($0.updated) } ?? String(localized: "Not Used Yet"))
+                            Text(last.map { ChatTime.row($0.updated) } ?? AppLocalization.text(LocalizedStringResource("Not Used Yet")))
                         } label: {
                             // An agent's own badge is its picture; only the generic symbol takes the round ground.
                             if let client = secret.agent ?? last?.client {
@@ -586,7 +600,7 @@ struct AgentsAndRelayView: View {
 
                 NavigationLink(value: SettingsRoute.relay) {
                     LabeledContent {
-                        Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? String(localized: "Not Set"))
+                        Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? AppLocalization.text(LocalizedStringResource("Not Set")))
                             .foregroundStyle(model.relayAddress == nil ? Color.orange : Color.secondary)
                     } label: {
                         SettingsLabel("Address", systemImage: "network")
@@ -600,7 +614,7 @@ struct AgentsAndRelayView: View {
 
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("External Agents")
+        .navigationTitle(AppLocalization.text("External Agents"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -740,7 +754,7 @@ struct SetupLayer2View: View {
             }
         }
         .background(Tint.page.ignoresSafeArea())
-        .navigationTitle("Setup")
+        .navigationTitle(AppLocalization.text("Setup"))
         .navigationBarTitleDisplayMode(.large)
         .onAppear { model.loopback.resume() }
         .sheet(isPresented: $guiding) {
@@ -751,17 +765,17 @@ struct SetupLayer2View: View {
     private var signedUntilText: String {
         if isSample { return "Nov 16" }
         if let expiry = model.signer.expiry {
-            return expiry.formatted(.dateTime.month(.abbreviated).day())
+            return expiry.formatted(.dateTime.month(.abbreviated).day().locale(AppLocalization.locale))
         }
-        return String(localized: "7 days")
+        return AppLocalization.text(LocalizedStringResource("7 days"))
     }
 
     private var appleAccountText: String {
-        if isSample { return String(localized: "Not Needed") + " ›" }
+        if isSample { return AppLocalization.text(LocalizedStringResource("Not Needed")) + " ›" }
         if let appleID = model.signer.status?.apple_id, !appleID.isEmpty {
             return appleID + " ›"
         }
-        return String(localized: "Not Needed") + " ›"
+        return AppLocalization.text(LocalizedStringResource("Not Needed")) + " ›"
     }
 }
 

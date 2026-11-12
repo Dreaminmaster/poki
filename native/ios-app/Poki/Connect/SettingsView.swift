@@ -83,7 +83,7 @@ struct SettingsHome: View {
             Section {
                 ForEach(model.identity.secrets) { secret in
                     NavigationLink(value: SettingsRoute.connector(secret)) {
-                        LabeledContent(secret.name, value: secret.created.formatted(.dateTime.month(.abbreviated).day()))
+                        LabeledContent(secret.name, value: secret.created.formatted(.dateTime.month(.abbreviated).day().locale(AppLocalization.locale)))
                     }
                     .disabled(model.relayAddress == nil)
                     .swipeActions { Button("Revoke", role: .destructive) { model.revoke(secret) } }
@@ -135,7 +135,7 @@ struct SettingsHome: View {
                 let total = SetupStep.shown.count
                 NavigationLink(value: SettingsRoute.relay) {
                     LabeledContent("Relay") {
-                        Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? String(localized: "Not Set"))
+                        Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? AppLocalization.text(LocalizedStringResource("Not Set")))
                             .foregroundStyle(model.relayAddress == nil ? Color.red : Color.secondary)
                     }
                 }
@@ -153,7 +153,7 @@ struct SettingsHome: View {
                      : "Memory holds the routines and notes every agent shares. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
             }
         }
-        .navigationTitle("Agents and Relay")
+        .navigationTitle(AppLocalization.text("Agents and Relay"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let done { ToolbarItem(placement: .confirmationAction) { Button("Done", action: done) } }
@@ -173,9 +173,9 @@ struct SettingsHome: View {
     /// or wrongly signed build); everything else shows its code.
     static func friendly(_ error: String) -> String {
         if error.contains("-34018") {
-            return String(localized: "Poki cannot access the keychain and has no relay key yet. Reinstall Poki with your signing tool, then reopen Settings.")
+            return AppLocalization.text(LocalizedStringResource("Poki cannot access the keychain and has no relay key yet. Reinstall Poki with your signing tool, then reopen Settings."))
         }
-        return String(localized: "Poki couldn’t read its relay key from the keychain (\(error)).")
+        return AppLocalization.text(LocalizedStringResource("Poki couldn’t read its relay key from the keychain (\(error))."))
     }
 }
 
@@ -207,7 +207,7 @@ struct RelayView: View {
             }
             Section("Status") { LabeledContent("Relay", value: statusText) }
         }
-        .navigationTitle("Relay")
+        .navigationTitle(AppLocalization.text("Relay"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave) } }
         .onAppear { text = model.relayAddress?.origin.absoluteString ?? ""; if model.relayAddress == nil { focused = true } }
@@ -285,7 +285,7 @@ struct ConnectorDetail: View {
                             if !line.isEmpty { Text(verbatim: line).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(2) }
                         }
                         Spacer(minLength: 8)
-                        Text(session.live ? String(localized: "now") : ChatTime.row(session.updated))
+                        Text(session.live ? AppLocalization.text(LocalizedStringResource("now")) : ChatTime.row(session.updated))
                             .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
                     }
                     .accessibilityElement(children: .combine)
@@ -294,7 +294,7 @@ struct ConnectorDetail: View {
                 Text("Recent Use")
             }
             Section {
-                LabeledContent("Added", value: secret.created.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Added", value: secret.created.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(AppLocalization.locale)))
                 Button("Revoke Access", role: .destructive) { model.revoke(secret); back() }
             }
         }

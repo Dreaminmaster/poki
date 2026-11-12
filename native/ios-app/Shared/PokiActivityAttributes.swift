@@ -23,6 +23,8 @@ struct PokiActivityAttributes: ActivityAttributes {
         enum Voice: String, Codable, Hashable {
             case listening, thinking, speaking
         }
+        /// Refreshes an existing activity when the shared UI language changes; older states decode nil.
+        var uiLanguage: String? = nil
         var phase: Phase
         /// What the agent is doing, in a few words ("Tap “Send”"), or the phase's line, in English: the
         /// face words it in the system's language (ActivityWords).
@@ -134,7 +136,9 @@ struct PendingApproval: Codable, Hashable {
     var kindLine: String? {
         guard byAgent else { return nil }
         let words = kinds.compactMap(Self.kindWord)
-        return words.isEmpty ? nil : ListFormatter.localizedString(byJoining: words)
+        let formatter = ListFormatter()
+        formatter.locale = AppLocalization.locale
+        return words.isEmpty ? nil : formatter.string(from: words)
     }
 
     /// The kinds and the sentence on one line ("Payment: Order lunch, ¥38 in total"), for the island.

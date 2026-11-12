@@ -59,7 +59,7 @@ struct ActivityPreview: View {
                 .listStyle(.insetGrouped)
             }
         }
-        .navigationTitle("Live Activity")
+        .navigationTitle(AppLocalization.text("Live Activity"))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: Self.stateChangedNotification)) { _ in
             if let next = UserDefaults.standard.string(forKey: "pokiActivityState") {
@@ -90,24 +90,24 @@ struct ActivityPreview: View {
 
     private static func title(_ name: String) -> String {
         switch name {
-        case "start": String(localized: "Task Started")
-        case "working": String(localized: "Working")
-        case "step": String(localized: "Next Step")
-        case "approval": String(localized: "Approval")
-        case "deciding": String(localized: "Approved")
-        case "yourturn": String(localized: "Your Turn")
-        case "passcode": String(localized: "Passcode")
-        case "done": String(localized: "Done")
-        case "plan": String(localized: "Chat Plan")
-        case "plannext": "\(String(localized: "Chat Plan")) › \(String(localized: "Next Step"))"
-        case "plandone": String(localized: "Chat Plan Done")
-        case "ready": String(localized: "Ready")
-        case "idle": String(localized: "Runner Asleep")
-        case "problem": String(localized: "Problem")
-        case "pairing": String(localized: "Pairing")
-        case "code": String(localized: "Pairing Code")
-        case "setup": String(localized: "Setup")
-        case "voice": String(localized: "Voice")
+        case "start": AppLocalization.text(LocalizedStringResource("Task Started"))
+        case "working": AppLocalization.text(LocalizedStringResource("Working"))
+        case "step": AppLocalization.text(LocalizedStringResource("Next Step"))
+        case "approval": AppLocalization.text(LocalizedStringResource("Approval"))
+        case "deciding": AppLocalization.text(LocalizedStringResource("Approved"))
+        case "yourturn": AppLocalization.text(LocalizedStringResource("Your Turn"))
+        case "passcode": AppLocalization.text(LocalizedStringResource("Passcode"))
+        case "done": AppLocalization.text(LocalizedStringResource("Done"))
+        case "plan": AppLocalization.text(LocalizedStringResource("Chat Plan"))
+        case "plannext": "\(AppLocalization.text(LocalizedStringResource("Chat Plan"))) › \(AppLocalization.text(LocalizedStringResource("Next Step")))"
+        case "plandone": AppLocalization.text(LocalizedStringResource("Chat Plan Done"))
+        case "ready": AppLocalization.text(LocalizedStringResource("Ready"))
+        case "idle": AppLocalization.text(LocalizedStringResource("Runner Asleep"))
+        case "problem": AppLocalization.text(LocalizedStringResource("Problem"))
+        case "pairing": AppLocalization.text(LocalizedStringResource("Pairing"))
+        case "code": AppLocalization.text(LocalizedStringResource("Pairing Code"))
+        case "setup": AppLocalization.text(LocalizedStringResource("Setup"))
+        case "voice": AppLocalization.text(LocalizedStringResource("Voice"))
         default: name.capitalized
         }
     }
@@ -117,12 +117,12 @@ struct ActivityPreview: View {
 
     static func makeSamples() -> [(String, PokiState)] {
         let now = Date()
-        let messages = String(localized: "Messages")
+        let messages = AppLocalization.text(LocalizedStringResource("Messages"))
         var start = PokiState(phase: .working, headline: "Open WeChat", thumbnailVersion: 0)
         start.since = now.addingTimeInterval(-3)
         start.event = .init(kind: .started, text: "Started")
 
-        var working = PokiState(phase: .working, headline: String(localized: "Tap “Send”"), thumbnailVersion: 1)
+        var working = PokiState(phase: .working, headline: AppLocalization.text(LocalizedStringResource("Tap “Send”")), thumbnailVersion: 1)
         working.app = messages
         working.since = now.addingTimeInterval(-42)
         working.stepCount = 6; working.failedCount = 1
@@ -137,7 +137,7 @@ struct ActivityPreview: View {
         var approval = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 1)
         approval.app = messages
         // What PokiCore asks for when the agent taps Send in Messages.
-        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25),
+        approval.approval = PendingApproval(id: "a", app: messages, summary: AppLocalization.text(LocalizedStringResource("Tap “Send”")), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25),
                                             ask: "Send a message in \(messages)", kinds: ["sending"])
         approval.since = now.addingTimeInterval(-61)
         approval.stepCount = 4
@@ -168,11 +168,11 @@ struct ActivityPreview: View {
 
         // A two-step task from Poki's own chat counts its plan's steps ("1/2"), not the taps under them
         // (main #150), and says the step under way in the plan's words, not the tap (ESP-467).
-        let steps = [String(localized: "Open Messages"), String(localized: "Open the chat with Mom")]
+        let steps = [AppLocalization.text(LocalizedStringResource("Open Messages")), AppLocalization.text(LocalizedStringResource("Open the chat with Mom"))]
         var plan = working
         plan.headline = "Tap “Messages”"
         plan.previous = nil
-        plan.plan = .init(steps: steps, current: 1, title: String(localized: "Text Mom"), to: String(localized: "Mom"))
+        plan.plan = .init(steps: steps, current: 1, title: AppLocalization.text(LocalizedStringResource("Text Mom")), to: AppLocalization.text(LocalizedStringResource("Mom")))
         var planNext = plan
         planNext.headline = "Tap “Send”"
         planNext.previous = "Tap “Messages”"

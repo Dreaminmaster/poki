@@ -30,7 +30,7 @@ final class ActionLog {
 
         /// One line of text for a copied log.
         var line: String {
-            let time = at.formatted(date: .omitted, time: .standard)
+            let time = at.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(AppLocalization.locale))
             let mark = kind == .approval ? (ok ? "approval allowed" : "approval refused") : (ok ? "ok" : "failed")
             let place = app.map { " in \($0)" } ?? ""
             let more = [detail, why].compactMap { $0 }.joined(separator: "; ")
@@ -190,7 +190,7 @@ struct ActionLogView: View {
                     .listRowBackground(Color.clear)
             }
             ForEach(days.prefix(shownDays), id: \.day) { day, runs in
-                Section(day.formatted(date: .complete, time: .omitted)) {
+                Section(day.formatted(Date.FormatStyle(date: .complete, time: .omitted).locale(AppLocalization.locale))) {
                     ForEach(runs) { run in
                         // A filtered log is a plain list; otherwise a run of several steps folds into one row.
                         if filtering || run.entries.count == 1 {
@@ -219,7 +219,7 @@ struct ActionLogView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Activity Log")
+        .navigationTitle(AppLocalization.text("Activity Log"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: Text("Search"))
         .toolbar {
@@ -282,9 +282,9 @@ struct ActionLogView: View {
 
     private func header(_ run: ActionLog.Run) -> some View {
         let count = run.entries.count
-        var parts = [String(localized: "\(count) entries")]
-        if run.failed > 0 { parts.append(String(localized: "\(run.failed) failed")) }
-        if run.approvals > 0 { parts.append(String(localized: "\(run.approvals) approvals")) }
+        var parts = [AppLocalization.text(LocalizedStringResource("\(count) entries"))]
+        if run.failed > 0 { parts.append(AppLocalization.text(LocalizedStringResource("\(run.failed) failed"))) }
+        if run.approvals > 0 { parts.append(AppLocalization.text(LocalizedStringResource("\(run.approvals) approvals"))) }
         return HStack(alignment: .center, spacing: 10) {
             badge(run.caller, ok: run.failed == 0, approval: false)
             VStack(alignment: .leading, spacing: 2) {
