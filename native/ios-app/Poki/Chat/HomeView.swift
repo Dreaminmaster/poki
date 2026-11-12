@@ -1,3 +1,4 @@
+import PokiCore
 import SwiftUI
 
 // The home page and the way from it into the conversation (ESP-376 boards 06 and 08, variant B, and
@@ -395,25 +396,19 @@ struct ChatTopBar: View {
 
 // MARK: Home page
 
-/// Something you could ask, with the app it happens in.
-struct HomeIdea: Identifiable {
-    var app: AppCapsule
-    var text: String
-    var id: String { app.id }
-
-    /// What goes into the message field: the app, then the sentence. The field draws the app as its capsule.
-    var prompt: String { CapsuleText.prefill(app: app, sentence: text) }
-
-    private static func idea(_ app: String, _ text: String) -> HomeIdea? {
-        AppCapsule.catalog.first { $0.name == app }.map { HomeIdea(app: $0, text: text) }
+/// The default quick actions, until the owner's own take their place (`HomeShortcuts`). The words are
+/// placeholders for ESP-446 to write.
+enum HomeIdea {
+    private static func idea(_ app: String, _ text: String) -> HomeShortcut? {
+        AppCapsule.catalog.first { $0.name == app }.map {
+            HomeShortcut(key: HomeShortcuts.normalize(text), text: text, app: $0, prompt: CapsuleText.prefill(app: $0, sentence: text))
+        }
     }
-    static var first: [HomeIdea] {
+    static var examples: [HomeShortcut] {
         [idea("Slack", String(localized: "Tell the team I’m late")),
          idea("Messages", String(localized: "Text Mom I’m on my way")),
-         idea("Uber", String(localized: "Book a ride home"))].compactMap { $0 }
-    }
-    static var second: [HomeIdea] {
-        [idea("Starbucks", String(localized: "Order my usual coffee")),
+         idea("Uber", String(localized: "Book a ride home")),
+         idea("Starbucks", String(localized: "Order my usual coffee")),
          idea("Notes", String(localized: "Add milk to my list")),
          idea("Instagram", String(localized: "Post today’s photo"))].compactMap { $0 }
     }
@@ -435,6 +430,7 @@ struct HomePage<Footer: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    private let shortcutStore = HomeShortcutStore.shared
     /// Everything but the bear: the two lines, the pills and the room between them.
     @ScaledMetric(relativeTo: .title) private var rest: CGFloat = 268
 
@@ -493,8 +489,9 @@ struct HomePage<Footer: View>: View {
                     }
                     if !writing {
                         VStack(spacing: 8) {
-                            row(HomeIdea.first, speed: HomeMotion.pillSpeeds.top, start: 64)
-                            row(HomeIdea.second, speed: HomeMotion.pillSpeeds.bottom, start: 0)
+                            let shortcuts = shortcutStore.shortcuts
+                            row(Array(shortcuts.prefix(3)), speed: HomeMotion.pillSpeeds.top, start: 64)
+                            if shortcuts.count > 3 { row(Array(shortcuts.dropFirst(3)), speed: HomeMotion.pillSpeeds.bottom, start: 0) }
                         }
                         .padding(.top, 2)
                         // A sideways drag on the rows scrolls them; it does not pull the drawer out.
@@ -510,6 +507,9 @@ struct HomePage<Footer: View>: View {
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.interactively)
         }
+        .task(id: SessionStore.shared.sessions.count) {
+            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+        }
     }
 
     /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
@@ -517,23 +517,26 @@ struct HomePage<Footer: View>: View {
     /// and its clock stops when the page is not in front. With VoiceOver it is a plain row, each pill
     /// once. The two ends fade out over 20 points. The first row starts a little way along, so the two
     /// rows do not line up.
-    private func row(_ ideas: [HomeIdea], speed: Double, start: CGFloat) -> some View {
+    private func row(_ ideas: [HomeShortcut], speed: Double, start: CGFloat) -> some View {
         Marquee(speed: speed, spacing: 8, start: start, running: !reduceMotion && !writing,
                 active: home && scenePhase == .active, loops: !voiceOver) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
                     HStack(spacing: 8) {
-                        IdeaCapsule(app: idea.app)
+                        if let app = idea.app { IdeaCapsule(app: app) }
                         Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
                     }
-                    .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
+                    .padding(.leading, idea.app == nil ? 18 : 12).padding(.trailing, 18).frame(minHeight: 48)
                     .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
                 .glassSurface(in: Capsule(), interactive: true)
-                .accessibilityLabel(Text(verbatim: idea.app.name + ", " + idea.text))
+                .contextMenu {
+                    Button("Forget", systemImage: "eye.slash", role: .destructive) { shortcutStore.forget(idea) }
+                }
+                .accessibilityLabel(Text(verbatim: [idea.app?.name, idea.text].compactMap { $0 }.joined(separator: ", ")))
                 .accessibilityHint(Text("Puts this in the message field"))
-                .accessibilityIdentifier("home.idea." + idea.app.name)
+                .accessibilityIdentifier("home.idea." + (idea.app?.name ?? idea.key))
                 // Said here and not on the row: the pills live in the scroll view's own hosting view.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
