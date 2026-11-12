@@ -243,7 +243,7 @@ final class ActivityController {
         }
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
-            alert = critical(StatusWord.needsApproval.text, approval.islandLine ?? approval.sentence)
+            alert = critical(StatusWord.needsApproval.text, approval.question)
             remindHalfway(approval)
         }
         if state.approval == nil, let was = old.approval {
@@ -292,7 +292,7 @@ final class ActivityController {
             try? await Task.sleep(for: .seconds(half))
             guard !Task.isCancelled, let self, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
             AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
-            self.send(alert: self.critical(StatusWord.needsApproval.text, approval.islandLine ?? approval.sentence), critical: true)
+            self.send(alert: self.critical(StatusWord.needsApproval.text, approval.question), critical: true)
         }
     }
 
@@ -452,7 +452,7 @@ final class ActivityController {
         state.previous = nil
         if let steps = state.plan?.steps { state.plan?.steps = steps.map { String($0.prefix(30)) } }
         if var approval = state.approval {
-            approval.summary = String(approval.summary.prefix(80)); approval.reason = String(approval.reason.prefix(60)); approval.ask = String(approval.ask.prefix(120))
+            approval.summary = String(approval.summary.prefix(80)); approval.reason = String(approval.reason.prefix(60))
             state.approval = approval
         }
     }
