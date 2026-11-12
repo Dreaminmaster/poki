@@ -521,7 +521,11 @@ export class Devices {
         }
         case 'select_device': {
           this.requested = args.device;
-          const target = await this.target(); this.selected = target.id; this.frame = undefined; this.elements = [];
+          const target = await this.target();
+          // CUA's numbered screen elements belong to the device that was just observed.
+          // Switching phones must invalidate those refs before another input can use them.
+          if (this.selected !== target.id) this.cua = undefined;
+          this.selected = target.id; this.frame = undefined; this.elements = [];
           return text({ selected: target.id, name: target.name });
         }
         case 'get_device_info': {
