@@ -4,7 +4,8 @@
 //   is the owner's to unlock and a password prompt is handed to them, and a purchase is a plain tap;
 //   and, for ESP-465, the Return sentence names the type answer's read-back as the check before
 //   Return, an action's check lines (the send check after Return) count as evidence, and finish_task
-//   comes in the reply right after the observation that verifies the result;
+//   comes in the reply right after the observation that verifies the result; and, for ESP-471, a task
+//   that cannot be completed is one beyond the tools, since a missing choice is asked in the chat;
 // - the instructions put PokiCore's own MCP instructions first, as task-runner.mjs puts the MCP server's
 //   instructions first;
 // - look, do and status are PokiCore's tools with their MCP descriptions;
@@ -40,7 +41,10 @@ enum Harness {
         // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
         // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
         // step more; the save rides in the same reply instead of a turn before it.
-        parts.append("Start the task with a do in your first reply: do {run: name} with the routine below that covers it, else do {launch: bundle id} with the app it needs. Send report_plan together with that first do. Finish in one reply: finish_task, which also brings the phone back to this chat, and with it routines {action: \"save\", name, description} when the task worked and was not a routine yet, named the way the owner would ask for it.")
+        parts.append("Start the task in your first reply: ask the owner when their words already leave a choice open, else do {run: name} with the routine below that covers it, else do {launch: bundle id} with the app it needs. Send report_plan together with that first do. Finish in one reply: finish_task, which also brings the phone back to this chat, and with it routines {action: \"save\", name, description} when the task worked and was not a routine yet, named the way the owner would ask for it.")
+        // Two kinds of unclear (ESP-471): an operation the model settles by trying, and a choice made
+        // for the owner, which is asked when it costs money or is hard to undo and nothing settles it.
+        parts.append("Settle every operation yourself: where to tap, which route, what a page holds; try it and look. A choice is a pick made for the owner, such as which hospital branch and department, which time, which of two contacts with the same name, or which product option. Take a choice yourself when it has a usual option or is easy to change later (a medium cup, the default address or payment), and name what you chose in your reply. Ask the owner when a choice costs money or is hard to undo and neither their words nor the saved notes settle it: one reply that holds every open choice, each with its options numbered as the screen lists them, while the submit step waits for their answer. Ask on the page that shows the options when they are not known before. Keep each answer with routines {action: \"remember\", text} so the next task of its kind starts from it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
