@@ -774,7 +774,7 @@ final class MailTestTests: XCTestCase {
             wda.set(key) { _ in try await Task.sleep(nanoseconds: 400_000_000); return (200, ["value": .null]) }
         }
         _ = await core.call("look", [:])
-        let result = await core.call("do", ["actions": [["button": "home"], ["tap": [100, 300]], ["drag": [0, 400, 200, 400]]]])
+        let result = await core.call("do", ["actions": [["button": "home"], ["tap": [100, 300]], ["drag": ["from": 1, "to": 2]]]])
         XCTAssertFalse(result.isError, result.text)
         XCTAssertEqual(result.text.components(separatedBy: "(sent, ").count - 1, 3, result.text)
     }

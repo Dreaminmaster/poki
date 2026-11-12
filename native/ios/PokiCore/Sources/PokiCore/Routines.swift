@@ -595,9 +595,9 @@ extension Computer {
                 action = Self.replacingTarget(action, with: Self.runRef)
                 front = lastForeground
                 scan = SensitiveScan(front: lastForeground, secureOnScreen: lastAll.contains(where: \.isSecure))
-            } else if config.sensitive.enabled, ["tap", "long_press", "type", "key", "drag"].contains(where: { action[$0] != nil }) {
-                // A step recorded without an element (a point, a key) is judged on the screen read now;
-                // unread, it is a screen not read yet.
+            } else if config.sensitive.enabled, ActionKind(action)?.movesScreen == true {
+                // A step recorded without an element (a point, a key, a swipe) is judged on the screen read
+                // now; unread, it is a screen not read yet.
                 scan = SensitiveScan(front: front, read: false, secureOnScreen: false)
                 if let tree = try? await runner.tree(timeout: min(config.readTimeout, max(0.3, until - now() - 0.1)), format: config.treeFormat) {
                     lastAll = tree.elements

@@ -41,7 +41,7 @@ const shot = name => call('save_screenshot', { path: join(directory, `${name}.pn
 function launch(language = 'zh') {
   const locale = language === 'zh' ? ['-AppleLanguages', '(zh-Hans)', '-AppleLocale', 'zh_CN'] : ['-AppleLanguages', '(en)', '-AppleLocale', 'en_US'];
   const args = { bundle_id: bundle, arguments: ['-chat.provider', 'custom', '-chat.customURL', 'http://127.0.0.1:8765/v1',
-    '-chat.customModel', 'poki-mock', '-approvals.mode', 'off', ...locale] };
+    '-chat.customModel', 'poki-mock', '-approvals.mode.v2', 'off', ...locale] };
   // A launch while the simulator is still closing the last one can time out; one more try settles it.
   try { call('launch_app', args); } catch { pause(3000); call('launch_app', args); }
   pause(3000);
