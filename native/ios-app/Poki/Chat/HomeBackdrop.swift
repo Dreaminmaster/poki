@@ -34,7 +34,7 @@ struct HomeBackdrop: View {
 
     var body: some View {
         let dark = scheme == .dark
-        let resting = reduceMotion || frozen || lowPower
+        let resting = reduceMotion || frozen || lowPower || PerfSwitch.on(.backdropStill)
         let seen = shown && scenePhase == .active && !covered
         let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
@@ -231,10 +231,34 @@ private struct DriftingMesh: View, Animatable {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: drift <= 0)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
+            let t = BackdropClock.fixed ?? context.date.timeIntervalSinceReferenceDate
             let _ = BackdropLog.note(mesh.period, t, drift)
             mesh.gradient(at: t, drift: drift, dark: dark)
                 .opacity(mesh.strength(at: t, drift: drift))
+        }
+        .modifier(MeshRaster())
+    }
+}
+
+/// How a moving mesh is drawn each time it changes: on the graphics processor (`drawingGroup`), at a
+/// third of the screen's pixels across and down, then scaled up to the page. The mesh has no detail
+/// finer than a few dozen points and the grain is laid over it at full size, so the smaller picture
+/// scaled up is the same light for a ninth of the pixels.
+private struct MeshRaster: ViewModifier {
+    static let shrink: CGFloat = 3
+
+    func body(content: Content) -> some View {
+        if PerfSwitch.on(.oldMeshDirect) {
+            content
+        } else if PerfSwitch.on(.oldMeshFullSize) {
+            content.drawingGroup()
+        } else {
+            GeometryReader { geometry in
+                content
+                    .frame(width: geometry.size.width / Self.shrink, height: geometry.size.height / Self.shrink)
+                    .drawingGroup()
+                    .scaleEffect(Self.shrink, anchor: .topLeading)
+            }
         }
     }
 }
@@ -256,6 +280,17 @@ enum BackdropLog {
     }
     #else
     @inline(__always) static func note(_ period: Double, _ now: TimeInterval, _ drift: Double) {}
+    #endif
+}
+
+/// `-pokiBackdropClock 100` holds the moving light at that moment of its motion, so two builds can be
+/// laid over each other pixel for pixel. Debug builds only.
+enum BackdropClock {
+    #if DEBUG
+    static let fixed: TimeInterval? = UserDefaults.standard.object(forKey: "pokiBackdropClock") == nil
+        ? nil : UserDefaults.standard.double(forKey: "pokiBackdropClock")
+    #else
+    static let fixed: TimeInterval? = nil
     #endif
 }
 
