@@ -4,7 +4,7 @@
 
 use crate::{
     ddi,
-    device::{DDI_TIMEOUT_FIX, Device, Failure, LOOPBACK_FIX, NETWORK_FIX, Pairing},
+    device::{DDI_TIMEOUT_FIX, Device, Failure, LOOPBACK_FIX, NETWORK_FIX, PAIRING_PORT_FIX, Pairing},
     launch,
     remote::Stage,
 };
@@ -108,7 +108,7 @@ impl Launcher {
     }
 
     fn fail(&self, attempt: u32, failure: &Failure) {
-        let waiting = matches!(failure.fix.as_deref(), Some(LOOPBACK_FIX) | Some(NETWORK_FIX) | Some(DDI_TIMEOUT_FIX));
+        let waiting = matches!(failure.fix.as_deref(), Some(LOOPBACK_FIX) | Some(PAIRING_PORT_FIX) | Some(NETWORK_FIX) | Some(DDI_TIMEOUT_FIX));
         let state = if waiting { "waiting_network" } else { "failed" };
         self.set(state, attempt, json!({"detail": failure.detail, "fix": failure.fix, "code": failure.code}));
     }

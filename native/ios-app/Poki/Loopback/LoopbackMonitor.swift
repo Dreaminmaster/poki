@@ -99,13 +99,48 @@ final class LoopbackMonitor {
 
     func pause() { timer?.invalidate(); timer = nil }
 
+    /// Called when the remote pairing service was found on another port and that port is in use:
+    /// whatever waits on a refused connection can try again now.
+    var onPairingPort: ((UInt16) -> Void)?
+    private var portSearchedAt = Date.distantPast
+    private var portSearchSaid = ""
+
+    /// The remote pairing port does not answer although 10.7.0.1 reaches this iPhone: looks the
+    /// port up in Bonjour (at most every 10 s) and, when one answers, uses it from here on.
+    private func movedPairingPort(from port: UInt16) async -> ProbeResult? {
+        guard Date().timeIntervalSince(portSearchedAt) >= 10 else { return nil }
+        portSearchedAt = Date()
+        var answer: ProbeResult?
+        let search = await RemotePairingPort.search(besides: port, browse: { await RemotePairingBrowser.ports() }) { candidate in
+            let result = await probe(label: "loopback", host: "10.7.0.1", port: candidate, timeout: 1.5)
+            if result.outcome == "connected" { answer = result }
+            return result.outcome == "connected"
+        }
+        // The same finding every 10 s is said once.
+        let said = search.said(besides: port)
+        if said != portSearchSaid { portSearchSaid = said; AppLog.shared.add("loopback", said) }
+        guard let found = search.found, let answer else { return nil }
+        RemotePairingPort.use(found)
+        onPairingPort?(found)
+        return answer
+    }
+
     func check() {
         guard !running else { return }
         running = true
         Task {
-            var result = await probe(label: "loopback", host: "10.7.0.1", port: 49152, timeout: 1.5)
+            let port = RemotePairingPort.current
+            var result = await probe(label: "loopback", host: "10.7.0.1", port: port, timeout: 1.5)
             if result.outcome != "connected" {
-                result = await probe(label: "loopback", host: "10.7.0.1", port: 62078, timeout: 1.5)
+                let lockdown = await probe(label: "loopback", host: "10.7.0.1", port: 62078, timeout: 1.5)
+                // 10.7.0.1 reaches this iPhone (lockdown answers, or the phone refused the port), and
+                // the remote pairing service is not on the port Poki uses: iOS moved it. Without this
+                // the page says Working while every connection is refused.
+                if lockdown.outcome == "connected" || result.outcome == "refused", let found = await movedPairingPort(from: port) {
+                    result = found
+                } else {
+                    result = lockdown
+                }
             }
             running = false
             let probed: State = result.outcome == "connected" ? .working(ms: result.milliseconds) : loopbackInterface() == nil ? .off : .noAnswer

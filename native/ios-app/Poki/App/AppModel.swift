@@ -347,6 +347,7 @@ final class AppModel {
             for await event in core.events { self?.handle(event) }
         }
         loopback.onChange = { [weak self] old, new in self?.loopbackChanged(from: old, to: new) }
+        loopback.onPairingPort = { [weak self] port in self?.pairingPortFound(port) }
         // A built-in tunnel that fails or drops while Poki is on dials again by itself; the loopback
         // check that follows lets `loopbackChanged` start the runner, as for any other recovery.
         tunnel.wanted = { [weak self] in self?.sessionOn == true && self?.setup.loopback == .builtIn }
@@ -1182,6 +1183,17 @@ final class AppModel {
         }
     }
 
+    /// iOS had moved the remote pairing service off the port Poki used, and Poki found it. The page
+    /// may have said Working all along (lockdown answered), so no change of state starts things
+    /// again: the launcher tries at once, and the pairing is checked on the port that answers.
+    func pairingPortFound(_ port: UInt16) {
+        let starts = sessionOn && !runner.isRunning && !runnerPaused
+        log.add("loopback", "using remote pairing port \(port) from now on" + (starts ? "; starting the runner now" : ""))
+        if starts { launcher.restart() }
+        Task { await verifyPairing(force: true) }
+        signer.maintain()
+    }
+
     /// The loopback came or went. Going: logged with the time, and the agent's status says so instead
     /// of "Checking pairing". Back: the launcher tries at once instead of waiting out its backoff
     /// (the runner dies with the tunnel, so every drop costs a restart).
@@ -1632,6 +1644,7 @@ final class AppModel {
     nonisolated static func problemText(code: String?, fix: String) -> String {
         let short = [
             "loopback": "Loopback Off",
+            "pairing_port": "Finding Pairing Port",
             "network": "No Internet",
             "ddi_timeout": "No Internet",
             "ddi_refused": "Disk Image Outdated",

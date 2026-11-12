@@ -107,6 +107,40 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(reconnect.lowerBound < pairing.lowerBound && pairing.lowerBound < developerMode.lowerBound, text)
     }
 
+    /// iOS moved the remote pairing service off 49152: the port Bonjour lists that answers at
+    /// 10.7.0.1 is the one, the refused port is not tried again, and another iPhone's port that
+    /// does not answer here is passed over.
+    @MainActor func testTheMovedPairingPortIsTheListedOneThatAnswers() async {
+        var tried: [UInt16] = []
+        let search = await RemotePairingPort.search(besides: 49152, browse: { ([49152, 51000, 53900, 60000], nil) }) { port in
+            tried.append(port)
+            return port == 53900
+        }
+        XCTAssertEqual(search.found, 53900)
+        XCTAssertEqual(tried, [51000, 53900])
+        XCTAssertTrue(search.said(besides: 49152).contains("answers on port 53900"))
+    }
+
+    /// Nothing listed, or nothing listed answers: no port is made up, and the log says which it was.
+    @MainActor func testNoPairingPortIsInventedWhenBonjourHasNone() async {
+        let empty = await RemotePairingPort.search(besides: 49152, browse: { ([], nil) }) { _ in true }
+        XCTAssertNil(empty.found)
+        XCTAssertTrue(empty.said(besides: 49152).contains("lists no remote pairing service"))
+        let same = await RemotePairingPort.search(besides: 49152, browse: { ([49152], nil) }) { _ in true }
+        XCTAssertNil(same.found)
+        let denied = await RemotePairingPort.search(besides: 49152, browse: { ([], "Bonjour error -72008") }) { _ in true }
+        XCTAssertTrue(denied.said(besides: 49152).contains("could not be searched"))
+    }
+
+    /// The phone refused the pairing port while the loopback works: the agent is not told to turn
+    /// the loopback on.
+    func testARefusedPairingPortIsNotCalledNeedsLoopback() {
+        let refused = RunnerStatus(state: "waiting_network", detail: "remote pairing connect failed", code: "pairing_port")
+        XCTAssertEqual(refused.title, "Finding the pairing port")
+        XCTAssertEqual(RunnerStatus(state: "waiting_network", code: "loopback").title, "Needs loopback")
+        XCTAssertEqual(AppModel.problemText(code: "pairing_port", fix: "x"), "Finding Pairing Port")
+    }
+
     /// With the loopback up, the launcher's own words stand.
     func testLoopbackUpKeepsTheLauncherState() {
         let (model, _) = model()

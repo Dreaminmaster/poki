@@ -42,7 +42,8 @@ The route contract is:
   the tunnel rather than reporting a working connection.
 
 Saving a configuration and VPN Connected indicate tunnel status only. The setup step passes only
-when RemotePairing (`49152`) or lockdown (`62078`) accepts a TCP connection through `10.7.0.1`.
+when RemotePairing (`49152`, or the port its Bonjour record names once iOS has moved it) or
+lockdown (`62078`) accepts a TCP connection through `10.7.0.1`.
 
 ## Signing and distribution
 
