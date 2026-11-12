@@ -345,7 +345,7 @@ struct GhRun {
     head_sha: Option<String>,
 }
 /// What `GET /repos/{repo}/actions/runs/{id}` says about the run that made an artifact.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct GhRunDetail {
     #[serde(default)]
     path: String,
@@ -356,6 +356,23 @@ struct GhRunDetail {
 const PREVIEW_WORKFLOW: &str = ".github/workflows/pr-preview.yml";
 
 fn run_is_preview(d: &GhRunDetail) -> bool { d.path == PREVIEW_WORKFLOW && d.event == "pull_request" }
+
+/// How many of a pull request's builds are checked, newest first, before it is taken to offer none.
+const PREVIEW_TRIES: usize = 3;
+/// How many runs are read from GitHub at once, and at most in one listing.
+const RUN_READS_AT_ONCE: usize = 8;
+const RUN_READS_PER_LISTING: usize = 40;
+
+/// Splits the runs a listing still needs into those to read now and those taken as unreadable,
+/// given how many reads it has left (none once GitHub said the request limit is reached).
+fn runs_to_read(needed: Vec<u64>, reads_left: usize) -> (Vec<u64>, Vec<u64>) {
+    let mut ask = needed;
+    let skip = ask.split_off(reads_left.min(ask.len()));
+    (ask, skip)
+}
+/// The runs read so far in this process. A run's workflow and event never change, so each is read
+/// once; a run that could not be read is not kept, and is asked again next time.
+static RUN_DETAILS: std::sync::Mutex<Option<std::collections::HashMap<u64, GhRunDetail>>> = std::sync::Mutex::new(None);
 #[derive(Deserialize)]
 struct GhPull {
     number: u64,
@@ -440,13 +457,14 @@ fn preview_candidates(artifacts: &[GhArtifact], open: &[GhPull]) -> Vec<Vec<(u64
 }
 
 /// The preview each pull request offers: its newest build whose run is a pull request run of the
-/// preview workflow. `runs` holds the runs read so far (None: it could not be read, so its build
-/// is not offered). The second list is the runs still to read before the answer is complete;
-/// while it is not empty the first is not final.
+/// preview workflow, among its newest PREVIEW_TRIES builds. `runs` holds the runs read so far
+/// (None: it could not be read, so its build is not offered). The second list is the runs still to
+/// read before the answer is complete; while it is not empty the first is not final. Each round of
+/// reads moves every pull request on by at most one build, so there are at most PREVIEW_TRIES.
 fn pick_previews(candidates: &[Vec<(u64, Release)>], runs: &std::collections::HashMap<u64, Option<GhRunDetail>>) -> (Vec<Release>, Vec<u64>) {
     let (mut found, mut needed) = (vec![], vec![]);
     for builds in candidates {
-        for (run, r) in builds {
+        for (run, r) in builds.iter().take(PREVIEW_TRIES) {
             match runs.get(run) {
                 None => {
                     needed.push(*run);
@@ -638,6 +656,7 @@ fn github(url: String) -> Result<reqwest::RequestBuilder> {
 /// Every preview build on offer (a few GitHub requests; the token is used when there is one, for
 /// its higher request limit, but listing works without).
 async fn list_previews() -> Result<Vec<Release>> {
+    use futures_util::StreamExt;
     let mut artifacts = vec![];
     for page in 1..=10 {
         let got: GhArtifacts = github(format!("https://api.github.com/repos/{}/actions/artifacts?per_page=100&page={page}", repo()))?
@@ -672,19 +691,45 @@ async fn list_previews() -> Result<Vec<Release>> {
         }
     }
     // Each build on offer is checked against its run: made by the preview workflow, for a pull
-    // request. A run that cannot be read is not believed, and the pull request's next build is tried.
+    // request. A run that cannot be read is not believed, and the pull request's next build is
+    // tried. The runs are read a few at once and kept for next time. After RUN_READS_PER_LISTING
+    // reads, or once GitHub says the request limit is reached, no more are asked: the builds still
+    // unchecked are not offered, and the listing has the ones that were.
     let candidates = preview_candidates(&artifacts, &pulls);
-    let mut runs: std::collections::HashMap<u64, Option<GhRunDetail>> = Default::default();
+    let mut runs: std::collections::HashMap<u64, Option<GhRunDetail>> =
+        RUN_DETAILS.lock().ok().and_then(|c| c.clone()).unwrap_or_default().into_iter().map(|(id, d)| (id, Some(d))).collect();
+    let mut reads_left = RUN_READS_PER_LISTING;
     loop {
         let (found, needed) = pick_previews(&candidates, &runs);
         if needed.is_empty() {
+            if let Ok(mut cache) = RUN_DETAILS.lock() {
+                let cache = cache.get_or_insert_with(Default::default);
+                cache.extend(runs.iter().filter_map(|(id, d)| d.clone().map(|d| (*id, d))));
+            }
             return Ok(found);
         }
-        for id in needed {
-            let detail = match github(format!("https://api.github.com/repos/{}/actions/runs/{id}", repo()))?.timeout(std::time::Duration::from_secs(30)).send().await {
-                Ok(res) if res.status().is_success() => res.json::<GhRunDetail>().await.ok(),
-                _ => None,
-            };
+        let (ask, skip) = runs_to_read(needed, reads_left);
+        runs.extend(skip.into_iter().map(|id| (id, None)));
+        reads_left -= ask.len();
+        let read = futures_util::stream::iter(ask)
+            .map(|id| async move {
+                let res = match github(format!("https://api.github.com/repos/{}/actions/runs/{id}", repo())) {
+                    Ok(req) => req.timeout(std::time::Duration::from_secs(15)).send().await,
+                    Err(_) => return (id, None, false),
+                };
+                match res {
+                    Ok(res) if res.status().is_success() => (id, res.json::<GhRunDetail>().await.ok(), false),
+                    Ok(res) => (id, None, matches!(res.status().as_u16(), 403 | 429)),
+                    Err(_) => (id, None, false),
+                }
+            })
+            .buffer_unordered(RUN_READS_AT_ONCE)
+            .collect::<Vec<_>>()
+            .await;
+        for (id, detail, limit) in read {
+            if limit {
+                reads_left = 0;
+            }
             runs.insert(id, detail);
         }
     }
@@ -1347,6 +1392,36 @@ mod tests {
                 known.insert(id, preview_run(PREVIEW_WORKFLOW, "pull_request"));
             }
         }
+    }
+
+    #[test]
+    fn run_reads_are_capped() {
+        let needed: Vec<u64> = (1..=50).collect();
+        let (ask, skip) = runs_to_read(needed.clone(), RUN_READS_PER_LISTING);
+        assert_eq!((ask.len(), skip.len()), (40, 10));
+        assert_eq!((ask[0], skip[0]), (1, 41));
+        assert_eq!(runs_to_read(needed.clone(), 0), (vec![], needed.clone()));
+        assert_eq!(runs_to_read(vec![7, 8], 5), (vec![7, 8], vec![]));
+        // Runs taken as unreadable leave their pull request without a preview, and a pull request
+        // whose newest builds all fail stops after PREVIEW_TRIES of them.
+        let builds = |pr: u64, n: u64| (0..n).map(|i| art(pr * 100 + 50 - i, &format!("Poki-preview-pr{pr}-0.3.1-{}-aaaaaaaaaaaa", 800 - i), 1, 1)).collect::<Vec<_>>();
+        let pull = |number: u64| GhPull { number, title: String::new(), head: GhPullHead { branch: format!("dev/pr{number}") } };
+        let candidates = preview_candidates(&builds(5, 6), &[pull(5)]);
+        let bad: std::collections::HashMap<u64, Option<GhRunDetail>> = candidates[0].iter().map(|(run, _)| (*run, None)).collect();
+        let (found, needed) = pick_previews(&candidates, &bad);
+        assert!(found.is_empty() && needed.is_empty());
+        let mut runs = std::collections::HashMap::new();
+        let mut asked = 0;
+        loop {
+            let (found, needed) = pick_previews(&candidates, &runs);
+            if needed.is_empty() {
+                assert!(found.is_empty());
+                break;
+            }
+            asked += needed.len();
+            runs.extend(needed.into_iter().map(|id| (id, None)));
+        }
+        assert_eq!(asked, PREVIEW_TRIES);
     }
 
     #[test]
