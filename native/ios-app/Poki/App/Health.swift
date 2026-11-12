@@ -82,6 +82,8 @@ struct Issue: Identifiable {
                                  text: fix.isEmpty ? (runner.detail.map { "\($0.prefix(1).uppercased())\($0.dropFirst())." } ?? String(localized: "Poki starts it again on the next agent request.")) : local(fix), fix: kind))
             } else if runner.state == "waiting_network", let fix = runner.fix, fix.contains("internet") {
                 out.append(Issue(id: "network", title: String(localized: "Waiting for the internet"), text: local(fix), fix: .none))
+            } else if let trouble = model.localSessionTrouble {
+                out.append(Issue(id: "local", title: String(localized: "Automation did not start"), text: trouble.text, fix: trouble.opensSetup ? .setup : .none))
             } else if model.loopback.cellularRefused {
                 // On the mounted image a new task starts without the loopback; only the mount needs Wi-Fi.
                 if model.cellularNeedsWiFi, !runner.isRunning {

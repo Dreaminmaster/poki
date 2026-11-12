@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     net::{IpAddr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -37,6 +37,11 @@ pub struct Config {
     /// image (the XCTest libraries the app loads) and starts no runner.
     #[serde(default)]
     pub in_process: bool,
+    /// A file the mounted developer disk image puts on the phone, as the app's own process sees it.
+    /// In-process, when the loopback refuses the connection and this file is there, the app opens its
+    /// own session on the image. None: no such fallback.
+    #[serde(default)]
+    pub ddi_marker: Option<PathBuf>,
 }
 
 /// The longest a disk image mount may take (Apple's signing server plus the upload).
@@ -72,8 +77,6 @@ pub struct Launcher {
     /// How often the runner is checked, and after how many misses it is launched again.
     pub check_every: Duration,
     pub misses_allowed: u32,
-    /// Whether the developer disk image is mounted, as the app's own process sees it.
-    pub mounted_locally: fn() -> bool,
 }
 
 impl Launcher {
@@ -88,7 +91,6 @@ impl Launcher {
             thread: Mutex::new(None),
             check_every: Duration::from_secs(5),
             misses_allowed: 2,
-            mounted_locally: ddi::mounted_locally,
         }
     }
 
@@ -221,9 +223,15 @@ impl Launcher {
             Ok(device) => device,
             // On cellular the loopback can refuse the connection (GitHub issue 35) while the image
             // mounted earlier is still there: the app's own session needs neither. It is ready only
-            // once that session opens, and nothing here checked the pairing.
-            Err(failure) if config.in_process && failure.remote_stage == Some(Stage::Connect) && (me.mounted_locally)() => {
-                return Self::hold_in_process(&me, attempt, json!({"runner": "in-process", "code": "local_ddi"}), commands).await;
+            // once that session opens, and nothing here checked the pairing. The refusal's words go
+            // with it, for the app's log.
+            Err(failure)
+                if config.in_process
+                    && failure.remote_stage == Some(Stage::Connect)
+                    && config.ddi_marker.as_deref().is_some_and(Path::is_file) =>
+            {
+                let status = json!({"runner": "in-process", "code": "local_ddi", "detail": failure.detail});
+                return Self::hold_in_process(&me, attempt, status, commands).await;
             }
             Err(failure) => return Err(failure),
         };

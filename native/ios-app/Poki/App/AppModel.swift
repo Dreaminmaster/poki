@@ -202,7 +202,7 @@ final class AppModel {
             return ["device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki"]
         }
         signer.isIdle = { [weak self] in self?.signingIdle ?? false }
-        signer.cellularOnly = { [weak self] in self?.loopback.cellularOnly ?? false }
+        signer.whyUnreachable = { [weak self] in self?.signerUnreachable ?? .loopback }
         signer.busyReason = { [weak self] in self?.signingBusyReason }
         signer.beforeInstall = { [weak self] in self?.windDownForUpdate() }
         signer.start()
@@ -864,7 +864,7 @@ final class AppModel {
         log.add("activity", activity.isRunning ? "Live Activity started" : "Live Activity not running: \(activity.lastError ?? "unknown reason")")
         sessionOn = true
         wantsOn = true
-        launcherConfig = LauncherConfig(pairing_file: pairing, ddi_dir: AppFiles.ddiDirectory.path, in_process: automationPath == .inProcess)
+        launcherConfig = LauncherConfig(pairing_file: pairing, ddi_dir: AppFiles.ddiDirectory.path, in_process: automationPath == .inProcess, ddi_marker: Self.ddiMarker)
         lastAgentActivity = Date()
         // The runner (and with it iOS's automation banner) starts only when an agent asks.
         standBy(reason: nil)
@@ -1712,10 +1712,37 @@ final class AppModel {
         return localDDIAvailable()
     }
 
-    /// The developer disk image is mounted, as the launcher's `ddi::mounted_locally` checks it.
+    /// A file the mounted developer disk image puts on the phone (the XCTest framework Poki loads).
+    static let ddiMarker = "/System/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation"
+
+    /// The developer disk image is mounted, as the launcher checks it (`ddi_marker`).
     static var localDDIMounted: Bool {
         var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: "/System/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation", isDirectory: &isDirectory) && !isDirectory.boolValue
+        return FileManager.default.fileExists(atPath: ddiMarker, isDirectory: &isDirectory) && !isDirectory.boolValue
+    }
+
+    /// Poki's own session did not open after the launcher found only the mounted image (ESP-448):
+    /// what Home says instead of the loopback's trouble, which it showed before the hand-over. Nil
+    /// while the session opens or is open.
+    var localSessionTrouble: (text: String, opensSetup: Bool)? {
+        guard sessionOn, runner.isRunning, runner.code == "local_ddi" else { return nil }
+        switch inProcessSession {
+        case .opening, .open, .waitingForPasscode:
+            return nil
+        case .passcodeMissed:
+            return (String(localized: "iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode."), false)
+        case .failed(let code, _) where loopback.cellularOnly:
+            return (String(localized: "Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again."), false)
+        case .failed(let code, _):
+            return (String(localized: "Poki could not open its own automation session (\(code)), and the loopback refused the connection. Check the loopback in Setup, then try again."), true)
+        }
+    }
+
+    /// Why the signer cannot reach the phone: the pairing comes first; on cellular the loopback it
+    /// needs waits for Wi-Fi (ESP-448).
+    var signerUnreachable: SelfSigner.Unreachable {
+        if pairingPath == nil { return .unpaired }
+        return loopback.cellularOnly && !loopback.isWorking ? .cellular : .loopback
     }
 
     /// On cellular a new task can still start on the mounted image; otherwise it waits for Wi-Fi.

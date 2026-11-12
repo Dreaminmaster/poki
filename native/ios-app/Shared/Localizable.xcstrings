@@ -1701,6 +1701,22 @@
       },
       "extractionState" : "manual"
     },
+    "Automation did not start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化未启动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動化未啟動"
+          }
+        }
+      }
+    },
     "BACKGROUND HOLD" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7687,6 +7703,38 @@
       },
       "extractionState" : "manual"
     },
+    "Poki could not open its own automation session (%@), and the loopback refused the connection. Check the loopback in Setup, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能打开自身的自动化会话（%@），回环也拒绝了连接。在配置中检查回环，然后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能開啟自身的自動化會話（%@），迴環也拒絕了連線。在配置中檢查迴環，然後再試。"
+          }
+        }
+      }
+    },
+    "Poki could not open its own automation session (%@). Connect to Wi-Fi and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能打开自身的自动化会话（%@）。连上 Wi-Fi 后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能開啟自身的自動化會話（%@）。連上 Wi-Fi 後再試。"
+          }
+        }
+      }
+    },
     "Poki could not reach %@: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -12947,6 +12995,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "https://…/v1"
+          }
+        }
+      }
+    },
+    "iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 要求输入 iPhone 锁屏密码以允许自动化，但未完成输入。先关闭再开启 Poki，然后输入密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 要求輸入 iPhone 鎖屏密碼以允許自動化，但未完成輸入。先關閉再開啟 Poki，然後輸入密碼。"
           }
         }
       }

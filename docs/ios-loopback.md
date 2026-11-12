@@ -90,10 +90,13 @@ A TCP connection does not prove that RemotePairing, its dynamic tunnel listener,
 The current product code uses the in-process XCTest session by default. Its launcher first opens
 the local developer connection, then checks the developer image. When that connection fails at TCP
 connect and the image is already mounted on the phone, the launcher reports `running` with code
-`local_ddi` instead of waiting for the network. The app then opens its own XCTest session, which
+`local_ddi` instead of waiting for the network. The status keeps the connection error (refused, no
+route, or timed out), and the app writes it to its activity log. The app passes the launcher the
+file it checks for the mounted image (`ddi_marker`). The app then opens its own XCTest session, which
 needs no loopback. Automation counts as ready only after that session opens. The hand-over does not
 check the pairing, so it does not update the pairing state. The signer still needs the loopback.
-If the local open fails, the launcher tries the normal path once when the loopback answers again.
+If the local open fails, Home says that the session did not open, with its code, and the launcher
+tries the normal path once when the loopback answers again.
 That return also checks the pairing and lets the signer retry, as before.
 
 These steps still need the loopback, so on cellular they show "This step needs Wi-Fi. Connect and

@@ -81,8 +81,9 @@ final class SelfSigner {
 
     /// The phone's own services (10.7.0.1 and the pairing file), when the loopback answers.
     var phone: () -> [String: Any]? = { nil }
-    /// The phone has only cellular, where the loopback the signer needs does not answer (ESP-448).
-    var cellularOnly: () -> Bool = { false }
+    /// Why `phone()` has nothing (ESP-448).
+    var whyUnreachable: () -> Unreachable = { .loopback }
+    enum Unreachable { case unpaired, loopback, cellular }
     /// No task is running, so Poki may be ended by an install.
     var isIdle: () -> Bool = { false }
     /// Why an install waits, for the message under the button.
@@ -344,7 +345,11 @@ final class SelfSigner {
     // MARK: Helpers
 
     private var unreachable: String {
-        cellularOnly() ? LoopbackMonitor.needsWiFi : String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.")
+        switch whyUnreachable() {
+        case .unpaired: String(localized: "Pair this iPhone first (Setup).")
+        case .cellular: LoopbackMonitor.needsWiFi
+        case .loopback: String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.")
+        }
     }
 
     private func run(_ title: String?, _ work: () async throws -> Void) async {
@@ -354,7 +359,7 @@ final class SelfSigner {
         defer { working = nil; fraction = nil }
         do { try await work() } catch {
             let code = (error as? SignerError)?.code ?? ""
-            lastError = cellularOnly() && ["loopback", "handshake", "unreachable"].contains(code) ? LoopbackMonitor.needsWiFi : error.localizedDescription
+            lastError = whyUnreachable() == .cellular && ["loopback", "handshake", "unreachable"].contains(code) ? LoopbackMonitor.needsWiFi : error.localizedDescription
             log.add("signing", "\(title ?? "signer"): \(error.localizedDescription)")
         }
     }
