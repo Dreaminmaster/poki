@@ -92,9 +92,16 @@ export async function runBatch(ctx, args) {
   if (last && last.tool !== 'shut_down_simulator') {
     // dispatch restores both when this batch ends.
     if (last.arguments?.device) { ctx.requested = last.arguments.device; ctx.resolved = undefined; }
-    const { screen, stop_reason } = await phase('batch_readback', () => ctx.readback(undefined, { once: unverified }));
-    stopReason ??= stop_reason;
-    summary.screen = screen;
+    try {
+      const { screen, stop_reason } = await phase('batch_readback', () => ctx.readback(undefined, { once: unverified }));
+      stopReason ??= stop_reason;
+      summary.screen = screen;
+    } catch (error) {
+      // Dispatch may have completed one or more inputs before the final observation failed.
+      // Do not discard their receipts, or invite the caller to repeat an already sent action.
+      stopReason ??= stopped(error) ? stoppingReason(error) : 'readback_failed';
+      summary.readback_error = error?.message ?? String(error);
+    }
   }
   if (stopReason) {
     if (failure) {
@@ -111,6 +118,9 @@ export async function runBatch(ctx, args) {
     }
     else if (unchanged) Object.assign(summary, { unchanged_step: unchanged, remaining_steps: commands.slice(ran), next: advice(stopReason, ran) });
     else Object.assign(summary, { remaining_steps: commands.slice(ran), next: advice(stopReason, ran + 1) });
+  }
+  if (summary.readback_error && stopReason) {
+    summary.next = `${summary.next ?? ''} The final screen read also failed; inspect the current screen before retrying or continuing.`.trim();
   }
   return { ...(failed || stopReason ? { isError: true } : {}), content: [...blocks, receipt({ completed_steps: ran, stop_reason: stopReason ?? null, ...summary })] };
 }
