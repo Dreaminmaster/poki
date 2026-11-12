@@ -54,6 +54,8 @@ final class ActivityController {
     private var tail: Task<Void, Never>?
     private var finishTimer: Task<Void, Never>?
     private var foldTimer: Task<Void, Never>?
+    /// Halfway to an approval's deadline the island is popped open once more (ESP-467).
+    private var approvalReminder: Task<Void, Never>?
     private var eventTimer: Task<Void, Never>?
     private var inStep = false
     private var runAnnounced = false
@@ -242,6 +244,7 @@ final class ActivityController {
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
             alert = critical(String(activity: "Poki needs you"), approval.question)
+            remindHalfway(approval)
         }
         if state.approval == nil, let was = old.approval {
             state.decision = nil
@@ -276,6 +279,21 @@ final class ActivityController {
     /// Updates that change what the person must do or know go out at once, ahead of plain progress.
     private static func isCritical(_ state: PokiState, after old: PokiState) -> Bool {
         state.phase != old.phase || state.approval?.id != old.approval?.id || state.decision != old.decision || state.pin != old.pin
+    }
+
+    /// iOS shows an alert's expanded island for a few seconds only. Halfway to the deadline, while the
+    /// same approval still waits, the update carries the alert once more: one reminder, never a loop.
+    /// The runner sends no input while an approval waits, so the expanded island is safe.
+    private func remindHalfway(_ approval: PendingApproval) {
+        approvalReminder?.cancel()
+        let half = approval.expires.timeIntervalSinceNow / 2
+        guard half > 5 else { return }
+        approvalReminder = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(half))
+            guard !Task.isCancelled, let self, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
+            AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
+            self.send(alert: self.critical(String(activity: "Poki needs you"), approval.question), critical: true)
+        }
     }
 
     private func armFinish() {

@@ -1507,10 +1507,10 @@ final class AppModel {
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-        // The Live Activity pops up for it by itself; the notification is for when it is not running.
-        // Before iOS 26 an approval is answered from the notification (touch and hold it); later, from
-        // the Live Activity's own buttons when one is running.
-        if #available(iOS 26.0, *), activity.isRunning {} else { ApprovalNotice.post(approval, caller: caller) }
+        // The Live Activity pops up for it, but iOS folds the island back after a few seconds and a tap
+        // on the folded island opens Poki. The notification's Allow and Don't Allow answer it without
+        // opening Poki, with or without a Live Activity (ESP-467).
+        ApprovalNotice.post(approval, caller: caller)
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {
