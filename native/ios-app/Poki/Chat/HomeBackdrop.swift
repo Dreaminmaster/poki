@@ -3,17 +3,21 @@ import SwiftUI
 /// The light behind the chat (ESP-376, the owner's pick "fog blue"), two layers one over the other.
 /// The conversation's ground is always there: a clean pale page with a faint brand-blue glow behind
 /// the message field, under a quarter of the screen high, still unless Poki is at work. Over it, on the
-/// home page, lies the home's light: paper white above, blue rising from the bottom edge, drifting
-/// very slowly. Your first message makes the home's light sink 260 points and fade, so it seems to draw
-/// back to the glow and stop there.
+/// home page, lies the home's light: paper white above, blue rising from the bottom edge, breathing
+/// slowly (ESP-470). Your first message makes the home's light sink 260 points and fade, so it seems
+/// to draw back to the glow and stop there.
 ///
-/// Points, colours, grain, bright edge and drift are the design's final table
-/// (定稿-首页渐变和玻璃参数, sections 1 to 4, 9 and 10). The system's mesh was laid beside the
-/// design's own rendering of the same table before anything was moved, and the table's points are
-/// used as they are. Nothing in here may be wider than the page: a stack takes the width of its
-/// widest layer and stretches the meshes to it, which is how the bright edge, laid in the stack at
-/// its own 797 points, once showed only the middle half of the light. With Reduce Motion nothing
-/// drifts or sinks; the change between the two is a fade.
+/// Points, colours, grain and bright edge are the design's final table (定稿-首页渐变和玻璃参数,
+/// sections 1 to 4, 9 and 10). The system's mesh was laid beside the design's own rendering of the same
+/// table before anything was moved, and the table's points are used as they are; the breathing moves
+/// them about those places and never changes a colour. Nothing in here may be wider than the page: a
+/// stack takes the width of its widest layer and stretches the meshes to it, which is how the bright
+/// edge, laid in the stack at its own 797 points, once showed only the middle half of the light.
+///
+/// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on, and its
+/// clock stops while the app is not active or another page covers this one. With Reduce Motion nothing
+/// sinks either; the change between the two layers is a fade. Behind the bear's place it always stands
+/// still (`StillPatch`).
 struct HomeBackdrop: View {
     /// The home page is in front.
     var home: Bool
@@ -21,27 +25,87 @@ struct HomeBackdrop: View {
     var working: Bool
     /// Stands still at rest, for laying a screenshot beside the design (`-pokiChat backdrop`).
     var frozen = false
+    /// The bear's place, in `HomeMotion.space`: the light behind it does not move.
+    var still: CGRect = .zero
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// False while another page is pushed over this one.
+    @State private var shown = false
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     var body: some View {
         let dark = scheme == .dark
-        let still = reduceMotion || frozen
+        let resting = reduceMotion || frozen || lowPower
+        let seen = shown && scenePhase == .active
+        let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
             Tint.page
             // Starting or stopping, the drift eases in and out over 600 ms; it never jumps back.
-            DriftingMesh(mesh: .chat, dark: dark, drift: working && !home && !still ? 1 : 0)
+            DriftingMesh(mesh: .chat, dark: dark, drift: working && !home && !resting && seen ? 1 : 0)
                 .animation(.easeInOut(duration: 0.6), value: working)
-            DriftingMesh(mesh: .home, dark: dark, drift: home && !still ? 1 : 0)
+            DriftingMesh(mesh: .home, dark: dark, drift: breathing)
                 .overlay(alignment: .bottom) { EdgeLight(dark: dark) }
                 .offset(y: home || reduceMotion ? 0 : 260)
                 .opacity(home ? 1 : 0)
                 .animation(HomeMotion.ground(reduceMotion), value: home)
+            StillPatch(place: still, dark: dark, breathing: breathing)
+                .animation(HomeMotion.ground(reduceMotion), value: home)
         }
+        // Coming back to the page, the light takes a second to start breathing again rather than
+        // jumping to where its clock has got to.
+        .animation(.easeInOut(duration: 1), value: seen && !lowPower)
         .overlay { Grain.image.resizable(resizingMode: .tile).opacity(0.03).blendMode(.overlay) }
         .compositingGroup()
         .ignoresSafeArea()
         .accessibilityHidden(true)
+        .onAppear { shown = true }
+        .onDisappear { shown = false }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
+            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
+    }
+}
+
+/// The home light's breathing (ESP-470: the owner asked for a breathing like the Gemini app's, on
+/// the colours as they are), its settings in one place to tune on a phone.
+///
+/// Once a `period` the band of light rises and settles: the lowest of the three middle rows by
+/// `rise` of the page's height, the two above it by less, all together. The lower blues and the
+/// bottom edge drift sideways by up to `flow` of the page's width: each row as a piece at its own
+/// pace, and each point a little on its own, so the colours slide past each other rather than sway in
+/// step. The band also dims and brightens by `glow`, a quarter breath after it rises, so it does not
+/// swell as one block. No two paces divide evenly, so the light never comes back to the same shape in
+/// step and is never seen to start again. The top row and the four corners never move; the side
+/// points only slide along their edge.
+enum HomeBreath {
+    /// Seconds for one breath.
+    static let period: Double = 7.5
+    /// How far the band rises and settles, as a share of the page's height.
+    static let rise: Float = 0.11
+    /// How far the lower blues drift sideways at most, as a share of the page's width.
+    static let flow: Float = 0.15
+    /// How much the band dims at the bottom of its breath, as a share of its strength.
+    static let glow: Double = 0.09
+
+    static let motion: [PointMotion] =
+        PointMotion.breath(row: 1, rise * 0.45) + PointMotion.breath(row: 2, rise * 0.8) + PointMotion.breath(row: 3, rise)
+        + sway(row: 2, frequency: 0.62, phase: 0, own: [(0.83, 1.0), (0.91, 3.0)])
+        + sway(row: 3, frequency: 0.71, phase: 2.0, own: [(0.77, 5.0), (0.87, 2.4)])
+        + sway(row: 4, frequency: 0.53, phase: 4.1, own: [(0.67, 0.7), (0.59, 3.6)])
+        + [PointMotion(index: 9, axis: .y, amplitude: 0.02, frequency: 0.79, phase: 1.0),
+           PointMotion(index: 10, axis: .y, amplitude: 0.02, frequency: 0.93, phase: 3.0),
+           PointMotion(index: 13, axis: .y, amplitude: 0.02, frequency: 0.69, phase: 5.0),
+           PointMotion(index: 14, axis: .y, amplitude: 0.02, frequency: 0.97, phase: 2.4)]
+
+    /// The middle two points of a row going sideways: three quarters of `flow` together, the last
+    /// quarter each at its own pace.
+    private static func sway(row: Int, frequency: Double, phase: Double, own: [(frequency: Double, phase: Double)]) -> [PointMotion] {
+        own.enumerated().flatMap { column, alone in
+            let index = row * LightMesh.columns + 1 + column
+            return [PointMotion(index: index, axis: .x, amplitude: flow * 0.75, frequency: frequency, phase: phase),
+                    PointMotion(index: index, axis: .x, amplitude: flow * 0.25, frequency: alone.frequency, phase: alone.phase)]
+        }
     }
 }
 
@@ -53,16 +117,20 @@ struct LightMesh {
     var darkDrop: Float
     var light: [UInt32]
     var dark: [UInt32]
+    /// Seconds for one turn of a motion at `frequency` 1.
+    var period: Double
+    /// How each point moves about its place at full drift.
+    var motion: [PointMotion]
+    /// How much the whole mesh dims at the bottom of its breath at full drift, a quarter turn after
+    /// the motion at `frequency` 1.
+    var glow: Double = 0
 
     static let columns = 4
     /// Where the points stand across the page: the two middle rows are a little out of line on
     /// purpose, so the edge of the light is not a regular arc.
     private static let across: [[Float]] = [[0, 0.34, 0.67, 1], [0, 0.34, 0.67, 1], [0, 0.32, 0.70, 1], [0, 0.36, 0.67, 1], [0, 0.34, 0.67, 1]]
-    /// The four points that move (the middle of the third and fourth rows) and where in its turn each
-    /// one starts, so the light does not sway as one piece.
-    private static let moving: [(index: Int, phase: Double)] = [(9, 0), (10, .pi / 2), (13, .pi), (14, 3 * .pi / 2)]
 
-    /// The home page (sections 1 and 4).
+    /// The home page (sections 1 and 4), breathing as `HomeBreath` says.
     static let home = LightMesh(
         rows: [[0, 0, 0, 0], [0.42, 0.44, 0.41, 0.43], [0.56, 0.60, 0.55, 0.59], [0.76, 0.80, 0.75, 0.81], [1, 1, 1, 1]], darkDrop: 0.02,
         light: [0xF5F7FA, 0xF5F7FA, 0xF5F7FA, 0xF5F7FA,
@@ -74,10 +142,13 @@ struct LightMesh {
                0x05070D, 0x05070D, 0x05070D, 0x05070D,
                0x06101F, 0x071226, 0x08102A, 0x070C1C,
                0x0B3C8A, 0x0C4FC0, 0x173FB0, 0x14286E,
-               0x1260D8, 0x1A6FF0, 0x2056E0, 0x2440B8])
+               0x1260D8, 0x1A6FF0, 0x2056E0, 0x2440B8],
+        period: HomeBreath.period, motion: HomeBreath.motion, glow: HomeBreath.glow)
 
     /// The conversation (section 10): the home's bottom colours taken 85 % of the way back to the
-    /// page, starting three quarters of the way down.
+    /// page, starting three quarters of the way down. While Poki works, the middle of the third and
+    /// fourth rows each go round a small ellipse about their place, 3 % of the page, once in 14
+    /// seconds, each starting a quarter turn after the last so the glow does not sway as one piece.
     static let chat = LightMesh(
         rows: [[0, 0, 0, 0], [0.75, 0.76, 0.75, 0.76], [0.84, 0.86, 0.83, 0.85], [0.93, 0.94, 0.92, 0.94], [1, 1, 1, 1]], darkDrop: 0,
         light: [0xF5F8FC, 0xF5F8FC, 0xF5F8FC, 0xF5F8FC,
@@ -89,10 +160,15 @@ struct LightMesh {
                0x05070D, 0x05070D, 0x05070D, 0x05070D,
                0x060E1C, 0x070F1E, 0x070D1D, 0x070B1A,
                0x071227, 0x08142A, 0x081128, 0x090E23,
-               0x07142B, 0x08172F, 0x09132D, 0x0A1027])
+               0x07142B, 0x08172F, 0x09132D, 0x0A1027],
+        period: 14,
+        motion: [(9, 0), (10, Double.pi / 2), (13, .pi), (14, 3 * .pi / 2)].flatMap { index, phase in
+            [PointMotion(index: index, axis: .x, amplitude: 0.03, phase: phase - .pi / 2),
+             PointMotion(index: index, axis: .y, amplitude: 0.03, frequency: 0.8, phase: phase)]
+        })
 
-    /// The grid at time `t`: each moving point goes round a small ellipse about its own place, 3 % of
-    /// the page at full `drift`, once in 14 seconds. The top and the bottom edge never move.
+    /// The grid at time `t`, with each point moved `drift` of the way along its motion (0 the table
+    /// as it is). The top and the bottom edge never move up or down.
     func points(at t: TimeInterval, drift: Double, dark: Bool) -> [SIMD2<Float>] {
         var points: [SIMD2<Float>] = []
         for (r, row) in rows.enumerated() {
@@ -100,16 +176,53 @@ struct LightMesh {
             for (c, y) in row.enumerated() { points.append(SIMD2(Self.across[r][c], y + drop)) }
         }
         guard drift > 0 else { return points }
-        let turn = 2 * Double.pi / 14
-        for (index, phase) in Self.moving {
-            points[index].x += Float(0.03 * drift * sin(t * turn + phase))
-            points[index].y += Float(0.03 * drift * cos(t * turn * 0.8 + phase))
-        }
+        let turn = t * 2 * .pi / period
+        for move in motion { move.apply(to: &points[move.index], at: turn, drift: Float(drift)) }
         return points
+    }
+
+    /// The mesh as the system draws it, at time `t`.
+    func gradient(at t: TimeInterval, drift: Double, dark: Bool) -> MeshGradient {
+        MeshGradient(width: Self.columns, height: rows.count, points: points(at: t, drift: drift, dark: dark),
+                     colors: (dark ? self.dark : light).map { Color(hex: $0) }, smoothsColors: true, colorSpace: .perceptual)
+    }
+
+    /// How strongly the mesh shows at time `t`: 1 at rest, down to 1 - 2 × `glow` at full drift.
+    func strength(at t: TimeInterval, drift: Double) -> Double {
+        1 - drift * glow * (1 - cos(t * 2 * .pi / period - .pi / 2))
     }
 }
 
-/// A mesh that drifts as far as `drift` says (0 still, 1 the full 3 %). `drift` animates, so the
+/// How one point of a mesh moves about its place: along one axis, by `amplitude` of the page, at
+/// `frequency` turns per turn of its mesh's period, from `phase` in its turn.
+///
+/// From `AnimationPattern.swift` in rryam/MeshingKit (commit 1c519ac7, MIT License, Copyright (c) 2024
+/// Rudrank Riyam; see THIRD_PARTY_NOTICES.md): `PointAnimation` and its `apply`, a cosine offset per
+/// point and axis with each point's own frequency, which several motions of one point add up. Changed
+/// here: a starting phase, the offset scaled by the drift, and no `.both` axis.
+struct PointMotion {
+    enum Axis { case x, y }
+    var index: Int
+    var axis: Axis
+    var amplitude: Float
+    var frequency: Double = 1
+    var phase: Double = 0
+
+    func apply(to point: inout SIMD2<Float>, at turn: Double, drift: Float) {
+        let value = amplitude * drift * Float(cos(turn * frequency + phase))
+        switch axis {
+        case .x: point.x += value
+        case .y: point.y += value
+        }
+    }
+
+    /// A whole row rising and settling together, at the mesh's own period.
+    static func breath(row: Int, _ amplitude: Float) -> [PointMotion] {
+        (0..<LightMesh.columns).map { PointMotion(index: row * LightMesh.columns + $0, axis: .y, amplitude: amplitude) }
+    }
+}
+
+/// A mesh that moves as far as `drift` says (0 still, 1 its full motion). `drift` animates, so the
 /// light eases into its movement and back to rest; at rest the clock stops.
 private struct DriftingMesh: View, Animatable {
     var mesh: LightMesh
@@ -122,12 +235,80 @@ private struct DriftingMesh: View, Animatable {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: drift <= 0)) { context in
-            MeshGradient(width: LightMesh.columns, height: mesh.rows.count,
-                         points: mesh.points(at: context.date.timeIntervalSinceReferenceDate, drift: drift, dark: dark),
-                         colors: (dark ? mesh.dark : mesh.light).map { Color(hex: $0) },
-                         smoothsColors: true, colorSpace: .perceptual)
+            let t = context.date.timeIntervalSinceReferenceDate
+            let _ = BackdropLog.note(mesh.period, t, drift)
+            mesh.gradient(at: t, drift: drift, dark: dark)
+                .opacity(mesh.strength(at: t, drift: drift))
         }
     }
+}
+
+/// The light right behind the bear, held still while the rest breathes (ESP-470: the owner saw the
+/// bear move with the light). The bear's feet fade into the light and its edges are soft, so whatever
+/// moves behind them moves the bear's own pixels. Across the page's width at the height of the bear's
+/// place, and `margin` points above and below it, this draws the page as it stands at rest, with the
+/// home light at its middle strength; past that it gives way to the moving light over `feather`. It is
+/// as wide as the page so it has no sides to show: a patch as wide as the bear left a still column
+/// beside light that moved. Only the light above the bear and the blue below its feet move. It knows
+/// only the place's height, not what stands in it, so a different bear can stand there.
+private struct StillPatch: View, Animatable {
+    /// In `HomeMotion.space`.
+    var place: CGRect
+    var dark: Bool
+    /// How far the home light breathes (0 still, 1 fully); animates with it.
+    var breathing: Double
+    var animatableData: Double {
+        get { breathing }
+        set { breathing = newValue }
+    }
+
+    /// Three times the blur, so the blur leaves the place itself fully covered.
+    static let margin: CGFloat = 48, feather: CGFloat = 16
+
+    var body: some View {
+        if breathing > 0, !place.isEmpty {
+            GeometryReader { geometry in
+                let origin = geometry.frame(in: .named(HomeMotion.space)).origin
+                let top = place.minY - origin.y - Self.margin, height = place.height + 2 * Self.margin
+                ZStack {
+                    Tint.page
+                    LightMesh.chat.gradient(at: 0, drift: 0, dark: dark)
+                    LightMesh.home.gradient(at: 0, drift: 0, dark: dark)
+                        .opacity(1 - LightMesh.home.glow * breathing)
+                }
+                // Easing in and out with the breathing, so the page never shows the still light
+                // over a page that is sinking away or a light that is only starting to move.
+                .opacity(breathing)
+                .mask {
+                    Rectangle()
+                        .frame(width: geometry.size.width + 4 * Self.feather, height: height)
+                        .position(x: geometry.size.width / 2, y: top + height / 2)
+                        .blur(radius: Self.feather)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+/// `-pokiBackdropLog YES` writes each frame a moving mesh draws, with its drift, to Caches/backdrop.log:
+/// for checking in the simulator how often the light redraws and that it stops in the background,
+/// under another page and with Reduce Motion. Debug builds only.
+enum BackdropLog {
+    #if DEBUG
+    private static let on = UserDefaults.standard.bool(forKey: "pokiBackdropLog")
+    private static var lines: [String] = []
+    private static var flushed: TimeInterval = 0
+    static func note(_ period: Double, _ now: TimeInterval, _ drift: Double) {
+        guard on, drift > 0 else { return }
+        lines.append(String(format: "%.4f period %.1f drift %.3f", now, period, drift))
+        guard now - flushed > 0.5, let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        flushed = now
+        try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("backdrop.log"), atomically: true, encoding: .utf8)
+    }
+    #else
+    @inline(__always) static func note(_ period: Double, _ now: TimeInterval, _ drift: Double) {}
+    #endif
 }
 
 /// The design's soft falloff for its two lights: a Gaussian read off at these distances from the

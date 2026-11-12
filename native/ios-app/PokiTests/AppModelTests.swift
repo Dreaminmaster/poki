@@ -508,6 +508,31 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(failed.contains("owner did not enter the iPhone passcode"), failed)
         XCTAssertTrue(failed.contains("the owner turns Poki off and on"), failed)
     }
+
+    /// The owner's call (ESP-464): with Poki in front the automation stays open between tasks, so the
+    /// next task does not wait for it to open again. Away from Poki it stands by after the idle time
+    /// as before, counted from when Poki left the front.
+    func testPokiInFrontDoesNotStandByWhenIdle() async {
+        let saved = model.idleStopSeconds
+        model.idleStopSeconds = 1
+        defer {
+            model.idleStopSeconds = saved
+            // The open gate is shared: the next test starts with Poki in front again.
+            InProcessWDA.gate.withLock { $0.inFront = true }
+        }
+        model.wakeRunner()
+        try? await Task.sleep(nanoseconds: 1_300_000_000)
+        model.checkIdle()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertFalse(model.runnerPaused, "Poki in front does not stand by")
+        model.wentToBackground()
+        model.checkIdle()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(model.runnerPaused, "the idle time counts from leaving the front")
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        model.checkIdle()
+        await waitFor("standing by in the background after the idle time") { self.model.runnerPaused }
+    }
 }
 
 @MainActor
@@ -572,7 +597,7 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertTrue(model.sessionOn, "Pause stands by; it does not turn Poki off")
     }
 
-    /// ESP-340: the bear sleeps and the Hands switch reads "Resting" only after the owner's own pause.
+    /// ESP-340: the bear sleeps and the Hands switch reads "Paused" only after the owner's own pause.
     /// Standing by right after Turn On, or after the idle time, is not a pause: read from `runnerPaused`
     /// (what Pause and Resume go by), Poki looked asleep the moment it was turned on.
     func testOnlyTheOwnersPauseCountsAsResting() {

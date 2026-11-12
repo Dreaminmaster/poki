@@ -95,6 +95,10 @@ The settings rows in [native/ios-app/Poki/Settings/PokiSettingsKit.swift](native
 
 [native/ios-app/Poki/Chat/Marquee.swift](native/ios-app/Poki/Chat/Marquee.swift) takes two things from `MarqueeView.swift` in [nainamaharjan/MarqueeSwiftUI](https://github.com/nainamaharjan/MarqueeSwiftUI) (commit 0b877e64), MIT License, Copyright (c) 2024 nainamaharjan: the speed that eases toward its target by the time that passed since the last frame, and the content laid out several times with the position wrapping by one content's width. The drawing and the touch handling are a `UIScrollView` of our own.
 
+## iPhone app home light
+
+`PointMotion` in [native/ios-app/Poki/Chat/HomeBackdrop.swift](native/ios-app/Poki/Chat/HomeBackdrop.swift) is adapted from `PointAnimation` in `Sources/MeshingKit/AnimationPattern.swift` of [rryam/MeshingKit](https://github.com/rryam/MeshingKit/tree/1c519ac7369d055eef0c23fb5d4944b9ef910a3e) (commit 1c519ac7), MIT License, Copyright (c) 2024 Rudrank Riyam: a cosine offset per mesh point and axis, each at its own frequency, several of which add up on one point. Poki added a starting phase and scales the offset by how far the light drifts. The mesh, its colours and the timing are Poki's own.
+
 ## iPhone app model loop
 
 The chat's model loop (`native/ios-app/Poki/Chat/PiLoop.swift`) links two products of [xibbon/PiSwift](https://github.com/xibbon/PiSwift/tree/f8696524cf41ca0a7f42f5b230eafa443daececd) at commit `f869652`, a Swift port of Mario Zechner's pi-mono, copyright 2025 Mario Zechner, under the [MIT license](third_party/LICENSE.piswift): PiSwiftAgent (the agent loop) and PiSwiftAI (the model providers and the ChatGPT sign-in). They are a Swift package dependency, not copied files; PiSwift's own dependencies come with it through the package resolution: MacPaw/OpenAI and jamesrochabrun/SwiftAnthropic (MIT) and apple/swift-argument-parser (Apache-2.0).

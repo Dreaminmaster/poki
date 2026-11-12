@@ -126,6 +126,9 @@ struct ChatView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if voice.isOn { LiveVoiceBar(voice: voice).transition(.move(edge: .top).combined(with: .opacity)) }
         }
+        // The conversation passes under the top bar's floating controls through the system's soft
+        // edge, with no line under them (ESP-468).
+        .softTopEdge()
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
@@ -143,7 +146,7 @@ struct ChatView: View {
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
             .frame(maxWidth: 720) }
         }
-        .background { HomeBackdrop(home: home, working: busy, frozen: bare) }
+        .background { HomeBackdrop(home: home, working: busy, frozen: bare, still: heroFrame) }
         .overlay {
             BearFollow(hero: heroFrame) { hero in
                 BearFlight(progress: home ? 0 : 1, landed: !home, hero: hero, avatar: avatarFrame,
@@ -279,6 +282,11 @@ extension View {
         } else {
             safeAreaInset(edge: .top, spacing: 0) { bar() }
         }
+    }
+
+    /// The system's soft scroll edge at the top on iOS 26 and later; nothing before.
+    @ViewBuilder func softTopEdge() -> some View {
+        if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .top) } else { self }
     }
 
     /// Marks the bear Poki's profile zooms out of.
@@ -553,6 +561,16 @@ struct ChatTranscript<Footer: View>: View {
     /// wait until the page has changed (600 ms, ESP-376).
     private var opening: Bool { rise != nil && entries.count <= 2 }
 
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var follow = ChatFollow.newest
+    /// Where the bars over the conversation end: the top bar's controls, or the status bar.
+    @State private var topEdge: CGFloat = 0
+
+    /// Your newest message: when it changes you have just sent one.
+    private var lastSent: UUID? {
+        entries.last { if case .you = $0.kind { true } else { false } }?.id
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 4) {
@@ -579,13 +597,50 @@ struct ChatTranscript<Footer: View>: View {
             .animation(PlanMotion.enter, value: entries)
             .animation(.easeOut(duration: 0.2), value: typing)
         }
-        // Opens at the newest message and follows new lines (the live voice transcript grows below the
-        // messages) while the content itself scrolls freely; a short chat starts under the top bar, as
-        // the boards draw it (ESP-376). A frame fixed to the screen's height here cut off everything above it.
+        // Opens at the newest message; a short chat starts under the top bar, as the boards draw it
+        // (ESP-376). A frame fixed to the screen's height here cut off everything above it.
+        .scrollPosition($position)
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.top, for: .alignment)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        // At the newest message, every reply, step, card and keyboard keeps it in view; read back and
+        // nothing moves under you (ESP-468). The bottom anchor alone did neither: a new conversation,
+        // still shorter than the screen, stayed at its top while the keyboard and the approval card
+        // covered its task card, and a reader further up was dragged down by every reply.
+        .defaultScrollAnchor(follow == .reading ? nil : .bottom, for: .sizeChanges)
+        .onScrollGeometryChange(for: ChatFollow.Frame.self, of: ChatFollow.Frame.init) { old, new in
+            let next = follow.after(old, new)
+            follow = next.follow
+            if next.scroll { position.scrollTo(edge: .bottom) }
+        }
+        // Your finger stops the chat on its way down to the newest: from there on you are reading.
+        .onScrollPhaseChange { _, phase, context in
+            if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
+        }
+        .onChange(of: lastSent) { _, sent in
+            if sent != nil { toNewest(animated: false) }
+        }
+        // Messages fade out before they reach the top bar's picture, name and buttons, which have no
+        // ground of their own: under them the page shows, not a bubble cut in two.
+        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentInsets.top }) { _, top in topEdge = top }
+        .mask { TopFade(edge: topEdge).ignoresSafeArea() }
+        .overlay(alignment: .bottom) {
+            if follow == .reading {
+                NewestButton { toNewest(animated: true) }
+                    .padding(.bottom, 10)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: follow)
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func toNewest(animated: Bool) {
+        follow = .reaching
+        if animated {
+            withAnimation(.snappy(duration: 0.35)) { position.scrollTo(edge: .bottom) }
+        } else {
+            position.scrollTo(edge: .bottom)
+        }
     }
 
     @ViewBuilder private func row(_ entry: ChatEntry, at i: Int) -> some View {
@@ -700,6 +755,77 @@ struct ChatTranscript<Footer: View>: View {
             }
         }
         return false
+    }
+}
+
+/// Whether the conversation keeps its newest message in view, is on its way down to it, or you are
+/// reading further up.
+enum ChatFollow: Equatable {
+    case newest, reaching, reading
+
+    /// What of the scroll view's geometry decides it. The container is the part between the top bar
+    /// and the message field (with the keyboard and any card over it); the insets are those bars.
+    struct Frame: Equatable {
+        var offset: CGFloat
+        var top: CGFloat
+        var content: CGFloat
+        var visible: CGFloat
+
+        init(_ geometry: ScrollGeometry) {
+            offset = geometry.contentOffset.y
+            top = geometry.contentInsets.top
+            content = geometry.contentSize.height
+            visible = geometry.containerSize.height
+        }
+
+        /// The end of the conversation is within a few points of the message field.
+        var atEnd: Bool { offset + top + visible >= content - 24 }
+    }
+
+    /// After the geometry changed. What grew or shrank (a reply, a card, the keyboard) brings the newest
+    /// back into view unless you are reading; a scroll that leaves the end is yours, unless the chat
+    /// itself is on its way down.
+    func after(_ old: Frame, _ new: Frame) -> (follow: ChatFollow, scroll: Bool) {
+        if new.atEnd { return (.newest, false) }
+        let resized = old.content != new.content || old.visible != new.visible
+        switch self {
+        case .reading: return (.reading, false)
+        case .reaching: return (.reaching, resized)
+        case .newest: return resized ? (.reaching, true) : (.reading, false)
+        }
+    }
+}
+
+/// The conversation's mask: nothing above the bars' end but the last stretch, where it fades in, and
+/// all of it below.
+private struct TopFade: View {
+    var edge: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: max(0, edge - 26))
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 34)
+            Color.black
+        }
+    }
+}
+
+/// Back to the newest message, over the bottom of a conversation you have scrolled up in.
+private struct NewestButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color(.label))
+                .frame(width: 40, height: 40)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassSurface(in: Circle(), interactive: true)
+        .accessibilityLabel(Text("Newest Messages", tableName: "Chat"))
+        .accessibilityIdentifier("chat.latest")
     }
 }
 
@@ -1029,7 +1155,7 @@ struct ModeLabels: View {
 // the repository), with the plus button in front from exyte/Chat (commit f382a14,
 // Sources/ExyteChat/Views/InputView/InputView.swift, Copyright (c) 2019 exyte, MIT License). Now two
 // layers on one sheet of glass (ESP-326 board "01 Chat: Greeting"): the message on top with dictation
-// at its end; below it the plus menu, the model, the Hands switch, and one button that talks, sends or
+// at its end; below it the More menu, the model, the Hands switch, and one button that talks, sends or
 // stops.
 struct ComposerInputView: View {
     @Environment(AppModel.self) private var model
@@ -1070,7 +1196,7 @@ struct ComposerInputView: View {
             // One row on one glass sheet (ESP-376): More, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             HStack(alignment: .bottom, spacing: 10) {
-                plus
+                more
                 // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                 CapsuleField(text: $input, focused: $focused, maxLines: 6, onSubmit: submit)
                     .overlay(alignment: .topLeading) {
@@ -1119,8 +1245,9 @@ struct ComposerInputView: View {
 
     /// More: what the row itself has no room for. A new conversation and the conversations (also the
     /// top bar's two buttons), dictation, Poki's hands, the model that answers, and the way to the
-    /// accounts and to Poki's profile.
-    private var plus: some View {
+    /// accounts and to Poki's profile. Its button is the system's More (ESP-468): a plus reads as
+    /// adding a photo or a file, which this menu does not do.
+    private var more: some View {
         Menu {
             Button("New Conversation", systemImage: "square.and.pencil", action: newConversation).disabled(running)
             if let openThreads { Button("Conversations", systemImage: "line.3.horizontal", action: openThreads) }
@@ -1132,7 +1259,7 @@ struct ComposerInputView: View {
             Button("Accounts and Models", systemImage: "person.crop.circle", action: openModel)
             Button("Poki Details", systemImage: "gearshape", action: openDetails)
         } label: {
-            Image(systemName: "plus")
+            Image(systemName: "ellipsis")
                 .font(.title3.weight(.medium)).foregroundStyle(Color(.label))
                 .frame(width: 48, height: 48)
                 .background(Color(.label).opacity(scheme == .dark ? 0.12 : 0.06), in: .circle)
@@ -1196,7 +1323,7 @@ struct ComposerInputView: View {
         return Toggle(isOn: Binding(get: { state == .on }, set: setHands)) {
             switch state {
             case .on: Label("Automation On", systemImage: "hand.tap.fill")
-            case .resting: Label("Resting", systemImage: "moon.zzz.fill")
+            case .resting: Label("Paused", systemImage: "moon.zzz.fill")
             case .off: Label("Off", systemImage: "power")
             }
         }
