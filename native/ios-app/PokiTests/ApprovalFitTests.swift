@@ -298,6 +298,9 @@ final class ApprovalFitTests: XCTestCase {
             UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 39, height: 84))
         } : nil
         let approval = Self.approval(cell.batch, sentence: cell.sentence)
+        // A screenshot left in the shared container (by the debug screen's demo) would stand in every
+        // card: a cell without one could not be measured.
+        XCTAssertEqual(Thumbnail.picture != nil, cell.shot, "a screenshot file is in the shared container; remove it to measure")
         var state = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: cell.shot ? 1 : 0)
         state.approval = approval
         state.app = "Lunch"
@@ -327,7 +330,13 @@ final class ApprovalFitTests: XCTestCase {
         let fitted = host.sizeThatFits(in: proposed)
         let size = CGSize(width: cell.surface == .compact ? min(natural.width, proposed.width) : proposed.width,
                           height: min(fitted.height, proposed.height))
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first!
+        // On a simulator's first launch the app's scene connects a moment after the tests start.
+        var scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        for _ in 0..<100 where scene == nil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        }
+        guard let scene else { XCTFail("the app has no window scene"); return ([], .zero, 0) }
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: max(size.width, 1), height: max(size.height, 1) + 400)
         window.windowLevel = .alert + 1
@@ -337,14 +346,14 @@ final class ApprovalFitTests: XCTestCase {
         host.view.layoutIfNeeded()
         var seen: [Seen] = []
         // The elements take their frames once SwiftUI has committed the layout, and a scroll view's
-        // a turn or two later: collected until the same elements come back twice with their frames.
+        // a turn or two later: collected until the same elements come back twice, with frames.
         var previous: [String] = []
         for _ in 0..<20 {
             seen = []
             var visited = Set<ObjectIdentifier>()
             collect(host.view, into: &seen, in: host.view, visited: &visited)
-            let labels = seen.map { "\($0.label)\($0.frame)" }
-            if !seen.isEmpty, labels == previous, !seen.contains(where: { $0.frame.isEmpty }) { break }
+            let labels = seen.map(\.label)
+            if labels == previous, seen.contains(where: { !$0.frame.isEmpty }) { break }
             previous = labels
             RunLoop.main.run(until: Date().addingTimeInterval(0.005))
         }
