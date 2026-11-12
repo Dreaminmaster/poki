@@ -291,26 +291,11 @@ struct ChatTopBar: View {
     var openUpdates: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Poki's state after its name, in a few words without the name again (the status words from
-    /// ESP-467 on say "Poki's asleep"); none while it says hello.
+    /// Poki's state after its name: the bear's own status words (PokiMood.word, through
+    /// PokiStatusCopy) without the name they start with ("Poki’s asleep" reads "Asleep" here); none
+    /// while it says hello.
     private var state: String? {
-        let word: String? = switch status.mood {
-        case .ready: String(localized: "Ready", table: "Chat")
-        case .thinking: String(localized: "Thinking", table: "Chat")
-        case .onYourPhone: String(localized: "On it", table: "Chat")
-        case .checking: String(localized: "Checking this step", table: "Chat")
-        case .needsYou: String(localized: "Needs you", table: "Chat")
-        case .yourTurn: String(localized: "Needs a hand", table: "Chat")
-        case .done: String(localized: "Done", table: "Chat")
-        case .tripped: String(localized: "Hit a snag", table: "Chat")
-        // Turned off says so in its own word; the owner's pause is sleep.
-        case .paused: status.word == status.mood.word ? String(localized: "Asleep", table: "Chat") : String(localized: "Off", table: "Chat")
-        case .cantReach: String(localized: "Can’t reach the phone", table: "Chat")
-        case .listening: String(localized: "Listening", table: "Chat")
-        case .speaking: String(localized: "Talking", table: "Chat")
-        case .hello: nil
-        }
-        return word
+        status.mood == .hello ? nil : PokiStatusCopy.word(status, besideName: true)
     }
 
     var body: some View {
