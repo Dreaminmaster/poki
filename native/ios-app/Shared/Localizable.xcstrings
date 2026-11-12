@@ -2193,22 +2193,6 @@
         }
       }
     },
-    "The local connection is not responding on cellular. Connect to Wi-Fi, reconnect it in Setup, then try again. A running automation session may continue on cellular. Starting again or renewing Poki may still need Wi-Fi." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "蜂窝网络下，本机连接未响应。请连接 Wi-Fi，在设置向导中重新连接后重试。正在运行的自动化会话可能继续使用蜂窝网络；重新启动或续签 Poki 仍可能需要 Wi-Fi。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "行動網路下，本機連線未回應。請連接 Wi-Fi，在設定精靈中重新連線後再試。正在執行的自動化工作階段可能繼續使用行動網路；重新啟動或續簽 Poki 仍可能需要 Wi-Fi。"
-          }
-        }
-      }
-    },
     "Connect to Wi-Fi first" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4736,6 +4720,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機 VPN 已連線。上方的檢查會確認開發者服務能否訪問。"
+          }
+        }
+      }
+    },
+    "Local automation ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机自动化可用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機自動化可用"
           }
         }
       }
@@ -10953,6 +10953,22 @@
       },
       "extractionState" : "manual"
     },
+    "The network loopback is unavailable." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络回环当前不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網路迴環目前無法使用。"
+          }
+        }
+      }
+    },
     "The pairing link carried no file." : {
       "localizations" : {
         "zh-Hans" : {
@@ -11432,6 +11448,22 @@
         }
       }
     },
+    "This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "蜂窝网络下，此 iPhone 在 10.7.0.1 没有应答。开发者磁盘映像仍已装载时，新任务无需回环也能开始；续签、更新和装载映像需要 Wi-Fi。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行動網路下，此 iPhone 在 10.7.0.1 沒有應答。開發者磁碟映像仍已裝載時，新任務無需迴環也能開始；續簽、更新和裝載映像需要 Wi-Fi。"
+          }
+        }
+      }
+    },
     "This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup." : {
       "localizations" : {
         "zh-Hans" : {
@@ -11460,6 +11492,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 iPhone 已可供 Poki 使用"
+          }
+        }
+      }
+    },
+    "This step needs Wi-Fi. Connect and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这一步需要 Wi-Fi，连上后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這一步需要 Wi-Fi，連上後再試。"
           }
         }
       }

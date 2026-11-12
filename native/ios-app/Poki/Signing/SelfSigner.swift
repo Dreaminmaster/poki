@@ -81,6 +81,8 @@ final class SelfSigner {
 
     /// The phone's own services (10.7.0.1 and the pairing file), when the loopback answers.
     var phone: () -> [String: Any]? = { nil }
+    /// The phone has only cellular, where the loopback the signer needs does not answer (ESP-448).
+    var cellularOnly: () -> Bool = { false }
     /// No task is running, so Poki may be ended by an install.
     var isIdle: () -> Bool = { false }
     /// Why an install waits, for the message under the button.
@@ -112,7 +114,7 @@ final class SelfSigner {
     var updateBlocker: String? {
         guard updateNotReady else { return nil }
         if !signedIn { return String(localized: "To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac.") }
-        if phone() == nil { return String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.") }
+        if phone() == nil { return unreachable }
         return nil
     }
     var channelTitle: String { status?.channels.first { $0.id == status?.channel }?.title ?? status?.channel ?? "" }
@@ -274,7 +276,7 @@ final class SelfSigner {
 
     func prepare(kind: String) async {
         guard var request = phone() else {
-            lastError = String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.")
+            lastError = unreachable
             return
         }
         request["op"] = "prepare"
@@ -303,7 +305,7 @@ final class SelfSigner {
             return
         }
         guard var request = phone() else {
-            lastError = String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.")
+            lastError = unreachable
             log.add("signing", "install: no loopback or pairing file")
             return
         }
@@ -341,13 +343,18 @@ final class SelfSigner {
 
     // MARK: Helpers
 
+    private var unreachable: String {
+        cellularOnly() ? LoopbackMonitor.needsWiFi : String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.")
+    }
+
     private func run(_ title: String?, _ work: () async throws -> Void) async {
         working = title
         fraction = nil
         lastError = nil
         defer { working = nil; fraction = nil }
         do { try await work() } catch {
-            lastError = error.localizedDescription
+            let code = (error as? SignerError)?.code ?? ""
+            lastError = cellularOnly() && ["loopback", "handshake", "unreachable"].contains(code) ? LoopbackMonitor.needsWiFi : error.localizedDescription
             log.add("signing", "\(title ?? "signer"): \(error.localizedDescription)")
         }
     }

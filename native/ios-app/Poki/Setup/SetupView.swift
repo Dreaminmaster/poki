@@ -51,10 +51,11 @@ struct SetupView: View {
         .onChange(of: checkedByPhone) { was, now in
             if !was, now, step != .loopback { advanceSoon() }
         }
-        // The loopback moves on when it comes on while this page is open, and when the first check after
-        // opening finds it already on (a proxy app set up before Poki: the page opened on `checking`).
-        .onChange(of: model.loopback.state) { was, now in
-            if step == .loopback, !was.isWorking, model.loopback.isWorking { advanceSoon() }
+        // The loopback moves on when it comes on while this page is open, when the first check after
+        // opening finds it already on (a proxy app set up before Poki: the page opened on `checking`),
+        // and when Poki's own session opens without it (ESP-448).
+        .onChange(of: model.isDone(.loopback)) { was, now in
+            if step == .loopback, !was, now { advanceSoon() }
         }
         .onAppear { model.loopback.resume(); reconnectBuiltIn() }
         .onChange(of: step) { _, now in if now == .loopback { reconnectBuiltIn() } }
@@ -281,19 +282,25 @@ private struct LoopbackPage: View {
 
     var body: some View {
         let monitor = model.loopback
+        let localReady = model.hasOpenInProcessSession && !monitor.isWorking
+        let detail: LocalizedStringKey = monitor.isWorking || monitor.state == .noAnswer ? LocalizedStringKey(monitor.detail) : "Checking 10.7.0.1 every few seconds…"
         Section {
             LabeledContent {
-                if monitor.state == .checking { ProgressView() }
+                if monitor.state == .checking && !localReady { ProgressView() }
             } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(headline(monitor))
-                        Text(monitor.isWorking || monitor.state == .noAnswer ? LocalizedStringKey(monitor.detail) : "Checking 10.7.0.1 every few seconds…")
+                        Text(localReady ? "Local automation ready" : headline(monitor))
+                        Text(localReady && monitor.state != .checking ? "The network loopback is unavailable." : detail)
                             .font(.footnote).foregroundStyle(Color(.secondaryLabel))
                     }
                 } icon: {
-                    Image(systemName: monitor.isWorking ? "checkmark.circle.fill" : monitor.state == .noAnswer ? "exclamationmark.triangle.fill" : "circle.dashed")
-                        .foregroundStyle(monitor.isWorking ? Color.green : monitor.state == .noAnswer ? Color.orange : Color.secondary)
+                    if localReady {
+                        Image(systemName: "iphone").foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: monitor.isWorking ? "checkmark.circle.fill" : monitor.state == .noAnswer ? "exclamationmark.triangle.fill" : "circle.dashed")
+                            .foregroundStyle(monitor.isWorking ? Color.green : monitor.state == .noAnswer ? Color.orange : Color.secondary)
+                    }
                 }
             }
         } header: {
@@ -313,7 +320,7 @@ private struct LoopbackPage: View {
         } header: {
             Text("Use Your Proxy App")
         } footer: {
-            if let chosen = model.setup.proxyApp, !monitor.isWorking, model.setup.loopback == .proxy {
+            if let chosen = model.setup.proxyApp, !monitor.isWorking, !localReady, model.setup.loopback == .proxy {
                 let name = ProxyApps.all.first { $0.id == chosen }?.name ?? "LocalDevVPN"
                 Text("\(name) is chosen, but nothing answers at 10.7.0.1 right now. Open \(name), make sure it is connected with the loopback on, then come back; this page updates by itself.")
             }
@@ -697,7 +704,9 @@ struct SetupStepRow: View {
     var body: some View {
         let done = model.isDone(step)
         LabeledContent {
-            if done {
+            if step == .loopback && !model.loopback.isWorking && model.hasOpenInProcessSession {
+                Text("Local automation ready").foregroundStyle(.secondary)
+            } else if done {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel(Text("Done"))
             } else {
                 Text(problem).foregroundStyle(.orange)

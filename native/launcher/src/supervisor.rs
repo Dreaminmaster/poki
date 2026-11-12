@@ -6,6 +6,7 @@ use crate::{
     ddi,
     device::{DDI_TIMEOUT_FIX, Device, Failure, LOOPBACK_FIX, NETWORK_FIX, Pairing},
     launch,
+    remote::Stage,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -198,6 +199,17 @@ impl Launcher {
         launch::end(&mut device).await.map_err(|e| e.to_string())
     }
 
+    /// The image is mounted and the app opens its own session: running until a restart or stop.
+    async fn hold_in_process(me: &Self, attempt: u32, status: Value, commands: &mut watch::Receiver<Command>) -> Result<(), Failure> {
+        me.set("running", attempt, status);
+        while commands.changed().await.is_ok() {
+            if *commands.borrow_and_update() != Command::Run {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     /// One launch and the watch over it. Ok when a running runner later stopped answering.
     async fn once(me: std::sync::Arc<Self>, attempt: u32, commands: &mut watch::Receiver<Command>) -> Result<(), Failure> {
         let config = me.config.clone();
@@ -205,7 +217,16 @@ impl Launcher {
         let mut pairing = Pairing::read(&config.pairing_file, config.host_name.as_deref())?;
         let kind = pairing.kind().name();
         me.set("pairing", attempt, json!({"pairing": kind}));
-        let mut device = Device::open(config.device_address, &mut pairing, Duration::from_secs(20)).await?;
+        let mut device = match Device::open(config.device_address, &mut pairing, Duration::from_secs(20)).await {
+            Ok(device) => device,
+            // On cellular the loopback can refuse the connection (GitHub issue 35) while the image
+            // mounted earlier is still there: the app's own session needs neither. It is ready only
+            // once that session opens, and nothing here checked the pairing.
+            Err(failure) if config.in_process && failure.remote_stage == Some(Stage::Connect) && (me.mounted_locally)() => {
+                return Self::hold_in_process(&me, attempt, json!({"runner": "in-process", "code": "local_ddi"}), commands).await;
+            }
+            Err(failure) => return Err(failure),
+        };
         if !ddi::mounted(&device) {
             me.set("mounting_ddi", attempt, json!({"pairing": kind}));
             // Apple's signing server and a ~20 MB upload: bounded, so a stalled network cannot hold
@@ -233,15 +254,7 @@ impl Launcher {
         let ios = device.ios_version().await.unwrap_or_default();
         if config.in_process {
             drop(device);
-            me.set("running", attempt, json!({"pairing": kind, "ios": ios, "runner": "in-process"}));
-            loop {
-                if commands.changed().await.is_err() {
-                    return Ok(());
-                }
-                if *commands.borrow_and_update() != Command::Run {
-                    return Ok(());
-                }
-            }
+            return Self::hold_in_process(&me, attempt, json!({"pairing": kind, "ios": ios, "runner": "in-process"}), commands).await;
         }
         me.set("launching", attempt, json!({"pairing": kind, "ios": ios}));
         let bundle = launch::find_runner(&mut device, config.runner_bundle.as_deref()).await?;

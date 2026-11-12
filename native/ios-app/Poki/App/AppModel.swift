@@ -202,6 +202,7 @@ final class AppModel {
             return ["device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki"]
         }
         signer.isIdle = { [weak self] in self?.signingIdle ?? false }
+        signer.cellularOnly = { [weak self] in self?.loopback.cellularOnly ?? false }
         signer.busyReason = { [weak self] in self?.signingBusyReason }
         signer.beforeInstall = { [weak self] in self?.windDownForUpdate() }
         signer.start()
@@ -357,9 +358,16 @@ final class AppModel {
 
     /// The in-process session as prepare last answered it in this process (ESP-152).
     private var inProcessSession = InProcessSession.opening
+    /// Automation works through Poki's own session, whether or not the loopback answers (ESP-448).
+    var hasOpenInProcessSession: Bool {
+        automationPath == .inProcess && sessionOn && inProcessSession == .open
+    }
     /// Poki's own automation session (ESP-152); a fake in tests.
     private let automation: InProcessAutomation
     private var inProcessWarming = false
+    private var inProcessOpensInFlight = 0
+    /// A failed local open went back to the loopback once since it last answered.
+    private var retriedLocalDDIOnLoopback = false
     /// iOS is asking the owner for the passcode to allow automation (in-process): an open has not
     /// answered in 5 s. The Live Activity and Poki's home ask the owner, and the agent reads that the
     /// owner has to enter it.
@@ -386,6 +394,8 @@ final class AppModel {
         // its answer is not taken (it would show .open, or keep .opening for good).
         inProcessEpoch += 1
         inProcessWarming = false
+        inProcessOpensInFlight = 0
+        retriedLocalDDIOnLoopback = false
         endPasscodeWait(opened: false)
         DispatchQueue.global(qos: .userInitiated).async { [automation] in
             let result = automation.close()
@@ -435,6 +445,7 @@ final class AppModel {
             log.add("runner", "the in-process open under way has not answered in \(Int(Self.staleOpen)) s: asking again for \(why)")
         }
         inProcessWarming = true
+        inProcessOpensInFlight += 1
         inProcessWarmStarted = Date()
         inProcessWarmToken += 1
         let epoch = inProcessEpoch, token = inProcessWarmToken
@@ -453,7 +464,13 @@ final class AppModel {
                 // Only the latest open's answer clears the flag (a stale one was asked again meanwhile).
                 let ok = (result["ok"] as? Bool) == true
                 // A stale open's failure does not undo what a newer one is doing.
-                guard token == self.inProcessWarmToken || ok else { return }
+                let accepted = token == self.inProcessWarmToken || ok
+                self.inProcessOpensInFlight -= 1
+                defer {
+                    let retrying = self.retryLocalDDIOverLoopbackIfNeeded()
+                    if self.sessionOn, accepted || retrying { self.host.update(runner: self.coreState(of: self.runner)) }
+                }
+                guard accepted else { return }
                 if token == self.inProcessWarmToken { self.inProcessWarming = false }
                 let waitedForPasscode = self.inProcessPasscode
                 self.endPasscodeWait(opened: ok)
@@ -461,7 +478,16 @@ final class AppModel {
                 let warm = (result["warm_seconds"] as? Double).map { $0 > 0 ? String(format: ", first snapshot and screenshot %.2f s", $0) : "" } ?? ""
                 self.log.add("runner", ok ? "in-process session ready for \(why) (generation \(result["generation"] ?? 0), \((result["reused"] as? Bool) == true ? "already open" : "opened"), \(seconds) s\(warm))"
                                           : "in-process session not ready for \(why): \(result["code"] ?? "unknown") after \(seconds) s")
-                if ok { self.automationStarted() }
+                if ok {
+                    self.automationStarted()
+                    // An open session proves both, also when the launcher only found the image mounted.
+                    if !self.setup.developerMode || !self.setup.uiAutomation {
+                        var confirmed = self.setup
+                        confirmed.developerMode = true
+                        confirmed.uiAutomation = true
+                        self.setup = confirmed
+                    }
+                }
                 let detail = result["detail"] as? String ?? ""
                 // iOS gives up on the passcode after a minute and says only that enabling timed out.
                 let passcodeMissed = waitedForPasscode || detail.localizedCaseInsensitiveContains("enabling automation mode")
@@ -471,9 +497,24 @@ final class AppModel {
                     self.log.add("runner", "the passcode for automation was not entered: Poki will not ask again until it is turned on again")
                 }
                 self.inProcessSession = ok ? .open : passcodeMissed ? .passcodeMissed : .failed(code: "\(result["code"] ?? "unknown")", detail: detail)
-                if self.sessionOn { self.host.update(runner: self.coreState(of: self.runner)) }
             }
         }
+    }
+
+    /// A local open failed after the launcher found only the mounted image: once the loopback answers,
+    /// the launcher goes the normal way, once until the loopback drops and comes back.
+    private func retryLocalDDIOverLoopbackIfNeeded() -> Bool {
+        guard automationPath == .inProcess, sessionOn, !runnerPaused, runner.isRunning, runner.code == "local_ddi",
+              loopback.isWorking, inProcessOpensInFlight == 0, !retriedLocalDDIOnLoopback,
+              !InProcessWDA.automationDeclined, case .failed(let code, _) = inProcessSession,
+              code != "open_poki_first", code != "open_under_way" else { return false }
+        retriedLocalDDIOnLoopback = true
+        // No agent wakes the old local state before the launcher reports again.
+        runner = RunnerStatus(state: "connecting")
+        inProcessSession = .opening
+        log.add("runner", "the local automation session did not open; trying again over the loopback")
+        launcher.restart()
+        return true
     }
 
     /// An open has taken over 5 s: iOS is asking for the passcode before it allows automation (after
@@ -684,9 +725,12 @@ final class AppModel {
     /// not be checked now: the loopback is down, or the simulator).
     /// A lockdown pairing record (from a computer: HostID, certificates), not an RPPairing file.
     static func isLockdownRecord(_ path: String) -> Bool {
-        guard let data = FileManager.default.contents(atPath: path),
-              let dict = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else { return false }
-        return dict["HostID"] != nil
+        pairingRecord(at: path)?["HostID"] != nil
+    }
+
+    private static func pairingRecord(at path: String) -> [String: Any]? {
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     }
 
     /// The way to the phone's developer services when a check or the runner fails, for the log:
@@ -1091,13 +1135,18 @@ final class AppModel {
             log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
         }
         if wasWorking, !loopback.isWorking {
+            retriedLocalDDIOnLoopback = false
             log.add("loopback", "dropped: 10.7.0.1 stopped answering (\(loopback.state)); the runner cannot survive this")
         } else if !wasWorking, loopback.isWorking, old != .checking {
             log.add("loopback", "back: 10.7.0.1 answers again" + (sessionOn && !runner.isRunning && !runnerPaused ? "; starting the runner now" : ""))
             if sessionOn, !runner.isRunning, !runnerPaused { launcher.restart() }
         }
-        // The loopback answers: check the pairing now, before anything needs it.
-        if !wasWorking, loopback.isWorking { Task { await verifyPairing() } }
+        // The loopback answers: a failed local open goes the normal way, and the pairing is checked
+        // now, before anything needs it.
+        if !wasWorking, loopback.isWorking {
+            _ = retryLocalDDIOverLoopbackIfNeeded()
+            Task { await verifyPairing() }
+        }
         // The signer's check at launch ran before the loopback was up and skipped the download: it
         // looks again now that it can reach the phone.
         if !wasWorking, loopback.isWorking { signer.maintain() }
@@ -1118,7 +1167,9 @@ final class AppModel {
         if preLaunch, !loopback.isWorking, loopback.state != .checking || status.state == "waiting_network" {
             if loopback.cellularRefused {
                 let since = loopback.droppedAt.map { " since \(Self.clock.string(from: $0))" } ?? ""
-                return .starting("waiting for the local developer connection\(since): neither developer port answered while the phone had only cellular. Ask the owner to connect to Wi-Fi, reconnect the local connection in Setup, and try again. This check does not identify whether iOS or the VPN refused the connection. An existing automation session may keep working on cellular; a new connection for automation or renewal may still fail")
+                return .starting(cellularNeedsWiFi
+                    ? "waiting for the local developer connection\(since): the phone has only cellular, and the developer disk image is not mounted. Mounting it (once after each iPhone restart) needs Wi-Fi. Ask the owner to connect to Wi-Fi; Poki carries on by itself"
+                    : "the phone has only cellular\(since): Poki is opening its own automation session on the mounted developer disk image. Call again in about 10 s; nothing is lost and no action is needed from you")
             }
             return .waitingForLoopback(since: loopback.droppedAt.map(Self.clock.string(from:)),
                                        tunnelWithoutAnswer: loopback.state == .noAnswer,
@@ -1133,6 +1184,10 @@ final class AppModel {
         // Events from a launcher that was stopped for idle are old news.
         guard !runnerPaused else { return }
         switch status.state {
+        case "running" where status.code == "local_ddi":
+            // Only the mounted image was found: nothing reached the phone, so the pairing and the
+            // setup steps stay as they were until the session opens (warmInProcess).
+            log.add("runner", "the loopback did not answer; using the mounted developer disk image")
         case "launching", "running":
             // The phone accepted the pairing.
             if pairingTrouble != nil { log.add("pairing", "accepted again") }
@@ -1616,7 +1671,8 @@ final class AppModel {
         case .developerMode: setup.developerMode
         // A loopback that answers is the step done, whichever app provides it: one set up before Poki
         // (or by Poki Setup on a computer) has no row tapped here, and `loopbackChanged` records it.
-        case .loopback: loopback.isWorking
+        // Poki's own session open on the mounted image does the step's job without it (ESP-448).
+        case .loopback: loopback.isWorking || hasOpenInProcessSession
         // The disk image downloads by itself (and is checked again when Poki turns on): it does not hold the step open.
         case .pairing: pairingPath != nil && pairingTrouble == nil
         case .automation: setup.uiAutomation
@@ -1640,6 +1696,31 @@ final class AppModel {
     /// not a step left for the owner.
     var setupStepsLeft: Bool {
         SetupStep.shown.contains { $0 == .loopback ? setup.loopback == .none : !isDone($0) }
+    }
+
+    /// Home offers Start although the loopback is not answering: the image is mounted and the
+    /// pairing is Poki's own, so a new task can open Poki's session on cellular (ESP-448).
+    var canStartFromHome: Bool { canStartFromHome(localDDIAvailable: diskImage.isReady && Self.localDDIMounted) }
+
+    func canStartFromHome(localDDIAvailable: @autoclosure () -> Bool) -> Bool {
+        if setupLooksComplete { return true }
+        guard automationPath == .inProcess, setup.loopback != .none, !setupStepsLeft,
+              let pairingPath, let record = Self.pairingRecord(at: pairingPath),
+              record["identifier"] is String,
+              (record["public_key"] as? Data)?.count == 32,
+              (record["private_key"] as? Data)?.count == 32 else { return false }
+        return localDDIAvailable()
+    }
+
+    /// The developer disk image is mounted, as the launcher's `ddi::mounted_locally` checks it.
+    static var localDDIMounted: Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: "/System/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation", isDirectory: &isDirectory) && !isDirectory.boolValue
+    }
+
+    /// On cellular a new task can still start on the mounted image; otherwise it waits for Wi-Fi.
+    var cellularNeedsWiFi: Bool {
+        loopback.cellularRefused && !hasOpenInProcessSession && !(automationPath == .inProcess && Self.localDDIMounted)
     }
 
     var activityProblem: String? { activity.lastError }

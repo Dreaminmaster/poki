@@ -135,7 +135,9 @@ final class LoopbackMonitor {
     }
     #endif
 
-    static var cellularHint: String { String(localized: "The local connection is not responding on cellular. Connect to Wi-Fi, reconnect it in Setup, then try again. A running automation session may continue on cellular. Starting again or renewing Poki may still need Wi-Fi.") }
+    static var cellularHint: String { String(localized: "This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi.") }
+    /// Renewing, updating and the first mount of the disk image go through the loopback (ESP-448).
+    static var needsWiFi: String { String(localized: "This step needs Wi-Fi. Connect and try again.") }
 
     var text: String {
         switch state {

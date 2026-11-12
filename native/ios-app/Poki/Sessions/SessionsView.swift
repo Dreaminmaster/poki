@@ -22,6 +22,8 @@ struct SessionsView: View {
     private var store: SessionStore { SessionStore.shared }
 
     var body: some View {
+        let canStart = model.canStartFromHome
+        let setupLeft = canStart ? 0 : SetupStep.shown.filter { !model.looksDone($0) }.count
         List {
             // What matters before any conversation: whether Poki is on, whether agents can reach it,
             // and what setup still needs.
@@ -118,7 +120,7 @@ struct SessionsView: View {
         .toolbar {
             HomeBrand()
             ToolbarItem(placement: .topBarTrailing) {
-                PowerButton(state: !model.setupLooksComplete ? .paused : model.sessionOn ? .ready : .stopped,
+                PowerButton(state: .init(sessionOn: model.sessionOn, canStart: canStart),
                             turnOn: { model.startSession() }, turnOff: { chat.stop(); model.stopSession() }, openSetup: openSetup)
             }
         }
@@ -170,7 +172,6 @@ struct SessionsView: View {
 
     private var needsSetup: Bool { model.pairingPath == nil || model.setupStepsLeft }
 
-    private var setupLeft: Int { model.setupLooksComplete ? 0 : SetupStep.shown.filter { !model.looksDone($0) }.count }
 
     /// What the Agents tab needs, if anything (the same test as its tab bar dot).
     private var agentsIssue: String? {
@@ -258,7 +259,14 @@ struct HomeBrand: ToolbarContent {
 /// (red, off; a tap turns it on), Paused (orange, a setup item is open; a tap opens Setup). Words as
 /// well as colours, so the state reads without colour. A haptic for each turn.
 struct PowerButton: View {
-    enum Status { case ready, stopped, paused }
+    enum Status: Equatable {
+        case ready, stopped, paused
+
+        /// Poki that is on can always be turned off; off, it starts when it can, or opens Setup.
+        init(sessionOn: Bool, canStart: Bool) {
+            self = sessionOn ? .ready : canStart ? .stopped : .paused
+        }
+    }
     var state: Status
     var turnOn: () -> Void
     var turnOff: () -> Void

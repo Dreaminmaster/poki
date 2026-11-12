@@ -87,29 +87,34 @@ Internet access, the local developer connection, and an automation session are s
 A VPN reporting Connected does not prove that either developer port accepts a connection.
 A TCP connection does not prove that RemotePairing, its dynamic tunnel listener, or RSD works.
 
-The current 0.3.1 product code uses the in-process XCTest session by default. Its launcher still
-opens the local developer connection before checking the developer image. A running session can
-outlive that connection, but a fresh launch can fail before it reaches the local XCTest service.
+The current product code uses the in-process XCTest session by default. Its launcher first opens
+the local developer connection, then checks the developer image. When that connection fails at TCP
+connect and the image is already mounted on the phone, the launcher reports `running` with code
+`local_ddi` instead of waiting for the network. The app then opens its own XCTest session, which
+needs no loopback. Automation counts as ready only after that session opens. The hand-over does not
+check the pairing, so it does not update the pairing state. The signer still needs the loopback.
+If the local open fails, the launcher tries the normal path once when the loopback answers again.
+That return also checks the pairing and lets the signer retry, as before.
+
+These steps still need the loopback, so on cellular they show "This step needs Wi-Fi. Connect and
+try again.":
+
+- Preparing a renewal or an update.
+- Installing a prepared build.
+- Mounting the developer image for the first time after the phone restarts.
+
 The preserved `dev/esp-409-preserve-030` branch has a different design. It includes
-`AutomationChooser`, native services, and a mounted-image fallback. Its chooser excludes new native
-tunnels when `cellularOnly` is true, even if the loopback probe answers. Those features are not
+`AutomationChooser`, native services, and its own mounted-image fallback. Those features are not
 present in the current product code.
 
-Two open contributions cover different automation cases:
-
-- [PR #91](https://github.com/JosssphZhou/poki/pull/91) tries local XCTest after a RemotePairing TCP
-  connect failure when the developer image is already mounted. It also lets Home start that path.
-  [Its field report](https://github.com/JosssphZhou/poki/issues/35#issuecomment-6735040996) includes
-  a configured iPhone using cellular with no working loopback. This does not prove first-time
-  image preparation or renewal works on cellular.
-- [PR #84](https://github.com/JosssphZhou/poki/pull/84) retains an automation session through idle
-  and adds explicit owner pause/resume behavior. It also changes relay reconnection handling.
-  It needs a prepared session and does not make an unavailable developer endpoint reachable.
-
-Both contributions require integration with the current branch and physical-device validation.
-When integrating #91, retain pairing verification and the signer's retry when loopback returns.
-When integrating #84, retain first-open passcode consent and explicit owner pause behavior.
-Do not use automation readiness as proof that pairing or renewal is ready.
+The local fallback adapts [PR #91](https://github.com/JosssphZhou/poki/pull/91) by Zeno6898.
+[Its field report](https://github.com/JosssphZhou/poki/issues/35#issuecomment-6735040996) shows a
+configured iPhone using cellular with no working loopback. That report covers an older build, so
+the integrated build needs its own device check. [PR #84](https://github.com/JosssphZhou/poki/pull/84)
+retains an automation session through idle and adds owner pause and resume. It needs a prepared
+session and does not make an unavailable developer endpoint reachable. When integrating #84, keep
+first-open passcode consent and explicit owner pause behavior. Do not use automation readiness as
+proof that pairing or renewal is ready.
 
 [Earlier Shadowrocket measurements](https://github.com/JosssphZhou/poki/issues/35#issuecomment-6705290849)
 stopped at TCP connect on cellular. They also found a route to 10.7.0.1 after switching networks.
