@@ -8,6 +8,12 @@ struct CapsuleField: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     var maxLines = 6
+    /// Whether the message is scrolled away from its first line, for a swipe down on the field: that
+    /// swipe scrolls the message back, it does not put the keyboard away.
+    var scroll: CapsuleScroll? = nil
+    /// An upright swipe on the field itself, true for up. The text view's own drag wins over a SwiftUI
+    /// gesture around it while it has the keyboard, so the field reads the swipe itself as well.
+    var onSwipe: ((Bool) -> Void)? = nil
     /// Return: the keyboard's Send key, as on the current field.
     var onSubmit: () -> Void
 
@@ -27,6 +33,10 @@ struct CapsuleField: UIViewRepresentable {
         view.accessibilityIdentifier = "capsule.field"
         view.accessibilityLabel = String(localized: "Message Poki")
         view.setPlain(text)
+        let swipe = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.swiped(_:)))
+        swipe.delegate = context.coordinator
+        swipe.cancelsTouchesInView = false
+        view.addGestureRecognizer(swipe)
         return view
     }
 
@@ -52,8 +62,10 @@ struct CapsuleField: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         var parent: CapsuleField
+        /// The message was scrolled away from its first line when the swipe began.
+        private var startedScrolled = false
 
         init(parent: CapsuleField) { self.parent = parent }
 
@@ -73,9 +85,41 @@ struct CapsuleField: UIViewRepresentable {
             if parent.text != view.plainText { parent.text = view.plainText }
         }
 
+        @objc func swiped(_ pan: UIPanGestureRecognizer) {
+            guard let view = pan.view as? UITextView else { return }
+            switch pan.state {
+            case .began: startedScrolled = Self.scrolledDown(view)
+            case .ended:
+                let (move, speed) = (pan.translation(in: view), pan.velocity(in: view))
+                guard abs(move.y) > abs(move.x) * 1.5 else { return }
+                if move.y < -24 || speed.y < -600 { parent.onSwipe?(true) }
+                if move.y > 24 || speed.y > 600, !startedScrolled { parent.onSwipe?(false) }
+            default: break
+            }
+        }
+
+        /// Alongside the text view's own scrolling and selection.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            parent.scroll?.scrolledDown = Self.scrolledDown(scrollView)
+        }
+
+        /// Away from the first line of a message taller than the field. A message that fits can sit a
+        /// few points off (the caret's line brought into view), and that is not scrolled.
+        private static func scrolledDown(_ view: UIScrollView) -> Bool {
+            view.contentSize.height > view.bounds.height + 1 && view.contentOffset.y + view.adjustedContentInset.top > 1
+        }
+
         func textViewDidBeginEditing(_ textView: UITextView) { if !parent.focused { parent.focused = true } }
         func textViewDidEndEditing(_ textView: UITextView) { if parent.focused { parent.focused = false } }
     }
+}
+
+/// Where the message field is scrolled, read when a swipe on the field starts.
+final class CapsuleScroll {
+    var scrolledDown = false
 }
 
 final class CapsuleTextView: UITextView {

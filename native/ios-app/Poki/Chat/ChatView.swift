@@ -1153,6 +1153,9 @@ struct ComposerInputView: View {
     @State private var choosingFiles = false
     /// A file Poki can't read, said for a moment over the message field.
     @State private var problem: String?
+    @State private var fieldScroll = CapsuleScroll()
+    /// A swipe down that started on a message scrolled away from its first line: it scrolls the message.
+    @State private var swipeScrolls: Bool?
     @Environment(\.colorScheme) private var scheme
 
     private var voice: VoiceModel { model.voice }
@@ -1177,7 +1180,8 @@ struct ComposerInputView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 plus
                 // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
-                CapsuleField(text: $input, focused: $focused, maxLines: 6, onSubmit: submit)
+                CapsuleField(text: $input, focused: $focused, maxLines: 6, scroll: fieldScroll,
+                             onSwipe: { up in if up { focused = true } else if focused { focused = false } }, onSubmit: submit)
                     .overlay(alignment: .topLeading) {
                         if input.isEmpty {
                             Text(dictation.on ? "Listening…" : attachments.isEmpty ? "Message Poki" : "Add a message")
@@ -1192,6 +1196,7 @@ struct ComposerInputView: View {
             .padding(8)
             .contentShape(.rect)
             .onTapGesture { focused = true }
+            .simultaneousGesture(swipe)
             .glassSurface(in: RoundedRectangle(cornerRadius: 32, style: .continuous), fallback: .bar)
             // Controls in a bar stop growing where the system's bars do; the message itself grows freely.
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -1233,6 +1238,24 @@ struct ComposerInputView: View {
         #if DEBUG && targetEnvironment(simulator)
         .onAppear { if let item = TestAttachment.take() { attachments.append(item) } }
         #endif
+    }
+
+    /// A swipe up on the message field brings the keyboard, a swipe down puts it away (the owner,
+    /// 2026-11-13), on the home page and in the chat. Only a mostly upright drag of some length counts,
+    /// so a tap on plus or Send stays a tap and a sideways drag does nothing. It lives on the field
+    /// alone, so the conversation above scrolls as before; a swipe down on a long message scrolled
+    /// away from its first line scrolls it back instead.
+    private var swipe: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { _ in if swipeScrolls == nil { swipeScrolls = fieldScroll.scrolledDown } }
+            .onEnded { drag in
+                let scrolled = swipeScrolls ?? false
+                swipeScrolls = nil
+                let (dx, dy) = (drag.translation.width, drag.predictedEndTranslation.height)
+                guard abs(drag.translation.height) > abs(dx) * 1.5 else { return }
+                if dy < -36, !focused { focused = true }
+                if dy > 36, focused, !scrolled { focused = false }
+            }
     }
 
     /// While dictation listens: the way to stop it. The words appear in the field; nothing is sent
