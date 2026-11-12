@@ -4,26 +4,11 @@ typealias PokiState = PokiActivityAttributes.ContentState
 
 /// Which bear the Live Activity draws (ESP-344): no round avatar any more, the bear itself stands on
 /// the island's black or the card's blue and says the state by its pose. The pictures are square;
-/// where the head sits in each is the design's own measurement (`ART` and `MEC` in its source).
+/// where the head and hand sit in each is the design's own measurement (`MEC` in its source).
 enum ActivityBear: String, Hashable {
     case phone, needs, turn, done, tripped, ready, paused, thinking, checking
 
     var image: String { "ActivityBear-\(rawValue)" }
-
-    /// The head with its ears: its left, top and right edge, as shares of the picture's side.
-    var head: (left: CGFloat, top: CGFloat, right: CGFloat) {
-        switch self {
-        case .phone: (0.095, 0.072, 0.853)
-        case .needs: (0.079, 0.17, 0.77)
-        case .turn: (0.09, 0.184, 0.83)
-        case .done: (0.08, 0.139, 0.847)
-        case .tripped: (0.1, 0.163, 0.836)
-        case .ready: (0.1, 0.11, 0.88)
-        case .paused: (0.1, 0.184, 0.894)
-        case .thinking: (0.083, 0.083, 0.89)
-        case .checking: (0.089, 0.087, 0.888)
-        }
-    }
 
     /// The middle of the smallest circle round the head and a raised hand, as shares of the side.
     var middle: (x: CGFloat, y: CGFloat) {

@@ -35,14 +35,10 @@ enum ActivityMetrics {
     /// edge, and a control near a corner keeps clear of the corner's curve.
     static let islandClip: CGFloat = 12.33
     static let islandClipCorner: CGFloat = 36
-    /// The same in the compact island: 4.33 points up from its bottom edge.
-    static let compactClip: CGFloat = 4.33
     static let compactHeight: CGFloat = 36.67
-    /// The compact island's left block, and how wide the bear's head is in it.
+    /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
-    /// 34 and 5 down: at 38 and 6 the system's line along the bottom cut through the mouth.
-    static let compactHead: CGFloat = 34
-    static let compactHeadTop: CGFloat = 5
+    static let compactBear: CGFloat = 39
     /// Short of room, every block fits a circle this wide; the bear's whole picture is then this long a side.
     static let narrowCircle: CGFloat = 28
     static let narrowBear: CGFloat = 31.6
@@ -325,15 +321,14 @@ struct IslandBottom: View {
 
 // MARK: Dynamic Island, compact and minimal
 
-/// The bear's face looking out over the bottom edge of the island: its head 34 points wide, the chin
-/// a little under the edge. A new state sinks the old bear and raises the new one. Short of room, the
-/// bear in a circle 28 points across.
+/// Direction three's small bear (ESP-344 board F-06, A): head, hands and what they hold, the picture's
+/// lower edge 3 points under the island's. Every mouth sits above the 4.33 points the system cuts off.
+/// A new state sinks the old bear and raises the new one. Short of room, the bear in a circle 28 points across.
 struct CompactLeading: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
-        let head = face.bear.head
-        let side = ActivityMetrics.compactHead / (head.right - head.left)
+        let side = ActivityMetrics.compactBear
         LimitedWidth { narrow in
             if narrow {
                 NarrowBear(bear: face.bear)
@@ -341,12 +336,11 @@ struct CompactLeading: View {
                 ZStack {
                     Image(face.bear.image).resizable().interpolation(.high)
                         .frame(width: side, height: side)
-                        .offset(x: 8 - head.left * side, y: ActivityMetrics.compactHeadTop - head.top * side)
+                        .offset(x: 11, y: ActivityMetrics.compactHeight + 3 - side)
                         .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
                         .id(face.bear)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 7).padding(.bottom, ActivityMetrics.compactClip) }
                 .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight)
                 .clipped()
             }
