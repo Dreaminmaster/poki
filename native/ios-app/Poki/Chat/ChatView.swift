@@ -865,6 +865,7 @@ enum ChatTime {
 
 /// Three dots that rise in turn: the model is working on its answer.
 struct TypingBubble: View {
+    @Environment(\.coveredByDrawer) private var covered
     /// Dot i's height in 0...1 at time t. Typed step by step: as one expression inside the view
     /// builder it can exceed the type checker's time limit on a busy CI runner.
     static func phase(_ t: Double, _ i: Int) -> Double {
@@ -874,7 +875,7 @@ struct TypingBubble: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: covered)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             HStack(spacing: 6) {
                 ForEach(0..<3) { i in

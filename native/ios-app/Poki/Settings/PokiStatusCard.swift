@@ -1,7 +1,7 @@
 import SwiftUI
 
 // ESP-469: tapping Poki's picture shows where Poki stands, on a card under the picture, with Pause and the
-// way into Settings. Settings itself opens from the bottom of the conversations (SettingsEntryRow) and
+// way into Settings. Settings itself opens from the bottom of the conversations (SettingsEntryButton) and
 // from this card.
 
 /// The one place the settings card and the status card take Poki's status words from. They are the

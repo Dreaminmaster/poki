@@ -22,7 +22,7 @@ const pause = ms => execFileSync('sleep', [String(ms / 1000)]);
 const elements = () => call('list_elements', { source: 'accessibility' }).elements;
 const centre = e => ({ x: e.frame.x + e.frame.width / 2, y: e.frame.y + e.frame.height / 2 });
 const byId = (list, id) => list.find(e => e.identifier === id);
-const row = (list, name) => list.find(e => e.type === 'Button' && !e.identifier && (e.label ?? '').startsWith(`${name}, `));
+const row = (list, name) => list.find(e => e.type === 'Button' && !e.identifier && (e.label === name || (e.label ?? '').startsWith(`${name}, `)));
 const tap = e => { call('tap', centre(e)); pause(1200); };
 
 function launch() {
