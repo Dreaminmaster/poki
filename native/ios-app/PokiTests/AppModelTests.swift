@@ -572,6 +572,23 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertFalse(model.ownerPaused, "off is off, not resting")
     }
 
+    /// 752's home warned in the last two days of signing (ESP-222), and the redesigned home lost it.
+    /// The home line says it again, ahead of an open setup step, and links to Updates.
+    func testHomeLineWarnsInTheLastTwoDaysOfSigning() {
+        defer { UserDefaults.standard.removeObject(forKey: "pokiSigningDays") }
+        UserDefaults.standard.set(1.0, forKey: "pokiSigningDays")
+        let ending = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        ending.setup.loopback = .none
+        let hint = SetupIssueHint.homeLine(model: ending)
+        XCTAssertEqual(hint?.target, .updates)
+        XCTAssertEqual(hint?.message, ExpiryWarning(expiry: ending.signer.expiry)?.message)
+
+        UserDefaults.standard.set(3.0, forKey: "pokiSigningDays")
+        let later = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        later.setup.loopback = .none
+        XCTAssertEqual(SetupIssueHint.homeLine(model: later)?.target, SetupIssueHint.first(model: later)?.target, "3 days left")
+    }
+
     /// ESP-321: Home has no tab bar, so main's Setup dot is Home's hint line. An open setup step shows
     /// there and links to that step; before, Home showed only runner failures and said nothing.
     func testHomeHintShowsOpenSetupStepWithoutTabBar() {
