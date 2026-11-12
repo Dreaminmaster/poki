@@ -2,6 +2,13 @@ import AVFoundation
 import PhotosUI
 import SwiftUI
 
+/// One-shot, session-scoped search navigation. A fresh id lets the same hit be opened twice.
+struct ConversationSearchJump: Equatable {
+    let sessionID: String
+    let entryID: UUID
+    let requestID = UUID()
+}
+
 /// The chat is the app. Before your first message it is the home page: the fog-blue ground, Poki's
 /// picture at the top, one line of greeting and what you could ask. Your first message turns it into
 /// the conversation: the ground sinks away and your words rise out of the message field. The top bar
@@ -16,6 +23,7 @@ struct ChatView: View {
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
+    var searchJump: ConversationSearchJump? = nil
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)? = nil
     /// Opens Updates, from the home page's hint.
@@ -35,6 +43,8 @@ struct ChatView: View {
 
     /// No message of yours yet: the page is the bear and what you could ask, not a transcript.
     private var isGreeting: Bool {
+        // A search hit in a saved introductory Poki line must open its transcript, not the Home overlay.
+        if let searchJump, chat.entries.contains(where: { $0.id == searchJump.entryID }) { return false }
         guard !chat.running, !voice.isOn, voice.lines.isEmpty else { return false }
         return !chat.entries.contains(where: Self.isContent)
     }
@@ -49,6 +59,9 @@ struct ChatView: View {
 
     /// The conversation without the greeting's lines, which the home page said itself.
     private var shown: [ChatEntry] {
+        if let searchJump, chat.entries.contains(where: { $0.id == searchJump.entryID }) {
+            return chat.entries
+        }
         guard let first = chat.entries.firstIndex(where: Self.isContent) else { return [] }
         return chat.entries.enumerated().compactMap { i, entry in
             if i < first, case .poki = entry.kind { return nil }
@@ -88,7 +101,7 @@ struct ChatView: View {
         let status = PokiStatus.current(model: model, chat: chat)
         let home = isGreeting
         ZStack {
-            ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
+            ChatTranscript(entries: shown, jump: searchJump, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || sampleScene == "lunch" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
@@ -498,6 +511,7 @@ private struct RiseIn: ViewModifier {
 
 struct ChatTranscript<Footer: View>: View {
     var entries: [ChatEntry]
+    var jump: ConversationSearchJump? = nil
     var typing = false
     var canRetry = false
     var retry: () -> Void = {}
@@ -580,6 +594,15 @@ struct ChatTranscript<Footer: View>: View {
         // Your finger stops the chat on its way down to the newest: from there on you are reading.
         .onScrollPhaseChange { _, phase, context in
             if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
+        }
+        // A search result points to the original message UUID. The screen is unchanged;
+        // we only move its scroll position after SwiftUI has installed the matching rows.
+        .task(id: jump) {
+            guard let jump, entries.contains(where: { $0.id == jump.entryID }) else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            follow = .reading
+            position.scrollTo(id: jump.entryID, anchor: .center)
         }
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
