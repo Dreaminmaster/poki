@@ -246,9 +246,7 @@ final class ApprovalTests: XCTestCase {
                     wda.tree(screen, app: "Shop")
                     let (core, _, _) = makeCore(wda) { c in
                         c.approvalWait = 0
-                        c.sensitive.secureFields = false
-                        c.sensitive.sending = []; c.sensitive.messagingApps = []
-                        c.sensitive.calling = []; c.sensitive.callingApps = []
+                        c.approvalMode = { .off }
                         c.memory = store
                     }
                     _ = await core.call("look", [:])

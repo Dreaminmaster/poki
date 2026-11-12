@@ -19,13 +19,7 @@ final class LiveCore: CoreSession {
         // Signing tools may rename the app; its own id is Poki too.
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
         // Never applies to optional questions. Payments, deletions and guarded apps still wait.
-        if ApprovalClassifier.mode == .off {
-            config.sensitive.secureFields = false
-            config.sensitive.sending = []
-            config.sensitive.messagingApps = []
-            config.sensitive.calling = []
-            config.sensitive.callingApps = []
-        }
+        config.approvalMode = { ApprovalClassifier.mode }
         sensitiveRulesOn = config.sensitive.enabled
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))

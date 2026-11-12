@@ -3,6 +3,9 @@ import Foundation
 public struct CoreConfig: Sendable {
     public var runnerURL: URL
     public var sensitive: SensitivityRules
+    /// The owner's way of asking (the app's Approvals page), which `sensitive` is narrowed by
+    /// (`SensitivityRules.asked`). Read when PokiCore starts.
+    public var approvalMode: @Sendable () -> ApprovalMode = { .confirm }
     /// How long `do` holds for an approval before answering approval_required. Owners took 42 to 47 s
     /// to approve on the phone, so this is as long as a request lives (`Approvals.lifetime`, 120 s)
     /// less a margin; a relay that gives up sooner shortens it for the call (`RelayRequest.answerBy`).
@@ -292,6 +295,8 @@ public final class PokiCore: @unchecked Sendable {
     public func onSession(_ handler: @escaping @Sendable (SessionSignal) -> Void) { sessionSignal.value = handler }
 
     public init(config: CoreConfig, host: CoreHost, transport: HTTPTransport = URLSessionTransport()) {
+        var config = config
+        config.sensitive = config.sensitive.asked(config.approvalMode())
         self.config = config
         self.host = host
         var c: AsyncStream<CoreEvent>.Continuation!
