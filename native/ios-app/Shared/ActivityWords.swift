@@ -15,11 +15,24 @@ import Foundation
 enum ActivityWords {
     static let table = "LiveActivity"
 
-    /// A word the app keeps in English, in the system's language. A text the table does not have (an
+    /// A word the app keeps in English, in the system's language. A state the app names in English
+    /// ("Runner asleep") is said in Poki's one set of status words; a text the table does not have (an
     /// error from the pairing) stays as it is.
     static func local(_ key: String) -> String {
-        Bundle.main.localizedString(forKey: key, value: key, table: table)
+        if let word = states[key] { return word.text }
+        return Bundle.main.localizedString(forKey: key, value: key, table: table)
     }
+
+    /// The app's English names of a state (the activity's `headline`, `RunnerStatus.title`) that are
+    /// said as a status word. The names stay as they are: the app and the face compare them.
+    static let states: [String: StatusWord] = [
+        "Ready for the agent": .ready, "Waiting for agent": .ready,
+        "Runner asleep": .paused, "Sleeping": .paused,
+        "Not started": .notStarted,
+        "Starting the runner": .starting, "Starting native services": .starting,
+        "Thinking": .thinking, "Listening": .listening, "Speaking": .speaking,
+        "Finished": .done,
+    ]
 
     /// The content line: at most four words, or eight Chinese characters, ending in "…" when cut.
     /// A word is a run of letters and digits ("1:24" and "don’t" are one); each Chinese character

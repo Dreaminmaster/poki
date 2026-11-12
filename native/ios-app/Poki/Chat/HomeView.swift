@@ -291,11 +291,10 @@ struct ChatTopBar: View {
     var openUpdates: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Poki's state after its name: the bear's own status words (PokiMood.word, through
-    /// PokiStatusCopy) without the name they start with ("Poki’s asleep" reads "Asleep" here); none
-    /// while it says hello.
+    /// Poki's state after its name: the bear's own status word (PokiMood.word, through PokiStatusCopy),
+    /// which has no subject ("Paused"); none while it says hello.
     private var state: String? {
-        status.mood == .hello ? nil : PokiStatusCopy.word(status, besideName: true)
+        status.mood == .hello ? nil : PokiStatusCopy.word(status)
     }
 
     var body: some View {
@@ -452,11 +451,10 @@ struct HomePage<Footer: View>: View {
     /// for two lines of title and two of text, so the bear's size and place stay where they were.
     @ScaledMetric(relativeTo: .title) private var rest: CGFloat = 268
 
-    /// Asleep or in trouble, the page says so under the bear; otherwise the bear's face is the status.
+    /// Paused or in trouble, the page says so under the bear; otherwise the bear's face is the status.
     private var note: String? {
         switch status.mood {
-        // In Poki's own voice.
-        case .paused: String(localized: "I’m resting. Tap me and I’ll carry on.")
+        case .paused: String(localized: "Poki is paused. It resumes automatically upon a new task or agent request.")
         case .cantReach, .tripped: status.word
         default: nil
         }
@@ -496,7 +494,7 @@ struct HomePage<Footer: View>: View {
                     .reportsBearFrame(.hero)
                     .background { BearGlow().opacity(home ? 1 : 0).animation(HomeMotion.words(home, reduceMotion), value: home) }
                     .padding(.top, 27)
-                    .accessibilityLabel(Text(status.mood == .paused ? "Poki, resting" : "Poki, details"))
+                    .accessibilityLabel(status.mood == .paused ? Text(verbatim: "Poki, \(status.word)") : Text("Poki, details"))
                     .accessibilityIdentifier("home.poki.details")
 
                     if let note {
