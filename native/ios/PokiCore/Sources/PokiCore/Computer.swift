@@ -586,6 +586,8 @@ final class Computer: @unchecked Sendable {
         var error: String?
         var lastKind: String?
         var toRun = actions
+        // What the screen said before these actions, for the send check: a message that was already there does not count as sent.
+        let textsBefore = lastAll.filter { !$0.fromPicture && !Self.fieldTypes.contains($0.type) }.map(\.text)
         var approvedNote: String?
         let sensitive = firstSensitive(actions)
         // Any other actions withdraw a pending request: nothing the automation does can approve it.
@@ -714,7 +716,7 @@ final class Computer: @unchecked Sendable {
             lastPicture = seenPicture
             result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["\(app) answered no element tree (no accessibility server in its process: kAXErrorServerNotFound); \(how), so its earlier page is gone"])
         }
-        if let line = sendCheck(toRun, error: error) { result.text += "\n" + line }
+        if let line = sendCheck(toRun, error: error, textsBefore: textsBefore) { result.text += "\n" + line }
         // A call that took far longer than its parts says where the time went (gym: a wait_until
         // whose parts said 5 s answered after 29.8 s).
         let total = now() - callStarted
@@ -742,10 +744,12 @@ final class Computer: @unchecked Sendable {
     static let chatApps = Set(SensitivityRules().messagingApps)
 
     /// After Return in a chat app: whether the text this task typed went out, judged from the read just
-    /// made. Sent: the message field (the lowest text field) no longer holds the text, and the last
-    /// message above it (the lowest element with text) shows it. Anything else is not confirmed, with
-    /// what the read showed (ESP-465: the model spent one to three turns after Return verifying the send).
-    func sendCheck(_ actions: [JSON], error: String?) -> String? {
+    /// made. Sent: the message field (the lowest text field) no longer holds the text, the last message
+    /// above it (the lowest element with text) reads exactly that text, and the screen shows that text
+    /// more times than before the actions, so an earlier message with the same words does not count.
+    /// Anything else is not confirmed, with what the read showed (ESP-465: the model spent one to three
+    /// turns after Return verifying the send).
+    func sendCheck(_ actions: [JSON], error: String?, textsBefore: [String]) -> String? {
         let sends = actions.contains { a in
             if let key = a["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
             return a["type"]?.text?.hasSuffix("\n") == true
@@ -770,8 +774,13 @@ final class Computer: @unchecked Sendable {
             let (ab, bb) = (a.frame.y + a.frame.height, b.frame.y + b.frame.height)
             return ab != bb ? ab < bb : a.frame.width * a.frame.height > b.frame.width * b.frame.height
         }) else { return notConfirmed("no message was read above the message field") }
-        guard [last.label ?? "", last.value ?? ""].contains(where: { $0.contains(text) }) else {
+        func reads(_ s: String?) -> Bool { s?.trimmingCharacters(in: .whitespacesAndNewlines) == text }
+        guard reads(last.label) || reads(last.value) else {
             return notConfirmed("the message field is empty, and the last message on screen reads \"\(last.text.prefix(60))\"")
+        }
+        let shown = { (texts: [String]) in texts.filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) == text }.count }
+        guard shown(messages.map(\.text)) > shown(textsBefore) else {
+            return notConfirmed("the last message reads the same text, but it was on screen before Return")
         }
         typedText = nil
         return "send check: sent: the message field is empty and the last message on screen reads \(quoted). This read verifies the send."
