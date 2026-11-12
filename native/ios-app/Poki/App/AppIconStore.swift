@@ -75,6 +75,18 @@ final class AppIconStore {
         return nil
     }
 
+    /// The name an app goes by on this iPhone, in its first language (English, Simplified or
+    /// Traditional Chinese), from a bundle ID or any of its names; nil for an app not listed here.
+    static func name(_ app: String) -> String? {
+        guard let id = bundleID(app), let names = apps.first(where: { $0.id == id })?.names else { return nil }
+        let language = Locale.preferredLanguages.first ?? "en"
+        if language.hasPrefix("zh-Hant") || language.hasPrefix("zh-TW") || language.hasPrefix("zh-HK") {
+            return names.count > 2 ? names[2] : names.last
+        }
+        if language.hasPrefix("zh") { return names.count > 1 ? names[1] : names[0] }
+        return names[0]
+    }
+
     /// Apps Poki's tasks often work in: bundle ID, the asset Poki carries (if any), and their names as
     /// the iPhone shows them in English, Simplified and Traditional Chinese.
     private static let apps: [(id: String, asset: String?, names: [String])] = [
