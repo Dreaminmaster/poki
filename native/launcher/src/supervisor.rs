@@ -4,7 +4,7 @@
 
 use crate::{
     ddi,
-    device::{DDI_TIMEOUT_FIX, Device, Failure, LOOPBACK_FIX, NETWORK_FIX, Pairing},
+    device::{DDI_TIMEOUT_FIX, Device, Failure, LOOPBACK_FIX, NETWORK_FIX, PAIRING_PORT_FIX, Pairing},
     launch,
     remote::Stage,
 };
@@ -108,7 +108,7 @@ impl Launcher {
     }
 
     fn fail(&self, attempt: u32, failure: &Failure) {
-        let waiting = matches!(failure.fix.as_deref(), Some(LOOPBACK_FIX) | Some(NETWORK_FIX) | Some(DDI_TIMEOUT_FIX));
+        let waiting = matches!(failure.fix.as_deref(), Some(LOOPBACK_FIX) | Some(PAIRING_PORT_FIX) | Some(NETWORK_FIX) | Some(DDI_TIMEOUT_FIX));
         let state = if waiting { "waiting_network" } else { "failed" };
         self.set(state, attempt, json!({"detail": failure.detail, "fix": failure.fix, "code": failure.code}));
     }
@@ -224,7 +224,9 @@ impl Launcher {
             // On cellular the loopback can refuse the connection (GitHub issue 35) while the image
             // mounted earlier is still there: the app's own session needs neither. It is ready only
             // once that session opens, and nothing here checked the pairing. The refusal's words go
-            // with it, for the app's log.
+            // with it, for the app's log. While the app looks for a moved remote pairing port on
+            // Wi-Fi, a refusal is `NotListening` and waits for that port; once the search ends, the
+            // same refusal comes here again.
             Err(failure)
                 if config.in_process
                     && failure.remote_stage == Some(Stage::Connect)

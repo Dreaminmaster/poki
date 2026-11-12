@@ -51,7 +51,7 @@ struct ApprovalsSections: View {
                     case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
                     }
                     Text("Payments, deletions and actions in Wallet always need your confirmation.")
-                    Text("Turning asking on or off takes effect the next time Poki opens.")
+                    Text("Changes apply right away, starting from Poki’s next step.")
                 }
             }
             if model.approvalMode != .off {

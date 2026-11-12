@@ -19,6 +19,19 @@ import UIKit
 //    request carries the bundle ID and the store's country only. A miss is remembered for a day.
 // Without any of these the view draws one placeholder: a grey tile in the icon's shape with an app glyph.
 
+/// The language the iPhone names apps in, from its first preferred language: Simplified or Traditional
+/// Chinese, or English for any other. Apps' names (`AppIconStore.name`) and the home page's default
+/// quick actions (`HomeIdea`) follow it.
+enum AppLanguage {
+    case english, simplifiedChinese, traditionalChinese
+
+    static var current: AppLanguage {
+        let language = Locale.preferredLanguages.first ?? "en"
+        if language.hasPrefix("zh-Hant") || language.hasPrefix("zh-TW") || language.hasPrefix("zh-HK") { return .traditionalChinese }
+        return language.hasPrefix("zh") ? .simplifiedChinese : .english
+    }
+}
+
 /// Icons of apps, found once and kept for the app's run.
 @MainActor @Observable
 final class AppIconStore {
@@ -85,12 +98,11 @@ final class AppIconStore {
     /// Traditional Chinese), from a bundle ID or any of its names; nil for an app not listed here.
     static func name(_ app: String) -> String? {
         guard let id = bundleID(app), let names = apps.first(where: { $0.id == id })?.names else { return nil }
-        let language = Locale.preferredLanguages.first ?? "en"
-        if language.hasPrefix("zh-Hant") || language.hasPrefix("zh-TW") || language.hasPrefix("zh-HK") {
-            return names.count > 2 ? names[2] : names.last
+        switch AppLanguage.current {
+        case .traditionalChinese: return names.count > 2 ? names[2] : names.last
+        case .simplifiedChinese: return names.count > 1 ? names[1] : names[0]
+        case .english: return names[0]
         }
-        if language.hasPrefix("zh") { return names.count > 1 ? names[1] : names[0] }
-        return names[0]
     }
 
     /// Apps Poki's tasks often work in: bundle ID, the asset Poki carries (if any), and their names as
@@ -138,15 +150,23 @@ final class AppIconStore {
         ("net.whatsapp.WhatsApp", nil, ["WhatsApp"]),
         ("ph.telegra.Telegraph", nil, ["Telegram"]),
         ("com.atebits.Tweetie2", nil, ["X"]),
-        ("com.xingin.discover", nil, ["Xiaohongshu", "小红书", "小紅書", "RED"]),
+        ("com.xingin.discover", "App-xiaohongshu", ["Xiaohongshu", "小红书", "小紅書", "RED"]),
         ("com.ss.iphone.ugc.Aweme", nil, ["Douyin", "抖音"]),
         ("com.zhiliaoapp.musically", nil, ["TikTok"]),
         ("com.google.ios.youtube", nil, ["YouTube"]),
         ("com.google.chrome.ios", nil, ["Chrome", "Google Chrome"]),
         ("com.spotify.client", nil, ["Spotify"]),
-        ("com.taobao.taobao4iphone", nil, ["Taobao", "淘宝", "淘寶"]),
+        ("com.taobao.taobao4iphone", "App-taobao", ["Taobao", "淘宝", "淘寶"]),
         ("com.alipay.iphoneclient", nil, ["Alipay", "支付宝", "支付寶"]),
         ("com.meituan.imeituan", nil, ["Meituan", "美团", "美團"]),
+        // The home page's default quick actions in Simplified Chinese, with their China store artwork.
+        ("com.dianping.dpscope", "App-dianping", ["Dianping", "大众点评", "大眾點評"]),
+        ("com.meituan.itakeaway", "App-meituan-waimai", ["Meituan Waimai", "美团外卖", "美團外賣"]),
+        ("com.xunmeng.pinduoduo", "App-pinduoduo", ["Pinduoduo", "拼多多"]),
+        ("com.taobao.fleamarket", "App-xianyu", ["Xianyu", "闲鱼", "閒魚"]),
+        ("com.360buy.jdmobile", "App-jd", ["JD", "京东", "京東"]),
+        ("com.baidu.map", "App-baidu-maps", ["Baidu Maps", "百度地图", "百度地圖"]),
+        ("com.autonavi.amap", "App-amap", ["Amap", "高德地图", "高德地圖"]),
     ]
 
     private static let byName: [String: String] = Dictionary(

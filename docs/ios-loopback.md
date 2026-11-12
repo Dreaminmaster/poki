@@ -42,7 +42,8 @@ The route contract is:
   the tunnel rather than reporting a working connection.
 
 Saving a configuration and VPN Connected indicate tunnel status only. The setup step passes only
-when RemotePairing (`49152`) or lockdown (`62078`) accepts a TCP connection through `10.7.0.1`.
+when RemotePairing (`49152`, or the port its Bonjour record names once iOS has moved it) or
+lockdown (`62078`) accepts a TCP connection through `10.7.0.1`.
 
 ## Signing and distribution
 
@@ -91,7 +92,10 @@ The current product code uses the in-process XCTest session by default. Its laun
 the local developer connection, then checks the developer image. When that connection fails at TCP
 connect and the image is already mounted on the phone, the launcher reports `running` with code
 `local_ddi` instead of waiting for the network. The status keeps the connection error (refused, no
-route, or timed out), and the app writes it to its activity log. The app passes the launcher the
+route, or timed out), and the app writes it to its activity log. One refusal waits instead: while
+the app looks for a moved RemotePairing port in Bonjour (on Wi-Fi, three looks at most), the
+launcher reports `waiting_network` with code `pairing_port`; once the looks end without a port, the
+next attempt hands over as above. The app passes the launcher the
 file it checks for the mounted image (`ddi_marker`). The app then opens its own XCTest session, which
 needs no loopback. Automation counts as ready only after that session opens. The hand-over does not
 check the pairing, so it does not update the pairing state. The signer still needs the loopback.

@@ -16,12 +16,40 @@ use std::{
     fmt,
     net::{IpAddr, SocketAddr},
     path::Path,
+    sync::atomic::{AtomicBool, AtomicU16, Ordering},
     time::{Duration, Instant},
 };
 use tokio::net::TcpStream;
 
-/// The port iOS serves `_remotepairing._tcp` on.
+/// The port iOS serves `_remotepairing._tcp` on after a restart of the phone. It is not fixed: iOS
+/// gives the service the next free port when it starts it, and names the port only in its Bonjour
+/// record, so a phone that started the service again listens somewhere else and refuses 49152.
 pub const REMOTE_PAIRING_PORT: u16 = 49152;
+static PORT: AtomicU16 = AtomicU16::new(REMOTE_PAIRING_PORT);
+
+/// The port every remote pairing connection of this process goes to.
+pub fn port() -> u16 {
+    PORT.load(Ordering::Relaxed)
+}
+
+/// The app found the phone's remote pairing port in Bonjour. 0 goes back to 49152.
+pub fn set_port(port: u16) {
+    PORT.store(if port == 0 { REMOTE_PAIRING_PORT } else { port }, Ordering::Relaxed);
+}
+
+/// Whether the app is looking for a moved remote pairing port in Bonjour. Only then does a refused
+/// connection mean the port moved. Otherwise it keeps its earlier meaning: on cellular iOS refuses
+/// the developer services' loopback itself (GitHub issue 35), and a mounted disk image goes to
+/// Poki's own session. The app never searches on cellular alone, and stops after a few looks.
+static SEARCHING: AtomicBool = AtomicBool::new(false);
+
+pub fn searching() -> bool {
+    SEARCHING.load(Ordering::Relaxed)
+}
+
+pub fn set_searching(on: bool) {
+    SEARCHING.store(on, Ordering::Relaxed);
+}
 /// The optional plist key that records the host name used when the RPPairing file was made.
 pub const SENDING_HOST_KEY: &str = "sending_host";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -33,6 +61,9 @@ pub type Control = RemotePairingClient<RpPairingSocket<TcpStream>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
     Connect,
+    /// The address refused the port while the app looks for a moved one (`searching`): the
+    /// loopback works, and the remote pairing service does not listen on this port.
+    NotListening,
     Handshake,
     PairVerify,
     Listener,
@@ -53,6 +84,10 @@ impl fmt::Display for RemoteError {
             Stage::Connect => write!(
                 f,
                 "remote pairing connect failed: cannot reach the phone's remote pairing service ({detail}). Is the loopback on (Poki's tunnel, or the 10.7.0.1 setting in your proxy app)?"
+            ),
+            Stage::NotListening => write!(
+                f,
+                "remote pairing connect failed: the loopback reached the phone, and nothing there listens on this port ({detail}). iOS moves its remote pairing service to another port when it starts the service again; Poki looks the port up in Bonjour and tries again by itself."
             ),
             Stage::Handshake => write!(
                 f,
@@ -129,7 +164,11 @@ async fn connect_tcp(addr: SocketAddr) -> Result<TcpStream, RemoteError> {
     match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
         Ok(Ok(stream)) => Ok(stream),
         Ok(Err(error)) => Err(RemoteError {
-            stage: Stage::Connect,
+            stage: if error.kind() == std::io::ErrorKind::ConnectionRefused && searching() {
+                Stage::NotListening
+            } else {
+                Stage::Connect
+            },
             detail: format!("{addr}: {error}"),
         }),
         Err(_) => Err(RemoteError {
@@ -147,7 +186,7 @@ pub async fn connect(
     sending_host: &str,
     trace: impl Fn(&str),
 ) -> Result<(AdapterHandle, RsdHandshake, Control), RemoteError> {
-    let addr = SocketAddr::new(host, REMOTE_PAIRING_PORT);
+    let addr = SocketAddr::new(host, port());
     trace("remote pairing connect");
     let stream = connect_tcp(addr).await?;
     let mut control = RemotePairingClient::new(RpPairingSocket::new(stream), sending_host);

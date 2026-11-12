@@ -80,12 +80,20 @@ enum ActivityWords {
         return words.dropFirst().reduce(words[0]) { String(activity: "\($0), then \($1)") }
     }
 
-    /// PokiCore's reason for an approval ("sending a message (\"send\")", "input in Wallet") in the
-    /// system's language, without the word in brackets that set it off.
-    static func reason(_ why: String) -> String {
-        let plain = why.split(separator: "(").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-        if plain.hasPrefix("input in ") { return String(activity: "Input in \(String(plain.dropFirst("input in ".count)))") }
-        return local(plain)
+    /// PokiCore's sentence for an approval (`Approval.ask` in PokiCore's Approvals.swift: "Delete in
+    /// Notes") in the system's language. Another text stays as it is.
+    static func ask(_ ask: String) -> String {
+        func after(_ words: String) -> String? {
+            ask.hasPrefix(words + " ") ? String(ask.dropFirst(words.count + 1)) : nil
+        }
+        if let app = after("Pay in") { return String(activity: "Pay in \(local(app))") }
+        if let app = after("Delete in") { return String(activity: "Delete in \(local(app))") }
+        if let app = after("Send a message in") { return String(activity: "Send a message in \(local(app))") }
+        if let app = after("Place a call in") { return String(activity: "Place a call in \(local(app))") }
+        if let app = after("Type a password in") { return String(activity: "Type a password in \(local(app))") }
+        if let app = after("Go on in") { return String(activity: "Go on in \(local(app))") }
+        if ask != "Use this app", let app = after("Use") { return String(activity: "Use \(local(app))") }
+        return local(ask)
     }
 
     /// A label's actions. A ", then " inside typed text (between “ and ”) does not split it.

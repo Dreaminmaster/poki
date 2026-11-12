@@ -66,22 +66,29 @@ final class AppModel {
     var closeSessionWhenIdle: Bool = UserDefaults.standard.bool(forKey: "inProcess.closeWhenIdle") {
         didSet { UserDefaults.standard.set(closeSessionWhenIdle, forKey: "inProcess.closeWhenIdle"); log.add("runner", "close the session when idle: \(closeSessionWhenIdle ? "on" : "off")") }
     }
-    /// Agents › Approvals › Ask Before Sensitive Steps: how the owner is asked, or never. PokiCore
-    /// reads on or off when Poki starts; the way of asking changes at once.
-    var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
-        didSet {
-            // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
-            // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
-            if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+    /// Agents › Approvals: how the owner is asked, or never. The saved choice (`ApprovalClassifier.mode`)
+    /// is the one copy: the pages here show it, and PokiCore's rules and each approval's route read it
+    /// at every step, so a change counts from the next step.
+    var approvalMode: ApprovalClassifier.Mode {
+        get {
+            access(keyPath: \.approvalMode)
+            return ApprovalClassifier.mode
+        }
+        set {
+            withMutation(keyPath: \.approvalMode) {
+                // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
+                // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
+                if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                    UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+                }
+                UserDefaults.standard.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
             }
-            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
+            log.add("approval", "ask before sensitive steps: \(newValue.rawValue)")
             for observer in approvalModeObservers { observer() }
         }
     }
-    /// Whether a sensitive step waits for the owner now: asking is on, and was on when Poki started
-    /// (PokiCore reads it then; turning it off counts at once).
-    var asksBeforeSensitiveSteps: Bool { approvalMode != .off && core.sensitiveRulesOn }
+    /// Whether a sensitive step waits for the owner now.
+    var asksBeforeSensitiveSteps: Bool { approvalMode != .off }
     private var approvalModeObservers: [() -> Void] = []
     func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
@@ -347,6 +354,8 @@ final class AppModel {
             for await event in core.events { self?.handle(event) }
         }
         loopback.onChange = { [weak self] old, new in self?.loopbackChanged(from: old, to: new) }
+        loopback.onPairingPort = { [weak self] port in self?.pairingPortFound(port) }
+        loopback.onPairingPortSearchEnded = { [weak self] in self?.pairingPortSearchEnded() }
         // A built-in tunnel that fails or drops while Poki is on dials again by itself; the loopback
         // check that follows lets `loopbackChanged` start the runner, as for any other recovery.
         tunnel.wanted = { [weak self] in self?.sessionOn == true && self?.setup.loopback == .builtIn }
@@ -700,7 +709,7 @@ final class AppModel {
         ]
         activityText = String(localized: "Tap “Send”")
         approvals = [PendingApproval(id: "sample", app: messages, summary: String(localized: "Send “On my way” to Mom"),
-                                     reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))]
+                                     reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25), ask: "Send a message in \(messages)", kinds: ["sending"])]
     }
 
     // MARK: Session
@@ -1182,6 +1191,26 @@ final class AppModel {
         }
     }
 
+    /// iOS had moved the remote pairing service off the port Poki used, and Poki found it. The page
+    /// may have said Working all along (lockdown answered), so no change of state starts things
+    /// again: the launcher tries at once, and the pairing is checked on the port that answers.
+    func pairingPortFound(_ port: UInt16) {
+        let starts = sessionOn && !runner.isRunning && !runnerPaused
+        log.add("loopback", "using remote pairing port \(port) from now on" + (starts ? "; starting the runner now" : ""))
+        if starts { launcher.restart() }
+        Task { await verifyPairing(force: true) }
+        signer.maintain()
+    }
+
+    /// The looks for a moved remote pairing port ended without one, or the network changed: a refused
+    /// connection is handled as before again (on a mounted disk image, Poki's own session), so the
+    /// launcher tries at once instead of waiting out its backoff.
+    func pairingPortSearchEnded() {
+        let starts = sessionOn && !runner.isRunning && !runnerPaused
+        log.add("loopback", "stopped looking for a moved remote pairing port" + (starts ? "; starting the runner now" : ""))
+        if starts { launcher.restart() }
+    }
+
     /// The loopback came or went. Going: logged with the time, and the agent's status says so instead
     /// of "Checking pairing". Back: the launcher tries at once instead of waiting out its backoff
     /// (the runner dies with the tunnel, so every drop costs a restart).
@@ -1528,7 +1557,7 @@ final class AppModel {
     /// Each request is answered by the owner on its own card or notification.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
-        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
+        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary) (\(approval.reason)); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
         // The Live Activity pops up for it, but iOS folds the island back after a few seconds and a tap
@@ -1632,6 +1661,7 @@ final class AppModel {
     nonisolated static func problemText(code: String?, fix: String) -> String {
         let short = [
             "loopback": "Loopback Off",
+            "pairing_port": "Finding Pairing Port",
             "network": "No Internet",
             "ddi_timeout": "No Internet",
             "ddi_refused": "Disk Image Outdated",

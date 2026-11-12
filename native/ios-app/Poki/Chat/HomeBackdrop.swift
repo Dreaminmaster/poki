@@ -15,9 +15,8 @@ import SwiftUI
 /// edge, laid in the stack at its own 797 points, once showed only the middle half of the light.
 ///
 /// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on, and its
-/// clock stops while the app is not active or another page covers this one. With Reduce Motion nothing
-/// sinks either; the change between the two layers is a fade. Behind the bear's place it always stands
-/// still (`StillPatch`).
+/// clock stops while the app is not active, another page covers this one or the drawer is open. With Reduce Motion nothing
+/// sinks either; the change between the two layers is a fade.
 struct HomeBackdrop: View {
     /// The home page is in front.
     var home: Bool
@@ -25,11 +24,10 @@ struct HomeBackdrop: View {
     var working: Bool
     /// Stands still at rest, for laying a screenshot beside the design (`-pokiChat backdrop`).
     var frozen = false
-    /// The bear's place, in `HomeMotion.space`: the light behind it does not move.
-    var still: CGRect = .zero
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.coveredByDrawer) private var covered
     /// False while another page is pushed over this one.
     @State private var shown = false
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -37,7 +35,7 @@ struct HomeBackdrop: View {
     var body: some View {
         let dark = scheme == .dark
         let resting = reduceMotion || frozen || lowPower
-        let seen = shown && scenePhase == .active
+        let seen = shown && scenePhase == .active && !covered
         let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
             Tint.page
@@ -48,8 +46,6 @@ struct HomeBackdrop: View {
                 .overlay(alignment: .bottom) { EdgeLight(dark: dark) }
                 .offset(y: home || reduceMotion ? 0 : 260)
                 .opacity(home ? 1 : 0)
-                .animation(HomeMotion.ground(reduceMotion), value: home)
-            StillPatch(place: still, dark: dark, breathing: breathing)
                 .animation(HomeMotion.ground(reduceMotion), value: home)
         }
         // Coming back to the page, the light takes a second to start breathing again rather than
@@ -239,54 +235,6 @@ private struct DriftingMesh: View, Animatable {
             let _ = BackdropLog.note(mesh.period, t, drift)
             mesh.gradient(at: t, drift: drift, dark: dark)
                 .opacity(mesh.strength(at: t, drift: drift))
-        }
-    }
-}
-
-/// The light right behind the bear, held still while the rest breathes (ESP-470: the owner saw the
-/// bear move with the light). The bear's feet fade into the light and its edges are soft, so whatever
-/// moves behind them moves the bear's own pixels. Across the page's width at the height of the bear's
-/// place, and `margin` points above and below it, this draws the page as it stands at rest, with the
-/// home light at its middle strength; past that it gives way to the moving light over `feather`. It is
-/// as wide as the page so it has no sides to show: a patch as wide as the bear left a still column
-/// beside light that moved. Only the light above the bear and the blue below its feet move. It knows
-/// only the place's height, not what stands in it, so a different bear can stand there.
-private struct StillPatch: View, Animatable {
-    /// In `HomeMotion.space`.
-    var place: CGRect
-    var dark: Bool
-    /// How far the home light breathes (0 still, 1 fully); animates with it.
-    var breathing: Double
-    var animatableData: Double {
-        get { breathing }
-        set { breathing = newValue }
-    }
-
-    /// Three times the blur, so the blur leaves the place itself fully covered.
-    static let margin: CGFloat = 48, feather: CGFloat = 16
-
-    var body: some View {
-        if breathing > 0, !place.isEmpty {
-            GeometryReader { geometry in
-                let origin = geometry.frame(in: .named(HomeMotion.space)).origin
-                let top = place.minY - origin.y - Self.margin, height = place.height + 2 * Self.margin
-                ZStack {
-                    Tint.page
-                    LightMesh.chat.gradient(at: 0, drift: 0, dark: dark)
-                    LightMesh.home.gradient(at: 0, drift: 0, dark: dark)
-                        .opacity(1 - LightMesh.home.glow * breathing)
-                }
-                // Easing in and out with the breathing, so the page never shows the still light
-                // over a page that is sinking away or a light that is only starting to move.
-                .opacity(breathing)
-                .mask {
-                    Rectangle()
-                        .frame(width: geometry.size.width + 4 * Self.feather, height: height)
-                        .position(x: geometry.size.width / 2, y: top + height / 2)
-                        .blur(radius: Self.feather)
-                }
-            }
-            .allowsHitTesting(false)
         }
     }
 }

@@ -94,7 +94,7 @@ func loopbackInterface(_ addresses: [LocalAddress] = localAddresses()) -> Loopba
 }
 
 /// The checks. Primary: 10.7.0.1, which the user's proxy app (Surge, Loon, sing-box, Shadowrocket)
-/// reflects back to this phone, on lockdown (62078), RemotePairing (49152) and a random port. Secondary: the Wi-Fi
+/// reflects back to this phone, on lockdown (62078), RemotePairing (49152 and the ports Bonjour lists) and a random port. Secondary: the Wi-Fi
 /// IPv4 address of en0, loopback and en0's link-local IPv6, on 49152.
 func runChecks() async -> [ProbeResult] {
     let addresses = localAddresses()
@@ -103,6 +103,16 @@ func runChecks() async -> [ProbeResult] {
     var results: [ProbeResult] = []
     results.append(await probe(label: "Reflected lockdown (10.7.0.1)", host: "10.7.0.1", port: 62078))
     results.append(await probe(label: "Reflected RemotePairing (10.7.0.1)", host: "10.7.0.1", port: 49152))
+    // iOS moves the remote pairing service off 49152 and names the port only in Bonjour: what it
+    // lists, the port Poki uses now, and whether each other listed port answers here.
+    let listed = await RemotePairingBrowser.ports()
+    let inUse = await RemotePairingPort.current
+    results.append(ProbeResult(label: "Remote pairing ports in Bonjour", target: "_remotepairing._tcp",
+                               outcome: listed.ports.isEmpty ? "none" : listed.ports.map(String.init).joined(separator: ", "),
+                               detail: (listed.problem.map { "\($0). " } ?? "") + "Poki uses port \(inUse). Other iPhones on this network are listed too."))
+    for port in listed.ports where port != 49152 {
+        results.append(await probe(label: "Reflected RemotePairing, Bonjour port (10.7.0.1)", host: "10.7.0.1", port: port))
+    }
     // The tunnel's second connection goes to a port the phone picks, and reflect matches the address
     // on any port: on a port nothing listens on, refused means reachable, a timeout means not.
     let arbitrary = UInt16.random(in: 50000...59999)
