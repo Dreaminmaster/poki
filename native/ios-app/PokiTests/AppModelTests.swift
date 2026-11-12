@@ -327,6 +327,15 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(homeIssues(), [], "the session is open")
     }
 
+    /// An open that waits its turn (another is asking for the passcode, or Poki is not in front) has
+    /// not failed: Home says nothing of it.
+    func testALocalOpenWaitingItsTurnIsNoTrouble() async {
+        await handOverToTheMountedImage()
+        session.answer(["ok": false, "code": "open_under_way"])
+        await waitFor("the answer is in") { self.model.host.currentRunner.describe.contains("open_under_way") }
+        XCTAssertEqual(homeIssues(), [])
+    }
+
     /// A local open that fails waits for the loopback; when it answers again the launcher goes the
     /// normal way once, as before the hand-over.
     func testAFailedLocalOpenRetriesOverTheLoopbackOnce() async {
