@@ -154,6 +154,9 @@ struct SessionsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // A long press lifts the row's own rounded shape, not the list's whole width, so the lifted row
+        // and its menu stay inside the drawer rather than over the chat beside it.
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
         .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
