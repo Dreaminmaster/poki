@@ -595,7 +595,7 @@ extension Computer {
                 action = Self.replacingTarget(action, with: Self.runRef)
                 front = lastForeground
                 scan = SensitiveScan(front: lastForeground, secureOnScreen: lastAll.contains(where: \.isSecure))
-            } else if config.sensitive.enabled, ["tap", "long_press", "type", "key", "drag"].contains(where: { action[$0] != nil }) {
+            } else if config.sensitive.enabled, ActionKind(action)?.judgedOnScreen == true {
                 // A step recorded without an element (a point, a key) is judged on the screen read now;
                 // unread, it is a screen not read yet.
                 scan = SensitiveScan(front: front, read: false, secureOnScreen: false)

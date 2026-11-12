@@ -534,7 +534,7 @@ final class Computer: @unchecked Sendable {
         if config.sensitive.enabled {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
-                if scan.moved, let point = action["tap"] ?? action["long_press"], point.array != nil || point["x"] != nil {
+                if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
                     var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy)
                     result.text += "\nnot_sent from action \(at + 1): the screen may have changed. Choose the remaining actions from the fresh screen above and send them in a new do call. Do not repeat the actions already sent."
                     return result
@@ -1007,46 +1007,80 @@ final class Computer: @unchecked Sendable {
         return (first.at, "multiple sensitive actions: " + reasons)
     }
 
+    /// Where an action puts a finger down and lifts it on one element, which a control takes as a press
+    /// whatever the action is called. `asTap`: judged as a tap is, also by where it lands on a screen
+    /// not read yet or at a point on a screen that may have changed; else by the element of the latest
+    /// read alone (its numbers are what the action itself aims by): back taps the top-left button of
+    /// that read, and a swipe or scroll_to presses what holds both ends of its first stroke there (a
+    /// stroke inside one tall button, or across a wide one), on a screen that was read. A key's tap lands on the keyboard's own
+    /// return key (Go, Search, Send: `returnKeyLabels`), judged with the key.
+    func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool) -> [(element: Element?, atPoint: Bool, asTap: Bool)] {
+        func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, asTap: Bool)? {
+            guard let spec else { return nil }
+            return (unread ? nil : target(spec, in: scan.elements), spec.array != nil || spec["x"] != nil, true)
+        }
+        func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, asTap: Bool)] {
+            guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
+                  let down = element(at: (path.0, path.1), in: scan.elements), down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
+            return [(down, false, false)]
+        }
+        let spec = action[kind.rawValue]
+        switch kind {
+        case .tap, .longPress, .pinch: return [at(spec)].compactMap { $0 }
+        // The field is tapped before the text goes.
+        case .type: return [at(action["ref"])].compactMap { $0 }
+        case .drag:
+            if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
+            return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
+        case .back: return Self.backButton(in: lastAll).map { [($0, false, false)] } ?? []
+        case .swipe: return stroke(in: spec?["in"] ?? action["in"], spec?.string ?? spec?["direction"]?.string ?? "", spec?["distance"]?.string ?? "long")
+        case .scrollTo: return stroke(in: spec?["in"], ["down": "up", "up": "down", "right": "left", "left": "right"][spec?["direction"]?.string ?? "down"] ?? "up", "scroll")
+        case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: return []
+        }
+    }
+
     /// Why this action needs the owner's approval, or nil; `scan` moves on past it. `do` checks its
     /// actions with it before sending any, and a routine run each step before it sends it.
     func sensitive(_ action: JSON, _ scan: inout SensitiveScan) -> String? {
         let rules = config.sensitive
-        guard rules.enabled else { return nil }
-        defer { if ["tap", "long_press", "type", "key", "swipe", "drag", "pinch", "scroll_to", "back"].contains(where: { action[$0] != nil }) { scan.moved = true } }
+        guard rules.enabled, let kind = ActionKind(action) else { return nil }
+        defer { if kind.movesScreen { scan.moved = true } }
         let messaging = scan.front?.bundleID.map(rules.messagingApps.contains) ?? false
         // In a messaging app, after an action that may have opened another screen, that screen is not
         // read yet: the composer's Send sits where the list had nothing, and the search field's number
         // from the list no longer says where typed text goes.
         let unread = !scan.read || (scan.moved && messaging)
-        if let spec = action["launch"] {
-            scan.front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil)
-            scan.read = false; scan.typingTarget = nil
-        } else if action["button"]?.text?.lowercased() == "home" {
-            scan.front = nil
-            scan.read = false; scan.typingTarget = nil
-        } else if let spec = action["run"] {
-            // A routine sends its own taps and keys: in a guarded app, in front or the routine's own
-            // (launched first), running it is input there.
-            let name = spec.string ?? spec["name"]?.string ?? ""
-            let app = memory?.routine(named: name)?.app
-            for bundle in [scan.front?.bundleID, app].compactMap({ $0 }) where rules.guardedApps.contains(bundle) {
-                return "input in \(bundle == scan.front?.bundleID ? scan.front?.describe ?? bundle : bundle) (routine \"\(name)\")"
-            }
-            if let app { scan.front = Foreground(bundleID: app, name: nil) }
-            scan.read = false; scan.typingTarget = nil
-        } else if let spec = action["tap"] ?? action["long_press"] {
-            let e = unread ? nil : target(spec, in: scan.elements)
-            if action["tap"] != nil { scan.typingTarget = e }
-            if let r = rules.reason(touching: e, typing: false, app: scan.front, secureOnScreen: scan.secureOnScreen) { return r }
-            let app = scan.front?.describe ?? "unknown"
+        let app = scan.front?.describe ?? "unknown"
+        let spec = action[kind.rawValue] ?? .null
+        if kind == .tap { scan.typingTarget = unread ? nil : target(spec, in: scan.elements) }
+        for press in presses(kind, action, scan, unread: unread) {
+            if let r = rules.reason(touching: press.element, typing: false, app: scan.front, secureOnScreen: scan.secureOnScreen) { return r }
+            guard press.asTap else { continue }
             if unread, messaging { return "sending a message (a tap in \(app) on a screen not read yet)" }
             // After a launch or a run nothing of the app's screen was read: a Delete there reads as nothing.
             // The home screen after Home opens apps, which ask for themselves.
             if !scan.read, scan.front != nil { return "a tap on a screen not read yet (in \(app))" }
-            if scan.moved, spec.array != nil || spec["x"] != nil {
-                return "a tap at a point on a screen that may have changed since it was read (in \(app))"
+            if scan.moved, press.atPoint { return "a tap at a point on a screen that may have changed since it was read (in \(app))" }
+        }
+        switch kind {
+        case .launch:
+            scan.front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil)
+            scan.read = false; scan.typingTarget = nil
+        case .button where spec.text?.lowercased() == "home":
+            scan.front = nil
+            scan.read = false; scan.typingTarget = nil
+        case .run:
+            // A routine sends its own taps and keys: in a guarded app, in front or the routine's own
+            // (launched first), running it is input there.
+            let name = spec.string ?? spec["name"]?.string ?? ""
+            let routineApp = memory?.routine(named: name)?.app
+            for bundle in [scan.front?.bundleID, routineApp].compactMap({ $0 }) where rules.guardedApps.contains(bundle) {
+                return "input in \(bundle == scan.front?.bundleID ? scan.front?.describe ?? bundle : bundle) (routine \"\(name)\")"
             }
-        } else if let text = action["type"]?.text {
+            if let routineApp { scan.front = Foreground(bundleID: routineApp, name: nil) }
+            scan.read = false; scan.typingTarget = nil
+        case .type:
+            guard let text = spec.text else { return nil }
             let e = if let ref = action["ref"] {
                 unread ? nil : (scan.elements == nil ? refs[ref.int ?? -1] : nil) ?? scan.typingTarget
             } else {
@@ -1054,15 +1088,20 @@ final class Computer: @unchecked Sendable {
             }
             scan.typingTarget = e
             if let r = rules.reason(touching: e, typing: true, app: scan.front, secureOnScreen: scan.read && scan.secureOnScreen && e == nil) { return r }
-            if messaging, text.contains(where: \.isNewline), !Self.isSearch(e) { return "sending a message (a return typed in \(scan.front?.describe ?? "unknown"))" }
-        } else if action["key"]?.string?.lowercased() == "return", let field = scan.typingTarget, rules.reason(touching: field, typing: true, app: scan.front, secureOnScreen: false) != nil {
-            return "submitting a password field"
-        } else if messaging, let key = action["key"]?.text, (Self.keyText[key.lowercased()] ?? key).contains(where: \.isNewline), !Self.isSearch(scan.typingTarget) {
+            if messaging, text.contains(where: \.isNewline), !Self.isSearch(e) { return "sending a message (a return typed in \(app))" }
+        case .key:
+            let key = spec.text ?? ""
+            if key.lowercased() == "return", let field = scan.typingTarget, rules.reason(touching: field, typing: true, app: scan.front, secureOnScreen: false) != nil {
+                return "submitting a password field"
+            }
             // Return is the send key in WeChat, WhatsApp and Telegram: typed text goes out on it.
-            return "sending a message (return in \(scan.front?.describe ?? "unknown"))"
-        } else if action["key"] != nil || action["drag"] != nil, let bundle = scan.front?.bundleID, rules.guardedApps.contains(bundle) {
+            if messaging, (Self.keyText[key.lowercased()] ?? key).contains(where: \.isNewline), !Self.isSearch(scan.typingTarget) {
+                return "sending a message (return in \(app))"
+            }
             // Waiting, handing the screen over, swipes, Home and launches are not input in a guarded app.
-            return "input in \(scan.front?.describe ?? bundle)"
+            if let bundle = scan.front?.bundleID, rules.guardedApps.contains(bundle) { return "input in \(app)" }
+        case .button, .tap, .back, .handoff, .swipe, .scrollTo, .longPress, .drag, .pinch, .waitUntil, .wait:
+            break
         }
         return nil
     }

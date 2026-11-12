@@ -187,6 +187,63 @@ final class ApprovalTests: XCTestCase {
 
     }
 
+    /// "Payments, deletions and actions in Wallet always need your confirmation", whatever action the
+    /// agent picks to touch the button: every kind of action is aimed at Pay and at Delete, with the
+    /// rules for messages, calls and passwords off, and no touch may go down and lift on either before the owner
+    /// answers, on a screen with a row-sized Pay and on one with a tall Pay across the middle, where a
+    /// swipe can go down and lift. A new kind of action needs its samples here.
+    func testNoActionPressesPayOrDeleteWithoutTheOwner() async {
+        let delete: [Double] = [8, 44, 60, 40]
+        let samples: [ActionKind: [JSON]] = [
+            .run: [["run": "checkout"]],
+            .tap: [["tap": 1], ["tap": [195, 122]], ["tap": ["x": 40, "y": 64]]],
+            .type: [["type": "x", "ref": 1], ["type": "x", "ref": 2]],
+            .back: [["back": true]],
+            .handoff: [["handoff": ["kind": "payment", "text": "Pay for the order"]]],
+            .key: [["key": "return"]],
+            .swipe: [["swipe": "up"], ["swipe": "left"], ["swipe": ["direction": "left", "in": 1]], ["swipe": ["direction": "up", "in": 1]]],
+            .scrollTo: [["scroll_to": ["text": "Nowhere", "max_swipes": 1]], ["scroll_to": ["text": "Nowhere", "in": 1, "max_swipes": 1]]],
+            .longPress: [["long_press": 1]],
+            .drag: [["drag": ["from": 1, "to": 1]], ["drag": ["from": 2, "to": 2]], ["drag": [100, 110, 300, 130]], ["drag": ["from": [100, 110], "to": [300, 130]]]],
+            .pinch: [["pinch": 1]],
+            .button: [["button": "volume_up"]],
+            .launch: [["launch": "com.apple.Preferences"]],
+            .waitUntil: [["wait_until": ["text": "Pay", "ms": 100]]],
+            .wait: [["wait": 10]],
+        ]
+        func inside(_ f: [Double], _ p: (Double, Double)) -> Bool { f[0] <= p.0 && p.0 <= f[0] + f[2] && f[1] <= p.1 && p.1 <= f[1] + f[3] }
+        /// Where each touch sent to the phone went down and lifted.
+        func touches(_ wda: FakeWDA) -> [(down: (Double, Double), up: (Double, Double))] {
+            func xy(_ b: JSON, _ x: String, _ y: String) -> (Double, Double) { (b[x]?.double ?? -1, b[y]?.double ?? -1) }
+            var out = (wda.bodies("POST /wda/tap") + wda.bodies("POST /wda/touchAndHold")).map { (xy($0, "x", "y"), xy($0, "x", "y")) }
+            out += (wda.bodies("POST /wda/pressAndDragWithVelocity") + wda.bodies("POST /wda/dragfromtoforduration")).map { (xy($0, "fromX", "fromY"), xy($0, "toX", "toY")) }
+            for body in wda.bodies("POST /actions") {
+                for finger in body["actions"]?.array ?? [] {
+                    let moves = (finger["actions"]?.array ?? []).filter { $0["type"]?.string == "pointerMove" }
+                    if let first = moves.first, let last = moves.last { out.append((xy(first, "x", "y"), xy(last, "x", "y"))) }
+                }
+            }
+            return out
+        }
+        for kind in ActionKind.allCases {
+            guard let actions = samples[kind] else { XCTFail("no sample of \(kind.rawValue): aim one at Pay or Delete"); continue }
+            for (action, pay) in actions.flatMap({ a in ([[16, 100, 358, 44], [16, 380, 358, 120]] as [[Double]]).map { (a, $0) } }) {
+                let wda = FakeWDA()
+                wda.tree([Node("Button", "Pay", pay), Node("Button", "Delete", delete)], app: "Shop")
+                let (core, _, _) = makeCore(wda) { c in
+                    c.approvalWait = 0
+                    c.sensitive.secureFields = false
+                    c.sensitive.sending = []; c.sensitive.messagingApps = []
+                    c.sensitive.calling = []; c.sensitive.callingApps = []
+                }
+                _ = await core.call("look", [:])
+                let result = await core.call("do", ["actions": [action]])
+                let pressed = touches(wda).filter { t in [pay, delete].contains { inside($0, t.down) && inside($0, t.up) } }
+                XCTAssertTrue(pressed.isEmpty, "\(action.serialized()) pressed \(pressed) on Pay at \(pay) without the owner: \(result.text)")
+            }
+        }
+    }
+
     func testADeletionWaitsForTheOwnerAndSendsNothing() async {
         let (core, wda, _) = makeCore(screenWithDelete())
         _ = await core.call("look", [:])
@@ -609,14 +666,15 @@ final class ApprovalTests: XCTestCase {
     func testInAMessagingAppReturnAfterTypingAsks() async {
         let composer = [("TextView", "Message")], list = [("SearchField", "Search"), ("Cell", "Mom")]
         // A tap on a conversation opens it: the search field's number belongs to the list read before,
-        // and the text goes to the composer.
+        // and the text goes to the composer. Typing by that number taps the old point first, on a
+        // screen not read yet, which asks as a tap there does.
         for (rows, actions): ([(String, String)], [JSON]) in [(composer, [["tap": 1], ["type": "on my way"], ["key": "return"]]), (composer, [["tap": 1], ["type": "on my way\n"]]),
                                                              (list, [["tap": 2], ["type": "on my way", "ref": 1], ["key": "return"]]), (list, [["tap": 2], ["type": "on my way\n", "ref": 1]])] {
             let (core, wda, _) = makeCore(messages("com.tencent.xin", rows))
             _ = await core.call("look", [:])
             let result = await core.call("do", ["actions": .array(actions)])
             XCTAssertTrue(result.text.contains("approval_required"), "\(actions): \(result.text)")
-            XCTAssertTrue(core.pendingApproval?.reason.hasPrefix("sending a message") == true, core.pendingApproval?.reason ?? "no request")
+            XCTAssertTrue(core.pendingApproval?.reason.contains("sending a message") == true, core.pendingApproval?.reason ?? "no request")
             XCTAssertFalse(wda.bodies("POST /wda/keys").contains { $0.serialized().contains("\\n") }, "\(actions): a return went out")
         }
         // Return in the app's search field searches: nothing is sent to anyone, whether the field was

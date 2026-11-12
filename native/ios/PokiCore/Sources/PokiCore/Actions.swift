@@ -11,6 +11,36 @@ import Foundation
 //   {launch: "bundle" | {bundle, fresh?}}      {wait: ms}       {back: true}
 //   {handoff: {kind, text}} hands a step to the owner on the phone (no input until Done, or {handoff: false})
 //   {wait_until: "text" | {text, gone?, ms?} | {settled: true, ms?}}
+
+/// Every action `do` sends and a routine replays. An action is the first of these keys it holds, in
+/// this order: `perform` sends it as that and the approval check (`Computer.sensitive`) judges it as
+/// that, so a new kind of action is not sent before both say what it does.
+enum ActionKind: String, CaseIterable {
+    case run, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, pinch, button, launch, waitUntil = "wait_until", wait
+
+    init?(_ action: JSON) {
+        guard let kind = Self.allCases.first(where: { action[$0.rawValue] != nil }) else { return nil }
+        self = kind
+    }
+
+    /// It sends touches or keys to the app in front, so the screen may change.
+    var movesScreen: Bool {
+        switch self {
+        case .tap, .type, .back, .key, .swipe, .scrollTo, .longPress, .drag, .pinch: true
+        case .run, .handoff, .button, .launch, .waitUntil, .wait: false
+        }
+    }
+
+    /// The approval check reads the screen to judge it: it presses something (`Computer.presses`),
+    /// types, or sends a key.
+    var judgedOnScreen: Bool {
+        switch self {
+        case .tap, .type, .back, .key, .longPress, .drag, .pinch: true
+        case .run, .handoff, .swipe, .scrollTo, .button, .launch, .waitUntil, .wait: false
+        }
+    }
+}
+
 extension Computer {
     static let keyText: [String: String] = ["return": "\n", "enter": "\n", "delete": "\u{8}", "backspace": "\u{8}", "tab": "\t", "space": " ", "escape": "\u{1b}"]
     static let buttons: [String: String] = ["volume_up": "volumeUp", "volume-up": "volumeUp", "volume_down": "volumeDown", "volume-down": "volumeDown"]
@@ -253,15 +283,17 @@ extension Computer {
 
     /// Returns the action's kind (for the settle pause) and what it did.
     func perform(_ action: JSON, until: Double) async throws -> (String, String) {
-        if let spec = action["run"] {
+        guard let kind = ActionKind(action) else { throw ActionFailure(message: "unknown action \(action.serialized())", delivery: .notSent) }
+        let spec = action[kind.rawValue] ?? .null
+        switch kind {
+        case .run:
             return ("run", try await runRoutine(spec, until: until))
-        }
-        if let spec = action["tap"] {
+        case .tap:
             let p = try point(spec)
             try await tap(p, within: frame(of: spec))
             return ("tap", "tap \(describe(action))\(offCentre(spec, p))\(fillsScreen(spec, p))\(container(spec))")
-        }
-        if let text = action["type"]?.text {
+        case .type:
+            guard let text = spec.text else { throw ActionFailure(message: "type takes the text to type", delivery: .notSent) }
             let target: Element? = try action["ref"]?.int.map(element)
             if let ref = action["ref"] {
                 try await tap(try point(ref), within: frame(of: ref))
@@ -289,11 +321,9 @@ extension Computer {
                 ?? "; the field could not be read back (no focused field answered in time), so check the elements or the picture"
             if let ref = action["ref"]?.int { typedInto = (ref, text) }
             return ("type", "\(describe(action)) (\(via))\(readBack)\(focusNote(reads.map { $0.contains(text) } ?? false))\(note)\(safariAddressNote(target, text))")
-        }
-        if action["back"] != nil {
+        case .back:
             return ("back", try await back(until: until))
-        }
-        if let spec = action["handoff"] {
+        case .handoff:
             if case .bool(false) = spec {
                 guard let current = handoff.value, current.done == nil else { return ("handoff", "handoff: nothing is handed to the owner") }
                 handoff.value = nil
@@ -308,8 +338,8 @@ extension Computer {
             handoff.value = h
             emit(.handoffRequested(id: h.id, kind: kind, text: h.text, app: lastForeground?.describe))
             return ("handoff", "handed to the owner (\(kind)): \"\(h.text.prefix(80))\", shown on the phone with a Done button. Keep calling look every few seconds, or {wait_until: {handoff_done: true, ms: 10000}}; no input is sent until the owner taps Done or you send {handoff: false}; status shows handoff: waiting|done")
-        }
-        if let key = action["key"]?.text {
+        case .key:
+            guard let key = spec.text else { throw ActionFailure(message: "key takes a key name: return, delete, tab, space, escape or one character", delivery: .notSent) }
             let k = key.lowercased()
             guard let text = Self.keyText[k] ?? (key.count == 1 ? key : nil) else {
                 throw ActionFailure(message: "key \(key) has no equivalent; use return, delete, tab, space, escape or one character", delivery: .notSent)
@@ -322,24 +352,20 @@ extension Computer {
             }
             _ = try await runner.call("POST", "/wda/keys", ["value": [.string(text)]], timeout: 3)
             return ("key", "key \(key)\(text == "\n" ? " (sent as a key event; no keyboard key was listed to tap)" : "")")
-        }
-        if let spec = action["swipe"] {
+        case .swipe:
             let direction = spec.string ?? spec["direction"]?.string ?? ""
             let screen = try await screenSize(until: until)
             let path = try swipePath(try area(spec["in"] ?? action["in"], screen), direction, spec["distance"]?.string ?? "long")
             try await gesture(path, seconds: 0.25, until: until)
             return ("swipe", "swipe \(direction) from [\(Int(path.0)), \(Int(path.1))] to [\(Int(path.2)), \(Int(path.3))]")
-        }
-        if let spec = action["scroll_to"] {
+        case .scrollTo:
             return ("scroll_to", "scroll_to \(spec.serialized()): \(try await scrollTo(spec, until: until))")
-        }
-        if let spec = action["long_press"] {
+        case .longPress:
             let p = try point(spec)
             let ms = min(5000, max(100, spec["ms"]?.double ?? action["ms"]?.double ?? 600))
             try await longPress(p, seconds: ms / 1000, within: frame(of: spec))
             return ("long_press", "long_press \(spec.serialized()) \(Int(ms)) ms")
-        }
-        if let spec = action["drag"] {
+        case .drag:
             let from: (x: Double, y: Double), to: (x: Double, y: Double)
             if let a = spec.array, a.count == 4, let v = Optional(a.compactMap(\.double)), v.count == 4 {
                 from = (v[0], v[1]); to = (v[2], v[3])
@@ -350,8 +376,7 @@ extension Computer {
             let hold = min(3000, max(0, spec["hold_ms"]?.double ?? 0))
             try await gesture((from.x, from.y, to.x, to.y), seconds: ms / 1000, hold: hold / 1000, rest: 0.15, until: until)
             return ("drag", "drag from [\(Int(from.x)), \(Int(from.y))] to [\(Int(to.x)), \(Int(to.y))] in \(Int(ms)) ms\(hold > 0 ? " after holding \(Int(hold)) ms" : "")")
-        }
-        if let spec = action["pinch"] {
+        case .pinch:
             let p = try point(spec)
             let screen = try await screenSize(until: until)
             let scale = min(4, max(0.25, spec["scale"]?.double ?? action["scale"]?.double ?? 2))
@@ -361,8 +386,8 @@ extension Computer {
             // humanize is on), in 500 ms.
             _ = try await runner.call("POST", "/actions", Humanize.actions(humanize.pinch(at: (p.x.rounded(), p.y.rounded()), from: a, to: b, seconds: 0.5)), timeout: 4)
             return ("pinch", "pinch \(spec.serialized()) x\(scale)")
-        }
-        if let name = action["button"]?.text {
+        case .button:
+            guard let name = spec.text else { throw ActionFailure(message: "button takes home, lock, volume_up or volume_down", delivery: .notSent) }
             let n = name.lowercased()
             switch n {
             // WDA waits for SpringBoard after a button (about 3 s on the simulator): these get the time a
@@ -375,8 +400,7 @@ extension Computer {
                 _ = try await runner.call("POST", "/wda/pressButton", ["name": .string(wda)], timeout: 8, countsAsMiss: false)
             }
             return ("button", "button \(name)")
-        }
-        if let spec = action["launch"] {
+        case .launch:
             guard let bundle = spec.string ?? spec["bundle"]?.string, !bundle.isEmpty else { throw ActionFailure(message: "launch takes a bundle id", delivery: .notSent) }
             let fresh = spec["fresh"]?.bool ?? false
             // A fresh launch ends the app first, so a page it was left on cannot answer for it, and
@@ -400,16 +424,14 @@ extension Computer {
                 catch let e as RunnerError where e.delivery == .notSent { throw Self.launchRefused(bundle, e) }
             }
             return ("launch", "launch \(bundle)\(fresh ? " (fresh)" : "")\(note)")
-        }
-        if let spec = action["wait_until"] {
+        case .waitUntil:
             return ("wait_until", try await waitUntil(spec, until: until))
-        }
-        if let ms = action["wait"]?.double {
+        case .wait:
+            guard let ms = spec.double else { throw ActionFailure(message: "wait takes milliseconds", delivery: .notSent) }
             let seconds = min(ms / 1000, 3, max(0, until - now()))
             await sleep(seconds: seconds)
             return ("wait", "wait \(Int(seconds * 1000)) ms")
         }
-        throw ActionFailure(message: "unknown action \(action.serialized())", delivery: .notSent)
     }
 
     /// A refused launch in one line: the system's error dump (FBSOpenApplication, several hundred
@@ -561,6 +583,13 @@ extension Computer {
         return (field, keyboard, true)
     }
 
+    /// The button `back` taps: a button in the top left corner of the read.
+    static func backButton(in all: [Element]) -> Element? {
+        all.filter { e in
+            e.type == "Button" && e.frame.x < 70 && e.frame.y < 130 && e.frame.y + e.frame.height > 20 && e.frame.width < 180 && e.frame.height < 70 && !e.fromPicture
+        }.min { ($0.frame.y, $0.frame.x) < ($1.frame.y, $1.frame.x) }
+    }
+
     /// `{back: true}`: the navigation bar's back button when the last read listed one (a button in
     /// the top left corner), else an edge swipe from the left, which most apps take as back. The
     /// answer says which, and the model sees the result in the read. No app-specific rule.
@@ -574,10 +603,7 @@ extension Computer {
             let buttons = listed.filter { $0.element.type == "Button" && sheet.contains($0.element) }.prefix(4).map { "\($0.ref) \"\($0.element.text.prefix(30))\"" }.joined(separator: ", ")
             sheetNote = "; a sheet is up\(buttons.isEmpty ? "" : " (its buttons: \(buttons))"): back does not dismiss sheets, tap one of its buttons or drag it down"
         }
-        let top = lastAll.filter { e in
-            e.type == "Button" && e.frame.x < 70 && e.frame.y < 130 && e.frame.y + e.frame.height > 20 && e.frame.width < 180 && e.frame.height < 70 && !e.fromPicture
-        }.sorted { ($0.frame.y, $0.frame.x) < ($1.frame.y, $1.frame.x) }
-        if let button = top.first {
+        if let button = Self.backButton(in: lastAll) {
             let p = (x: button.frame.x + button.frame.width / 2, y: button.frame.y + button.frame.height / 2)
             try await tap(p, within: button.frame)
             return "back: tapped the top-left button \(button.text.isEmpty ? "" : "\"\(button.text)\" ")at [\(Int(p.x)), \(Int(p.y))]\(sheetNote)"
