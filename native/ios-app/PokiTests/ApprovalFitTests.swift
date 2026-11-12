@@ -228,15 +228,17 @@ final class ApprovalFitTests: XCTestCase {
             if out > 0.5 { problems.append(String(format: "\(name) %.2f outside the visible area", out)) }
         }
         let words = Set(cell.batch.kinds.map(Self.word))
-        var wide: [Seen]?
         for kind in cell.batch.kinds {
             let word = Self.word(kind)
             if let label = seen.first(where: { $0.label == word }) {
                 let out = outside(label.frame, area)
                 if out > 0.5 { problems.append(String(format: "\(word) %.2f outside the visible area", out)) }
-                wide = wide ?? measure(cell, width: 1600).seen
-                if let full = wide?.first(where: { $0.label == word }), full.frame.width - label.frame.width > 0.5 {
-                    problems.append(String(format: "\(word) cut: %.2f of %.2f wide", label.frame.width, full.frame.width))
+                // A tag on one line is as wide as its word at least; a cut one is narrower.
+                let font = Self.tagFont(cell)
+                let lines = (label.frame.height / font.lineHeight).rounded(.down)
+                let needed = (word as NSString).size(withAttributes: [.font: font]).width
+                if lines < 2, needed - label.frame.width > 0.5 {
+                    problems.append(String(format: "\(word) cut: %.2f of %.2f wide", label.frame.width, needed))
                 }
             } else if let group = seen.first(where: { element in
                 let parts = element.label.components(separatedBy: CharacterSet(charactersIn: ",，、")).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -270,6 +272,19 @@ final class ApprovalFitTests: XCTestCase {
             }
         }
         return (problems, true)
+    }
+
+    /// The tag's typeface at the cell's text size, as the surface sets it: on the Live Activity Geist
+    /// SemiBold 11 (the system font for Chinese) up to xxLarge, in the app the caption's up to accessibility1.
+    private static func tagFont(_ cell: Cell) -> UIFont {
+        if cell.surface == .card {
+            let size = min(cell.size, .accessibility1)
+            let base = UIFont.preferredFont(forTextStyle: .caption1, compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(size)))
+            return UIFont.systemFont(ofSize: base.pointSize, weight: .semibold)
+        }
+        let size = min(cell.size, ActivityMetrics.largestType)
+        guard ActivityTheme.usesGeist, let geist = UIFont(name: "Geist-SemiBold", size: 11) else { return .systemFont(ofSize: 11, weight: .semibold) }
+        return UIFontMetrics(forTextStyle: .body).scaledFont(for: geist, compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(size)))
     }
 
     private func isAllow(_ element: Seen) -> Bool {
