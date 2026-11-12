@@ -31,8 +31,8 @@ enum ActionKind: String, CaseIterable {
         }
     }
 
-    /// The approval check reads the screen to judge it: it presses something (`Computer.presses`),
-    /// types, or sends a key.
+    /// The approval check reads the screen to judge it: it taps something (`Computer.presses`), types,
+    /// or sends a key. A routine's swipe is judged by the screen read before it.
     var judgedOnScreen: Bool {
         switch self {
         case .tap, .type, .back, .key, .longPress, .drag, .pinch: true

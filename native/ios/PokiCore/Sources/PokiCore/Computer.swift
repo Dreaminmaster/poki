@@ -1007,22 +1007,26 @@ final class Computer: @unchecked Sendable {
         return (first.at, "multiple sensitive actions: " + reasons)
     }
 
+    /// How a press is judged. `tap`: as a tap is, also by where it lands on a screen not read yet or at
+    /// a point on a screen that may have changed. `button`: by the element of the latest read and the
+    /// app it is in (back taps the top-left button of that read). `stroke`: by the element's own words
+    /// alone, since a swipe in Phone or Wallet scrolls rather than calls or pays.
+    enum Press { case tap, button, stroke }
+
     /// Where an action puts a finger down and lifts it on one element, which a control takes as a press
-    /// whatever the action is called. `asTap`: judged as a tap is, also by where it lands on a screen
-    /// not read yet or at a point on a screen that may have changed; else by the element of the latest
-    /// read alone (its numbers are what the action itself aims by): back taps the top-left button of
-    /// that read, and a swipe or scroll_to presses what holds both ends of its first stroke there (a
-    /// stroke inside one tall button, or across a wide one), on a screen that was read. A key's tap lands on the keyboard's own
-    /// return key (Go, Search, Send: `returnKeyLabels`), judged with the key.
-    func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool) -> [(element: Element?, atPoint: Bool, asTap: Bool)] {
-        func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, asTap: Bool)? {
+    /// whatever the action is called. A swipe or scroll_to presses what holds both ends of its first
+    /// stroke on a screen that was read (a stroke inside one tall button, or across a wide one). A
+    /// key's tap lands on the keyboard's own return key (Go, Search, Send: `returnKeyLabels`), judged
+    /// with the key.
+    func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+        func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, judged: Press)? {
             guard let spec else { return nil }
-            return (unread ? nil : target(spec, in: scan.elements), spec.array != nil || spec["x"] != nil, true)
+            return (unread ? nil : target(spec, in: scan.elements), spec.array != nil || spec["x"] != nil, .tap)
         }
-        func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, asTap: Bool)] {
+        func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
             guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
                   let down = element(at: (path.0, path.1), in: scan.elements), down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
-            return [(down, false, false)]
+            return [(down, false, .stroke)]
         }
         let spec = action[kind.rawValue]
         switch kind {
@@ -1032,7 +1036,7 @@ final class Computer: @unchecked Sendable {
         case .drag:
             if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
             return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
-        case .back: return Self.backButton(in: lastAll).map { [($0, false, false)] } ?? []
+        case .back: return Self.backButton(in: lastAll).map { [($0, false, .button)] } ?? []
         case .swipe: return stroke(in: spec?["in"] ?? action["in"], spec?.string ?? spec?["direction"]?.string ?? "", spec?["distance"]?.string ?? "long")
         case .scrollTo: return stroke(in: spec?["in"], ["down": "up", "up": "down", "right": "left", "left": "right"][spec?["direction"]?.string ?? "down"] ?? "up", "scroll")
         case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: return []
@@ -1054,8 +1058,8 @@ final class Computer: @unchecked Sendable {
         let spec = action[kind.rawValue] ?? .null
         if kind == .tap { scan.typingTarget = unread ? nil : target(spec, in: scan.elements) }
         for press in presses(kind, action, scan, unread: unread) {
-            if let r = rules.reason(touching: press.element, typing: false, app: scan.front, secureOnScreen: scan.secureOnScreen) { return r }
-            guard press.asTap else { continue }
+            if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen) { return r }
+            guard press.judged == .tap else { continue }
             if unread, messaging { return "sending a message (a tap in \(app) on a screen not read yet)" }
             // After a launch or a run nothing of the app's screen was read: a Delete there reads as nothing.
             // The home screen after Home opens apps, which ask for themselves.
