@@ -212,9 +212,12 @@ final class MarqueeScrollView: UIScrollView {
         link = nil
         guard window != nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick))
-        // Every frame the display shows, up to 120 a second where the display has them (on iPhone
-        // that needs CADisableMinimumFrameDurationOnPhone, set in the app's Info.plist).
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        // 60 frames a second. At 18 to 20 points a second that is a third of a point, one pixel on a
+        // 3x screen, a frame: as even a glide as 120 gives, and the page is not drawn twice as often
+        // for it. Other motion (the drawer, scrolling) still gets 120 where the display has it.
+        link.preferredFrameRateRange = PerfSwitch.on(.old120)
+            ? CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+            : CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         link.add(to: .main, forMode: .common)
         self.link = link
         wake()

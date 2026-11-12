@@ -24,6 +24,10 @@ enum PerfSwitch: String, CaseIterable {
     /// Every app icon is the placeholder tile, with no lookup.
     case iconsPlaceholder
 
+    // The earlier version of a change made to draw less, to compare the two on the same build.
+    /// The suggestion rows ask for 120 frames a second again.
+    case old120
+
     static func on(_ part: PerfSwitch) -> Bool { active.contains(part) }
 
     #if DEBUG
