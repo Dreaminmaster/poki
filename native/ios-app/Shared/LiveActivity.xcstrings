@@ -115,29 +115,6 @@
         }
       }
     },
-    "Agent finished" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s done"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 办完了"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 辦完了"
-          }
-        }
-      }
-    },
     "Allow" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -739,29 +716,6 @@
         }
       }
     },
-    "Done, carry on" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Done, Continue"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完成，继续"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完成，繼續"
-          }
-        }
-      }
-    },
     "Don’t Allow" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -974,48 +928,25 @@
         }
       }
     },
-    "Finished" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s done"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 办完了"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 辦完了"
-          }
-        }
-      }
-    },
     "Finished in %@" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki’s done in %@"
+            "value" : "Done in %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 在“%@”办完了"
+            "value" : "已在“%@”完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 在「%@」辦完了"
+            "value" : "已在「%@」完成"
           }
         }
       }
@@ -1217,29 +1148,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "背景保活"
-          }
-        }
-      }
-    },
-    "Listening" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s listening"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在听"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在聽"
           }
         }
       }
@@ -1457,29 +1365,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有網路"
-          }
-        }
-      }
-    },
-    "Not started" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s not awake yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 还没醒"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 還沒醒"
           }
         }
       }
@@ -1708,19 +1593,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki’s paired"
+            "value" : "Paired"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 配对好了"
+            "value" : "已配对"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 配對好了"
+            "value" : "已配對"
           }
         }
       }
@@ -1919,52 +1804,6 @@
         }
       }
     },
-    "Poki can’t reach iPhone" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki can’t reach iPhone"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 连不上手机"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 連不上手機"
-          }
-        }
-      }
-    },
-    "Poki needs you" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki needs you"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 想问你一句"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 想問你一句"
-          }
-        }
-      }
-    },
     "Poki Runner" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2045,29 +1884,6 @@
         }
       }
     },
-    "Poki needs attention" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki hit a snag"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 遇到点麻烦"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 遇到點麻煩"
-          }
-        }
-      }
-    },
     "Poki needs it once after each restart, then tries again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2097,42 +1913,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki’s messaging %@"
+            "value" : "Messaging %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 在给%@发消息"
+            "value" : "正在给%@发消息"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 在傳訊息給%@"
-          }
-        }
-      }
-    },
-    "Poki’s on it" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s on it"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在帮你办事"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在幫你辦事"
+            "value" : "正在傳訊息給%@"
           }
         }
       }
@@ -2143,42 +1936,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki’s paired"
+            "value" : "Paired"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 配对好了"
+            "value" : "已配对"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 配對好了"
-          }
-        }
-      }
-    },
-    "Poki’s waking up" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s waking up"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 正在醒来"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 正在醒來"
+            "value" : "已配對"
           }
         }
       }
@@ -2486,29 +2256,6 @@
         }
       }
     },
-    "Runner asleep" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s asleep"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 睡着了"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 睡著了"
-          }
-        }
-      }
-    },
     "Runner on. Waiting for the agent." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2715,29 +2462,6 @@
         }
       }
     },
-    "Sleeping" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s asleep"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 睡着了"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 睡著了"
-          }
-        }
-      }
-    },
     "Speak to Poki, or tap to open Voice." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2757,29 +2481,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "直接說話或輕點開啟語音"
-          }
-        }
-      }
-    },
-    "Speaking" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s talking"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在说话"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在說話"
           }
         }
       }
@@ -2849,29 +2550,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在啟動"
-          }
-        }
-      }
-    },
-    "Starting the runner" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s waking up"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 正在醒来"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 正在醒來"
           }
         }
       }
@@ -3677,29 +3355,6 @@
         }
       }
     },
-    "Waiting for agent" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s ready"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 准备好了"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 準備好了"
-          }
-        }
-      }
-    },
     "With the same signing tool and Apple ID as Poki." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3889,29 +3544,6 @@
         }
       }
     },
-    "Thinking" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s thinking"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在想下一步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 在想下一步"
-          }
-        }
-      }
-    },
     "This feature requires a newer version of iOS." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3954,50 +3586,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Working on task"
-          }
-        }
-      }
-    },
-    "Ready for the agent" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s ready"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 准备好了"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 準備好了"
-          }
-        }
-      }
-    },
-    "Starting native services" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki’s waking up"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 正在醒来"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 正在醒來"
           }
         }
       }
@@ -4882,6 +4470,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 %lld 中輸入"
+          }
+        }
+      }
+    },
+    "Continue" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續"
           }
         }
       }

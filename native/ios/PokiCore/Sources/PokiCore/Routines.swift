@@ -471,6 +471,7 @@ extension Computer {
             }
             steps.append(s)
         }
+        steps = Self.withoutRefocusTaps(steps)
         // The end check: what the last screen shows that was not there before the last step (its
         // headings and texts, three at most), else what the step went to.
         var checks = expect ?? []
@@ -493,6 +494,21 @@ extension Computer {
         if steps.contains(where: { $0.secret == true }) { notes.append("a password typed in it was not kept: a run stops there for you to type it") }
         if routine.expect.isEmpty { notes.append("no end check could be chosen from the last screen; give expect: [\"text\"] to add one") }
         return (routine, notes.joined(separator: "; "))
+    }
+
+    /// The steps without a tap on a text field that comes right after typing into it and right before
+    /// Return: the field still has the focus there, so the tap does nothing a run needs, and a run would
+    /// repeat it every time (ESP-465: the model tapped the message field before Send in 3 of 6 sends).
+    static func withoutRefocusTaps(_ steps: [RoutineStep]) -> [RoutineStep] {
+        steps.indices.compactMap { i in
+            let step = steps[i]
+            guard step.action["tap"] != nil, let target = step.target, fieldTypes.contains(target.type),
+                  i > 0, steps[i - 1].action["type"] != nil, i + 1 < steps.count, isReturn(steps[i + 1].action) else { return step }
+            // The field typed into: the type's own target, else the tap that came before the type.
+            let typedInto = steps[i - 1].target ?? (i > 1 && steps[i - 2].action["tap"] != nil ? steps[i - 2].target : nil)
+            if let typedInto, typedInto.type != target.type || typedInto.label != target.label || typedInto.identifier != target.identifier { return step }
+            return nil
+        }
     }
 
     /// `{run: "name"}` or `{run: {name, with: {text_1: "…"}}}`: the routine's steps in order, each when

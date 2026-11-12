@@ -5,31 +5,21 @@ import SwiftUI
 // from this card.
 
 /// The one place the settings card and the status card take Poki's status words from. They are the
-/// bear's own (PokiMood.word), the keys ESP-467 settled with the Live Activity in Poki's voice ("Poki’s
-/// asleep", "Poki’s on it"), never a second set.
+/// bear's own (PokiMood.word, from `StatusWord`), the same words the Live Activity says ("Ready",
+/// "Paused"), never a second set.
 enum PokiStatusCopy {
     @MainActor static func current(model: AppModel, chat: ChatModel) -> PokiStatus {
         PokiStatus.current(model: model, chat: chat)
     }
 
-    /// The words beside the dot. Beside Poki's name, which the line would repeat, they lose their
-    /// "Poki" ("Poki’s asleep" is "Asleep", "Poki 睡着了" is "睡着了").
-    static func word(_ status: PokiStatus, besideName: Bool = false) -> String {
-        let word = status.word
-        guard besideName else { return word }
-        for prefix in ["Poki’s ", "Poki's ", "Poki "] where word.hasPrefix(prefix) {
-            let rest = word.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
-            if rest.isEmpty { break }
-            return rest.prefix(1).uppercased() + rest.dropFirst()
-        }
-        return word
-    }
+    /// The words beside the dot. They have no subject, so beside Poki's name they read as they are.
+    static func word(_ status: PokiStatus) -> String { status.word }
 
     /// The status a card shows beside its button: off and paused come from the switch itself, so the
-    /// words never say otherwise than the button (Turn On under "Poki’s off", Resume under "Poki’s asleep").
+    /// words never say otherwise than the button (Turn On under "Off", Resume under "Paused").
     @MainActor static func card(_ status: PokiStatus, power: PowerTile) -> PokiStatus {
         switch power {
-        case .turnOn: PokiStatus(.paused, word: String(localized: "Poki’s off"))
+        case .turnOn: PokiStatus(.paused, word: StatusWord.off.text)
         case .resume: status.mood == .paused ? status : PokiStatus(.paused)
         case .pause: status.mood == .paused ? PokiStatus(.ready) : status
         }

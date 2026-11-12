@@ -67,7 +67,7 @@ struct ActivityFace: Hashable {
         case approval(id: String)
         /// The answer is on its way to PokiCore.
         case deciding(String)
-        /// "Done, carry on" for a screen the agent handed to the person.
+        /// "Continue" for a screen the agent handed to the person.
         case handoff(id: String)
         /// Open Poki to fix a stopped runner or pairing error.
         case openPoki
@@ -162,7 +162,7 @@ extension PokiState {
             let place = String(headline.dropFirst("Finished in ".count))
             return String(activity: "Finished in \(ActivityWords.local(place))")
         }
-        return String(activity: "Finished")
+        return StatusWord.done.text
     }
 
     /// The one count every presentation shows (ESP-328, the inventory of state machines, item 2): the
@@ -237,7 +237,7 @@ extension PokiState {
                 kicker: total.map { String(activity: "Step \(step) of \($0)") } ?? String(activity: "Step \(step)"),
                 place: name,
                 meta: since.map { ActivityFace.Meta.elapsed($0) } ?? ActivityFace.Meta.none,
-                content: doing ?? String(activity: "Poki’s on it"),
+                content: doing ?? StatusWord.running.text,
                 previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
@@ -334,9 +334,9 @@ extension PokiState {
         case .idle:
             if let voice {
                 let (line, hint, bear): (String, String, ActivityBear) = switch voice {
-                case .listening: (String(activity: "Listening"), String(activity: "Speak to Poki, or tap to open Voice."), .ready)
-                case .thinking: (String(activity: "Thinking"), String(activity: "Working out the next step."), .thinking)
-                case .speaking: (String(activity: "Speaking"), String(activity: "Tap to return to Voice."), .ready)
+                case .listening: (StatusWord.listening.text, String(activity: "Speak to Poki, or tap to open Voice."), .ready)
+                case .thinking: (StatusWord.thinking.text, String(activity: "Working out the next step."), .thinking)
+                case .speaking: (StatusWord.speaking.text, String(activity: "Tap to return to Voice."), .ready)
                 }
                 return ActivityFace(
                     symbol: "waveform",
@@ -351,17 +351,17 @@ extension PokiState {
         }
     }
 
-    /// The runner's start-up stages (`RunnerStatus.title`). Each says the same main line, Poki waking
-    /// up, and names its stage in the small line under it (ESP-467).
+    /// The runner's start-up stages (`RunnerStatus.title`). Each says the same main line, Starting,
+    /// and names its stage in the small line under it (ESP-467).
     static let wakingStages: Set<String> = ["Connecting", "Checking pairing", "Opening tunnel", "Preparing", "Starting"]
 
     /// Ready (the runner is up), Idle (it sleeps until an agent asks), and the runner on its way up.
     private var quietFace: ActivityFace {
         let (title, subtitle): (String, String) =
             if Self.wakingStages.contains(headline) {
-                (String(activity: "Poki’s waking up"), ActivityWords.local(headline))
+                (StatusWord.starting.text, ActivityWords.local(headline))
             } else if headline == "Needs loopback" {
-                (String(activity: "Poki can’t reach iPhone"), ActivityWords.local(headline))
+                (StatusWord.disconnected.text, ActivityWords.local(headline))
             } else {
                 (ActivityWords.local(headline), runnerPaused
                     ? String(activity: "The runner wakes when an agent asks.")

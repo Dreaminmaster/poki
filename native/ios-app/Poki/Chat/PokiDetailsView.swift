@@ -244,7 +244,7 @@ private struct PokiSettingsCard: View {
                         .accessibilityAddTraits(.isHeader)
                     HStack(spacing: 6) {
                         Circle().fill(status.mood.dot).frame(width: 7, height: 7)
-                        Text(verbatim: PokiStatusCopy.word(status, besideName: true)).lineLimit(1)
+                        Text(verbatim: PokiStatusCopy.word(status)).lineLimit(1)
                     }
                     .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
                     .accessibilityElement(children: .combine)
@@ -296,9 +296,9 @@ struct HandsView: View {
                 }
                 .accessibilityIdentifier("hands.on")
             } footer: {
-                // Resting is not a lock: an agent's request, or a task you send, starts Poki again.
+                // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
                 Text(on ? "Poki can tap, type, and scroll on this iPhone."
-                     : model.sessionOn ? "Poki is resting. It starts again when you send a task or an agent asks."
+                     : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
                      : "Poki is off. Agents can’t reach this iPhone.")
             }
 
@@ -487,7 +487,7 @@ struct ApprovalsSettingsView: View {
                         case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
                         }
                         Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                        Text("Turning asking on or off takes effect the next time Poki opens.")
+                        Text("Changes apply right away, starting from Poki’s next step.")
                     } else {
                         Button("Learn More") { withAnimation(.snappy) { more = true } }
                             .font(.footnote.weight(.semibold))

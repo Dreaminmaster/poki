@@ -70,8 +70,8 @@ struct PokiHead: View {
     var status: PokiStatus
     @Environment(\.colorScheme) private var scheme
 
-    /// The bear's own status words without the name they start with ("Poki’s ready" reads "Ready").
-    private var word: String { PokiStatusCopy.word(status, besideName: true) }
+    /// The status word, from the one table (StatusWord).
+    private var word: String { PokiStatusCopy.word(status) }
 
     var body: some View {
         let dark = scheme == .dark
@@ -142,7 +142,7 @@ struct ChatTopBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status, besideName: true)))
+            .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("chat.header.details")
             .padding(.horizontal, HomeMotion.button + 12)
@@ -296,7 +296,7 @@ struct HomePage<Footer: View>: View {
     /// apart by weight and shade (the owner: the name and the words after it did not match).
     private func pill(_ idea: HomeShortcut) -> some View {
         HStack(spacing: 8) {
-            AppIconView(app: idea.app, size: 24)
+            AppIconView(app: idea.app, size: 24, alwaysLight: true)
             HStack(spacing: 5) {
                 Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
                 Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))

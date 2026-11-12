@@ -1486,7 +1486,7 @@ struct LiveVoiceBar: View {
         case .listening: voice.isLive ? String(localized: "Listening. Just talk and Poki answers when you pause.") : String(localized: "Ready")
         case .hearing: String(localized: "Hearing you…")
         case .thinking: String(localized: "Working on it…")
-        case .speaking: String(localized: "Speaking")
+        case .speaking: StatusWord.speaking.text
         case .off: String(localized: "Off")
         case .lost(let why): why
         }

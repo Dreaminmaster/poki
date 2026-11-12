@@ -86,9 +86,9 @@ struct StopRunnerIntent: LiveActivityIntent {
 
 /// Done on the Live Activity's "your turn" card: the person finished what the agent could not do
 /// (a passcode, a verification, a payment). The app passes it on to PokiCore, which tells the agent.
-/// No authentication: it only says "carry on".
+/// No authentication: it only says "continue".
 struct HandoffDoneIntent: LiveActivityIntent {
-    static let title: LocalizedStringResource = "Done, carry on"
+    static let title: LocalizedStringResource = "Continue"
     static let isDiscoverable = false
 
     @Parameter(title: "Handoff") var handoffID: String

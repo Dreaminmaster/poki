@@ -66,22 +66,29 @@ final class AppModel {
     var closeSessionWhenIdle: Bool = UserDefaults.standard.bool(forKey: "inProcess.closeWhenIdle") {
         didSet { UserDefaults.standard.set(closeSessionWhenIdle, forKey: "inProcess.closeWhenIdle"); log.add("runner", "close the session when idle: \(closeSessionWhenIdle ? "on" : "off")") }
     }
-    /// Agents › Approvals › Ask Before Sensitive Steps: how the owner is asked, or never. PokiCore
-    /// reads on or off when Poki starts; the way of asking changes at once.
-    var approvalMode: ApprovalClassifier.Mode = ApprovalClassifier.mode {
-        didSet {
-            // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
-            // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
-            if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+    /// Agents › Approvals: how the owner is asked, or never. The saved choice (`ApprovalClassifier.mode`)
+    /// is the one copy: the pages here show it, and PokiCore's rules and each approval's route read it
+    /// at every step, so a change counts from the next step.
+    var approvalMode: ApprovalClassifier.Mode {
+        get {
+            access(keyPath: \.approvalMode)
+            return ApprovalClassifier.mode
+        }
+        set {
+            withMutation(keyPath: \.approvalMode) {
+                // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
+                // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
+                if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                    UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+                }
+                UserDefaults.standard.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
             }
-            UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey); log.add("approval", "ask before sensitive steps: \(approvalMode.rawValue)")
+            log.add("approval", "ask before sensitive steps: \(newValue.rawValue)")
             for observer in approvalModeObservers { observer() }
         }
     }
-    /// Whether a sensitive step waits for the owner now: asking is on, and was on when Poki started
-    /// (PokiCore reads it then; turning it off counts at once).
-    var asksBeforeSensitiveSteps: Bool { approvalMode != .off && core.sensitiveRulesOn }
+    /// Whether a sensitive step waits for the owner now.
+    var asksBeforeSensitiveSteps: Bool { approvalMode != .off }
     private var approvalModeObservers: [() -> Void] = []
     func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
@@ -1561,7 +1568,7 @@ final class AppModel {
         }, ApprovalMailbox.handoffDone as CFString, nil, .deliverImmediately)
     }
 
-    /// The person tapped "Done, carry on" on the Live Activity's "Your turn" card.
+    /// The person tapped "Continue" on the Live Activity's "Your turn" card.
     func handoffDone() {
         guard let id = ApprovalMailbox.drainHandoffDone() else { return }
         handoffDone(id: id)
