@@ -61,26 +61,20 @@ enum HomeMotion {
 ///
 /// For now it is the transition version from ESP-382 (its HomeBear.swift, with every number as given
 /// there; changed only to fill its frame instead of a fixed 280 points, to show the face for Poki's
-/// state, and to start breathing when Reduce Motion is turned off later): the one still picture comes
-/// in on a spring, then breathes and floats. Its pixels are never recoloured, only scaled and moved.
+/// state): the one still picture comes in on a spring and then stands still, while the light behind it
+/// breathes (ESP-470: the owner wants the bear itself not to move). Its pixels are never recoloured.
 /// Its feet fade out, and in dark a blue light is laid over them first, so the body melts into the
 /// ground's light and does not grey. With Reduce Motion it stands still.
 struct HomeBear: View {
     /// The face it shows.
     var face: PokiMood
-    /// True while the bear flies to the top bar: the breathing and floating fold back to rest inside
-    /// the flight's first 80 ms.
-    var frozen = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
-    @State private var idleStart: Date? = nil
 
     // Entrance: one spring.
     static let enterScale = 0.86, enterRise = 16.0
     static let enterSpring = Animation.spring(response: 0.55, dampingFraction: 0.62)
-    // Idle: breathing about the bottom centre, slow float. Cosine curves, eased in over the first second.
-    static let idleDelay = 0.6, breathAmp = 0.012, breathPeriod = 4.0, floatPt = 3.0, floatPeriod = 6.0
     // Bottom fade on the canvas (fixed, does not move with the bear) and the dark-mode blue light.
     static let fade = Gradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: 0.76),
                                        .init(color: .white.opacity(0.55), location: 0.86), .init(color: .white.opacity(0.18), location: 0.93),
@@ -89,13 +83,6 @@ struct HomeBear: View {
     static let darkTint = Gradient(stops: [.init(color: darkLight.opacity(0), location: 0), .init(color: darkLight.opacity(0), location: 0.62),
                                            .init(color: darkLight.opacity(0.55), location: 0.80), .init(color: darkLight.opacity(0.85), location: 0.92),
                                            .init(color: darkLight, location: 1)])
-
-    static func idle(_ t: Double) -> (scale: Double, dy: Double) {
-        let ramp = min(1, max(0, t))
-        let b = 0.5 - 0.5 * cos(2 * .pi * t / breathPeriod)
-        let f = 0.5 - 0.5 * cos(2 * .pi * t / floatPeriod)
-        return (1 + breathAmp * ramp * b, -floatPt * ramp * f)
-    }
 
     /// The face for Poki's state: asleep or in trouble it shows that; at work it thinks; otherwise it
     /// greets you.
@@ -108,28 +95,14 @@ struct HomeBear: View {
     }
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion || frozen || idleStart == nil)) { ctx in
-            let t = idleStart.map { ctx.date.timeIntervalSince($0) } ?? 0
-            let i = (reduceMotion || frozen) ? (scale: 1.0, dy: 0.0) : Self.idle(t)
-            picture
-                .scaleEffect(i.scale, anchor: .bottom).offset(y: i.dy)
-                .scaleEffect(appeared ? 1 : Self.enterScale, anchor: .bottom)
-                .offset(y: appeared ? 0 : Self.enterRise)
-                .opacity(appeared ? 1 : 0)
-                .animation(HomeMotion.paced(.easeOut(duration: 0.08)), value: frozen)   // folds the idle offset back inside the send transition's first 80 ms
-        }
+        picture
+            .scaleEffect(appeared ? 1 : Self.enterScale, anchor: .bottom)
+            .offset(y: appeared ? 0 : Self.enterRise)
+            .opacity(appeared ? 1 : 0)
         .overlay { if scheme == .dark { LinearGradient(gradient: Self.darkTint, startPoint: .top, endPoint: .bottom).blendMode(.sourceAtop) } }
         .compositingGroup()
         .mask(LinearGradient(gradient: Self.fade, startPoint: .top, endPoint: .bottom))
-        .onAppear {
-            if reduceMotion { appeared = true; return }
-            withAnimation(Self.enterSpring) { appeared = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleDelay) { idleStart = .now }
-        }
-        // Reduce Motion turned off while the page is up: the bear is already there, it starts to breathe.
-        .onChange(of: reduceMotion) { _, reduce in
-            if !reduce, idleStart == nil { appeared = true; idleStart = .now }
-        }
+        .onAppear { withAnimation(reduceMotion ? nil : Self.enterSpring) { appeared = true } }
         .accessibilityHidden(true)
     }
 
@@ -215,7 +188,7 @@ struct BearFlight: View, Animatable {
             Color.clear.allowsHitTesting(false)
         } else if still {
             ZStack {
-                HomeBear(face: face, frozen: landed).frame(width: hero.width, height: hero.height)
+                HomeBear(face: face).frame(width: hero.width, height: hero.height)
                     .position(x: hero.midX, y: hero.midY).opacity(1 - p)
                 PokiPortrait(mood: mood, side: avatar.width)
                     .position(x: avatar.midX, y: avatar.midY).opacity(p)
@@ -233,7 +206,7 @@ struct BearFlight: View, Animatable {
             // 240 to 360 ms on the clock is 0.67 to 0.95 of the spring.
             let change = min(max((p - 0.67) / 0.28, 0), 1)
             ZStack {
-                HomeBear(face: face, frozen: landed).opacity(1 - change)
+                HomeBear(face: face).opacity(1 - change)
                 PokiPortrait(mood: mood, side: side).opacity(change)
             }
             .frame(width: side, height: side)

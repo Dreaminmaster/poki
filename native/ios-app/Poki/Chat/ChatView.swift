@@ -143,7 +143,7 @@ struct ChatView: View {
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
             .frame(maxWidth: 720) }
         }
-        .background { HomeBackdrop(home: home, working: busy, frozen: bare) }
+        .background { HomeBackdrop(home: home, working: busy, frozen: bare, still: heroFrame) }
         .overlay {
             BearFollow(hero: heroFrame) { hero in
                 BearFlight(progress: home ? 0 : 1, landed: !home, hero: hero, avatar: avatarFrame,
