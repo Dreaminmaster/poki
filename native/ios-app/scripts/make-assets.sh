@@ -42,13 +42,8 @@ for png in "$HERE"/Poki/ProxyIcons/*.png; do
   cp "$png" "$APP/$name.imageset/icon@3x.png"
   echo '{"images":[{"filename":"icon@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$APP/$name.imageset/Contents.json"
 done
-# Apps' own App Store icons (Poki/AppIcons, see its README) in the app capsules (ESP-377).
-for png in "$HERE"/Poki/AppIcons/*.png; do
-  name="App-$(basename "$png" .png)"
-  mkdir -p "$APP/$name.imageset"
-  cp "$png" "$APP/$name.imageset/icon@3x.png"
-  echo '{"images":[{"filename":"icon@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$APP/$name.imageset/Contents.json"
-done
+# Apps' own App Store icons (Poki/AppIcons) are not in the catalogue: the build copies the PNGs into
+# the app and AppIconStore reads them there, so a stale catalogue cannot drop one.
 
 # The Live Activity's bears (Poki/ActivityBears, see its README), one per pose, for the app's preview
 # and the widget. In a catalogue, so the Live Activity's archive names them instead of carrying them.
