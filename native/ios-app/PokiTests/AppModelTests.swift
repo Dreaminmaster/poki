@@ -303,6 +303,11 @@ final class InProcessPasscodeTests: XCTestCase {
         await waitFor("the local open is under way") { self.session.isHoldingOpen }
     }
 
+    /// What Home lists about the runner and the loopback (the simulator's relay and location aside).
+    private func homeIssues() -> [String] {
+        Issue.current(model).map(\.id).filter { ["runner", "cellular", "loopback", "local"].contains($0) }
+    }
+
     /// ESP-448: set up on Wi-Fi, then a new task on cellular. Automation is ready only once the
     /// session really opens, and the launcher's hand-over does not count as a pairing check.
     func testOnCellularTheMountedImageCountsOnceTheSessionOpens() async {
@@ -311,6 +316,7 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(model.pairingVerifiedAt, lastPairingCheck, "nothing reached the phone's pairing service")
         XCTAssertFalse(model.isDone(.loopback))
         XCTAssertFalse(model.setup.developerMode)
+        XCTAssertEqual(homeIssues(), [], "the session is opening")
         session.answer(nil)
         await waitFor("the local session opens") { self.model.isDone(.loopback) }
         XCTAssertFalse(model.loopback.isWorking)
@@ -318,6 +324,7 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(model.setup.developerMode)
         XCTAssertTrue(model.setup.uiAutomation)
         XCTAssertEqual(model.pairingVerifiedAt, lastPairingCheck)
+        XCTAssertEqual(homeIssues(), [], "the session is open")
     }
 
     /// A local open that fails waits for the loopback; when it answers again the launcher goes the
@@ -328,6 +335,7 @@ final class InProcessPasscodeTests: XCTestCase {
         session.answer(["ok": false, "code": "missing_framework"])
         await waitFor("the local failure is reported") { self.model.host.currentRunner.describe.contains("missing_framework") }
         XCTAssertEqual(launcher.restarts, restarts)
+        XCTAssertEqual(homeIssues(), ["local"], "Home says the session did not open, as it said the loopback was off before")
         model.loopback.simulate(.working(ms: 9))
         XCTAssertEqual(launcher.restarts, restarts + 1)
 
