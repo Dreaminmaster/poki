@@ -458,13 +458,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 里删除？"
+            "value" : "在“%@”里删除？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 裡刪除？"
+            "value" : "在「%@」裡刪除？"
           }
         }
       }
@@ -515,7 +515,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中删除"
+            "value" : "在“%@”中删除"
           }
         },
         "en" : {
@@ -527,7 +527,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中刪除"
+            "value" : "在「%@」中刪除"
           }
         }
       }
@@ -938,7 +938,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已在 %@ 完成"
+            "value" : "已在“%@”完成"
           }
         },
         "en" : {
@@ -950,7 +950,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已在 %@ 完成"
+            "value" : "已在「%@」完成"
           }
         }
       }
@@ -1316,7 +1316,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中付款"
+            "value" : "在“%@”中付款"
           }
         },
         "en" : {
@@ -1328,7 +1328,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中付款"
+            "value" : "在「%@」中付款"
           }
         }
       }
@@ -1796,13 +1796,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 里付款？"
+            "value" : "在“%@”里付款？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 裡付款？"
+            "value" : "在「%@」裡付款？"
           }
         }
       }
@@ -2281,13 +2281,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 里发送？"
+            "value" : "在“%@”里发送？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 裡傳送？"
+            "value" : "在「%@」裡傳送？"
           }
         }
       }
@@ -2321,7 +2321,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 发消息"
+            "value" : "在“%@”发消息"
           }
         },
         "en" : {
@@ -2333,7 +2333,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 傳訊息"
+            "value" : "在「%@」傳訊息"
           }
         }
       }
@@ -3196,7 +3196,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 输密码"
+            "value" : "在“%@”输密码"
           }
         },
         "en" : {
@@ -3208,7 +3208,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 輸密碼"
+            "value" : "在「%@」輸密碼"
           }
         }
       }
@@ -4024,13 +4024,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中输入"
+            "value" : "在“%@”中输入"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 %@ 中輸入"
+            "value" : "在「%@」中輸入"
           }
         }
       }
