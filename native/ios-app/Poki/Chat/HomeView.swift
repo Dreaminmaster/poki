@@ -291,7 +291,7 @@ struct ChatTopBar: View {
     var openUpdates: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Poki's state after its name: the bear's own status word (PokiMood.word, through PokiStatusCopy),
+    /// Poki's state in the capsule: the bear's own status word (PokiMood.word, through PokiStatusCopy),
     /// which has no subject ("Paused"); none while it says hello.
     private var state: String? {
         status.mood == .hello ? nil : PokiStatusCopy.word(status)
@@ -369,10 +369,15 @@ struct ChatTopBar: View {
 
     /// "Poki ›" in a glass capsule, as Messages names the person under their picture, with Poki's state
     /// after the name.
+    /// The capsule under the picture says the state alone ("Ready"), with no "Poki" before it (the
+    /// owner, 2026-11-12); before Poki is set up it says the name.
     private var name: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(verbatim: "Poki").font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
-            if let state { Text(verbatim: state).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+            if let state {
+                Text(verbatim: state).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+            } else {
+                Text(verbatim: "Poki").font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+            }
             Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
         }
         .lineLimit(1)
