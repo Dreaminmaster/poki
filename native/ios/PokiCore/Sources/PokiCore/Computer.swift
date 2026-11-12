@@ -563,6 +563,7 @@ final class Computer: @unchecked Sendable {
         var lastKind: String?
         var toRun = actions
         var approvedNote: String?
+        let steps = sensitiveSteps(actions)
         let sensitive = firstSensitive(actions)
         // Any other actions withdraw a pending request: nothing the automation does can approve it.
         if let pending = approvals.pending, pending.fingerprint != sensitive.map({ JSON.array(Array(actions[$0.at...])).serialized() }) {
@@ -622,7 +623,9 @@ final class Computer: @unchecked Sendable {
         }
 
         let actionsStarted = now()
-        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count)
+        let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
+        let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
+        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -785,14 +788,23 @@ final class Computer: @unchecked Sendable {
     /// The actions, in order, each within its own action time (`actionCap` from when it starts; a
     /// launch gets 9 s, the time XCTest's launch handshake takes on the phone) and the call's
     /// deadline. Stops at the first that fails.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0) async -> (did: [String], error: String?, lastKind: String?) {
+    /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
+    /// approved an action, by its number in the do.
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:]) async -> (did: [String], error: String?, lastKind: String?) {
         var did: [String] = []
         var error: String?
         var logError: String?
         var lastKind: String?
+        var moved = moved
         defer { if let line = logError ?? error { failureLog.value = line } }
         for (i, action) in actions.enumerated() {
             let index = offset + i
+            defer { if ActionKind(action)?.changesScreen(action) == true { moved = true } }
+            if moved, let held = await pressNow(action, after: lastKind, approved: approved[index], until: until - config.readTimeout - 0.5) {
+                did.append("\(action.serialized()) (not_sent)")
+                error = "action \(index + 1) was not sent: \(held)\(i + 1 < actions.count ? "; the actions after it were not sent" : "")"
+                break
+            }
             let cap = actionCap(action)
             let actionsUntil = min(until - config.readTimeout - 0.5, now() + cap)
             let left = actionsUntil - now()
@@ -852,6 +864,29 @@ final class Computer: @unchecked Sendable {
             }
         }
         return (did, error, lastKind)
+    }
+
+    /// Why an action that presses the screen is held back on the screen as it is now, after an action
+    /// before it in the same do may have changed it: what lies where it will touch is read again and
+    /// judged as the latest read was, so a Delete that came where Back was is not tapped. A press the
+    /// owner approved goes on while it is still the step they approved (`approved`, its reason).
+    /// The read waits the pause the final read waits after the action before (`after`), so a page
+    /// still sliding in is not read as the one it covers.
+    func pressNow(_ action: JSON, after: String?, approved: String?, until: Double) async -> String? {
+        let rules = config.sensitive
+        guard rules.enabled, let kind = ActionKind(action), kind.presses(action) else { return nil }
+        let pause = min(Self.settle[after ?? "tap"] ?? 0.4, max(0, until - now() - 0.3))
+        if pause > 0.01 { await sleep(seconds: pause) }
+        guard until - now() > 0.3, let screen = size,
+              let tree = try? await runner.tree(timeout: min(config.readTimeout, until - now()), format: config.treeFormat) else {
+            return "the action before it may have changed the screen, and it could not be read again to check this one. Choose the remaining actions from the fresh screen below and send them in a new do"
+        }
+        let scan = SensitiveScan(front: tree.foreground, secureOnScreen: false, elements: listable(tree.elements, screen))
+        for press in presses(kind, action, scan, unread: false) {
+            guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false), reason != approved else { continue }
+            return "the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do"
+        }
+        return nil
     }
 
     /// After a type that failed or timed out: what the focused field holds says what happened, so the
@@ -993,14 +1028,20 @@ final class Computer: @unchecked Sendable {
         var elements: [Element]?
     }
 
-    /// Where approval begins, with every reason the remaining batch must wait.
-    func firstSensitive(_ actions: [JSON]) -> (at: Int, reason: String)? {
-        guard config.sensitive.enabled else { return nil }
+    /// Each action of a batch that needs the owner's approval, and why, judged on the latest read.
+    func sensitiveSteps(_ actions: [JSON]) -> [(at: Int, reason: String)] {
+        guard config.sensitive.enabled else { return [] }
         var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
         var matches: [(at: Int, reason: String)] = []
         for (at, action) in actions.enumerated() {
             if let reason = sensitive(action, &scan) { matches.append((at, reason)) }
         }
+        return matches
+    }
+
+    /// Where approval begins, with every reason the remaining batch must wait.
+    func firstSensitive(_ actions: [JSON]) -> (at: Int, reason: String)? {
+        let matches = sensitiveSteps(actions)
         guard let first = matches.first else { return nil }
         guard matches.count > 1 else { return first }
         let reasons = matches.map { "action \($0.at + 1): \($0.reason)" }.joined(separator: "; ")
@@ -1008,8 +1049,8 @@ final class Computer: @unchecked Sendable {
     }
 
     /// How a press is judged. `tap`: as a tap is, also by where it lands on a screen not read yet or at
-    /// a point on a screen that may have changed. `button`: by the element of the latest read and the
-    /// app it is in (back taps the top-left button of that read). `stroke`: by the element's own words
+    /// a point on a screen that may have changed. `button`: by the element and the app it is in (back
+    /// taps the top-left button of the latest read). `stroke`: by the element's own words
     /// alone, since a swipe in Phone or Wallet scrolls rather than calls or pays.
     enum Press { case tap, button, stroke }
 
@@ -1019,9 +1060,13 @@ final class Computer: @unchecked Sendable {
     /// key's tap lands on the keyboard's own return key (Go, Search, Send: `returnKeyLabels`), judged
     /// with the key.
     func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+        // On a screen read after the numbers were given, a number is judged by what lies where it is touched.
+        func under(_ p: (x: Double, y: Double)?) -> Element? { p.flatMap { element(at: $0, in: scan.elements) } }
         func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, judged: Press)? {
             guard let spec else { return nil }
-            return (unread ? nil : target(spec, in: scan.elements), spec.array != nil || spec["x"] != nil, .tap)
+            let atPoint = spec.array != nil || spec["x"] != nil
+            let e = unread ? nil : scan.elements == nil || atPoint ? target(spec, in: scan.elements) : under(try? point(spec))
+            return (e, atPoint, .tap)
         }
         func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
             guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
@@ -1036,7 +1081,9 @@ final class Computer: @unchecked Sendable {
         case .drag:
             if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
             return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
-        case .back: return Self.backButton(in: lastAll).map { [($0, false, .button)] } ?? []
+        case .back:
+            guard let button = Self.backButton(in: lastAll) else { return [] }
+            return [(scan.elements == nil ? button : under(button.frame.centre), false, .button)]
         case .swipe: return stroke(in: spec?["in"] ?? action["in"], spec?.string ?? spec?["direction"]?.string ?? "", spec?["distance"]?.string ?? "long")
         case .scrollTo: return stroke(in: spec?["in"], ["down": "up", "up": "down", "right": "left", "left": "right"][spec?["direction"]?.string ?? "down"] ?? "up", "scroll")
         case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: return []

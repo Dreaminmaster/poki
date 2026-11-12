@@ -191,7 +191,10 @@ final class ApprovalTests: XCTestCase {
     /// agent picks to touch the button: every kind of action is aimed at Pay and at Delete, with the
     /// rules for messages, calls and passwords off, and no touch may go down and lift on either before the owner
     /// answers, on a screen with a row-sized Pay and on one with a tall Pay across the middle, where a
-    /// swipe can go down and lift. A new kind of action needs its samples here.
+    /// swipe can go down and lift. Each action goes in every way an action reaches the phone: alone in a
+    /// do, after a tap in the same do that opened that screen over one with harmless buttons where Pay
+    /// and Delete are now (its numbers and points are of the screen before), and as the step of a saved
+    /// routine. A new kind of action needs its samples here.
     func testNoActionPressesPayOrDeleteWithoutTheOwner() async {
         let delete: [Double] = [8, 44, 60, 40]
         let samples: [ActionKind: [JSON]] = [
@@ -211,6 +214,7 @@ final class ApprovalTests: XCTestCase {
             .waitUntil: [["wait_until": ["text": "Pay", "ms": 100]]],
             .wait: [["wait": 10]],
         ]
+        enum Entrance: CaseIterable { case alone, afterATapThatOpenedIt, routineStep }
         func inside(_ f: [Double], _ p: (Double, Double)) -> Bool { f[0] <= p.0 && p.0 <= f[0] + f[2] && f[1] <= p.1 && p.1 <= f[1] + f[3] }
         /// Where each touch sent to the phone went down and lifted.
         func touches(_ wda: FakeWDA) -> [(down: (Double, Double), up: (Double, Double))] {
@@ -225,22 +229,88 @@ final class ApprovalTests: XCTestCase {
             }
             return out
         }
+        /// A routine of one step, recorded on the screen read last as the recorder records a do.
+        func save(_ name: String, _ action: JSON, _ core: PokiCore, _ store: RoutineStore) -> Bool {
+            guard let recorded = core.computer.recordable(action) else { return false }
+            store.save(Routine(name: name, description: "", app: nil, steps: [recorded.step], params: [:], expect: [], read: [], runs: 0, ok: 0,
+                               failuresInARow: 0, lastStop: nil, lastMs: nil, savedBy: "test", created: Date(), updated: Date()))
+            return true
+        }
         for kind in ActionKind.allCases {
             guard let actions = samples[kind] else { XCTFail("no sample of \(kind.rawValue): aim one at Pay or Delete"); continue }
             for (action, pay) in actions.flatMap({ a in ([[16, 100, 358, 44], [16, 380, 358, 120]] as [[Double]]).map { (a, $0) } }) {
-                let wda = FakeWDA()
-                wda.tree([Node("Button", "Pay", pay), Node("Button", "Delete", delete)], app: "Shop")
-                let (core, _, _) = makeCore(wda) { c in
-                    c.approvalWait = 0
-                    c.sensitive.secureFields = false
-                    c.sensitive.sending = []; c.sensitive.messagingApps = []
-                    c.sensitive.calling = []; c.sensitive.callingApps = []
+                let screen = [Node("Button", "Pay", pay), Node("Button", "Delete", delete)]
+                for entrance in Entrance.allCases {
+                    let wda = FakeWDA()
+                    let store = RoutineStore(url: nil)
+                    wda.tree(screen, app: "Shop")
+                    let (core, _, _) = makeCore(wda) { c in
+                        c.approvalWait = 0
+                        c.sensitive.secureFields = false
+                        c.sensitive.sending = []; c.sensitive.messagingApps = []
+                        c.sensitive.calling = []; c.sensitive.callingApps = []
+                        c.memory = store
+                    }
+                    _ = await core.call("look", [:])
+                    // The routine `run` sends: a tap on Pay, recorded on this screen.
+                    _ = save("checkout", ["tap": 1], core, store)
+                    var sent: [JSON] = [action]
+                    switch entrance {
+                    case .alone: break
+                    case .afterATapThatOpenedIt:
+                        wda.tree([Node("Button", "Orders", pay), Node("Button", "Back", delete), Node("Cell", "Order 1", [0, 600, 390, 44])], app: "Shop")
+                        _ = await core.call("look", [:])
+                        wda.set("POST /wda/tap") { [wda] _ in wda.tree(screen, app: "Shop"); return (200, ["value": .null]) }
+                        sent = [["tap": 3], action]
+                    case .routineStep:
+                        guard save("probe", action, core, store) else { continue }
+                        sent = [["run": "probe"]]
+                    }
+                    let result = await core.call("do", ["actions": .array(sent)])
+                    let pressed = touches(wda).filter { t in [pay, delete].contains { inside($0, t.down) && inside($0, t.up) } }
+                    XCTAssertTrue(pressed.isEmpty, "\(entrance) \(JSON.array(sent).serialized()) pressed \(pressed) on Pay at \(pay) without the owner: \(result.text)")
                 }
-                _ = await core.call("look", [:])
-                let result = await core.call("do", ["actions": [action]])
-                let pressed = touches(wda).filter { t in [pay, delete].contains { inside($0, t.down) && inside($0, t.up) } }
-                XCTAssertTrue(pressed.isEmpty, "\(action.serialized()) pressed \(pressed) on Pay at \(pay) without the owner: \(result.text)")
             }
+        }
+    }
+
+    /// Seen in review: in one do, a tap opened a page with Delete in the top left, and back then tapped
+    /// it, judged by the Back button of the page before. A press after an action that may have changed
+    /// the screen (a tap, a launch, Home) is judged again on the screen it lands on; where that is
+    /// harmless, it goes.
+    func testBackAfterATapThatOpenedAPageIsJudgedOnThatPage() async {
+        let openers: [(endpoint: String, action: JSON)] = [("POST /wda/tap", ["tap": 2]), ("POST /wda/apps/activate", ["launch": "com.example.shop"]), ("POST /wda/homescreen", ["button": "home"])]
+        for opener in openers {
+            for (opened, asks) in [("Delete", true), ("Back", false)] {
+                let wda = FakeWDA()
+                wda.tree([Node("Button", "Back", [8, 50, 60, 40]), Node("Cell", "Orders", [0, 200, 390, 44])], app: "Shop")
+                let page = [Node("Button", opened, [8, 50, 60, 40]), Node("Cell", "Order 1", [0, 200, 390, 44])]
+                wda.set(opener.endpoint) { [wda] _ in wda.tree(page, app: "Shop"); return (200, ["value": .null]) }
+                let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+                _ = await core.call("look", [:])
+                let result = await core.call("do", ["actions": [opener.action, ["back": true]]])
+                let backTaps = wda.bodies("POST /wda/tap").filter { $0["x"]?.double == 38 && $0["y"]?.double == 70 }
+                XCTAssertEqual(backTaps.count, asks ? 0 : 1, "\(opener.action.serialized()) opened \(opened): \(result.text)")
+                XCTAssertEqual(result.text.contains("action 2 was not sent: the action before it may have changed the screen, and where it touches now it needs the owner's approval (deleting (\"delete\"))"), asks, "\(opener.action.serialized()): \(result.text)")
+            }
+        }
+    }
+
+    /// A routine's swipe went without a check: a step recorded without an element is judged on the screen
+    /// read just before it, a swipe as any other, so one that would go down and lift inside a tall Pay
+    /// stops the run there, and one across a list goes.
+    func testARoutinesSwipeIsJudgedOnTheScreenBeforeIt() async {
+        for (screen, asks) in [([Node("Button", "Pay", [16, 380, 358, 120])], true), ([Node("Cell", "Row 1", [0, 380, 390, 44]), Node("Cell", "Row 2", [0, 424, 390, 44])], false)] {
+            let store = RoutineStore(url: nil)
+            store.save(Routine(name: "swipe", description: "", app: nil, steps: [RoutineStep(action: ["swipe": "left"], target: nil, app: nil, secret: nil)], params: [:], expect: [], read: [],
+                               runs: 0, ok: 0, failuresInARow: 0, lastStop: nil, lastMs: nil, savedBy: "test", created: Date(), updated: Date()))
+            let wda = FakeWDA()
+            wda.tree(screen, app: "Shop")
+            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.memory = store }
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["run": "swipe"]]])
+            XCTAssertEqual(wda.bodies("POST /wda/pressAndDragWithVelocity").count, asks ? 0 : 1, result.text)
+            XCTAssertEqual(result.text.contains("stopped at step 1 of 1: it needs the owner's approval (a payment (\"pay\"))"), asks, result.text)
         }
     }
 

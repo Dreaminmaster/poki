@@ -31,12 +31,23 @@ enum ActionKind: String, CaseIterable {
         }
     }
 
-    /// The approval check reads the screen to judge it: it taps something (`Computer.presses`), types,
-    /// or sends a key. A routine's swipe is judged by the screen read before it.
-    var judgedOnScreen: Bool {
+    /// After it, the screen may not be the one read: it sends input, opens an app or Home, or runs a
+    /// routine.
+    func changesScreen(_ action: JSON) -> Bool {
         switch self {
-        case .tap, .type, .back, .key, .longPress, .drag, .pinch: true
-        case .run, .handoff, .swipe, .scrollTo, .button, .launch, .waitUntil, .wait: false
+        case .launch, .run: true
+        case .button: action["button"]?.text?.lowercased() == "home"
+        default: movesScreen
+        }
+    }
+
+    /// It may put a finger down and lift it on an element (`Computer.presses`): after an action that may
+    /// have changed the screen in the same do, it is judged again on a read of the screen it lands on.
+    func presses(_ action: JSON) -> Bool {
+        switch self {
+        case .tap, .back, .swipe, .scrollTo, .longPress, .drag, .pinch: true
+        case .type: action["ref"] != nil
+        case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: false
         }
     }
 }
