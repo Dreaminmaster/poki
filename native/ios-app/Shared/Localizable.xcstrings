@@ -1916,6 +1916,38 @@
         }
       }
     },
+    "Change it on Poki’s card: tap Poki’s picture at the top of the chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片里更改：轻点对话顶部 Poki 的头像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片裡更改：輕點對話頂部 Poki 的頭像。"
+          }
+        }
+      }
+    },
+    "Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片里更换聊天模型：轻点对话顶部 Poki 的头像。输入框听写不需要账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片裡更換聊天模型：輕點對話頂部 Poki 的頭像。輸入框聽寫不需要帳戶。"
+          }
+        }
+      }
+    },
     "Changes apply right away, starting from Poki’s next step." : {
       "localizations" : {
         "zh-Hans" : {
