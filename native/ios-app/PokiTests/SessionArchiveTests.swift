@@ -110,4 +110,22 @@ final class SessionArchiveTests: XCTestCase {
         let relaunched = launch()
         for session in archived { XCTAssertEqual(relaunched.session(session.id)?.entries, session.entries) }
     }
+
+    /// A conversation brought back from the archive counts as new from that moment for the limit: a full
+    /// list does not drop it at once for its old date.
+    func testAConversationJustUnarchivedIsNotTheOldestForTheLimit() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let old = try save("old", lines: ["Book a table", "Booked."], updated: start, archived: start)
+        for i in 0..<SessionStore.limit { try save("listed-\(i)", lines: ["Task \(i)"], updated: start.addingTimeInterval(1000 + Double(i))) }
+
+        let store = launch()
+        store.unarchive("old")
+        store.flush()
+
+        let relaunched = launch()
+        XCTAssertEqual(relaunched.listed.count, SessionStore.limit)
+        XCTAssertEqual(relaunched.session("old")?.entries, old.entries, "the conversation just brought back stays")
+        XCTAssertNil(relaunched.session("listed-0"), "the oldest of the others goes instead")
+    }
 }

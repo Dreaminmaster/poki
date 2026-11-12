@@ -26,6 +26,12 @@ struct SavedSession: Codable, Identifiable, Equatable {
     var connector: String? = nil
     /// When it was archived: out of the conversations list, in Settings > Conversations, every line kept.
     var archived: Date? = nil
+    /// When it was last brought back from the archive. The list keeps its own time and place; the limit
+    /// counts it as new from this moment, so a full list does not drop it at once for its old date.
+    var unarchived: Date? = nil
+
+    /// Its age for the limit: the later of its last change and its return from the archive.
+    var keptSince: Date { max(updated, unarchived ?? .distantPast) }
 
     /// The row's second line: the last thing that happened, as plain text (markdown neither drawn nor
     /// shown as its marks).
@@ -297,10 +303,12 @@ final class SessionStore {
         put(session)
     }
 
-    /// Back to the conversations list, at its own time.
+    /// Back to the conversations list, at its own time and place among the days; for the limit it counts
+    /// as new from now.
     func unarchive(_ id: String) {
         guard var session = session(id), session.archived != nil else { return }
         session.archived = nil
+        session.unarchived = Date()
         put(session)
     }
 
@@ -448,12 +456,13 @@ final class SessionStore {
         pendingWrites = []
     }
 
-    /// Past the limit, the oldest conversations in the list go. An archived one is never deleted here: only
-    /// the owner's Delete in Settings > Conversations removes it.
+    /// Past the limit, the oldest conversations in the list go, one just brought back from the archive
+    /// counting as new (`keptSince`). An archived one is never deleted here: only the owner's Delete in
+    /// Settings > Conversations removes it.
     private func trim() {
         let listed = sessions.filter { $0.archived == nil }
         guard listed.count > Self.limit else { return }
-        let gone = Set(listed.sorted { $0.updated > $1.updated }[Self.limit...].map(\.id))
+        let gone = Set(listed.sorted { $0.keptSince > $1.keptSince }[Self.limit...].map(\.id))
         for id in gone { try? FileManager.default.removeItem(at: file(id)) }
         sessions.removeAll { gone.contains($0.id) }
     }
