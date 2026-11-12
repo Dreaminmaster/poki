@@ -2,6 +2,7 @@
 # app-tests.sh SIMULATOR_UDID [DERIVED_DATA]: builds PokiTests and runs it inside Poki on a booted
 # iOS simulator. The bundle is injected into Poki at launch (libXCTestBundleInject) instead of going
 # through `xcodebuild test`, whose runner connection hangs on some Xcode and simulator pairs.
+# TEST_LANGUAGE runs it in another language (zh-Hans); TEST_ONLY runs one test class.
 set -euo pipefail
 UDID="$1"
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,12 +21,15 @@ xcrun simctl privacy "$UDID" grant location-always "$BUNDLE"
 xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 
 # PokiTests read the English text, as on CI's simulator, whatever language this Mac's simulator uses.
+LANGUAGE="${TEST_LANGUAGE:-en}"
+ONLY=()
+[ -n "${TEST_ONLY:-}" ] && ONLY=(-XCTest "PokiTests.$TEST_ONLY")
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"; xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true' EXIT
 SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="$X/usr/lib/libXCTestBundleInject.dylib" \
 SIMCTL_CHILD_XCTestBundlePath="$APP/PlugIns/PokiTests.xctest" \
 SIMCTL_CHILD_DYLD_FRAMEWORK_PATH="$X/Library/Frameworks:$X/Library/PrivateFrameworks" \
 SIMCTL_CHILD_DYLD_LIBRARY_PATH="$X/usr/lib" \
-  timeout 300 xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -AppleLanguages "(en)" -AppleLocale en_US >"$LOG" 2>&1 || true
-grep -E "^Test Case|error:|Executed" "$LOG" || true
-grep -q "Test Suite 'All tests' passed" "$LOG"
+  timeout 300 xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -AppleLanguages "($LANGUAGE)" -AppleLocale "${LANGUAGE/-/_}" ${ONLY[@]+"${ONLY[@]}"} >"$LOG" 2>&1 || true
+grep -E "^Test Case|error:|Executed|^FIT" "$LOG" || true
+grep -qE "Test Suite '(All|Selected) tests' passed" "$LOG"
