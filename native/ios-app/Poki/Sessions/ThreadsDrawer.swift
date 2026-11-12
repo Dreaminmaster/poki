@@ -40,6 +40,9 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     /// True once the drawer has closed all the way. Set when the closing spring ends, not with the progress
     /// itself: the progress jumps to its target and the spring only draws the way there.
     @State private var hidden = true
+    /// From the moment a drag takes the drawer until its spring has settled. The list's buttons are off
+    /// meanwhile: a row lets its tap through when the finger lifts inside it, however far it went sideways.
+    @State private var sliding = false
     /// True while a drag is under way, so a drag the system cancels (no `onEnded`) still settles.
     @GestureState private var dragging = false
     @State private var screen = CGSize(width: 402, height: 874)
@@ -150,6 +153,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .offset(x: reduceMotion ? 0 : (settled - 1) * ThreadsDrawerMotion.menuShift)
             .opacity(reduceMotion ? settled : (hidden ? 0 : 0.55 + 0.45 * settled))
+            .disabled(sliding)
             .allowsHitTesting(isOpen)
             .accessibilityHidden(!isOpen)
             .accessibilityAction(.escape) { settle(false, speed: 0) }
@@ -162,7 +166,9 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
         let animation = reduceMotion ? ThreadsDrawerMotion.fade : ThreadsDrawerMotion.spring(from: progress, to: target, speed: speed)
         if open { hidden = false }
         withAnimation(animation, completionCriteria: .removed) { progress = target } completion: {
-            if progress == 0, dragStart == nil { hidden = true }
+            guard dragStart == nil else { return }
+            sliding = false
+            if progress == 0 { hidden = true }
         }
         if isOpen != open { isOpen = open }
     }
@@ -182,6 +188,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                     // A mostly sideways drag in the drawer's direction; an up or down one belongs to the scroll view.
                     guard abs(dx) > abs(value.translation.height) * 1.5, isOpen ? dx < 0 : dx > 0, !scrolls(value) else { return }
                     dragStart = progress
+                    sliding = true
                 }
                 guard let start = dragStart else { return }
                 var next = start + dx / layout.travel
