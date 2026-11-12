@@ -30211,29 +30211,6 @@
         }
       }
     },
-    "Poki needs a hand" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki needs a hand"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 需要你搭把手"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 需要你搭把手"
-          }
-        }
-      }
-    },
     "Poki’s done" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30303,29 +30280,6 @@
         }
       }
     },
-    "Poki can’t reach the phone" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki can’t reach the phone"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 连不上手机"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 連不上手機"
-          }
-        }
-      }
-    },
     "Poki’s listening" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30368,29 +30322,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 在說話"
-          }
-        }
-      }
-    },
-    "Poki says hi" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki says hi"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 来打个招呼"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 來打個招呼"
           }
         }
       }
@@ -30526,6 +30457,75 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "瞭解更多"
+          }
+        }
+      }
+    },
+    "Poki needs your help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki needs your help"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要你接手"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要你接手"
+          }
+        }
+      }
+    },
+    "Poki can’t reach iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki can’t reach iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 连不上手机"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 連不上手機"
+          }
+        }
+      }
+    },
+    "Poki isn’t set up yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki isn’t set up yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 还没设置好"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 還沒設定好"
           }
         }
       }

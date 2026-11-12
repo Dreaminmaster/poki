@@ -25,15 +25,15 @@ enum PokiMood: String, CaseIterable {
         case .onYourPhone: String(localized: "Poki’s on it")
         case .checking: String(localized: "Poki’s checking this step")
         case .needsYou: String(localized: "Poki needs you")
-        case .yourTurn: String(localized: "Poki needs a hand")
+        case .yourTurn: String(localized: "Poki needs your help")
         case .done: String(localized: "Poki’s done")
         case .tripped: String(localized: "Poki hit a snag")
         // The word the Hands switch uses: you paused it, and it starts again when you or an agent asks.
         case .paused: String(localized: "Poki’s asleep")
-        case .cantReach: String(localized: "Poki can’t reach the phone")
+        case .cantReach: String(localized: "Poki can’t reach iPhone")
         case .listening: String(localized: "Poki’s listening")
         case .speaking: String(localized: "Poki’s talking")
-        case .hello: String(localized: "Poki says hi")
+        case .hello: String(localized: "Poki isn’t set up yet")
         }
     }
 
