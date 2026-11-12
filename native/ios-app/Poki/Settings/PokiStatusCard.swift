@@ -1,9 +1,11 @@
 import SwiftUI
 
 // Tapping Poki's picture, on the home page, in the conversation or on the voice page, opens Poki's card
-// under it (the owner's home of 2026-11-12, boards 定稿 08 and 01c): the model that answers, changed on
-// the spot; how Poki asks before a sensitive step; Pause or Resume. These live only here: Settings keeps
-// the accounts. Settings opens from the bottom of the conversations (SettingsEntryButton).
+// under it (the owner's home of 2026-11-12, boards 定稿 08 and 01c): two rows, the model that answers and
+// how Poki asks before a sensitive step, each showing its choice and opening in place to change it. These
+// live only here: Settings keeps the accounts. Settings opens from the bottom of the conversations
+// (SettingsEntryButton). Pause is not on it (the owner, 2026-11-13): it only stopped the task, which the
+// message field's Stop does, and the next task woke Poki again.
 
 /// The one place the settings card and the status card take Poki's status words from. They are the
 /// bear's own (PokiMood.word, from `StatusWord`), the same words the Live Activity says ("Ready",
@@ -79,17 +81,18 @@ extension PowerTile {
     }
 }
 
-/// Poki's card under its picture (board 定稿 08): a system-style menu card of three groups. The model
-/// that answers, which opens in place to the chat models of every account that is set up (07b), or
-/// Add Model with none; the three ways of asking, the one in use ticked, the same setting Settings ›
-/// Approvals reads; and Pause, Resume or Turn On. Each acts at once.
+/// Poki's card under its picture (board 定稿 08): a system-style menu card of two rows. The model that
+/// answers, which opens in place to the chat models of every account that is set up (07b), or Add
+/// Model with none; and the approval method, which opens in place the same way to the three methods,
+/// the one in use ticked, and the line on what always asks you. The method is `AppModel.approvalMode`,
+/// the one setting Settings › Approvals reads. Each acts at once; one row is open at a time.
 struct PokiStatusCard: View {
     @Environment(AppModel.self) private var model
-    @Environment(ChatModel.self) private var chat
     @Environment(\.colorScheme) private var scheme
     /// Settings › Models, for Add Model.
     var openModel: () -> Void
-    @State private var choosingModel = false
+    @State private var open: Row?
+    private enum Row { case model, approvals }
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
 
@@ -97,7 +100,6 @@ struct PokiStatusCard: View {
     private var soft: Color { Color(.secondaryLabel) }
 
     var body: some View {
-        let power = PowerTile.card(model: model)
         let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
             // Where Poki stands, which the top bar no longer says in words: its face shows it there.
@@ -106,20 +108,10 @@ struct PokiStatusCard: View {
                 .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
                 .accessibilityIdentifier("status.word")
             modelRow
-            if choosingModel { modelChoices }
+            if open == .model { modelChoices }
             rule
-            approvals
-            rule
-            Button { power.act(model: model, chat: chat) } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: power.symbol).font(.body.weight(.semibold)).frame(width: 20)
-                    Text(power.title).frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .foregroundStyle(power == .pause ? Color(.label) : Tint.blue)
-                .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
-            }
-            .buttonStyle(CardRowStyle())
-            .accessibilityIdentifier("status.\(power.name)")
+            approvalRow
+            if open == .approvals { approvalChoices }
         }
         .padding(.vertical, 6)
         .frame(maxWidth: 330, alignment: .leading)
@@ -129,7 +121,7 @@ struct PokiStatusCard: View {
         .shadow(color: .black.opacity(dark ? 0.4 : 0.16), radius: 24, y: 16)
         .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
-        .animation(.snappy(duration: 0.28), value: choosingModel)
+        .animation(.snappy(duration: 0.28), value: open)
         // A container, so each row keeps its own identifier.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("status.card")
@@ -147,14 +139,8 @@ struct PokiStatusCard: View {
 
     @ViewBuilder private var modelRow: some View {
         if ModelKeys.hasUsableKey {
-            Button { choosingModel.toggle() } label: {
-                HStack(spacing: 8) {
-                    Text("Model").foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
-                    Text(verbatim: ModelKeys.selectedModelName).foregroundStyle(soft).lineLimit(1)
-                    Image(systemName: choosingModel ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
-                }
-                .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
+            Button { toggle(.model) } label: {
+                choiceRow("Model", value: ModelKeys.selectedModelName, open: open == .model)
             }
             .buttonStyle(CardRowStyle())
             .id(modelVersion)
@@ -186,7 +172,7 @@ struct PokiStatusCard: View {
                         ModelKeys.selectedModel = choice.id
                         ModelKeys.saved += 1
                         modelVersion += 1
-                        choosingModel = false
+                        open = nil
                     } label: {
                         tickRow(choice.name, ticked: chosen, inset: 36)
                     }
@@ -202,14 +188,25 @@ struct PokiStatusCard: View {
 
     // MARK: Approvals
 
-    private var approvals: some View {
+    private var approvalRow: some View {
+        Button { toggle(.approvals) } label: {
+            choiceRow("Approval Method", value: model.approvalMode.title, open: open == .approvals)
+        }
+        .buttonStyle(CardRowStyle())
+        .accessibilityValue(Text(verbatim: model.approvalMode.title))
+        .accessibilityIdentifier("status.approvals")
+    }
+
+    /// The three methods, the one in use ticked, and under them what always asks you whatever the method.
+    private var approvalChoices: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Approval Method").font(.footnote).foregroundStyle(soft)
-                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 4)
             ForEach(ApprovalClassifier.Mode.allCases) { mode in
                 let chosen = model.approvalMode == mode
-                Button { if !chosen { model.approvalMode = mode } } label: {
-                    tickRow(mode.title, ticked: chosen, inset: 20, height: 44)
+                Button {
+                    if !chosen { model.approvalMode = mode }
+                    open = nil
+                } label: {
+                    tickRow(mode.title, ticked: chosen, inset: 36)
                 }
                 .buttonStyle(CardRowStyle())
                 .accessibilityAddTraits(chosen ? .isSelected : [])
@@ -218,9 +215,23 @@ struct PokiStatusCard: View {
             Text("Payments, deletions and actions in Wallet always need your confirmation.")
                 .font(.footnote).foregroundStyle(soft)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 12)
+                .padding(.leading, 36).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 10)
         }
         .sensoryFeedback(.selection, trigger: model.approvalMode)
+        .transition(.opacity)
+    }
+
+    private func toggle(_ row: Row) { open = open == row ? nil : row }
+
+    /// A row of the card: its name, what is chosen, and the arrow that opens the choices under it.
+    private func choiceRow(_ title: LocalizedStringKey, value: String, open: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
+            Text(verbatim: value).foregroundStyle(soft).lineLimit(1)
+            Image(systemName: open ? "chevron.up" : "chevron.down")
+                .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+        }
+        .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
     }
 
     private func tickRow(_ title: String, ticked: Bool, inset: CGFloat, height: CGFloat = 44) -> some View {

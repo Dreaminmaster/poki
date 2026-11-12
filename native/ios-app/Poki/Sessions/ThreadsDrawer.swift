@@ -40,9 +40,10 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     /// True once the drawer has closed all the way. Set when the closing spring ends, not with the progress
     /// itself: the progress jumps to its target and the spring only draws the way there.
     @State private var hidden = true
-    /// From the moment a drag takes the drawer until its spring has settled. The list's buttons ignore
-    /// their taps meanwhile (`drawerSliding`): a row lets its tap through when the finger lifts inside it,
-    /// however far it went sideways.
+    /// From the moment a drag takes the drawer until just after the finger lifts. The list's buttons
+    /// ignore their taps meanwhile (`drawerSliding`): a row lets its tap through when the finger lifts
+    /// inside it, however far it went sideways. Only that lift: a tap a moment later, while the spring
+    /// still settles, opens the row.
     @State private var sliding = false
     /// True while a drag is under way, so a drag the system cancels (no `onEnded`) still settles.
     @GestureState private var dragging = false
@@ -65,7 +66,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             card(content).zIndex(1)
         }
         .simultaneousGesture(drag, including: (enabled || isOpen) ? .all : .subviews)
-        .background(ThreadsDrawerLayout.ground.ignoresSafeArea())
+        .background(Tint.sidebar.ignoresSafeArea())
         // The safe area, read where it is kept (a reader that ignores it reads none).
         .background {
             GeometryReader { geometry in
@@ -92,7 +93,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
         }
         .onChange(of: dragging) { _, now in
             // The system took the drag away before it ended: go back to where it was.
-            if !now, dragStart != nil { dragStart = nil; settle(isOpen, speed: 0) }
+            if !now, dragStart != nil { dragStart = nil; release(); settle(isOpen, speed: 0) }
         }
         .onAppear { progress = isOpen ? 1 : 0; hidden = !isOpen }
     }
@@ -110,7 +111,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .overlay {
                 if !hidden, !reduceMotion {
                     ZStack {
-                        CardCorners(radius: radius).fill(ThreadsDrawerLayout.ground)
+                        CardCorners(radius: radius).fill(Tint.sidebar)
                         RoundedRectangle(cornerRadius: radius).strokeBorder(Color.primary.opacity((dark ? 0.16 : 0.08) * settled), lineWidth: 0.5)
                     }
                     .ignoresSafeArea()
@@ -167,11 +168,14 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
         let animation = reduceMotion ? ThreadsDrawerMotion.fade : ThreadsDrawerMotion.spring(from: progress, to: target, speed: speed)
         if open { hidden = false }
         withAnimation(animation, completionCriteria: .removed) { progress = target } completion: {
-            guard dragStart == nil else { return }
-            sliding = false
-            if progress == 0 { hidden = true }
+            if progress == 0, dragStart == nil { hidden = true }
         }
         if isOpen != open { isOpen = open }
+    }
+
+    /// Lets the list's buttons take taps again once the lift that ended the drag has passed them by.
+    private func release() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { if dragStart == nil { sliding = false } }
     }
 
     /// The drag began on something that scrolls sideways itself (the home page's suggestion rows),
@@ -202,6 +206,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .onEnded { value in
                 guard dragStart != nil else { return }
                 dragStart = nil
+                release()
                 let speed = value.velocity.width / layout.travel
                 let projected = min(progress, 1) + speed / 6
                 settle(projected > (isOpen ? 0.55 : 0.45), speed: speed)
@@ -213,9 +218,6 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
 struct ThreadsDrawerLayout {
     var screen: CGSize
     var insets: EdgeInsets
-
-    /// The drawer's ground: the page's own white in light, black in dark.
-    static let ground = Color(.systemBackground)
 
     /// The strip of the chat left showing when open: a little over a fifth of the screen.
     var strip: CGFloat { max(72, (screen.width * 0.22).rounded()) }

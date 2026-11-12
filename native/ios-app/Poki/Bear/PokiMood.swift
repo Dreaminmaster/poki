@@ -109,8 +109,8 @@ struct PokiStatus: Equatable {
         // Setup is open, unless only the loopback is missing and Poki can start without it (main's rule for Home).
         if !model.canStartTasks { return PokiStatus(.hello) }
         if !(model.sessionOn || model.wantsOn) { return PokiStatus(.paused, word: StatusWord.off.text) }
-        // Standing by after the idle minute is still ready: only the owner's own pause puts it to sleep.
-        if model.ownerPaused { return PokiStatus(.paused) }
+        // Standing by (after Turn On, after the idle minute, or after the owner's pause) is Ready: the
+        // next task or agent request wakes it, and nothing is yours to do (the owner, 2026-11-13).
         return PokiStatus(.ready)
     }
 

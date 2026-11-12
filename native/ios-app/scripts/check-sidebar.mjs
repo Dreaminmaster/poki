@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // check-sidebar.mjs POKI_MCP_ROOT SIMULATOR_NAME OUTPUT_DIR: drives Poki on a simulator through Poki MCP and
-// checks that the conversation drawer holds only the conversations and the new-conversation button, and that
-// switching, deleting and starting a conversation still work from it.
+// checks that the conversation drawer holds only Poki's name, the day headings, the conversations, New Conversation
+// and Settings, and that switching, renaming and deleting (from the long-press menu) and starting a conversation
+// still work from it.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -9,7 +10,7 @@ import { join, resolve } from 'node:path';
 
 const [clientRoot, device, output] = process.argv.slice(2);
 assert(clientRoot && device && output, 'Usage: check-sidebar.mjs POKI_MCP_ROOT SIMULATOR_NAME OUTPUT_DIR');
-assert(device.startsWith('ESP-447 '), 'Use the dedicated ESP-447 simulator');
+assert(device.startsWith('ESP-'), 'Use a dedicated task simulator (named ESP-…): the check deletes and renames conversations');
 const directory = resolve(output);
 mkdirSync(directory, { recursive: true });
 
@@ -47,29 +48,40 @@ try {
   const drawer = openDrawer();
   call('save_screenshot', { path: join(directory, 'drawer.png'), overwrite: true });
   evidence.drawer = drawer.map(e => ({ type: e.type, identifier: e.identifier ?? null, label: e.label ?? null }));
+  const furniture = new Set(['Poki', 'Today', 'Yesterday', 'Earlier', 'Close Conversations']);
   const extra = drawer.filter(e => e.type !== 'Application' && e.identifier !== 'threads.newChat' && e.identifier !== 'threads.settings'
-    && !(e.type === 'Button' && !e.identifier && (e.label ?? '').includes(', ')));
+    && !furniture.has(e.label ?? '') && !(e.type === 'Button' && !e.identifier) && !(e.type === 'Group' && !e.label));
   assert.deepEqual(extra.map(e => `${e.type}: ${e.identifier ?? e.label}`), [], 'The drawer must list only conversations');
   assert(row(drawer, 'Codex') && row(drawer, 'What iOS version is this?'), 'The drawer must list the saved conversations');
 
+  // In the drawer a sideways drag closes it, so Rename and Delete are in the long-press menu.
   const live = row(drawer, 'Claude → Poki');
-  call('swipe', { from_x: live.frame.x + live.frame.width - 20, from_y: centre(live).y, to_x: live.frame.x + 40, to_y: centre(live).y });
+  call('long_press', { ...centre(live), duration: 1 });
   pause(1000);
   const liveActions = elements();
-  evidence.liveSwipe = liveActions.filter(e => e.type === 'Button').map(e => e.label);
-  assert(!liveActions.some(e => e.type === 'Button' && e.label === 'Delete'), 'A running conversation must not offer Delete');
+  evidence.liveMenu = liveActions.filter(e => e.type === 'Button').map(e => e.label);
+  assert(liveActions.some(e => e.label === 'Rename'), 'A running conversation must offer Rename');
+  assert(!liveActions.some(e => e.label === 'Delete'), 'A running conversation must not offer Delete');
 
   launch();
   const fresh = openDrawer();
-  const codex = row(fresh, 'Codex');
-  call('swipe', { from_x: codex.frame.x + codex.frame.width - 20, from_y: centre(codex).y, to_x: codex.frame.x + 40, to_y: centre(codex).y });
+  call('long_press', { ...centre(row(fresh, 'Codex')), duration: 1 });
   pause(1000);
-  const del = elements().find(e => e.type === 'Button' && e.label === 'Delete');
+  const del = elements().find(e => e.label === 'Delete');
   assert(del, 'A finished conversation must offer Delete');
   tap(del);
   const afterDelete = elements();
   assert(!row(afterDelete, 'Codex'), 'Delete must remove the conversation from the drawer');
   evidence.deleted = 'Codex';
+
+  call('long_press', { ...centre(row(afterDelete, 'Order my usual coffee')), duration: 1 });
+  pause(1000);
+  tap(elements().find(e => e.label === 'Rename'));
+  call('type_text', { text: 'Coffee run', clear: true });
+  tap(elements().find(e => e.type === 'Button' && e.label === 'Save'));
+  const afterRename = elements();
+  assert(row(afterRename, 'Coffee run') && !row(afterRename, 'Order my usual coffee'), 'Rename must show the new name in the drawer');
+  evidence.renamed = 'Coffee run';
 
   tap(row(afterDelete, 'What iOS version is this?'));
   const session = elements();
@@ -84,7 +96,7 @@ try {
   assert(!byId(home, 'threads.newChat') && byId(home, 'chat.threads'), 'New Conversation must close the drawer on the home page');
   evidence.newConversation = true;
 
-  console.log('PASS: the drawer lists only conversations; switch, delete and new conversation work');
+  console.log('PASS: the drawer lists only conversations; switch, rename, delete and new conversation work');
 } catch (error) {
   evidence.failure = error.message;
   console.error(error.message.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi, '<device>'));
