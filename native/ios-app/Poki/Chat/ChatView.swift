@@ -1120,7 +1120,7 @@ struct ModeLabels: View {
 // the repository), with the plus button in front from exyte/Chat (commit f382a14,
 // Sources/ExyteChat/Views/InputView/InputView.swift, Copyright (c) 2019 exyte, MIT License). Now two
 // layers on one sheet of glass (ESP-326 board "01 Chat: Greeting"): the message on top with dictation
-// at its end; below it the plus menu, the model, the Hands switch, and one button that talks, sends or
+// at its end; below it the More menu, the model, the Hands switch, and one button that talks, sends or
 // stops.
 struct ComposerInputView: View {
     @Environment(AppModel.self) private var model
@@ -1161,7 +1161,7 @@ struct ComposerInputView: View {
             // One row on one glass sheet (ESP-376): More, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             HStack(alignment: .bottom, spacing: 10) {
-                plus
+                more
                 // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                 CapsuleField(text: $input, focused: $focused, maxLines: 6, onSubmit: submit)
                     .overlay(alignment: .topLeading) {
@@ -1210,8 +1210,9 @@ struct ComposerInputView: View {
 
     /// More: what the row itself has no room for. A new conversation and the conversations (also the
     /// top bar's two buttons), dictation, Poki's hands, the model that answers, and the way to the
-    /// accounts and to Poki's profile.
-    private var plus: some View {
+    /// accounts and to Poki's profile. Its button is the system's More (ESP-468): a plus reads as
+    /// adding a photo or a file, which this menu does not do.
+    private var more: some View {
         Menu {
             Button("New Conversation", systemImage: "square.and.pencil", action: newConversation).disabled(running)
             if let openThreads { Button("Conversations", systemImage: "line.3.horizontal", action: openThreads) }
@@ -1223,7 +1224,7 @@ struct ComposerInputView: View {
             Button("Accounts and Models", systemImage: "person.crop.circle", action: openModel)
             Button("Poki Details", systemImage: "gearshape", action: openDetails)
         } label: {
-            Image(systemName: "plus")
+            Image(systemName: "ellipsis")
                 .font(.title3.weight(.medium)).foregroundStyle(Color(.label))
                 .frame(width: 48, height: 48)
                 .background(Color(.label).opacity(scheme == .dark ? 0.12 : 0.06), in: .circle)
