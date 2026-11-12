@@ -97,10 +97,13 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     private var scrim: some View {
         let cutout = Rectangle().subtracting(layout.shape.offset(x: panelOffset).path(in: layout.panel))
         return ZStack {
-            if !reduceTransparency {
+            if reduceTransparency {
+                // Without the blur (Reduce Transparency) the page's own colour covers most of the chat, so
+                // the chat's buttons in the strip don't look tappable.
+                Rectangle().fill(Color(.systemBackground).opacity(ThreadsDrawerMotion.cover * settled))
+            } else {
                 Rectangle().fill(.ultraThinMaterial).opacity(settled)
             }
-            // Without the blur (Reduce Transparency) a deeper dim does its work.
             Rectangle().fill(Color.black.opacity((reduceTransparency ? ThreadsDrawerMotion.dimOpaque : ThreadsDrawerMotion.dim) * settled))
         }
         .mask(cutout)
@@ -221,7 +224,9 @@ enum ThreadsDrawerMotion {
     /// The chat's dim at fully open, under the blur.
     static let dim: CGFloat = 0.22
     /// The dim with Reduce Transparency, where there is no blur.
-    static let dimOpaque: CGFloat = 0.5
+    static let dimOpaque: CGFloat = 0.3
+    /// How much of the page's colour covers the chat under Reduce Transparency.
+    static let cover: CGFloat = 0.8
     /// How far the chat moves back to the trailing side at fully open.
     static let chatShift: CGFloat = 24
     /// Past the screen's edge when closed, so the panel's shadow does not show.
