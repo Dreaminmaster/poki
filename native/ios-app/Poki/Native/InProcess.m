@@ -843,15 +843,16 @@ static const int PKFrontKey = -1;
 
 - (NSDictionary<NSString *, id> *)unanswered {
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    // The latest: one that never answers must not hide a newer one past testmanagerd's limit.
     NSNumber *pid = nil;
-    NSTimeInterval oldest = now;
+    NSTimeInterval latest = 0;
     @synchronized (PKHungLock()) {
         for (NSNumber *key in PKHungSince()) {
             NSTimeInterval since = PKHungSince()[key].doubleValue;
-            if (since <= oldest) { oldest = since; pid = key; }
+            if (!pid || since > latest) { latest = since; pid = key; }
         }
     }
-    return pid ? @{@"pid": pid, @"seconds": @(now - oldest)} : nil;
+    return pid ? @{@"pid": pid, @"seconds": @(now - latest)} : nil;
 }
 
 - (CGRect)viewport {

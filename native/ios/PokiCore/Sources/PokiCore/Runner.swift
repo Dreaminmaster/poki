@@ -139,7 +139,7 @@ public final class Runner: @unchecked Sendable {
     var wedgedAfter: Double = 15
     /// A runner busy with one request longer than this is wedged all the same (testmanagerd waits 60 s
     /// for one request's work to complete).
-    static let busyLimit: Double = 60
+    var busyLimit: Double = 60
     /// Why the runner was last restarted by this side, for the next call to report (once).
     let lastRestart = LockedBox<String?>(nil)
     /// The host's own way to a screenshot (apart from the runner), used when the runner gives none.
@@ -235,9 +235,10 @@ public final class Runner: @unchecked Sendable {
             throw RunnerError(message: "the runner did not answer \(method) \(Self.short(path)): \(error)", delivery: .unknown, silent: true)
         }
         state.update { $0.misses = 0 }
-        if queued { stall.value = nil }
         let parsed = (try? JSON.parse(result.body)) ?? (result.body.isEmpty ? .object([:]) : ["value": .string(String(decoding: result.body, as: UTF8.self))])
         let value = parsed["value"] ?? parsed
+        // An answer is the runner through with what it was finishing, unless it says that is still held.
+        if queued, value["error"]?.string != LocalRunner.heldError { stall.value = nil }
         if let code = value["error"]?.string {
             let message = (value["message"]?.string ?? code).split(separator: "\n").first.map(String.init) ?? code
             throw RunnerError(message: "the runner refused \(method) \(Self.short(path)): \(message)", delivery: .notSent, status: result.status, code: code)
@@ -288,7 +289,7 @@ public final class Runner: @unchecked Sendable {
             // as before; one that does not answer at all is a runner gone or hung whole, restarted with
             // no second wait, so a dead runner is restarted no later than before.
             let status = try? await self.raw("GET", "/status", timeout: 3, countsAsMiss: false)
-            if let busy = status?["busy"]?["seconds"]?.double, busy < Self.busyLimit {
+            if let busy = status?["busy"]?["seconds"]?.double, busy < self.busyLimit {
                 if self.stall.value?.since == stalled.since { self.watch(stalled) }
                 return
             }

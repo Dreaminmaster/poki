@@ -60,7 +60,7 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
 /// the viewport (the one noted last stands), as that lookup would wait behind a request testmanagerd is
 /// still serving.
 - (nullable NSData *)screenshot:(NSString *_Nullable *_Nullable)code refreshViewport:(BOOL)refreshViewport;
-/// The oldest accessibility request this process gave up on that testmanagerd is still serving: keys
+/// The latest accessibility request this process gave up on that testmanagerd is still serving: keys
 /// pid (0: the accessibility server, -1: a lookup of the app in front) and seconds. nil when none is.
 - (nullable NSDictionary<NSString *, id> *)unanswered;
 /// The app in front: bundleId, name, pid. Empty when accessibility gives none.

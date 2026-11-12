@@ -44,11 +44,13 @@ final class Phone: @unchecked Sendable {
 }
 
 final class LocalRunnerTests: XCTestCase {
-    private func makeLocalCore(_ phone: Phone) -> (PokiCore, FakeHost) {
+    private func makeLocalCore(_ phone: Phone, heldFor: Double = 60) -> (PokiCore, FakeHost) {
         let host = FakeHost()
         var config = CoreConfig(approvalWait: 0.3, toolDeadline: 6, actionCap: 2, readTimeout: 1, busyWait: 0.2, treeFormat: "json", humanize: false)
         config.sensitive.enabled = false
-        return (PokiCore(config: config, host: host, transport: LocalRunner(serve: phone.serve)), host)
+        let lanes = LocalRunner(serve: phone.serve)
+        lanes.heldFor = heldFor
+        return (PokiCore(config: config, host: host, transport: lanes), host)
     }
 
     /// Seen on the phone (ESP-464): the chat app in front did not answer for 38 s, and the read that
@@ -93,6 +95,24 @@ final class LocalRunnerTests: XCTestCase {
         let later = await core.call("do", ["actions": [["tap": [100, 300]]]])
         XCTAssertFalse(later.isError, later.text)
         XCTAssertEqual(phone.touches.value.count, 1, "once the app answers, a tap goes through: \(later.text)")
+    }
+
+    /// What must not get looser: a request still not through past testmanagerd's own limit (60 s on the
+    /// phone, 3 s here) is a wedged queue, and the runner is restarted, also while the agent keeps
+    /// calling and each call is refused at once. The new session then lets requests through again.
+    func testARequestHeldPastTheDaemonsLimitStillRestartsTheRunner() async throws {
+        let phone = Phone()
+        let (core, host) = makeLocalCore(phone, heldFor: 3)
+        core.runner.wedgedAfter = 1
+        core.runner.busyLimit = 3
+        _ = await core.call("look", [:])
+        phone.silentUntil.value = now() + 15
+        let until = now() + 9
+        while now() < until, host.restarts.value == 0 {
+            _ = await core.call("look", [:])
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        XCTAssertGreaterThanOrEqual(host.restarts.value, 1, "a request held past the daemon's limit is a wedged runner")
     }
 
     /// A runner that says it is still serving a request (Poki's own process says so in its status) is

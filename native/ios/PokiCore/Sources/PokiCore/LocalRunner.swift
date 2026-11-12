@@ -47,9 +47,14 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
     private let queue = DispatchQueue(label: "poki.inprocess.wda", qos: .userInitiated)
     /// Screenshots are answered beside the queue, as WDA does.
     private let pictures = DispatchQueue(label: "poki.inprocess.screenshot", qos: .userInitiated)
-    /// A held request is waited for this long; after that requests are sent again anyway (testmanagerd
-    /// itself waits 60 s for one request's work to complete).
+    /// testmanagerd itself waits 60 s for one request's work to complete. The phone side's own unanswered
+    /// request counts for that long. A request held on the queue counts until it is through: its age
+    /// reaches `Runner`'s watchdog through /status, which restarts the runner past this time, and the
+    /// new session (POST /session) then lets requests through again.
     var heldFor: Double = 60
+    /// The error of a request refused because an earlier one is still held: `Runner` does not take this
+    /// answer for the runner being through with what it was finishing.
+    public static let heldError = "earlier request unanswered"
     /// Requests answered in this process alone, never through testmanagerd: served while a request is held.
     static let local: Set<String> = ["GET /wda/screen", "GET /wda/locked", "POST /appium/settings", "POST /session", "DELETE /session",
                                      "POST /wda/getPasteboard", "POST /wda/setPasteboard",
@@ -71,12 +76,12 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
     }
 
     /// What holds testmanagerd for this process, the longest first: a request held on the queue, or
-    /// the phone side's own unanswered one. Past `heldFor` it no longer counts.
+    /// the phone side's own unanswered one (until `heldFor`).
     private func holding(_ s: Lanes, at t: Double) -> (what: String, seconds: Double)? {
         var found: [(what: String, seconds: Double)] = []
         if let h = s.held { found.append((h.key, t - h.since)) }
-        if let u = unanswered() { found.append((u.what, u.seconds)) }
-        return found.filter { $0.seconds < heldFor }.max { $0.seconds < $1.seconds }
+        if let u = unanswered(), u.seconds < heldFor { found.append((u.what, u.seconds)) }
+        return found.max { $0.seconds < $1.seconds }
     }
 
     /// GET /status, answered at once beside the queue (WDA answers it apart too), with what the queue is
@@ -95,8 +100,8 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
         return (200, (["value": value] as JSON).data())
     }
 
-    private static func refused(_ message: String) -> (status: Int, body: Data) {
-        (500, (["value": ["error": "unknown error", "message": .string(message)]] as JSON).data())
+    private static func refused(_ message: String, error: String = "unknown error") -> (status: Int, body: Data) {
+        (500, (["value": ["error": .string(error), "message": .string(message)]] as JSON).data())
     }
 
     public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
@@ -114,6 +119,16 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
                 // Its caller gave up while it waited its turn: nobody would read the answer, and an
                 // action would land after the agent was told it failed.
                 guard began < givesUp else { continuation.resume(throwing: TransportError.timedOut); return }
+                // A new session after the watchdog's restart: a request held past testmanagerd's own
+                // limit is not waited for any longer.
+                if key == "POST /session" {
+                    state.update { s in
+                        if let h = s.held, began - h.since >= heldFor {
+                            NSLog("%@", "PokiInProcess: a new session; \(h.key), unanswered for \(Int(began - h.since)) s, is no longer waited for")
+                            s.held = nil
+                        }
+                    }
+                }
                 let s = state.value
                 if picture, let h = s.heldPicture, began - h.since < heldFor {
                     continuation.resume(returning: Self.refused("no screenshot: an earlier one has been under way for \(Int((began - h.since).rounded())) s"))
@@ -121,7 +136,7 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
                 }
                 let holder = holding(s, at: began)
                 if !picture, !Self.local.contains(key), let holder {
-                    continuation.resume(returning: Self.refused("not sent: the app in front has not answered \(holder.what) for \(Int(holder.seconds.rounded())) s (its main thread is busy), and the phone serves one such request at a time; nothing is read or touched until it answers, so nothing lands late"))
+                    continuation.resume(returning: Self.refused("not sent: the app in front has not answered \(holder.what) for \(Int(holder.seconds.rounded())) s (its main thread is busy), and the phone serves one such request at a time; nothing is read or touched until it answers, so nothing lands late", error: Self.heldError))
                     return
                 }
                 request.whileHeld = holder != nil
