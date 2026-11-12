@@ -143,7 +143,8 @@ struct RootView: View {
                     .navigationDestination(for: HomeRoute.self) { destination($0, split: false) }
                     .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
             }
-            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions }
+            // Under the chat while closed, the drawer's own picture of Poki draws only while it is open.
+            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions.environment(\.bearCovered, !threadsOpen) }
         }
     }
 
