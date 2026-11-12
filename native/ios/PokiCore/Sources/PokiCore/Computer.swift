@@ -743,6 +743,12 @@ final class Computer: @unchecked Sendable {
     /// emptied (Approvals off); this one stays.
     static let chatApps = Set(SensitivityRules().messagingApps)
 
+    /// A Return key, or typed text that ends in a new line.
+    static func isReturn(_ action: JSON) -> Bool {
+        if let key = action["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
+        return action["type"]?.text?.hasSuffix("\n") == true
+    }
+
     /// After Return in a chat app: what the read just made shows of the text this task typed, so the
     /// model knows what to check (it had spent one to three turns after Return working that out).
     /// The message field is the lowest text field; the last message is the lowest element with text
@@ -750,11 +756,7 @@ final class Computer: @unchecked Sendable {
     /// in the field and the last message, and no app's element tree has been checked for the marks
     /// that tell them apart, so the model reads the screen again.
     func sendCheck(_ actions: [JSON], error: String?, textsBefore: [String]) -> String? {
-        let sends = actions.contains { a in
-            if let key = a["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
-            return a["type"]?.text?.hasSuffix("\n") == true
-        }
-        guard sends, error == nil, let app = lastForeground?.bundleID, Self.chatApps.contains(app),
+        guard actions.contains(where: Self.isReturn), error == nil, let app = lastForeground?.bundleID, Self.chatApps.contains(app),
               let text = typedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         let keyboard = lastAll.first { $0.type == "Keyboard" }
         let read = lastAll.filter { !$0.fromPicture && !(keyboard?.contains($0) ?? false) && $0.frame.width > 0 && $0.frame.height > 0 }

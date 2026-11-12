@@ -500,11 +500,7 @@ extension Computer {
     /// Return: the field still has the focus there, so the tap does nothing a run needs, and a run would
     /// repeat it every time (ESP-465: the model tapped the message field before Send in 3 of 6 sends).
     static func withoutRefocusTaps(_ steps: [RoutineStep]) -> [RoutineStep] {
-        func isReturn(_ action: JSON) -> Bool {
-            if let key = action["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
-            return action["type"]?.text?.hasSuffix("\n") == true
-        }
-        return steps.indices.compactMap { i in
+        steps.indices.compactMap { i in
             let step = steps[i]
             guard step.action["tap"] != nil, let target = step.target, fieldTypes.contains(target.type),
                   i > 0, steps[i - 1].action["type"] != nil, i + 1 < steps.count, isReturn(steps[i + 1].action) else { return step }
