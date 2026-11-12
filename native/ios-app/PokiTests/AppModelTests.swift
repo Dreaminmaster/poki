@@ -240,6 +240,20 @@ final class ApprovalDefaultTests: XCTestCase {
         }
     }
 
+    /// An owner who never chose, then picks how to be asked in Rules, keeps the sensitivity Rules shows:
+    /// Ask for Everything. Saving the way of asking must not move the sensitivity to Balanced, where the
+    /// chat model's yes lets a step through, behind a slider that still reads Ask for Everything.
+    func testChoosingHowToBeAskedKeepsTheSensitivityRulesShows() {
+        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.onKey)
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(model.classifierLevel, .everything)
+        model.approvalMode = .off
+        model.approvalMode = .reply
+        XCTAssertEqual(ApprovalClassifier.Level.saved, .everything, "what route() reads")
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).classifierLevel, .everything, "after a restart")
+    }
+
     /// A phone that never chose (a new install, or an alpha tester who left the switch alone) asks the
     /// owner before a sensitive step: the Send tap in Messages waits for an answer instead of going
     /// through, and the switch reads on.
