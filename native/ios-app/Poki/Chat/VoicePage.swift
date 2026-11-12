@@ -78,27 +78,27 @@ struct VoicePage: View {
 
     private var readyLine: String {
         if case .lost(let why) = voice.phase { return why }
-        if !voice.canTalk, VoiceDirect.apiKey == nil { return String(localized: "Set up Poki’s model first. Tap to open Settings › Models.") }
-        return String(localized: "“Text Mom I’m on my way.”")
+        if !voice.canTalk, VoiceDirect.apiKey == nil { return AppLocalization.text(LocalizedStringResource("Set up Poki’s model first. Tap to open Settings › Models.")) }
+        return AppLocalization.text(LocalizedStringResource("“Text Mom I’m on my way.”"))
     }
 
     /// What Poki heard so far, the last word faded while you speak.
     private var heard: Text {
-        let said = Self.sample == .listening ? String(localized: "Text Mom\nI’m on my way…") : (voice.lines.last { $0.role == .you }?.text ?? String(localized: "Listening…"))
+        let said = Self.sample == .listening ? AppLocalization.text(LocalizedStringResource("Text Mom\nI’m on my way…")) : (voice.lines.last { $0.role == .you }?.text ?? AppLocalization.text(LocalizedStringResource("Listening…")))
         guard let space = said.lastIndex(where: { $0 == " " || $0 == "\n" }) else { return Text(verbatim: said) }
         let last = Text(verbatim: String(said[said.index(after: space)...])).foregroundStyle(.white.opacity(0.5))
         return Text("\(String(said[...space]))\(last)")
     }
 
     private var workingTitle: String {
-        if Self.sample == .working { return String(localized: "Typing “On my way”") }
+        if Self.sample == .working { return AppLocalization.text(LocalizedStringResource("Typing “On my way”")) }
         return ActivityWords.label(model.activityText)
     }
 
     private var workingDetail: String {
-        if Self.sample == .working { return String(localized: "Step 3 of 4, in Messages") }
+        if Self.sample == .working { return AppLocalization.text(LocalizedStringResource("Step 3 of 4, in Messages")) }
         let n = model.recentSteps.count + 1
-        return model.currentApp.map { String(localized: "Step \(n), in \($0)") } ?? String(localized: "Step \(n)")
+        return model.currentApp.map { AppLocalization.text(LocalizedStringResource("Step \(n), in \($0)")) } ?? AppLocalization.text(LocalizedStringResource("Step \(n)"))
     }
 
     /// Done steps and the one under way. The total is not known until the task ends, so it grows.

@@ -48,7 +48,7 @@ final class ContinuedRun {
         register()
         guard registered.contains(wildcard) else { return false }
         let id = String(wildcard.dropLast()) + UUID().uuidString.prefix(8).lowercased()
-        let request = BGContinuedProcessingTaskRequest(identifier: id, title: String(localized: "Poki is on"), subtitle: subtitle)
+        let request = BGContinuedProcessingTaskRequest(identifier: id, title: AppLocalization.text(LocalizedStringResource("Poki is on")), subtitle: subtitle)
         request.strategy = .fail
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -86,7 +86,7 @@ final class ContinuedRun {
     }
 
     func update(subtitle: String) {
-        task?.updateTitle(String(localized: "Poki is on"), subtitle: subtitle)
+        task?.updateTitle(AppLocalization.text(LocalizedStringResource("Poki is on")), subtitle: subtitle)
     }
 
     func end() { finish(success: true) }

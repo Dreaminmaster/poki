@@ -23,14 +23,14 @@ import UIKit
 //    request carries the bundle ID and the store's country only. A miss is remembered for a day.
 // Without any of these the view draws one placeholder: a grey tile in the icon's shape with an app glyph.
 
-/// The language the iPhone names apps in, from its first preferred language: Simplified or Traditional
+/// The language Poki names known apps in, from its effective UI language: Simplified or Traditional
 /// Chinese, or English for any other. Apps' names (`AppIconStore.name`) and the home page's default
 /// quick actions (`HomeIdea`) follow it.
 enum AppLanguage {
     case english, simplifiedChinese, traditionalChinese
 
     static var current: AppLanguage {
-        let language = Locale.preferredLanguages.first ?? "en"
+        let language = AppLocalization.language
         if language.hasPrefix("zh-Hant") || language.hasPrefix("zh-TW") || language.hasPrefix("zh-HK") { return .traditionalChinese }
         return language.hasPrefix("zh") ? .simplifiedChinese : .english
     }

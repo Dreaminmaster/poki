@@ -20,6 +20,7 @@ struct PokiLiveActivity: Widget {
             let face = context.face
             LockScreenCard(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
                 .environment(\.colorScheme, .dark)
+                .environment(\.locale, AppLocalization.locale)
                 // Outside the line above, where the system's own appearance can still be read: the flat
                 // colour that goes with the card's gradient, and light or dark handed down to the card.
                 .modifier(CardTint())
@@ -28,15 +29,15 @@ struct PokiLiveActivity: Widget {
         } dynamicIsland: { context in
             let face = context.face
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
-                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
-                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
+                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale) }
+                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale) }
+                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale) }
             } compactLeading: {
-                CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
+                CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale)
             } compactTrailing: {
-                CompactTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
+                CompactTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale)
             } minimal: {
-                MinimalView(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
+                MinimalView(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale)
             }
             .widgetURL(face.link)
             // Always Poki's blue; the system draws the outline only over a dark background, at its own width.

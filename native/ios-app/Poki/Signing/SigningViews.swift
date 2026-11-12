@@ -108,7 +108,7 @@ struct SigningSection: View {
                 LabeledContent { Text(verbatim: "\(latest.version) (\(latest.build))") } label: { Label("Update Available", systemImage: "sparkles") }
             } else if let next = signer.next {
                 LabeledContent {
-                    Text(next.kind == "update" ? "\(next.version) (\(next.build))" : "Until \(next.expires.formatted(.dateTime.month(.abbreviated).day().year()))").lineLimit(1)
+                    Text(next.kind == "update" ? "\(next.version) (\(next.build))" : "Until \(next.expires.formatted(.dateTime.month(.abbreviated).day().year().locale(AppLocalization.locale)))").lineLimit(1)
                 } label: {
                     Label(next.kind == "update" ? "Update Ready" : "Refresh Ready", systemImage: "checkmark.seal")
                 }
@@ -125,7 +125,7 @@ struct SigningSection: View {
                 } else {
                     NavigationLink {
                         Form { AccountPage() }
-                            .navigationTitle("Apple Account")
+                            .navigationTitle(AppLocalization.text("Apple Account"))
                             .navigationBarTitleDisplayMode(.inline)
                     } label: {
                         Label("Sign In to Download the Update", systemImage: "person.crop.circle.badge.plus")
@@ -158,13 +158,13 @@ struct SigningSection: View {
 
     private var footer: String {
         if let blocker = signer.updateBlocker { return blocker }
-        if !signer.signedIn { return String(localized: "Poki Setup on your Mac renews Poki when this iPhone is connected.") }
+        if !signer.signedIn { return AppLocalization.text(LocalizedStringResource("Poki Setup on your Mac renews Poki when this iPhone is connected.")) }
         if signer.next != nil {
             return model.signingIdle
-                ? String(localized: "Installing closes Poki for a moment. Your chats and setup stay.")
-                : (model.signingBusyReason ?? "") + " " + String(localized: "Install is available when Poki isn’t running a task.")
+                ? AppLocalization.text(LocalizedStringResource("Installing closes Poki for a moment. Your chats and setup stay."))
+                : (model.signingBusyReason ?? "") + " " + AppLocalization.text(LocalizedStringResource("Install is available when Poki isn’t running a task."))
         }
-        return String(localized: "Poki gets the next build ready by itself, \(Int(SelfSigner.refreshWithDaysLeft)) days before it expires or when your channel has an update. It installs only when you tap Install.")
+        return AppLocalization.text(LocalizedStringResource("Poki gets the next build ready by itself, \(Int(SelfSigner.refreshWithDaysLeft)) days before it expires or when your channel has an update. It installs only when you tap Install."))
     }
 }
 
@@ -179,8 +179,8 @@ struct ExpiryWarning {
     }
 
     var message: String {
-        let when = expiry.formatted(date: .abbreviated, time: .shortened)
-        return String(localized: "Poki stops opening after \(when). Connect this iPhone to your Mac and ask your agent to renew it.")
+        let when = expiry.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale))
+        return AppLocalization.text(LocalizedStringResource("Poki stops opening after \(when). Connect this iPhone to your Mac and ask your agent to renew it."))
     }
 }
 
@@ -265,7 +265,7 @@ struct SigningOptionsPage: View {
             Section {
                 NavigationLink {
                     Form { AccountPage() }
-                        .navigationTitle("Apple Account")
+                        .navigationTitle(AppLocalization.text("Apple Account"))
                         .navigationBarTitleDisplayMode(.inline)
                 } label: {
                     LabeledContent {
@@ -280,7 +280,7 @@ struct SigningOptionsPage: View {
             }
             SignerActivityRows(signer: signer)
         }
-        .navigationTitle("Signing")
+        .navigationTitle(AppLocalization.text("Signing"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { anisette = signer.status?.anisette ?? "" }
     }

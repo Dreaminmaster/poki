@@ -16,7 +16,7 @@ enum AgentsRoute: Hashable { case accounts, voice, activityLog, approvals }
 struct ApprovalsView: View {
     var body: some View {
         Form { ApprovalsSections() }
-            .navigationTitle("Approvals")
+            .navigationTitle(AppLocalization.text("Approvals"))
             .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -89,9 +89,9 @@ struct ApprovalsSections: View {
 struct AgentsView: View {
     /// The line under MCP Relay: the address to set, Poki being off, or the relay's live state.
     private var relayLine: String {
-        if model.relayAddress == nil { return String(localized: "Set an address first") }
-        if !model.relayEnabled { return String(localized: "Off, agents can’t reach this iPhone") }
-        if !model.sessionOn { return String(localized: "Waiting for Poki, turn Poki on and agents can connect") }
+        if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
+        if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
+        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
         return Health.relay(model).word
     }
 
@@ -106,12 +106,12 @@ struct AgentsView: View {
                 Section {
                     NavigationLink(value: AgentsRoute.accounts) {
                         LabeledContent {
-                            Text(ModelKeys.hasUsableKey ? ModelKeys.selectedModelName : String(localized: "Add an Account")).foregroundStyle(ModelKeys.hasUsableKey ? Color.secondary : Color.orange)
+                            Text(ModelKeys.hasUsableKey ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add an Account"))).foregroundStyle(ModelKeys.hasUsableKey ? Color.secondary : Color.orange)
                         } label: { Label("Accounts and Models", systemImage: "person.crop.circle") }
                     }
                     NavigationLink(value: AgentsRoute.voice) {
                         LabeledContent {
-                            Text(VoiceDirect.apiKey != nil ? VoiceDirect.model : String(localized: "Dictation Only"))
+                            Text(VoiceDirect.apiKey != nil ? VoiceDirect.model : AppLocalization.text(LocalizedStringResource("Dictation Only")))
                         } label: { Label("Voice", systemImage: "waveform") }
                     }
                     NavigationLink(value: SettingsRoute.memory) {
@@ -130,7 +130,7 @@ struct AgentsView: View {
                         let last = SessionStore.shared.sessions(for: secret, among: model.identity.secrets).first
                         NavigationLink(value: SettingsRoute.connector(secret)) {
                             LabeledContent {
-                                Text(last.map { ChatTime.row($0.updated) } ?? String(localized: "Not Used Yet"))
+                                Text(last.map { ChatTime.row($0.updated) } ?? AppLocalization.text(LocalizedStringResource("Not Used Yet")))
                             } label: {
                                 Label {
                                     Text(verbatim: secret.name)
@@ -182,7 +182,7 @@ struct AgentsView: View {
                     .disabled(model.relayAddress == nil || !model.sessionOn)
                     NavigationLink(value: SettingsRoute.relay) {
                         LabeledContent {
-                            Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? String(localized: "Not Set"))
+                            Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? AppLocalization.text(LocalizedStringResource("Not Set")))
                                 .foregroundStyle(model.relayAddress == nil ? Color.orange : Color.secondary)
                         } label: {
                             Label("Address", systemImage: "network")
@@ -197,7 +197,7 @@ struct AgentsView: View {
                 Section {
                     NavigationLink(value: AgentsRoute.approvals) {
                         LabeledContent {
-                            Text(model.approvalMode == .off ? String(localized: "Off") : model.classifierLevel.title)
+                            Text(model.approvalMode == .off ? AppLocalization.text(LocalizedStringResource("Off")) : model.classifierLevel.title)
                                 .foregroundStyle(model.approvalMode == .off ? Color.orange : Color.secondary)
                         } label: { Label("Approvals", systemImage: "hand.raised") }
                     }
@@ -209,7 +209,7 @@ struct AgentsView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Agents")
+            .navigationTitle(AppLocalization.text("Agents"))
             .navigationDestination(for: AgentsRoute.self) { route in
                 switch route {
                 case .accounts: ModelSettingsView()
@@ -238,7 +238,7 @@ struct SetupTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             SetupChecklist()
-                .navigationTitle("Setup")
+                .navigationTitle(AppLocalization.text("Setup"))
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -280,7 +280,7 @@ struct AdvancedView: View {
                 Text("Diagnostics has connection checks and this iPhone’s addresses. Testing Options has switches being tried.")
             }
         }
-        .navigationTitle("Advanced")
+        .navigationTitle(AppLocalization.text("Advanced"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
