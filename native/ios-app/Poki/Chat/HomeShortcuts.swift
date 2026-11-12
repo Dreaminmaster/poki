@@ -82,6 +82,7 @@ enum HomeShortcuts {
     struct Request: Equatable { var text: String; var at: Date }
     struct Remembered: Equatable { var text: String; var app: String?; var runs: Int; var at: Date }
 
+    /// At least this many, and as many as there are default examples.
     static let shown = 6
 
     static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], forgotten: Set<String>,
@@ -105,7 +106,7 @@ enum HomeShortcuts {
         }
 
         for example in examples where !taken(example.key) { out.append(example) }
-        return Array(out.prefix(shown))
+        return Array(out.prefix(max(shown, examples.count)))
     }
 
     /// A routine's app is the one it was recorded in; its words lose the app's name if they begin with it.
