@@ -16,6 +16,29 @@ enum RemotePairingPort {
         poki_set_remote_pairing_port(port)
     }
 
+    /// Whether Poki looks for a moved port now. Only then does the launcher read a refused connection
+    /// as a moved port (`pairing_port`); otherwise a refusal keeps its earlier meaning, and on a
+    /// mounted disk image it goes to Poki's own session.
+    @MainActor private(set) static var searching = false
+
+    @MainActor static func setSearching(_ on: Bool) {
+        guard on != searching else { return }
+        searching = on
+        poki_set_pairing_port_search(on)
+    }
+
+    /// When a look may start after the port stopped answering: at once, then 10 s and 30 s after the
+    /// look before. Three looks, then none until the network changes or the port answers again.
+    static let lookDelays: [TimeInterval] = [0, 10, 30]
+
+    /// Whether a look in Bonjour is due. Never on cellular alone: there iOS refuses the developer
+    /// services' loopback itself (GitHub issue 35), and a mounted disk image goes to Poki's own
+    /// session at once instead of waiting for a port.
+    static func lookDue(cellularOnly: Bool, looks: Int, lastAt: Date, now: Date) -> Bool {
+        guard !cellularOnly, looks < lookDelays.count else { return false }
+        return now.timeIntervalSince(lastAt) >= lookDelays[looks]
+    }
+
     /// What one look in Bonjour gave.
     struct Search: Equatable {
         /// The port that answered at 10.7.0.1, when one did.

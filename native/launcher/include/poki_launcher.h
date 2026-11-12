@@ -4,6 +4,7 @@
 #ifndef POKI_LAUNCHER_H
 #define POKI_LAUNCHER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -29,6 +30,9 @@ void poki_string_free(char *text);
 // The phone's remote pairing port, as found in Bonjour (_remotepairing._tcp): iOS moves the service
 // off 49152 when it starts it again. Every later connection goes there. 0 means 49152.
 void poki_set_remote_pairing_port(uint16_t port);
+// true while the app looks for a moved remote pairing port in Bonjour: only then is a refused
+// connection reported as a moved port (code "pairing_port"). false: handled as before.
+void poki_set_pairing_port_search(bool searching);
 
 // config_json: {"host_name": "Poki", "out_path": "...", "identity_path": "..."}
 // Events: {"event": "advertise", "service_type": "_remotepairing-pairable-host._tcp", "instance": "...",

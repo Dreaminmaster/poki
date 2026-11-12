@@ -141,6 +141,14 @@ pub extern "C" fn poki_set_remote_pairing_port(port: u16) {
     remote::set_port(port);
 }
 
+/// The app is looking for a moved remote pairing port in Bonjour (true) or has stopped (false).
+/// While it looks, a refused connection waits for the port (code `pairing_port`); otherwise it is
+/// handled as before (on a mounted disk image, Poki's own session; else the loopback's fix).
+#[unsafe(no_mangle)]
+pub extern "C" fn poki_set_pairing_port_search(searching: bool) {
+    remote::set_searching(searching);
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn poki_string_free(text: *mut c_char) {
     if !text.is_null() {

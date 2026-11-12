@@ -16,7 +16,7 @@ use std::{
     fmt,
     net::{IpAddr, SocketAddr},
     path::Path,
-    sync::atomic::{AtomicU16, Ordering},
+    sync::atomic::{AtomicBool, AtomicU16, Ordering},
     time::{Duration, Instant},
 };
 use tokio::net::TcpStream;
@@ -36,6 +36,20 @@ pub fn port() -> u16 {
 pub fn set_port(port: u16) {
     PORT.store(if port == 0 { REMOTE_PAIRING_PORT } else { port }, Ordering::Relaxed);
 }
+
+/// Whether the app is looking for a moved remote pairing port in Bonjour. Only then does a refused
+/// connection mean the port moved. Otherwise it keeps its earlier meaning: on cellular iOS refuses
+/// the developer services' loopback itself (GitHub issue 35), and a mounted disk image goes to
+/// Poki's own session. The app never searches on cellular alone, and stops after a few looks.
+static SEARCHING: AtomicBool = AtomicBool::new(false);
+
+pub fn searching() -> bool {
+    SEARCHING.load(Ordering::Relaxed)
+}
+
+pub fn set_searching(on: bool) {
+    SEARCHING.store(on, Ordering::Relaxed);
+}
 /// The optional plist key that records the host name used when the RPPairing file was made.
 pub const SENDING_HOST_KEY: &str = "sending_host";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,8 +61,8 @@ pub type Control = RemotePairingClient<RpPairingSocket<TcpStream>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
     Connect,
-    /// The address answered and refused the port: the loopback works, and the remote pairing
-    /// service does not listen on this port.
+    /// The address refused the port while the app looks for a moved one (`searching`): the
+    /// loopback works, and the remote pairing service does not listen on this port.
     NotListening,
     Handshake,
     PairVerify,
@@ -150,7 +164,7 @@ async fn connect_tcp(addr: SocketAddr) -> Result<TcpStream, RemoteError> {
     match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
         Ok(Ok(stream)) => Ok(stream),
         Ok(Err(error)) => Err(RemoteError {
-            stage: if error.kind() == std::io::ErrorKind::ConnectionRefused {
+            stage: if error.kind() == std::io::ErrorKind::ConnectionRefused && searching() {
                 Stage::NotListening
             } else {
                 Stage::Connect

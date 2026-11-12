@@ -132,6 +132,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(denied.said(besides: 49152).contains("could not be searched"))
     }
 
+    /// On cellular alone a refused port is iOS refusing the loopback (GitHub issue 35), and a mounted
+    /// disk image goes to Poki's own session: Poki does not look for a moved port there. Elsewhere it
+    /// looks at once, after 10 s and after 30 s more, and then no more.
+    func testNoPortIsLookedUpOnCellularAloneAndThreeLooksAtMostElsewhere() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        XCTAssertFalse(RemotePairingPort.lookDue(cellularOnly: true, looks: 0, lastAt: .distantPast, now: start))
+        XCTAssertTrue(RemotePairingPort.lookDue(cellularOnly: false, looks: 0, lastAt: .distantPast, now: start))
+        XCTAssertFalse(RemotePairingPort.lookDue(cellularOnly: false, looks: 1, lastAt: start, now: start.addingTimeInterval(9)))
+        XCTAssertTrue(RemotePairingPort.lookDue(cellularOnly: false, looks: 1, lastAt: start, now: start.addingTimeInterval(10)))
+        XCTAssertTrue(RemotePairingPort.lookDue(cellularOnly: false, looks: 2, lastAt: start, now: start.addingTimeInterval(30)))
+        XCTAssertFalse(RemotePairingPort.lookDue(cellularOnly: false, looks: 3, lastAt: start, now: start.addingTimeInterval(3_600)))
+    }
+
     /// The phone refused the pairing port while the loopback works: the agent is not told to turn
     /// the loopback on.
     func testARefusedPairingPortIsNotCalledNeedsLoopback() {

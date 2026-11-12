@@ -348,6 +348,7 @@ final class AppModel {
         }
         loopback.onChange = { [weak self] old, new in self?.loopbackChanged(from: old, to: new) }
         loopback.onPairingPort = { [weak self] port in self?.pairingPortFound(port) }
+        loopback.onPairingPortSearchEnded = { [weak self] in self?.pairingPortSearchEnded() }
         // A built-in tunnel that fails or drops while Poki is on dials again by itself; the loopback
         // check that follows lets `loopbackChanged` start the runner, as for any other recovery.
         tunnel.wanted = { [weak self] in self?.sessionOn == true && self?.setup.loopback == .builtIn }
@@ -1192,6 +1193,15 @@ final class AppModel {
         if starts { launcher.restart() }
         Task { await verifyPairing(force: true) }
         signer.maintain()
+    }
+
+    /// The looks for a moved remote pairing port ended without one, or the network changed: a refused
+    /// connection is handled as before again (on a mounted disk image, Poki's own session), so the
+    /// launcher tries at once instead of waiting out its backoff.
+    func pairingPortSearchEnded() {
+        let starts = sessionOn && !runner.isRunning && !runnerPaused
+        log.add("loopback", "stopped looking for a moved remote pairing port" + (starts ? "; starting the runner now" : ""))
+        if starts { launcher.restart() }
     }
 
     /// The loopback came or went. Going: logged with the time, and the agent's status says so instead
