@@ -24,6 +24,8 @@ struct SavedSession: Codable, Identifiable, Equatable {
     var autoName: String? = nil
     /// sha256 of the connector secret an outside agent's session came through (the relay says).
     var connector: String? = nil
+    /// When it was archived: out of the conversations list, in Settings > Conversations, every line kept.
+    var archived: Date? = nil
 
     /// The row's second line: the last thing that happened, as plain text (markdown neither drawn nor
     /// shown as its marks).
@@ -79,13 +81,20 @@ struct SavedSession: Codable, Identifiable, Equatable {
 @MainActor
 @Observable
 final class SessionStore {
-    static let shared = SessionStore()
+    static let shared: SessionStore = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let sample = UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil
+        return SessionStore(folder: base.appendingPathComponent("Poki/Sessions", isDirectory: true), defaults: .standard, samples: sample)
+    }()
     static let limit = 200
+    /// Set once the conversations saved before archiving existed have been archived.
+    static let archivedEarlierKey = "sessions.archivedEarlier"
     /// An outside agent's session with no call for this long is over (most clients never send DELETE).
     static let agentIdle: TimeInterval = 10 * 60
 
     private(set) var sessions: [SavedSession] = []
     private let folder: URL
+    private let defaults: UserDefaults
     private var pendingWrites: Set<String> = []
     private var writeTask: Task<Void, Never>?
     /// The outside agent sessions seen since launch: id → client name.
@@ -112,37 +121,65 @@ final class SessionStore {
     /// The outside agent session whose call is running, if any.
     var activeSessionID: String? { currentSession }
 
-    private init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        folder = base.appendingPathComponent("Poki/Sessions", isDirectory: true)
+    init(folder: URL, defaults: UserDefaults, samples: Bool = false) {
+        self.folder = folder
+        self.defaults = defaults
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        if UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil {
+        if samples {
             sessions = Self.samples()
             return
         }
-        load()
+        let complete = load()
+        if complete { archiveEarlier() }
     }
 
-    private func load() {
+    /// The saved sessions from their files; false when a file could not be read (before the first unlock).
+    private func load() -> Bool {
         let decoder = JSONDecoder()
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        var loaded = files.filter { $0.pathExtension == "json" }.compactMap { url in
-            (try? Data(contentsOf: url)).flatMap { try? decoder.decode(SavedSession.self, from: $0) }
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)).map { $0.filter { $0.pathExtension == "json" } }
+        var complete = files != nil
+        var loaded: [SavedSession] = []
+        for url in files ?? [] {
+            guard let data = try? Data(contentsOf: url) else { complete = false; continue }
+            if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
         }
         // Nothing is live after a relaunch.
         for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = loaded[i].outcome ?? .stopped }
         sessions = loaded.sorted { $0.updated > $1.updated }
         trim()
+        return complete
+    }
+
+    /// The first launch of the version that archives puts every conversation saved before it in the
+    /// archive, so the list starts empty. Once only: a conversation the owner brings back stays back.
+    /// It waits for a launch that could read every file, so none is left out.
+    private func archiveEarlier() {
+        guard !defaults.bool(forKey: Self.archivedEarlierKey) else { return }
+        let now = Date()
+        for i in sessions.indices where sessions[i].archived == nil {
+            sessions[i].archived = now
+            pendingWrites.insert(sessions[i].id)
+        }
+        flush()
+        defaults.set(true, forKey: Self.archivedEarlierKey)
     }
 
     func session(_ id: String) -> SavedSession? { sessions.first { $0.id == id } }
 
     /// The latest in-app chat, to come back to at launch.
-    func latestPoki() -> SavedSession? { sessions.first { $0.kind == .poki } }
+    func latestPoki() -> SavedSession? { sessions.first { $0.kind == .poki && $0.archived == nil } }
 
     /// Live first, then newest.
     var ordered: [SavedSession] {
         sessions.sorted { a, b in a.live != b.live ? a.live : a.updated != b.updated ? a.updated > b.updated : a.id < b.id }
+    }
+
+    /// The conversations list: every session not archived, live first, then newest.
+    var listed: [SavedSession] { ordered.filter { $0.archived == nil } }
+
+    /// Settings > Conversations: the archived ones, the last archived first.
+    var archivedSessions: [SavedSession] {
+        sessions.filter { $0.archived != nil }.sorted { a, b in a.archived != b.archived ? a.archived! > b.archived! : a.updated > b.updated }
     }
 
     var liveAgentCount: Int { sessions.filter { $0.live && ($0.kind == .agent || $0.kind == .handoff) }.count }
@@ -160,7 +197,8 @@ final class SessionStore {
         if let name = pendingNames.removeValue(forKey: chat.sessionID) { session.autoName = name }
         // Opening a conversation hands the same lines back: only a new line gives the row a new time
         // and moves it up the list. (It used to jump to the top, marked "now", each time it was opened.)
-        if changed { session.updated = Date() }
+        // A new line in an archived conversation brings it back to the list.
+        if changed { session.updated = Date(); session.archived = nil }
         session.live = chat.running
         guard session != saved else { return }
         put(session)
@@ -250,6 +288,20 @@ final class SessionStore {
         }
     }
 
+    /// Out of the conversations list and into Settings > Conversations; every line stays. Not while it runs.
+    func archive(_ id: String) {
+        guard var session = session(id), !session.live, session.archived == nil else { return }
+        session.archived = Date()
+        put(session)
+    }
+
+    /// Back to the conversations list, at its own time.
+    func unarchive(_ id: String) {
+        guard var session = session(id), session.archived != nil else { return }
+        session.archived = nil
+        put(session)
+    }
+
     func delete(_ id: String) {
         sessions.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: file(id))
@@ -319,6 +371,7 @@ final class SessionStore {
         // A hand-off's own session is the in-app agent's (its steps come from ChatModel).
         guard session.kind == .agent else { return }
         session.live = true
+        session.archived = nil
         session.connector = session.connector ?? connectors[id]
         change(&session)
         session.updated = Date()
@@ -381,7 +434,8 @@ final class SessionStore {
         }
     }
 
-    private func flush() {
+    /// Writes the changed sessions now, rather than after the half-second gathering.
+    func flush() {
         writeTask = nil
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .deferredToDate
