@@ -166,6 +166,83 @@ struct BearPlayback {
     }
 }
 
+/// The white pads behind the bear's eyes, shut with the eyes. In the model they are fixed to the head,
+/// so a blink drew its line, and the smile its arc, on two whole white discs: the white-painted eyes
+/// the flat bear was faulted for. Here each pad is drawn apart from the bear and follows its eye's
+/// joint, which squeezes it with the pupil as the eye shuts, and it fades as it shuts, so a shut eye
+/// leaves a faint trace of its pad round the line, as the flat bear's does. The model is unchanged:
+/// its own pads are only not drawn. A bear without parts named `EyePad_L…` and `EyePad_R…` and joints
+/// ending in `Eye_L` and `Eye_R` keeps its pads as they are.
+@MainActor
+private struct EyePads {
+    /// How much of a pad shows once its eye is shut.
+    static let shut: Float = 0.3
+
+    private let pads: [(entity: ModelEntity, joint: Int)]
+    private let bear: ModelEntity
+    private let parents: [Int?]
+    private let inverseBind: [simd_float4x4]
+    private let material: PhysicallyBasedMaterial
+
+    init?(bear: ModelEntity) {
+        guard var model = bear.model, let skeleton = model.mesh.contents.skeletons.first else { return nil }
+        let contents = model.mesh.contents
+        let names = skeleton.joints.map(\.name)
+        var pads: [(entity: ModelEntity, joint: Int)] = []
+        var padMaterial: Int?
+        for side in ["L", "R"] {
+            let models = contents.models.filter { $0.id.hasPrefix("EyePad_\(side)") }
+            guard let joint = names.firstIndex(where: { $0.hasSuffix("Eye_\(side)") }),
+                  let index = models.first?.parts.first?.materialIndex,
+                  let material = model.materials[index] as? PhysicallyBasedMaterial else { return nil }
+            var pad = MeshResource.Contents()
+            pad.models = MeshModelCollection(models.map { model in
+                var model = model
+                model.parts = MeshPartCollection(model.parts.map { part in
+                    var part = part
+                    part.skeletonID = nil
+                    part.jointInfluences = nil
+                    part.materialIndex = 0
+                    return part
+                })
+                return model
+            })
+            pad.instances = MeshInstanceCollection(contents.instances.filter { instance in models.contains { $0.id == instance.model } })
+            guard let mesh = try? MeshResource.generate(from: pad) else { return nil }
+            pads.append((ModelEntity(mesh: mesh, materials: [material]), joint))
+            padMaterial = index
+        }
+        guard let padMaterial, var hidden = model.materials[padMaterial] as? PhysicallyBasedMaterial else { return nil }
+        material = hidden
+        // The model's own pads are kept but not drawn, not even into depth.
+        hidden.blending = .transparent(opacity: .init(scale: 0))
+        hidden.opacityThreshold = 0.5
+        model.materials[padMaterial] = hidden
+        bear.model = model
+        pads.forEach { bear.addChild($0.entity) }
+        self.pads = pads
+        self.bear = bear
+        parents = skeleton.joints.map(\.parentIndex)
+        inverseBind = skeleton.joints.map(\.inverseBindPoseMatrix)
+    }
+
+    /// Puts each pad where its eye's joint has it at the pose just updated, and fades it as it shuts.
+    func follow() {
+        let local = bear.jointTransforms.map(\.matrix)
+        guard local.count == parents.count else { return }
+        func placed(_ joint: Int) -> simd_float4x4 { parents[joint].map { placed($0) * local[joint] } ?? local[joint] }
+        for (entity, joint) in pads {
+            entity.transform = Transform(matrix: placed(joint) * inverseBind[joint])
+            let open = min(max((bear.jointTransforms[joint].scale.y - 0.1) / 0.9, 0), 1)
+            var material = material
+            if case .transparent(let opacity) = material.blending {
+                material.blending = .transparent(opacity: .init(scale: opacity.scale * (Self.shut + (1 - Self.shut) * open), texture: opacity.texture))
+            }
+            entity.model?.materials = [material]
+        }
+    }
+}
+
 /// Where the chat is covered (the conversations drawer, Poki's profile over it): the bear holds still.
 extension EnvironmentValues {
     @Entry var bearCovered = false
@@ -283,6 +360,7 @@ private final class BearCanvas: UIView {
     private let drawn: () -> Void
     private var controllers: [AnimationPlaybackController] = []
     private var skins: [ModelEntity] = []
+    private var pads: EyePads?
     private var playback = BearPlayback()
     private var link: CADisplayLink?
     private var wake: Task<Void, Never>?
@@ -329,6 +407,13 @@ private final class BearCanvas: UIView {
         guard let renderer else { return }
 
         let entity = loaded.entity.clone(recursive: true)
+        // The eye pads go in before the bear goes to the renderer: an entity added after it is drawn,
+        // but where it was added, whatever it is moved to.
+        func skin(_ e: Entity) -> ModelEntity? {
+            if let model = e as? ModelEntity, !model.jointNames.isEmpty { return model }
+            return e.children.lazy.compactMap(skin).first
+        }
+        pads = skin(entity).flatMap(EyePads.init)
         renderer.entities.append(entity)
         let camera = PerspectiveCamera()
         camera.camera.fieldOfViewInDegrees = 19.458
@@ -404,6 +489,7 @@ private final class BearCanvas: UIView {
                 settling = 3
             }
             guard let drawable = layer.nextDrawable() else { return }
+            pads?.follow()
             BearLog.note(now, playback.move, time * clips.fps)
             lastPose = pose
             rendering = true
