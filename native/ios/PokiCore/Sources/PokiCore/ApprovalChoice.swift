@@ -17,10 +17,13 @@ public enum ApprovalLevel: String, CaseIterable, Identifiable, Sendable {
 /// asks less than the version it replaces, and a value that cannot be read asks the most: With
 /// Confirmation at Ask for Everything, an Allow card for every step.
 public enum ApprovalChoice {
-    /// This version's choice. 0.3.0 kept its own as "approvals.mode", which 0.3.1 ignored: those owners
-    /// were asked as 0.3.1's switches said, and their 0.3.0 choice does not come back.
+    /// This version's choice.
     public static let modeKey = "approvals.mode.v2"
-    /// Saved with the way of asking here, and by 0.3.1's auto-classifier and 0.3.0 before that.
+    /// The choice 0.3.0 and the test build after 0.3.1 kept. 0.3.1 ignored it and asked as its
+    /// switches said, so an owner with both is asked as the stricter of the two.
+    public static let earlierModeKey = "approvals.mode"
+    /// Saved with the way of asking here and in the test build, and by 0.3.1's auto-classifier and
+    /// 0.3.0 before that.
     public static let levelKey = "approvals.classifier.level"
     /// 0.3.1's two switches: Ask Me (on unless turned off) and the auto-classifier (a test, off
     /// unless turned on).
@@ -34,14 +37,32 @@ public enum ApprovalChoice {
             guard let mode = (mode as? String).flatMap(ApprovalMode.init) else { return (.confirm, .everything) }
             return (mode, (level as? String).flatMap(ApprovalLevel.init) ?? .everything)
         }
-        // 0.3.1 with the auto-classifier on: the model judged every step, at the sensitivity picked
-        // there, Balanced until one was.
+        let switches = switches752(saved)
+        guard let earlier = saved(earlierModeKey) else { return switches }
+        guard let mode = (earlier as? String).flatMap(ApprovalMode.init) else { return (.confirm, .everything) }
+        // The test build showed Balanced for a choice made before any sensitivity was.
+        let chosen = (mode, level == nil ? .balanced : (level as? String).flatMap(ApprovalLevel.init) ?? .everything)
+        return asking(chosen) > asking(switches) ? chosen : switches
+    }
+
+    /// What 0.3.1's switches did.
+    static func switches752(_ saved: (String) -> Any?) -> (mode: ApprovalMode, level: ApprovalLevel) {
+        // The auto-classifier on: the model judged every step, at the sensitivity picked there,
+        // Balanced until one was.
         if saved(classifierKey) as? Bool == true {
-            guard let level else { return (.reply, .balanced) }
+            guard let level = saved(levelKey) else { return (.reply, .balanced) }
             return (.reply, (level as? String).flatMap(ApprovalLevel.init) ?? .everything)
         }
-        // Otherwise 0.3.1 asked nothing with Ask Me off and the owner for every step with it on, whatever
+        // Otherwise Ask Me off asked nothing and Ask Me on the owner for every step, whatever
         // sensitivity a classifier turned off again left saved.
         return (saved(askKey) as? Bool == false ? .off : .confirm, .everything)
+    }
+
+    /// How much a way of asking asks, least first: never; the model at a sensitivity, a no it gives
+    /// going to the owner's card before one the agent asks about in words; the owner's card for
+    /// every step.
+    static func asking(_ choice: (mode: ApprovalMode, level: ApprovalLevel)) -> Int {
+        guard choice.mode != .off else { return 0 }
+        return 1 + 2 * ApprovalLevel.allCases.firstIndex(of: choice.level)! + (choice.mode == .confirm ? 1 : 0)
     }
 }

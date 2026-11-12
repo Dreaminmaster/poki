@@ -205,11 +205,12 @@ final class AppModelTests: XCTestCase {
 
 @MainActor
 final class ApprovalDefaultTests: XCTestCase {
-    private let keys = [LiveCore.askKey, ApprovalClassifier.modeKey, ApprovalClassifier.onKey, ApprovalClassifier.levelKey]
+    private let keys = [LiveCore.askKey, ApprovalClassifier.modeKey, ApprovalChoice.earlierModeKey, ApprovalClassifier.onKey, ApprovalClassifier.levelKey]
     private var saved: [String: Any] = [:]
     override func setUp() {
         for key in keys { saved[key] = UserDefaults.standard.object(forKey: key) }
         UserDefaults.standard.removeObject(forKey: ApprovalClassifier.modeKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalChoice.earlierModeKey)
         UserDefaults.standard.removeObject(forKey: ApprovalClassifier.levelKey)
     }
     override func tearDown() {

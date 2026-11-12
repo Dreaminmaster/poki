@@ -36,7 +36,7 @@ const open = list => Boolean(byId(list, 'threads.newChat'));
 const evidence = {};
 try {
   call('launch_app', { bundle_id: 'nz.zheha.poki', arguments: ['-pokiSessions', 'sample', '-pokiChat', 'empty',
-    '-approvals.mode', 'off', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US'] });
+    '-approvals.mode.v2', 'off', '-AppleLanguages', '(en)', '-AppleLocale', 'en_US'] });
   const home = until('Home must offer the conversations button', list => Boolean(byId(list, 'chat.threads')));
   const { width, height } = home.find(e => e.type === 'Application').frame;
   const y = Math.round(height * 0.55);
