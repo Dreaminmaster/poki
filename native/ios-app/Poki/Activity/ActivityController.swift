@@ -7,6 +7,7 @@
 import ActivityKit
 import Foundation
 import ImageIO
+import UIKit
 import UniformTypeIdentifiers
 
 /// Runs the one Live Activity: started when a session starts, updated from PokiCore's events, ended
@@ -53,6 +54,8 @@ final class ActivityController {
     private var tail: Task<Void, Never>?
     private var finishTimer: Task<Void, Never>?
     private var foldTimer: Task<Void, Never>?
+    /// Halfway to an approval's deadline the island is popped open once more (ESP-467).
+    private var approvalReminder: Task<Void, Never>?
     private var eventTimer: Task<Void, Never>?
     private var inStep = false
     private var runAnnounced = false
@@ -236,11 +239,12 @@ final class ActivityController {
             attention = (handoff.title, handoff.detail)
         }
         if state.handoff == nil, old.handoff != nil, state.phase == .working {
-            setEvent(.resumed, "Carrying on")
+            setEvent(.resumed, "Resumed")
         }
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
-            alert = critical(String(activity: "Allow this step?"), approval.question)
+            alert = critical(String(activity: "Poki needs you"), approval.question)
+            remindHalfway(approval)
         }
         if state.approval == nil, let was = old.approval {
             state.decision = nil
@@ -258,8 +262,8 @@ final class ActivityController {
             alert = critical(String(activity: "Pairing code \(pin)"), String(activity: "Type it on the Pair with Poki screen in Settings"))
         }
         if old.phase == .pairing, state.phase == .idle, state.headline == "Paired" {
-            setEvent(.paired, "Paired")
-            alert = critical(String(activity: "Paired"), String(activity: "This iPhone is ready for Poki"))
+            setEvent(.paired, "Pairing complete")
+            alert = critical(String(activity: "Poki’s paired"), String(activity: "This iPhone is ready for Poki"))
         }
 
         // A step began (AppModel sets the headline to the step's words): shown, never popped up.
@@ -275,6 +279,21 @@ final class ActivityController {
     /// Updates that change what the person must do or know go out at once, ahead of plain progress.
     private static func isCritical(_ state: PokiState, after old: PokiState) -> Bool {
         state.phase != old.phase || state.approval?.id != old.approval?.id || state.decision != old.decision || state.pin != old.pin
+    }
+
+    /// iOS shows an alert's expanded island for a few seconds only. Halfway to the deadline, while the
+    /// same approval still waits, the update carries the alert once more: one reminder, never a loop.
+    /// The runner sends no input while an approval waits, so the expanded island is safe.
+    private func remindHalfway(_ approval: PendingApproval) {
+        approvalReminder?.cancel()
+        let half = approval.expires.timeIntervalSinceNow / 2
+        guard half > 5 else { return }
+        approvalReminder = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(half))
+            guard !Task.isCancelled, let self, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
+            AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
+            self.send(alert: self.critical(String(activity: "Poki needs you"), approval.question), critical: true)
+        }
     }
 
     private func armFinish() {
@@ -312,7 +331,7 @@ final class ActivityController {
         state.endedAt = Date()
         state.previous = nil
         state.headline = "Finished"
-        setEvent(.finished, "Finished")
+        setEvent(.finished, "Run finished")
         let summary = state.runSummary
         send(alert: alert ? ordinary(String(activity: "Agent finished"), summary) : nil, critical: true)
         armFold()
@@ -404,12 +423,19 @@ final class ActivityController {
         guard let activity else { return }
         let previous = tail
         tally.sent += 1
+        let queued = Date()
         tail = Task {
             await previous?.value
             let began = Date()
             if let alert { await activity.update(content, alertConfiguration: alert) } else { await activity.update(content) }
             self.tally.answered += 1
             let seconds = Date().timeIntervalSince(began)
+            if alert != nil {
+                // For the Activity Log: iOS opens the island for an alert, but not while Poki itself is in
+                // front, and late if the update waited behind others.
+                let state = switch UIApplication.shared.applicationState { case .active: "active"; case .inactive: "inactive"; default: "background" }
+                AppLog.shared.add("activity", "alert sent with \(content.state.phase.rawValue) \(String(format: "%.1f", Date().timeIntervalSince(queued))) s after it was queued; \(activity.activityState); Poki \(state)")
+            }
             guard seconds > 2 else { return }
             AppLog.shared.add("activity", "the update to \(content.state.phase.rawValue) step \(content.state.stepCount) took \(String(format: "%.1f", seconds)) s; \(activity.activityState)")
         }
@@ -424,6 +450,7 @@ final class ActivityController {
         guard size() > 3_500 else { return }
         state.headline = String(state.headline.prefix(80))
         state.previous = nil
+        if let steps = state.plan?.steps { state.plan?.steps = steps.map { String($0.prefix(30)) } }
         if var approval = state.approval {
             approval.summary = String(approval.summary.prefix(80)); approval.reason = String(approval.reason.prefix(60))
             state.approval = approval

@@ -20,20 +20,20 @@ enum PokiMood: String, CaseIterable {
     /// The word beside the dot under Poki's name.
     var word: String {
         switch self {
-        case .ready: String(localized: "Ready")
-        case .thinking: String(localized: "Thinking")
-        case .onYourPhone: String(localized: "On your phone")
-        case .checking: String(localized: "Checking this step")
-        case .needsYou: String(localized: "Needs you")
-        case .yourTurn: String(localized: "Your turn")
-        case .done: String(localized: "Done")
-        case .tripped: String(localized: "Tripped")
+        case .ready: String(localized: "Poki’s ready")
+        case .thinking: String(localized: "Poki’s thinking")
+        case .onYourPhone: String(localized: "Poki’s on it")
+        case .checking: String(localized: "Poki’s checking this step")
+        case .needsYou: String(localized: "Poki needs you")
+        case .yourTurn: String(localized: "Poki needs your help")
+        case .done: String(localized: "Poki’s done")
+        case .tripped: String(localized: "Poki hit a snag")
         // The word the Hands switch uses: you paused it, and it starts again when you or an agent asks.
-        case .paused: String(localized: "Resting")
-        case .cantReach: String(localized: "Can’t reach this iPhone")
-        case .listening: String(localized: "Listening")
-        case .speaking: String(localized: "Speaking")
-        case .hello: String(localized: "Hello")
+        case .paused: String(localized: "Poki’s asleep")
+        case .cantReach: String(localized: "Poki can’t reach iPhone")
+        case .listening: String(localized: "Poki’s listening")
+        case .speaking: String(localized: "Poki’s talking")
+        case .hello: String(localized: "Poki isn’t set up yet")
         }
     }
 
@@ -104,7 +104,7 @@ struct PokiStatus: Equatable {
         if DoneLinger.shared.showing { return PokiStatus(.done) }
         // Setup is open, unless only the loopback is missing and Poki can start without it (main's rule for Home).
         if !model.canStartTasks { return PokiStatus(.hello) }
-        if !(model.sessionOn || model.wantsOn) { return PokiStatus(.paused, word: String(localized: "Off")) }
+        if !(model.sessionOn || model.wantsOn) { return PokiStatus(.paused, word: String(localized: "Poki’s off")) }
         // Standing by after the idle minute is still ready: only the owner's own pause puts it to sleep.
         if model.ownerPaused { return PokiStatus(.paused) }
         return PokiStatus(.ready)

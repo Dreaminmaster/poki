@@ -1441,9 +1441,14 @@ final class AppModel {
         }
     }
 
-    /// The chat's model published its plan: the Live Activity counts the same steps as the chat.
-    func chatPlan(total: Int, current: Int) {
-        activity.update { $0.plan = .init(total: total, current: current) }
+    /// The chat's model published its plan: the Live Activity counts the same steps as the chat and
+    /// says the one under way in the plan's words. A later report_plan that leaves out the title or
+    /// the recipient keeps the first one's.
+    func chatPlan(steps: [String], current: Int, title: String?, to: String?) {
+        activity.update { state in
+            let old = state.plan
+            state.plan = .init(steps: steps.map { String($0.prefix(60)) }, current: current, title: title ?? old?.title, to: to ?? old?.to)
+        }
     }
 
     /// End the task, return to Poki and finish its Live Activity.
@@ -1507,10 +1512,10 @@ final class AppModel {
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-        // The Live Activity pops up for it by itself; the notification is for when it is not running.
-        // Before iOS 26 an approval is answered from the notification (touch and hold it); later, from
-        // the Live Activity's own buttons when one is running.
-        if #available(iOS 26.0, *), activity.isRunning {} else { ApprovalNotice.post(approval, caller: caller) }
+        // The Live Activity pops up for it, but iOS folds the island back after a few seconds and a tap
+        // on the folded island opens Poki. The notification's Allow and Don't Allow answer it without
+        // opening Poki, with or without a Live Activity (ESP-467).
+        ApprovalNotice.post(approval, caller: caller)
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {
