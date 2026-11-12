@@ -77,7 +77,9 @@ export function GitHubCard() {
 /// Shown only with Preview Builds on (GitHub Account).
 export function PreviewPicker({ onChange, onError }: { onChange: () => void; onError: (e: string) => void }) {
   const [state, setState] = useState<PreviewState | null>(null);
-  useEffect(() => { api.previews().then(setState).catch(() => {}); }, []);
+  // GitHub could not be read, or could not confirm the chosen build: the choice stays, and the
+  // message says to try again.
+  useEffect(() => { api.previews().then(setState).catch((e) => onError(failureText(e))); }, []);
   if (!state?.enabled) return null;
   const pick = (pr: number | null) => api.setPreview(pr).then((s) => { setState(s); onChange(); }).catch((e) => onError(failureText(e)));
   return (

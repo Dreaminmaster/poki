@@ -364,9 +364,12 @@ const RUN_READS_AT_ONCE: usize = 8;
 const RUN_READS_PER_LISTING: usize = 40;
 
 /// Splits the runs a listing still needs into those to read now and those taken as unreadable,
-/// given how many reads it has left (none once GitHub said the request limit is reached).
-fn runs_to_read(needed: Vec<u64>, reads_left: usize) -> (Vec<u64>, Vec<u64>) {
-    let mut ask = needed;
+/// given how many reads it has left (none once GitHub said the request limit is reached). The runs
+/// in `first` (the chosen pull request's builds) are read before the others, so the build that
+/// installs and updates depend on is never the one left unread.
+fn runs_to_read(needed: Vec<u64>, reads_left: usize, first: &[u64]) -> (Vec<u64>, Vec<u64>) {
+    let (mut ask, rest): (Vec<u64>, Vec<u64>) = needed.into_iter().partition(|id| first.contains(id));
+    ask.extend(rest);
     let skip = ask.split_off(reads_left.min(ask.len()));
     (ask, skip)
 }
@@ -481,6 +484,45 @@ fn pick_previews(candidates: &[Vec<(u64, Release)>], runs: &std::collections::Ha
     needed.sort_unstable();
     needed.dedup();
     (found, needed)
+}
+
+/// The pull requests that offer no preview only because a run of theirs could not be read (a
+/// timeout, a GitHub error, the request limit, or the reads a listing allows running out). Not
+/// knowing is not the same as gone: a pull request here may still have a good build.
+fn unchecked_previews(candidates: &[Vec<(u64, Release)>], runs: &std::collections::HashMap<u64, Option<GhRunDetail>>) -> Vec<u64> {
+    candidates
+        .iter()
+        .filter(|builds| {
+            let tried = || builds.iter().take(PREVIEW_TRIES).map(|(run, _)| runs.get(run));
+            !tried().any(|d| matches!(d, Some(Some(d)) if run_is_preview(d))) && tried().any(|d| !matches!(d, Some(Some(_))))
+        })
+        .filter_map(|builds| builds.first().and_then(|(_, r)| r.preview.as_ref()).map(|p| p.pr))
+        .collect()
+}
+
+/// The preview builds on offer, and the pull requests GitHub could not answer for this time.
+#[derive(Default)]
+struct PreviewListing {
+    builds: Vec<Release>,
+    unchecked: Vec<u64>,
+}
+
+/// The chosen pull request's preview against a listing: its build while it is on offer. When it is
+/// confirmed gone (its pull request was closed or merged, the label came off, or the build
+/// expired) the choice is dropped and the answer is None, so the channel takes over. When GitHub
+/// could not answer for it, the choice stays and nothing is offered in its place: going to the
+/// channel then would install another build than the one chosen.
+fn settle_preview(listing: &PreviewListing, pr: u64) -> Result<Option<Release>> {
+    if let Some(r) = listing.builds.iter().find(|r| r.preview.as_ref().map(|p| p.pr) == Some(pr)) {
+        return Ok(Some(r.clone()));
+    }
+    if listing.unchecked.contains(&pr) {
+        return Err(Error::msg(format!(
+            "GitHub could not confirm the preview build of PR {pr} just now. Your choice is kept and nothing was installed. Try again in a few minutes."
+        )));
+    }
+    set_preview(None)?;
+    Ok(None)
 }
 
 const GITHUB_TOKEN: &str = "github-token";
@@ -654,8 +696,9 @@ fn github(url: String) -> Result<reqwest::RequestBuilder> {
 }
 
 /// Every preview build on offer (a few GitHub requests; the token is used when there is one, for
-/// its higher request limit, but listing works without).
-async fn list_previews() -> Result<Vec<Release>> {
+/// its higher request limit, but listing works without), and the pull requests GitHub could not
+/// answer for. The runs of `chosen`'s builds are read first.
+async fn list_previews(chosen: Option<u64>) -> Result<PreviewListing> {
     use futures_util::StreamExt;
     let mut artifacts = vec![];
     for page in 1..=10 {
@@ -696,6 +739,11 @@ async fn list_previews() -> Result<Vec<Release>> {
     // reads, or once GitHub says the request limit is reached, no more are asked: the builds still
     // unchecked are not offered, and the listing has the ones that were.
     let candidates = preview_candidates(&artifacts, &pulls);
+    let first: Vec<u64> = candidates
+        .iter()
+        .filter(|builds| builds.first().and_then(|(_, r)| r.preview.as_ref()).map(|p| p.pr) == chosen && chosen.is_some())
+        .flat_map(|builds| builds.iter().map(|(run, _)| *run))
+        .collect();
     let mut runs: std::collections::HashMap<u64, Option<GhRunDetail>> =
         RUN_DETAILS.lock().ok().and_then(|c| c.clone()).unwrap_or_default().into_iter().map(|(id, d)| (id, Some(d))).collect();
     let mut reads_left = RUN_READS_PER_LISTING;
@@ -706,9 +754,9 @@ async fn list_previews() -> Result<Vec<Release>> {
                 let cache = cache.get_or_insert_with(Default::default);
                 cache.extend(runs.iter().filter_map(|(id, d)| d.clone().map(|d| (*id, d))));
             }
-            return Ok(found);
+            return Ok(PreviewListing { builds: found, unchecked: unchecked_previews(&candidates, &runs) });
         }
-        let (ask, skip) = runs_to_read(needed, reads_left);
+        let (ask, skip) = runs_to_read(needed, reads_left, &first);
         runs.extend(skip.into_iter().map(|id| (id, None)));
         reads_left -= ask.len();
         let read = futures_util::stream::iter(ask)
@@ -733,19 +781,6 @@ async fn list_previews() -> Result<Vec<Release>> {
             runs.insert(id, detail);
         }
     }
-}
-
-/// What installs and updates use: the chosen pull request's preview build while it exists, else
-/// the channel's newest release. The bool says the chosen preview is gone (its pull request was
-/// merged or closed, the label came off, or the build expired).
-fn choose(list: &[GhRelease], channel: Channel, previews: &[Release], preview: Option<u64>) -> (Option<Release>, bool) {
-    if let Some(pr) = preview {
-        if let Some(r) = previews.iter().find(|r| r.preview.as_ref().map(|p| p.pr) == Some(pr)) {
-            return (Some(r.clone()), false);
-        }
-        return (pick(list, channel), true);
-    }
-    (pick(list, channel), false)
 }
 
 /// Downloads a preview build's artifact (a zip of the IPA, Poki-signing.zip and SHA256SUMS) with
@@ -817,16 +852,16 @@ pub async fn previews() -> Result<PreviewState> {
     if !previews_enabled() {
         return Ok(PreviewState { enabled: false, selected: None, has_token: github_token().is_some(), github_login: github_login(), can_sign_in: github_client_id().is_ok(), builds: vec![] });
     }
-    let builds = list_previews().await?;
     let mut selected = preview();
-    // A chosen build that is gone: back to the channel, as latest() does.
+    let listing = list_previews(selected).await?;
+    // A chosen build that is gone: back to the channel, as latest() does. One GitHub could not
+    // answer for stays chosen, and the picker says to try again.
     if let Some(pr) = selected {
-        if !builds.iter().any(|r| r.preview.as_ref().map(|p| p.pr) == Some(pr)) {
-            set_preview(None)?;
+        if settle_preview(&listing, pr)?.is_none() {
             selected = None;
         }
     }
-    Ok(PreviewState { enabled: true, selected, has_token: github_token().is_some(), github_login: github_login(), can_sign_in: github_client_id().is_ok(), builds })
+    Ok(PreviewState { enabled: true, selected, has_token: github_token().is_some(), github_login: github_login(), can_sign_in: github_client_id().is_ok(), builds: listing.builds })
 }
 
 /// The highest version and build the channel offers, whatever order GitHub lists releases in
@@ -855,15 +890,19 @@ fn none_in(channel: Channel) -> Error {
 
 /// What Poki Setup and Poki install and update with: the chosen preview build when preview builds
 /// are on and one is chosen, else the newest installable release on the chosen channel. When the
-/// chosen preview is gone the choice is dropped and the channel takes over again.
+/// chosen preview is gone the choice is dropped and the channel takes over again. When GitHub
+/// could not say whether it is there, this fails and keeps the choice, rather than hand over the
+/// channel's build in its place.
 pub async fn latest() -> Result<Release> {
-    let (channel, preview) = (channel(), preview());
-    let previews = if preview.is_some() { list_previews().await? } else { vec![] };
-    let (found, gone) = choose(&list().await?, channel, &previews, preview);
-    if gone {
-        let _ = set_preview(None);
+    let channel = channel();
+    let chosen = match preview() {
+        Some(pr) => settle_preview(&list_previews(Some(pr)).await?, pr)?,
+        None => None,
+    };
+    match chosen {
+        Some(r) => Ok(r),
+        None => pick(&list().await?, channel).ok_or_else(|| none_in(channel)),
     }
-    found.ok_or_else(|| none_in(channel))
 }
 
 /// The newest installable release that a channel offers.
@@ -1397,11 +1436,14 @@ mod tests {
     #[test]
     fn run_reads_are_capped() {
         let needed: Vec<u64> = (1..=50).collect();
-        let (ask, skip) = runs_to_read(needed.clone(), RUN_READS_PER_LISTING);
+        let (ask, skip) = runs_to_read(needed.clone(), RUN_READS_PER_LISTING, &[]);
         assert_eq!((ask.len(), skip.len()), (40, 10));
         assert_eq!((ask[0], skip[0]), (1, 41));
-        assert_eq!(runs_to_read(needed.clone(), 0), (vec![], needed.clone()));
-        assert_eq!(runs_to_read(vec![7, 8], 5), (vec![7, 8], vec![]));
+        assert_eq!(runs_to_read(needed.clone(), 0, &[]), (vec![], needed.clone()));
+        assert_eq!(runs_to_read(vec![7, 8], 5, &[]), (vec![7, 8], vec![]));
+        // The chosen pull request's runs go first, so running out of reads never leaves its build
+        // unchecked while others are read.
+        assert_eq!(runs_to_read(needed.clone(), 2, &[49, 50]), (vec![49, 50], (1..=48).collect::<Vec<u64>>()));
         // Runs taken as unreadable leave their pull request without a preview, and a pull request
         // whose newest builds all fail stops after PREVIEW_TRIES of them.
         let builds = |pr: u64, n: u64| (0..n).map(|i| art(pr * 100 + 50 - i, &format!("Poki-preview-pr{pr}-0.3.1-{}-aaaaaaaaaaaa", 800 - i), 1, 1)).collect::<Vec<_>>();
@@ -1479,15 +1521,11 @@ mod tests {
         let found = previews_with(&artifacts, &open, vec![(400, None), (300, preview_run(PREVIEW_WORKFLOW, "push"))]);
         assert_eq!(found.iter().map(|r| r.preview.as_ref().unwrap().pr).collect::<Vec<_>>(), vec![12]);
 
-        let found = previews_with(&artifacts, &open[..1], vec![]);
-        let channels = vec![gh("app-prealpha-latest", true, "2026-11-09T06:00:00Z", Some("Poki-external-0.3.1-760.ipa"))];
-        let (r, gone) = choose(&channels, Channel::PreAlpha, &found, Some(177));
-        assert_eq!((r.unwrap().build.as_str(), gone), ("785", false));
-        // The pull request was merged or closed: its build is gone, so the channel's is used.
-        let (r, gone) = choose(&channels, Channel::PreAlpha, &found, Some(12));
-        assert_eq!((r.unwrap().build.as_str(), gone), ("760", true));
-        let (r, gone) = choose(&channels, Channel::PreAlpha, &found, None);
-        assert_eq!((r.unwrap().build.as_str(), gone), ("760", false));
+        let (_g, _d) = paths::test_home();
+        let listing = PreviewListing { builds: previews_with(&artifacts, &open[..1], vec![]), unchecked: vec![] };
+        assert_eq!(settle_preview(&listing, 177).unwrap().unwrap().build, "785");
+        // The pull request was merged or closed: its build is gone, so latest() uses the channel's.
+        assert!(settle_preview(&listing, 12).unwrap().is_none());
     }
 
     #[test]
@@ -1520,6 +1558,35 @@ mod tests {
         assert!(matches!(github_poll_step(&a(None, Some("access_denied"))), Err(Err(_))));
         assert!(matches!(github_poll_step(&a(None, Some("expired_token"))), Err(Err(_))));
         assert!(matches!(github_poll_step(&a(Some(""), None)), Err(Err(_))));
+    }
+
+    /// GitHub listed the pull request and its builds but did not answer for their runs (a timeout,
+    /// a 503, the request limit, or the listing's reads running out). The chosen preview is not
+    /// known to be gone, so the choice stays and nothing is handed out in its place.
+    #[test]
+    fn a_preview_github_could_not_check_stays_chosen() {
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        set_github_token("gho_test").unwrap();
+        set_preview_switch(true).unwrap();
+        set_preview(Some(177)).unwrap();
+        let artifacts = vec![art(40, "Poki-preview-pr177-0.3.1-785-bbbbbbbbbbbb", 1, 1), art(30, "Poki-preview-pr177-0.3.1-783-24a45bb8bb04", 1, 1)];
+        let open = vec![GhPull { number: 177, title: String::new(), head: GhPullHead { branch: "dev/pr177".into() } }];
+        let candidates = preview_candidates(&artifacts, &open);
+        let unread: std::collections::HashMap<u64, Option<GhRunDetail>> = candidates[0].iter().map(|(run, _)| (*run, None)).collect();
+        let (builds, needed) = pick_previews(&candidates, &unread);
+        assert!(builds.is_empty() && needed.is_empty());
+        let listing = PreviewListing { builds, unchecked: unchecked_previews(&candidates, &unread) };
+        assert!(settle_preview(&listing, 177).is_err());
+        assert_eq!(preview(), Some(177));
+        // GitHub answered, and neither build came from the preview workflow: that pull request
+        // offers no preview, so the choice goes and the channel takes over.
+        let other: std::collections::HashMap<u64, Option<GhRunDetail>> = candidates[0].iter().map(|(run, _)| (*run, preview_run(".github/workflows/other.yml", "pull_request"))).collect();
+        let (builds, _) = pick_previews(&candidates, &other);
+        let listing = PreviewListing { builds, unchecked: unchecked_previews(&candidates, &other) };
+        assert!(settle_preview(&listing, 177).unwrap().is_none());
+        assert_eq!(preview(), None);
     }
 
     #[test]

@@ -379,7 +379,9 @@ struct PreviewBuildsSection: View {
             }
             .pickerStyle(.inline)
             .labelsHidden()
-            if signer.previews.isEmpty {
+            if let error = signer.previewError {
+                Label { Text(verbatim: error) } icon: { Image(systemName: "exclamationmark.triangle") }.foregroundStyle(.orange)
+            } else if signer.previews.isEmpty {
                 (loaded ? Text("No Preview Builds") : Text("Checking…")).foregroundStyle(Color(.secondaryLabel))
             }
         } header: {

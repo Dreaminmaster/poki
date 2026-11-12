@@ -107,6 +107,8 @@ final class SelfSigner {
     /// The code GitHub is waiting for, while a GitHub sign-in is under way.
     private(set) var githubCode: GitHubCode?
     private(set) var githubError: String?
+    /// Why the preview builds could not be listed, the last time they were looked up.
+    private(set) var previewError: String?
 
     /// The phone's own services (10.7.0.1 and the pairing file), when the loopback answers.
     var phone: () -> [String: Any]? = { nil }
@@ -308,8 +310,14 @@ final class SelfSigner {
     /// Looks up the preview builds on offer. A chosen one that is gone (its pull request was merged
     /// or closed) is dropped by the signer, so the status is read again.
     func loadPreviews() async {
-        guard previewsEnabled else { previews = []; return }
-        guard let list = try? await SignerBridge.decode(PreviewList.self, ["op": "previews"]) else { return }
+        guard previewsEnabled else { previews = []; previewError = nil; return }
+        let list: PreviewList
+        do { list = try await SignerBridge.decode(PreviewList.self, ["op": "previews"]) } catch {
+            // GitHub could not be read: the choice stays (the signer keeps it), and the section says why.
+            previewError = error.localizedDescription
+            return
+        }
+        previewError = nil
         previews = list.builds
         if list.selected != status?.preview { await reload() }
     }
