@@ -50,7 +50,7 @@ struct SessionsView: View {
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { controls }
-        .background(ThreadsDrawerLayout.ground.ignoresSafeArea())
+        .background(Tint.sidebar.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
@@ -63,13 +63,15 @@ struct SessionsView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
+            // The home page's own picture of Poki, small: the bear's face for its state.
+            PokiPortrait(mood: PokiStatus.current(model: model, chat: chat).mood, side: 32)
             Text(verbatim: "Poki").font(Prominent.font(size: 28, relativeTo: .title, .bold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Spacer()
         }
         .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 12)
-        .background(ThreadsDrawerLayout.ground)
+        .background(Tint.sidebar)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
@@ -83,12 +85,16 @@ struct SessionsView: View {
             } label: {
                 Label("New Conversation", systemImage: "square.and.pencil")
                     .labelStyle(PillLabelStyle())
-                    .font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
-                    .padding(.horizontal, 20).frame(minHeight: 48)
+                    .font(.body.weight(.semibold)).foregroundStyle(.white)
+                    // One line: "New Conversation" in English is the longest, and in a narrow drawer it
+                    // shrinks a little rather than wrapping.
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 18).frame(minHeight: 48)
                     .contentShape(.capsule)
             }
             .buttonStyle(.plain)
-            .glassSurface(in: Capsule(), tint: Tint.solid, interactive: true)
+            // Poki's blue, the send button's own.
+            .glassSurface(in: Capsule(), tint: Tint.blue, interactive: true)
             .opacity(chat.running ? 0.5 : 1)
             .disabled(chat.running)
             .accessibilityIdentifier("threads.newChat")
@@ -96,12 +102,12 @@ struct SessionsView: View {
             SettingsEntryButton()
         }
         .glassGroup(spacing: 8)
-        .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 4)
+        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     private func heading(_ day: Day) -> some View {
-        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Color(.tertiaryLabel))
+        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Tint.sidebarHeading)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
@@ -117,7 +123,7 @@ struct SessionsView: View {
     /// The selected row's soft fill; every other row stands on the list's ground.
     @ViewBuilder private func ground(_ session: SavedSession) -> some View {
         if current(session) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(scheme == .dark ? 0.1 : 0.05)).padding(.horizontal, 16)
+            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected).padding(.horizontal, 16)
         } else {
             Color.clear
         }
@@ -151,6 +157,9 @@ struct SessionsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // A long press lifts the row's own rounded shape, not the list's whole width, so the lifted row
+        // and its menu stay inside the drawer rather than over the chat beside it.
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
         .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
