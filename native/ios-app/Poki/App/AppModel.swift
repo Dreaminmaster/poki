@@ -1907,7 +1907,7 @@ final class AppModel {
 
     // MARK: Relay and connectors
 
-    static let noRelay = "Enter your relay’s address first in Poki › External Agents › Address. Poki has no default relay."
+    static let noRelay = "Enter your relay’s address first in Settings › External Agents › Address. Poki has no default relay."
 
     /// Saves the relay address the person entered; false when it is not one. A running session moves
     /// to the new relay at once.

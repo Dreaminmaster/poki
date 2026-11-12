@@ -34,6 +34,7 @@ struct SessionsView: View {
         .listStyle(.plain)
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
+        .safeAreaInset(edge: .bottom, spacing: 0) { SettingsEntryRow() }
         .background(Color(.systemBackground))
         .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {

@@ -14,40 +14,89 @@ import SwiftUI
 /// live voice needs OpenAI's Realtime API, so only an OpenAI API key can run it.
 struct ModelSettingsView: View {
     @State private var adding = false
+    @State private var changing = false
     @State private var version = ModelKeys.saved
 
     var body: some View {
         List {
+            // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
+            Section {
+                InUseCard(add: { adding = true }, change: { changing = true })
+            } header: {
+                Text("In Use").textCase(nil)
+            } footer: {
+                Text("Open an account to choose what it is used for. Dictation in the message field needs no account.")
+            }
+
             Section {
                 ForEach(ModelProvider.allCases.filter(ModelAccounts.isSetUp)) { provider in
                     NavigationLink { AccountDetail(provider: provider) } label: { AccountRow(provider: provider) }
                 }
                 Button("Add Account", systemImage: "plus") { adding = true }
             } header: {
-                Text("Accounts")
+                Text("Accounts").textCase(nil)
             } footer: {
                 Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
             }
-
-            Section {
-                LabeledContent("Text Chat", value: ModelKeys.hasUsableKey ? "\(ModelKeys.selectedProvider.name), \(ModelKeys.selectedModelName)" : String(localized: "No Account"))
-                LabeledContent("Live Voice", value: VoiceDirect.apiKey != nil ? String(localized: "OpenAI") : String(localized: "No Account"))
-                LabeledContent("Dictation", value: String(localized: "On This iPhone"))
-            } header: {
-                Text("In Use")
-            } footer: {
-                Text("Open an account to choose what it is used for. Dictation in the message field needs no account.")
-            }
-
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
         .background { Color.clear.accessibilityHidden(true).id(version) }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $changing) { TextChatFeature(provider: ModelKeys.selectedProvider) }
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
+    }
+}
+
+/// What runs now: the chat's model and its account, what the text chat, live voice and dictation each
+/// use (main's In Use rows), and Change Chat Model (or Add Account while there is none).
+private struct InUseCard: View {
+    var add: () -> Void
+    var change: () -> Void
+
+    var body: some View {
+        let has = ModelKeys.hasUsableKey
+        let provider = ModelKeys.selectedProvider
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                if has { ProviderTile(provider: provider, size: 44) } else { SettingsIcon(symbol: "sparkles", warns: true, size: 44) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: has ? ModelKeys.selectedModelName : String(localized: "No Account"))
+                        .font(.title3.weight(.semibold)).foregroundStyle(Color(.label))
+                    if has { Text(verbatim: provider.name).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { uses(has: has, provider: provider) }
+                VStack(alignment: .leading, spacing: 6) { uses(has: has, provider: provider) }
+            }
+            SettingsPill(title: has ? "Change Chat Model" : "Add Account", symbol: has ? "arrow.triangle.2.circlepath" : "plus",
+                         prominent: true, action: has ? change : add)
+                .accessibilityIdentifier("model.inUse.action")
+        }
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder private func uses(has: Bool, provider: ModelProvider) -> some View {
+        chip("Text Chat", has ? provider.name : String(localized: "No Account"))
+        chip("Live Voice", VoiceDirect.apiKey != nil ? String(localized: "OpenAI") : String(localized: "No Account"))
+        chip("Dictation", String(localized: "On This iPhone"))
+    }
+
+    private func chip(_ title: LocalizedStringKey, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption).foregroundStyle(Color(.secondaryLabel))
+            Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Color(.label))
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Tint.blueSoft.opacity(0.6), in: .rect(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 

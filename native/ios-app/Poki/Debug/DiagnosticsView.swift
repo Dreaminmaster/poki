@@ -108,7 +108,7 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Approvals.")
+                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals.")
             }
             // The in-process path's switch and probes (ESP-173, ESP-175).
             InProcessSection()

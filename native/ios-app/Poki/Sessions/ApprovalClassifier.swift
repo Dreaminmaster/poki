@@ -27,7 +27,7 @@ enum ApprovalClassifier {
             switch self {
             case .reply: String(localized: "With Message Reply")
             case .confirm: String(localized: "With Confirmation")
-            case .off: String(localized: "Never")
+            case .off: String(localized: "Never Ask")
             }
         }
     }

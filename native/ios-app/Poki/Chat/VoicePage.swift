@@ -78,7 +78,7 @@ struct VoicePage: View {
 
     private var readyLine: String {
         if case .lost(let why) = voice.phase { return why }
-        if !voice.canTalk, VoiceDirect.apiKey == nil { return String(localized: "Set up Poki’s model first. Tap to open Poki › Models.") }
+        if !voice.canTalk, VoiceDirect.apiKey == nil { return String(localized: "Set up Poki’s model first. Tap to open Settings › Models.") }
         return String(localized: "“Text Mom I’m on my way.”")
     }
 

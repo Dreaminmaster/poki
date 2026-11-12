@@ -56,6 +56,8 @@ struct RootView: View {
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
+    /// The status card under Poki's picture (ESP-469): the picture shows where Poki stands; Settings is on the card.
+    @State private var statusOpen = false
     @State private var detailsPath = NavigationPath()
     @Namespace private var profile
 
@@ -83,7 +85,7 @@ struct RootView: View {
 
     private func chatPage(split: Bool) -> some View {
         ChatView(
-            openDetails: { openDetails() },
+            openDetails: { statusOpen = true },
             openVoice: openLiveVoice,
             openSetup: { openDetails([DetailsRoute.hands, DetailsRoute.setup]) },
             // Beside the list (iPad) the chat has no stack of its own to push on: the step opens in the profile.
@@ -104,7 +106,7 @@ struct RootView: View {
             // The voice page keeps its own header and blue ground (not redrawn in ESP-340's first batch).
             VoicePage(
                 back: split ? nil : { show(.chat) },
-                openDetails: { openDetails() },
+                openDetails: { statusOpen = true },
                 openModel: { openDetails([DetailsRoute.model]) },
                 select: { target in if target == .chat { show(.chat) } }
             )
@@ -144,6 +146,9 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
+            // Settings opens from the bottom of the conversations and from the status card (ESP-469).
+            .environment(\.openPokiSettings, { openDetails() })
+            .pokiStatusCard(isPresented: $statusOpen, leading: width == .regular ? 391 : 16, openSettings: { openDetails() })
             // Poki's profile rises from the bottom (ESP-376): a full-height sheet on iPhone, a sheet at a
             // page's width beside the list on iPad, as the system's own are.
             .sheet(isPresented: $detailsOpen) {
@@ -293,9 +298,11 @@ struct RootView: View {
         case "moreSettings", "details", "status":
             // More Settings is gone: its rows are on Poki's profile, by what they are about.
             openDetails()
+        case "statusCard":
+            statusOpen = true
         case "hands":
             openDetails([DetailsRoute.hands])
-        case "rules":
+        case "rules", "approvals":
             openDetails([DetailsRoute.approvals])
         case "health":
             openDetails([DetailsRoute.health])

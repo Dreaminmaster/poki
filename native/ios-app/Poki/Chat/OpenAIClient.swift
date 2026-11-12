@@ -50,7 +50,7 @@ final class OpenAIClient: ModelClient {
             let text = apiErrorText(json, data, key: key)
             let code = (json?["error"] as? [String: Any])?["code"] as? String
             let words: String = switch status {
-            case 401: String(localized: "OpenAI did not accept the key. Check it in Poki › Models.")
+            case 401: String(localized: "OpenAI did not accept the key. Check it in Settings › Models.")
             case 403, 404: String(localized: "This OpenAI key can’t use \(ModelKeys.selectedModelName).")
             case 429 where code == "insufficient_quota": String(localized: "This OpenAI key has no credit left. Check billing at platform.openai.com.")
             case 429: String(localized: "OpenAI says the key has hit its rate limit. Try again in a minute.")
