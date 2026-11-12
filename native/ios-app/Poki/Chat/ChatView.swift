@@ -115,8 +115,8 @@ struct ChatView: View {
             // The home page stays in the tree while the conversation is in front, so the bear's place
             // on it is known when a new conversation brings it back; it is neither seen nor touched.
             HomePage(home: home, status: status, promise: promise, bear: bearTapped, writing: writing, pick: { draft = $0; writing = true }) {
-                if home, let hint = currentSetupHint {
-                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
+                if home, let hint = homeHint {
+                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel, openUpdates: openUpdates)
                 }
             }
             .allowsHitTesting(home)
@@ -254,6 +254,10 @@ struct ChatView: View {
         guard sampleScene == nil else { return nil }
         return SetupIssueHint.first(model: model)
     }
+
+    private var homeHint: SetupIssueHint? {
+        sampleScene == nil ? SetupIssueHint.homeLine(model: model) : currentSetupHint
+    }
 }
 
 extension View {
@@ -291,6 +295,8 @@ struct SetupIssueHint: Equatable {
         case setup
         /// Agents and Relay (Home only).
         case agents
+        /// Health › Updates, where the renewed build installs (Home only).
+        case updates
     }
     var message: String
     var link: String
@@ -423,6 +429,15 @@ struct SetupIssueHint: Equatable {
 }
 
 extension SetupIssueHint {
+    /// The home page's line: in the last two days of signing, that Poki stops opening (main's home
+    /// warning, ESP-222) ahead of everything else, since nothing works once it does; then the chat's.
+    @MainActor static func homeLine(model: AppModel) -> SetupIssueHint? {
+        if let warning = ExpiryWarning(expiry: model.signer.expiry) {
+            return SetupIssueHint(message: warning.message, link: String(localized: "Open Updates ›"), target: .updates)
+        }
+        return first(model: model)
+    }
+
     /// Home's one line (ESP-321): what main's two tab dots said, one problem at a time. A runner or
     /// pairing failure, then an open setup step (Setup's dot), then no chat account, then the relay
     /// offline (the Agents dot). The chat doesn't show the relay: it needs no relay to reply.
@@ -446,6 +461,7 @@ struct SetupHintLine: View {
     var openSetup: () -> Void
     var openModel: () -> Void
     var openAgents: () -> Void = {}
+    var openUpdates: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 2) {
@@ -459,6 +475,7 @@ struct SetupHintLine: View {
                 case .model: openModel()
                 case .setup: openSetup()
                 case .agents: openAgents()
+                case .updates: openUpdates()
                 }
             } label: {
                 Text(verbatim: hint.link)
