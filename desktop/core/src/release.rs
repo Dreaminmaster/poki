@@ -437,9 +437,10 @@ pub fn set_github_token(token: &str) -> Result<()> {
     crate::apple::store::secret_set(GITHUB_TOKEN, token)
 }
 
-/// The OAuth App that GitHub's device sign-in runs under ("Enable Device Flow" on, no client
-/// secret involved; the ID is public). `POKI_GITHUB_CLIENT_ID` overrides it.
-pub const GITHUB_CLIENT_ID: &str = "";
+/// The GitHub App that GitHub's device sign-in runs under (app 5678895: "Enable Device Flow" on,
+/// user tokens that do not expire, Actions and Pull requests read; no client secret is involved
+/// and the ID is public). `POKI_GITHUB_CLIENT_ID` overrides it.
+pub const GITHUB_CLIENT_ID: &str = "Iv23linjHPGV8Hd0O2sQ";
 
 fn github_client_id() -> Result<String> {
     std::env::var("POKI_GITHUB_CLIENT_ID").ok().filter(|v| !v.trim().is_empty()).or_else(|| (!GITHUB_CLIENT_ID.is_empty()).then(|| GITHUB_CLIENT_ID.to_string()))

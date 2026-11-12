@@ -87,9 +87,9 @@ is tried on a phone before it reaches any channel.
   users. Without a sign-in, a saved Pre-alpha choice behaves as Alpha.
 - **Going back.** Choose None. The next update check follows the release channel again.
 
-The sign-in uses GitHub's device flow with no scopes. The OAuth App's client ID is the
-`GITHUB_CLIENT_ID` constant in `desktop/core/src/release.rs` (`POKI_GITHUB_CLIENT_ID` overrides it
-for development). It is public, not a secret.
+The sign-in uses GitHub's device flow under a GitHub App that can only read Actions and pull
+requests. Its client ID is the `GITHUB_CLIENT_ID` constant in `desktop/core/src/release.rs`
+(`POKI_GITHUB_CLIENT_ID` overrides it for development). It is public, not a secret.
 
 ## Checks
 
@@ -104,8 +104,10 @@ check runs only for `desktop/core` and its Cargo files. A skipped job counts as 
   read), installed on this repository, with its id and private key in the Actions secrets
   `POKI_BOT_APP_ID` and `POKI_BOT_PRIVATE_KEY`.
 - Labels `promotion`, `soak-override`, `blocker` and `preview`.
-- A GitHub OAuth App with device flow enabled, for the GitHub sign-in of preview builds. Its client
-  ID goes into `GITHUB_CLIENT_ID` in `desktop/core/src/release.rs`.
+- A GitHub App for the GitHub sign-in of preview builds: Device Flow enabled, "Expire user
+  authorization tokens" off, repository permissions Actions read and Pull requests read, no
+  webhook, installed on this repository. Its client ID is `GITHUB_CLIENT_ID` in
+  `desktop/core/src/release.rs`.
 - The `alpha`, `beta`, and `stable` environments are configured with `JosssphZhou` as the only
   required reviewer and administrator bypass disabled. Self-review prevention is off so the owner
   can approve a run they started. Agents must not approve on the owner's behalf.
