@@ -144,8 +144,7 @@ final class ChatSendTests: XCTestCase {
         _ = await core.call("do", ["actions": [["tap": [190, 468]], ["type": "收到"]]])
         let tried = await core.call("do", ["actions": [["key": "return"]]])
         XCTAssertEqual(app.messages.value, ["在吗", "明天见"])
-        XCTAssertFalse(tried.text.contains("send check: sent"), tried.text)
-        XCTAssertTrue(tried.text.contains("send check: not confirmed"), tried.text)
+        XCTAssertTrue(tried.text.contains("send check: not confirmed: no message was read above the message field"), tried.text)
     }
 
     /// The field emptied without a send, and the last message happens to read the same words as the
