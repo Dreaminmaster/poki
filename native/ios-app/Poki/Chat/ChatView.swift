@@ -126,6 +126,9 @@ struct ChatView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if voice.isOn { LiveVoiceBar(voice: voice).transition(.move(edge: .top).combined(with: .opacity)) }
         }
+        // The conversation passes under the top bar's floating controls through the system's soft
+        // edge, with no line under them (ESP-468).
+        .softTopEdge()
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
@@ -279,6 +282,11 @@ extension View {
         } else {
             safeAreaInset(edge: .top, spacing: 0) { bar() }
         }
+    }
+
+    /// The system's soft scroll edge at the top on iOS 26 and later; nothing before.
+    @ViewBuilder func softTopEdge() -> some View {
+        if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .top) } else { self }
     }
 
     /// Marks the bear Poki's profile zooms out of.

@@ -140,7 +140,8 @@ struct HomeBear: View {
     }
 }
 
-/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground.
+/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground. The
+/// face blinks and hops when the state changes (`BlinkingFace`).
 struct PokiPortrait: View {
     var mood: PokiMood
     /// The circle's side. Given, not measured: measured inside the flight, the bear in it lagged a
@@ -150,15 +151,10 @@ struct PokiPortrait: View {
     var body: some View {
         ZStack {
             Circle().fill(Tint.portrait)
-            if let image = PokiMood.cutout(mood, small: true) {
-                // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
-                // cuts it at the chest.
-                Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
-                    .frame(width: side * 50 / 56, height: side * 50 / 56)
-                    .offset(y: side * 3 / 56)
-                    // A new face is just there: no animation around it may fade it in late.
-                    .transaction { $0.animation = nil }
-            }
+            // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
+            // cuts it at the chest.
+            BlinkingFace(mood: mood, side: side * 50 / 56)
+                .offset(y: side * 3 / 56)
         }
         .frame(width: side, height: side)
         .clipShape(.circle)
@@ -295,9 +291,18 @@ private struct Dip: ViewModifier, Animatable {
 
 // MARK: Top bar
 
-/// The two round glass buttons that never move, and between them, once a conversation has begun,
-/// Poki's picture and name (board 08, variant B). On the home page the new-conversation button is grey
-/// and does nothing: the page already is a new conversation.
+// The middle of the bar, Poki's picture over its name and a chevron, is IMessageChannelHeaderModifier
+// from GetStream/stream-tutorial-projects (commit 04c8dbb, AI/AgentSkills/iMessageCloneWithSkills/
+// IMessageScreens.swift; the repository has no licence file). Changed: a bar of its own instead of a
+// toolbar item, so the bear can fly into the picture's place; the picture at the board's 56 points;
+// the name in a glass capsule as Messages on iOS 26 draws it; Poki's state after the name.
+
+/// The chat's top as Messages draws a conversation's (ESP-468): the two round glass buttons float at
+/// the sides, the conversations on the left and a new conversation on the right, and between them,
+/// once a conversation has begun, Poki's round picture with its name in a small glass capsule under
+/// it. There is no bar behind them: the conversation passes under them through the system's scroll
+/// edge effect. On the home page the new-conversation button is grey and does nothing (the page
+/// already is a new conversation), and the middle says when a newer Poki waits.
 struct ChatTopBar: View {
     var status: PokiStatus
     var home: Bool
@@ -313,50 +318,69 @@ struct ChatTopBar: View {
     var openUpdates: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Resting or in trouble, Poki says so under its name; otherwise its face is the status.
-    private var says: Bool { [.paused, .cantReach, .tripped].contains(status.mood) }
+    /// Poki's state after its name, in a few words without the name again (the status words from
+    /// ESP-467 on say "Poki's asleep"); none while it says hello.
+    private var state: String? {
+        let word: String? = switch status.mood {
+        case .ready: String(localized: "Ready", table: "Chat")
+        case .thinking: String(localized: "Thinking", table: "Chat")
+        case .onYourPhone: String(localized: "On it", table: "Chat")
+        case .checking: String(localized: "Checking this step", table: "Chat")
+        case .needsYou: String(localized: "Needs you", table: "Chat")
+        case .yourTurn: String(localized: "Needs a hand", table: "Chat")
+        case .done: String(localized: "Done", table: "Chat")
+        case .tripped: String(localized: "Hit a snag", table: "Chat")
+        // Turned off says so in its own word; the owner's pause is sleep.
+        case .paused: status.word == status.mood.word ? String(localized: "Asleep", table: "Chat") : String(localized: "Off", table: "Chat")
+        case .cantReach: String(localized: "Can’t reach the phone", table: "Chat")
+        case .listening: String(localized: "Listening", table: "Chat")
+        case .speaking: String(localized: "Talking", table: "Chat")
+        case .hello: nil
+        }
+        return word
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let openThreads {
-                Button(action: openThreads) { glyph("line.3.horizontal") }
-                    .buttonStyle(.plain)
-                    .glassSurface(in: Circle(), interactive: true)
-                    .accessibilityLabel(Text("Conversations"))
-                    .accessibilityIdentifier("chat.threads")
+        ZStack(alignment: .top) {
+            HStack {
+                if let openThreads {
+                    Button(action: openThreads) { glyph("line.3.horizontal") }
+                        .buttonStyle(.plain)
+                        .glassSurface(in: Circle(), interactive: true)
+                        .accessibilityLabel(Text("Conversations"))
+                        .accessibilityIdentifier("chat.threads")
+                }
+                Spacer(minLength: 8)
+                Button(action: newConversation) {
+                    glyph("square.and.pencil", dim: home || busy).animation(HomeMotion.landing(home, reduceMotion), value: home)
+                }
+                .buttonStyle(.plain)
+                .glassSurface(in: Circle(), interactive: !home && !busy)
+                .allowsHitTesting(!home && !busy)
+                .accessibilityLabel(Text("New Conversation"))
+                .accessibilityHidden(home)
+                .accessibilityIdentifier("home.newChat")
             }
+            .padding(.top, (HomeMotion.avatar - HomeMotion.button) / 2)
             Button(action: openDetails) {
-                HStack(spacing: 12) {
+                VStack(spacing: 4) {
+                    // Poki's picture is drawn by the flight over the page; here is its place.
                     Color.clear.frame(width: HomeMotion.avatar, height: HomeMotion.avatar).reportsBearFrame(.avatar)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(verbatim: "Poki").font(Prominent.font(.title2, .bold)).foregroundStyle(Color(.label))
-                        if says { Text(verbatim: status.word).font(.caption).foregroundStyle(Color(.secondaryLabel)) }
-                    }
-                    .lineLimit(1)
-                    .opacity(home ? 0 : 1)
-                    .animation(HomeMotion.landing(home, reduceMotion), value: home)
+                    // Glass ignores an opacity around it, so on the home page the capsule is not there at all.
+                    if !home { name.transition(.opacity) }
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .allowsHitTesting(!home)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("Poki, \(status.word), details"))
+            .accessibilityLabel(Text("Poki, \(state ?? status.word), details"))
             .accessibilityAddTraits(.isButton)
             .accessibilityHidden(home)
             .accessibilityIdentifier("chat.header.details")
-            Spacer(minLength: 8)
-            Button(action: newConversation) {
-                glyph("square.and.pencil", dim: home || busy).animation(HomeMotion.landing(home, reduceMotion), value: home)
-            }
-            .buttonStyle(.plain)
-            .glassSurface(in: Circle(), interactive: !home && !busy)
-            .allowsHitTesting(!home && !busy)
-            .accessibilityLabel(Text("New Conversation"))
-            .accessibilityHidden(home)
-            .accessibilityIdentifier("home.newChat")
+            .padding(.horizontal, HomeMotion.button + 12)
         }
-        .overlay {
+        .overlay(alignment: .top) {
             if home, let update {
                 Button(action: openUpdates) {
                     HStack(spacing: 6) {
@@ -373,16 +397,30 @@ struct ChatTopBar: View {
                 .accessibilityValue(Text(verbatim: update))
                 .accessibilityIdentifier("home.update")
                 .padding(.horizontal, HomeMotion.button + 12)
+                .padding(.top, (HomeMotion.avatar - 44) / 2)
                 .glassAppearing()
             }
         }
         .animation(HomeMotion.words(home, reduceMotion), value: home)
         .animation(.easeOut(duration: 0.25), value: update)
         .glassGroup()
-        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 6)
+        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 4)
         .frame(maxWidth: 720)
         // A bar's controls stop growing where the system's bars do.
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+    }
+
+    /// "Poki ›" in a glass capsule, as Messages names the person under their picture, with Poki's state
+    /// after the name.
+    private var name: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(verbatim: "Poki").font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+            if let state { Text(verbatim: state).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+            Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .glassSurface(in: Capsule())
     }
 
     private func glyph(_ symbol: String, dim: Bool = false) -> some View {
