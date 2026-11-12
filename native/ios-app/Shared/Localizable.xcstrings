@@ -3424,6 +3424,12 @@
             "state" : "translated",
             "value" : "客人"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訪客"
+          }
         }
       }
     },
@@ -5133,12 +5139,24 @@
             "state" : "translated",
             "value" : "需要你"
           }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要你"
+          }
         }
       }
     },
     "Needs You (%lld)" : {
       "localizations" : {
         "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要你（%lld）"
+          }
+        },
+        "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "需要你（%lld）"
@@ -25069,6 +25087,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有要你处理的事"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有要你處理的事"
           }
         }
       }
