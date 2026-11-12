@@ -365,8 +365,32 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
         manifest["preview_pr"] = json!(p.pr);
         manifest["sha"] = json!(p.sha);
     }
+    // The choice changed while this was being prepared: it is not left ready to install.
+    if let Err(stale) = still_chosen(&manifest) {
+        let _ = std::fs::remove_dir_all(&out_dir);
+        return Err(stale);
+    }
     std::fs::write(out_dir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap_or_default())?;
     Ok(manifest)
+}
+
+/// A prepared update goes on only while it is still the build chosen: a pull request's preview
+/// while that pull request is chosen, a channel build while none is. Choosing None, turning
+/// Preview Builds off or signing out of GitHub leaves an already prepared preview on disk; this is
+/// what keeps it off the phone. A refresh re-signs what is installed, so it is always fine.
+fn still_chosen(manifest: &Value) -> std::result::Result<(), Failure> {
+    if manifest["kind"].as_str() != Some("update") {
+        return Ok(());
+    }
+    let prepared = manifest["preview_pr"].as_u64();
+    if prepared == release::preview() {
+        return Ok(());
+    }
+    let message = match prepared {
+        Some(pr) => format!("The prepared preview build of PR {pr} is no longer the one chosen, so it was not installed. Check for updates again."),
+        None => "A preview build is chosen now, so the prepared channel build was not installed. Check for updates again.".to_string(),
+    };
+    Err(fail(message, "stale"))
 }
 
 /// Installs a prepared build: its profiles through misagent, then the app as an upgrade through
@@ -375,6 +399,7 @@ async fn install(request: &Value, reporter: &Reporter) -> Out {
     let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;
     let manifest_path = PathBuf::from(str_of(request, "manifest")?);
     let manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path)?).map_err(|e| fail(e.to_string(), "config"))?;
+    still_chosen(&manifest)?;
     let ipa = PathBuf::from(str_of(&manifest, "ipa")?);
     let mut device = phone.open().await?;
 

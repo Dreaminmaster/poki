@@ -126,7 +126,15 @@ final class SelfSigner {
     var needsCode: Bool { status?.needs_code == true }
     var daysLeft: Double? { expiry.map { $0.timeIntervalSinceNow / 86_400 } }
     /// The build Install would put on: an update when one is ready, else a refresh.
-    var next: Prepared? { ready["update"] ?? ready["refresh"] }
+    var next: Prepared? { readyUpdate ?? ready["refresh"] }
+    /// The prepared update, while it is still the build chosen: a pull request's preview only while
+    /// that pull request is chosen, a channel build only while none is. Choosing None, turning
+    /// Preview Builds off or signing out of GitHub leaves a prepared preview on disk; it is neither
+    /// offered nor installed (the signer refuses it too), and the next prepare replaces it.
+    var readyUpdate: Prepared? {
+        guard let u = ready["update"], u.preview_pr == status?.preview else { return nil }
+        return u
+    }
     /// The channel has a newer Poki than the installed one.
     var updateAvailable: Bool { latest.map(isNewer) ?? false }
     /// A newer Poki is on the channel, but no signed copy of it is ready to install yet. Compared by
@@ -134,7 +142,7 @@ final class SelfSigner {
     /// keep one tag for every build, so a copy prepared from an earlier build has the same tag.
     var updateNotReady: Bool {
         guard updateAvailable, let latest else { return false }
-        guard let u = ready["update"] else { return true }
+        guard let u = readyUpdate else { return true }
         return u.version != latest.version || u.build != latest.build || u.preview_pr != latest.preview_pr || (u.sha ?? "") != (latest.sha ?? "")
     }
     var previewsEnabled: Bool { status?.previews_enabled == true }
@@ -343,7 +351,7 @@ final class SelfSigner {
                     return
                 }
             }
-            if let days = daysLeft, days <= Self.refreshWithDaysLeft, ready["refresh"] == nil, ready["update"] == nil {
+            if let days = daysLeft, days <= Self.refreshWithDaysLeft, ready["refresh"] == nil, readyUpdate == nil {
                 await prepare(kind: "refresh")
             }
             remindIfExpiring()
@@ -368,7 +376,7 @@ final class SelfSigner {
     /// downloaded build stays ready for Install Update.
     func downloadAndInstallUpdate() async {
         if updateNotReady { await prepare(kind: "update") }
-        guard !updateNotReady, ready["update"] != nil, lastError == nil else { return }
+        guard !updateNotReady, readyUpdate != nil, lastError == nil else { return }
         await install()
     }
 
@@ -415,6 +423,9 @@ final class SelfSigner {
 
     /// Installs the prepared build. iOS ends Poki when it lands; a notification brings it back.
     func install() async {
+        // The choice may have changed elsewhere (Poki Setup, the command line) since the status
+        // was read; next goes by the current one.
+        await reload()
         guard let p = next else { log.add("signing", "install tapped, but no build is ready"); return }
         log.add("signing", "install tapped: \(p.kind) \(p.version) (\(p.build))")
         guard isIdle() else {
