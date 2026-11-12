@@ -30,6 +30,10 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     @State private var progress: CGFloat = 0
     /// The progress when the drawer's current drag began; nil while none is under way.
     @State private var dragStart: CGFloat?
+    /// True once the panel has closed all the way. Set when the closing spring ends, not with the progress
+    /// itself: the progress jumps to its target and the spring only draws the way there, so a panel hidden
+    /// by the progress would fade out on its way closed instead of sliding out.
+    @State private var hidden = true
     /// True while a drag is under way, so a drag the system cancels (no `onEnded`) still settles.
     @GestureState private var dragging = false
     @State private var screen = CGSize(width: 402, height: 874)
@@ -89,7 +93,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                 // The system took the drag away before it ended: go back to where it was.
                 if !now, dragStart != nil { dragStart = nil; settle(isOpen, speed: 0) }
             }
-            .onAppear { progress = isOpen ? 1 : 0 }
+            .onAppear { progress = isOpen ? 1 : 0; hidden = !isOpen }
     }
 
     /// The uncovered chat: dimmed and lightly blurred, so its own buttons do not look like they can be
@@ -131,7 +135,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .offset(x: panelOffset)
             // Placed with padding, not an offset, so the list inside gets the safe area of where it really is.
             .padding(.leading, layout.panel.minX).padding(.top, layout.panel.minY)
-            .opacity(reduceMotion ? settled : (progress > 0.001 ? 1 : 0))
+            .opacity(reduceMotion ? settled : (hidden ? 0 : 1))
             .allowsHitTesting(isOpen)
             .accessibilityHidden(!isOpen)
             .accessibilityAddTraits(.isModal)
@@ -153,7 +157,10 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     private func settle(_ open: Bool, speed: CGFloat) {
         let target: CGFloat = open ? 1 : 0
         let animation = reduceMotion ? ThreadsDrawerMotion.fade : ThreadsDrawerMotion.spring(from: progress, to: target, speed: speed)
-        withAnimation(animation) { progress = target }
+        if open { hidden = false }
+        withAnimation(animation, completionCriteria: .removed) { progress = target } completion: {
+            if progress == 0, dragStart == nil { hidden = true }
+        }
         if isOpen != open { isOpen = open }
     }
 
@@ -179,7 +186,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                 if next > 1 { next = 1 + (next - 1) * 0.12 }
                 var instant = Transaction()
                 instant.disablesAnimations = true
-                withTransaction(instant) { progress = max(0, next) }
+                withTransaction(instant) { progress = max(0, next); hidden = false }
             }
             .onEnded { value in
                 guard dragStart != nil else { return }
