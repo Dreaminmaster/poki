@@ -67,6 +67,10 @@ struct PokiDetailsView: View {
                 }
 
                 Section {
+                    NavigationLink(value: DetailsRoute.conversations) {
+                        ProfileRow(title: "Conversations", caption: "Search", symbol: "magnifyingglass", tile: Tint.blue)
+                    }
+                    .accessibilityIdentifier("details.searchConversations")
                     NavigationLink(value: DetailsRoute.approvals) {
                         ProfileRow(title: "Rules", caption: "What Poki asks about first", symbol: "checkmark.shield.fill", value: model.approvalMode.title, tile: Tint.amber)
                     }
@@ -102,6 +106,8 @@ struct PokiDetailsView: View {
                     ModelSettingsView()
                 case .history:
                     ActionLogView(openSession: { id in dismiss(); openSession(id) })
+                case .conversations:
+                    ConversationSearchView(openSession: { id in dismiss(); openSession(id) })
                 case .voice:
                     VoiceView(embedded: true)
                 case .hands:
@@ -177,7 +183,46 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, voice, hands, health, settings, setup, updates, approvals
+    case model, history, conversations, voice, hands, health, settings, setup, updates, approvals
+}
+
+private struct ConversationSearchView: View {
+    var openSession: (String) -> Void
+    @State private var query = ""
+
+    private var matches: [SavedSession] {
+        let words = query.trimmingCharacters(in: .whitespaces)
+        return SessionStore.shared.ordered.filter { session in
+            words.isEmpty || [session.name, session.title, session.lastLine, session.client ?? ""]
+                .contains { $0.localizedCaseInsensitiveContains(words) }
+        }
+    }
+
+    var body: some View {
+        List {
+            ForEach(matches) { session in
+                Button { openSession(session.id) } label: {
+                    HStack(spacing: 12) {
+                        SessionAvatar(session: session, size: 36)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: session.name).foregroundStyle(Color(.label))
+                            Text(verbatim: session.lastLine).font(.subheadline)
+                                .foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+            if matches.isEmpty {
+                ContentUnavailableView.search(text: query)
+            }
+        }
+        .navigationTitle("Conversations")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, prompt: Text("Search"))
+    }
 }
 
 // MARK: The card, the tiles and the rows

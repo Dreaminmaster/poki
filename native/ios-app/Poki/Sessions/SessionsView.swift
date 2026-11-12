@@ -10,65 +10,27 @@
 import SwiftUI
 import UIKit
 
-/// Every conversation (ESP-326 board "07 Threads"): the drawer beside the chat on iPhone, the left
-/// column on iPad. Pinned on top are Poki itself and the guests that borrow its hands (outside agents);
-/// below them the recent conversations. Poki's status sits on the bottom edge and opens its profile.
+/// The drawer contains conversations and the action for starting a new one.
 struct SessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
-    /// Shows Poki's chat (and closes the drawer).
     var openChat: () -> Void
     var openSession: (String) -> Void
-    var openModel: () -> Void = {}
-    var openConnectors: () -> Void = {}
-    var openDetails: () -> Void
-    var openSetup: () -> Void = {}
-    var openSetupStep: (SetupStep) -> Void = { _ in }
-    /// The bear on the bottom edge is where Poki's profile zooms out of when it opens from here.
-    var profileSource: Namespace.ID? = nil
-    @State private var query = ""
-    @State private var filter = Filter.all
     @State private var renaming: SavedSession?
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var newName = ""
 
-    enum Filter: Hashable { case all, needsYou, guests }
-
     private var store: SessionStore { SessionStore.shared }
     private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
 
-    /// One problem at a time under the list: a runner or pairing failure, an open setup step, no chat
-    /// account, or the relay offline (see `SetupIssueHint.home`).
-    private var homeHint: SetupIssueHint? {
-        guard sampleHome == nil else { return nil }
-        return SetupIssueHint.home(model: model)
-    }
-
     var body: some View {
-        let status = sampleHome == "paused" ? PokiStatus(.paused) : PokiStatus.current(model: model, chat: chat)
-        let rows = shown
         List {
-            if filter == .all, query.isEmpty {
-                Section {
-                    pokiRow(status)
-                    ForEach(guests) { guest in guestRow(guest) }
-                } header: { Text("Pinned") }
-                .listSectionSeparator(.hidden)
-            }
-            Section {
-                ForEach(rows) { session in row(session) }
-                if rows.isEmpty { empty }
-            } header: { if !rows.isEmpty { Text("Recent") } }
-            .listSectionSeparator(.hidden)
-            if let hint = homeHint {
-                SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel, openAgents: openConnectors)
-                    .listRowSeparator(.hidden)
-            }
+            ForEach(shown) { session in row(session) }
+            if shown.isEmpty { empty }
         }
         .listStyle(.plain)
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
-        .safeAreaInset(edge: .bottom, spacing: 0) { strip(status) }
         .background(Color(.systemBackground))
         .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -81,95 +43,27 @@ struct SessionsView: View {
         }
     }
 
-    // MARK: Search, new chat and the filter
-
     private var header: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Color(.secondaryLabel))
-                    TextField("Search", text: $query).submitLabel(.search).autocorrectionDisabled()
-                    if !query.isEmpty {
-                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Color(.tertiaryLabel)) }
-                            .buttonStyle(.plain).accessibilityLabel(Text("Clear"))
-                    }
-                }
-                .padding(.horizontal, 12).frame(minHeight: 40)
-                .background(Color(.tertiarySystemFill), in: .capsule)
-
-                Button {
-                    if !chat.running { chat.newConversation() }
-                    openChat()
-                } label: {
-                    Image(systemName: "square.and.pencil").font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
-                        .frame(width: 40, height: 40).background(Tint.solid, in: .circle)
-                }
-                .buttonStyle(.plain)
-                .disabled(chat.running)
-                .accessibilityLabel(Text("New Conversation"))
-                .accessibilityIdentifier("threads.newChat")
+        HStack {
+            Spacer()
+            Button {
+                if !chat.running { chat.newConversation() }
+                openChat()
+            } label: {
+                Image(systemName: "square.and.pencil").font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
+                    .frame(width: 40, height: 40).background(Tint.solid, in: .circle)
             }
-            Picker("Show", selection: $filter) {
-                Text("All").tag(Filter.all)
-                Text(needing > 0 ? "Needs You (\(needing))" : "Needs You").tag(Filter.needsYou)
-                Text("Guests").tag(Filter.guests)
-            }
-            .pickerStyle(.segmented)
+            .buttonStyle(.plain)
+            .disabled(chat.running)
+            .accessibilityLabel(Text("New Conversation"))
+            .accessibilityIdentifier("threads.newChat")
         }
-        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+        .padding(.horizontal, 16).padding(.vertical, 8)
         .background(Color(.systemBackground))
-        // Bars stop growing here, as the system's do; the rows below grow freely.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
-    // MARK: Rows
-
-    /// At the accessibility text sizes a row's time goes under its words instead of beside them.
     private var big: Bool { typeSize.isAccessibilitySize }
-
-    /// Poki itself: its face and what it is doing. While it has the phone the row is Poki's soft blue.
-    private func pokiRow(_ status: PokiStatus) -> some View {
-        let busy = [.onYourPhone, .thinking, .checking].contains(status.mood)
-        return Button(action: openChat) {
-            HStack(spacing: 12) {
-                PokiAvatar(size: 44, mood: status.mood)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    Text(verbatim: status.word).font(.subheadline).foregroundStyle(busy ? Tint.blueText : Color(.secondaryLabel)).lineLimit(big ? 2 : 1)
-                    if busy, big { Text("now").font(.footnote).foregroundStyle(Tint.blueText) }
-                }
-                Spacer(minLength: 8)
-                if busy, !big { Text("now").font(.footnote).foregroundStyle(Tint.blueText) }
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .listRowSeparator(.hidden)
-        .listRowBackground(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(busy ? Tint.blueSoft : Color.clear).padding(.horizontal, 8))
-        .accessibilityIdentifier("threads.poki")
-    }
-
-    /// An outside agent that has used Poki's hands, by its latest session.
-    private func guestRow(_ session: SavedSession) -> some View {
-        let name = (session.client ?? session.name).trimmingCharacters(in: .whitespaces)
-        return Button { openSession(session.id) } label: {
-            HStack(spacing: 12) {
-                AgentBadge(name: name, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: name).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(big ? 2 : 1)
-                    Text(verbatim: session.live ? (session.lastLine.isEmpty ? String(localized: "Working…") : session.lastLine)
-                         : String(localized: "Over MCP, \(stamp(session))"))
-                        .font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(big ? 2 : 1)
-                    if session.live, big { Text("now").font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
-                }
-                Spacer(minLength: 8)
-                if session.live, !big { Text("now").font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .listRowSeparator(.hidden)
-    }
 
     private func row(_ session: SavedSession) -> some View {
         let needs = needsYou(session)
@@ -213,82 +107,14 @@ struct SessionsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private var empty: some View {
-        if !query.isEmpty {
-            ContentUnavailableView.search(text: query).listRowSeparator(.hidden)
-        } else if filter == .needsYou {
-            ContentUnavailableView("Nothing Needs You", systemImage: "checkmark.circle",
-                                   description: Text("Steps waiting for your answer show up here.").font(.subheadline))
-                .listRowSeparator(.hidden)
-        } else {
-            ContentUnavailableView("No Conversations Yet", systemImage: "bubble.left.and.bubble.right",
-                                   description: Text("Tap Poki to ask for anything on this iPhone. Claude, Codex and other agents show up here once they connect.").font(.subheadline))
-                .listRowSeparator(.hidden)
-        }
+    private var empty: some View {
+        ContentUnavailableView("No Conversations Yet", systemImage: "bubble.left.and.bubble.right")
+            .listRowSeparator(.hidden)
     }
 
-    // MARK: Poki on the bottom edge
-
-    private func strip(_ status: PokiStatus) -> some View {
-        Button(action: openDetails) {
-            HStack(spacing: 12) {
-                PokiAvatar(size: 40, mood: status.mood).profileSource(profileSource, id: "poki-threads")
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    PokiStatusLine(status: status).font(.footnote).foregroundStyle(Color(.secondaryLabel))
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "slider.horizontal.3").font(.body.weight(.medium)).foregroundStyle(Color(.label))
-                    .frame(width: 40, height: 40).background(Color(.tertiarySystemFill), in: .circle)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Poki, \(status.word), details"))
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("threads.details")
-    }
-
-    // MARK: What is listed
-
-    /// The outside agents, one row each by their latest session, at most two.
-    private var guests: [SavedSession] {
-        if sampleHome == "paused" { return [] }
-        let base = sampleHome == "sessions" ? Self.sampleSessions : store.ordered
-        var seen: Set<String> = []
-        var result: [SavedSession] = []
-        for session in base where session.kind == .agent || session.kind == .handoff {
-            let client = (session.client ?? session.name).trimmingCharacters(in: .whitespaces)
-            guard !client.isEmpty, !seen.contains(client) else { continue }
-            seen.insert(client)
-            result.append(session)
-            if result.count == 2 { break }
-        }
-        return result
-    }
-
-    /// The sessions matching the filter and the search field: name, first message or last line.
     private var shown: [SavedSession] {
         if sampleHome == "paused" { return [] }
-        var base = sampleHome == "sessions" ? Self.sampleSessions : store.ordered
-        switch filter {
-        case .all: break
-        case .needsYou: base = base.filter(needsYou)
-        case .guests: base = base.filter { $0.kind == .agent || $0.kind == .handoff }
-        }
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return base }
-        return base.filter { [$0.name, $0.title, $0.lastLine, $0.client ?? ""].contains { $0.localizedCaseInsensitiveContains(q) } }
-    }
-
-    private var needing: Int {
-        if sampleHome == "paused" { return 0 }
-        return (sampleHome == "sessions" ? Self.sampleSessions : store.ordered).filter(needsYou).count
+        return sampleHome == "sessions" ? Self.sampleSessions : store.ordered
     }
 
     /// Held by a step that waits for the owner: its own last plan says so, or it is the conversation

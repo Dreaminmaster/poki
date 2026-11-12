@@ -277,7 +277,7 @@ extension View {
         }
     }
 
-    /// Marks the bear Poki's profile zooms out of: "poki" in the chat, "poki-threads" in the drawer.
+    /// Marks the bear Poki's profile zooms out of.
     @ViewBuilder func profileSource(_ namespace: Namespace.ID?, id: String = "poki") -> some View {
         if let namespace { matchedTransitionSource(id: id, in: namespace) } else { self }
     }

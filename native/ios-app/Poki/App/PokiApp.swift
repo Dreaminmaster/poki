@@ -57,8 +57,6 @@ struct RootView: View {
     @State private var threadsOpen = false
     @State private var detailsOpen = false
     @State private var detailsPath = NavigationPath()
-    /// The bear the profile zooms out of: the chat's ("poki") or the drawer's ("poki-threads").
-    @State private var profileSourceID = "poki"
     @Namespace private var profile
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
@@ -69,24 +67,17 @@ struct RootView: View {
         home = route == .chat ? NavigationPath() : NavigationPath([route])
     }
 
-    private func openDetails(_ items: [any Hashable] = [], from source: String = "poki") {
+    private func openDetails(_ items: [any Hashable] = []) {
         var next = NavigationPath()
         for item in items { next.append(item) }
         detailsPath = next
-        profileSourceID = source
         detailsOpen = true
     }
 
     private var sessions: some View {
         SessionsView(
             openChat: { show(.chat) },
-            openSession: { show(.session($0)) },
-            openModel: { openDetails([DetailsRoute.model], from: "poki-threads") },
-            openConnectors: { openDetails([DetailsRoute.settings], from: "poki-threads") },
-            openDetails: { openDetails(from: "poki-threads") },
-            openSetup: { openDetails([DetailsRoute.hands, DetailsRoute.setup], from: "poki-threads") },
-            openSetupStep: { step in openDetails([DetailsRoute.hands, DetailsRoute.setup, step], from: "poki-threads") },
-            profileSource: profile
+            openSession: { show(.session($0)) }
         )
     }
 
