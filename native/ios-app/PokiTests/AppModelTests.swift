@@ -572,7 +572,7 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertTrue(model.sessionOn, "Pause stands by; it does not turn Poki off")
     }
 
-    /// ESP-340: the bear sleeps and the Hands switch reads "Resting" only after the owner's own pause.
+    /// ESP-340: the bear sleeps and the Hands switch reads "Paused" only after the owner's own pause.
     /// Standing by right after Turn On, or after the idle time, is not a pause: read from `runnerPaused`
     /// (what Pause and Resume go by), Poki looked asleep the moment it was turned on.
     func testOnlyTheOwnersPauseCountsAsResting() {

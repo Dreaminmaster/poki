@@ -1295,7 +1295,7 @@ struct ComposerInputView: View {
         return Toggle(isOn: Binding(get: { state == .on }, set: setHands)) {
             switch state {
             case .on: Label("Automation On", systemImage: "hand.tap.fill")
-            case .resting: Label("Resting", systemImage: "moon.zzz.fill")
+            case .resting: Label("Paused", systemImage: "moon.zzz.fill")
             case .off: Label("Off", systemImage: "power")
             }
         }
