@@ -17,6 +17,9 @@ import SwiftUI
 enum HomeMotion {
     /// The side of Poki's picture in the top bar, and of the round buttons beside it.
     static let avatar: CGFloat = 56
+    /// The side of Poki's picture over the greeting on the home page (board 头像位置 丙), 16 points
+    /// above the greeting.
+    static let homeAvatar: CGFloat = 80
     static let button: CGFloat = 48
     private static let fade = Animation.easeInOut(duration: 0.2)
     /// The two rows of suggestions, in points a second: positive goes left, negative right. Slow, and
@@ -48,7 +51,7 @@ extension PokiMood {
     var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking].contains(self) }
 }
 
-/// Poki's round picture in the top bar: the bear's face for its state, on a pale blue ground. Ready
+/// Poki's round picture: the bear's face for its state, on a pale blue ground. Ready
 /// or at work, it is the three-dimensional bear, blinking, and a tap on it makes it say hi
 /// (`ModelBear`); the other faces are not modelled yet and are the flat ones, which blink and hop
 /// when the state changes (`BlinkingFace`). The two fade into each other.
@@ -75,26 +78,95 @@ struct PokiPortrait: View {
     }
 }
 
-/// Poki at the top of the home page and of the conversation (board 定稿 07): its picture in a white
-/// ring with a soft blue shadow, and under it its name on a capsule of glass. Where Poki stands
-/// shows in the picture's face; the word for it is at the top of Poki's card and in what VoiceOver
-/// reads. The picture inside the ring is the one place the three-dimensional bear takes over.
-struct PokiHead: View {
-    var status: PokiStatus
+/// Poki's picture as it shows on a page: in a white ring with a soft blue shadow (boards 定稿 07 and
+/// 头像位置 丙). It is drawn at the home page's 80 points and scaled, so one picture, and one
+/// three-dimensional bear, goes from the home page to the top of the chat without being made again.
+struct PokiPicture: View {
+    var mood: PokiMood
+    var side: CGFloat
     /// Counts the taps on Poki, for the bear to answer.
     var pokes = 0
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let dark = scheme == .dark
+        PokiPortrait(mood: mood, side: HomeMotion.homeAvatar, pokes: pokes)
+            .scaleEffect(side / HomeMotion.homeAvatar)
+            .frame(width: side, height: side)
+            .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.85 : 1), lineWidth: 2))
+            .shadow(color: dark ? Color(hex: 0x3C8DFF).opacity(0.35) : Color(hex: 0x0177FD).opacity(0.18), radius: dark ? 8 : 7, y: 4)
+    }
+}
+
+/// The two places Poki's picture sits: over the greeting on the home page, and at the top of the chat.
+enum PicturePlace: Hashable { case home, top }
+
+struct PicturePlaceKey: PreferenceKey {
+    static let defaultValue: [PicturePlace: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [PicturePlace: Anchor<CGRect>], nextValue: () -> [PicturePlace: Anchor<CGRect>]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+extension View {
+    /// Marks where Poki's picture sits on this page; the chat draws the one picture there (`PokiFlight`).
+    func picturePlace(_ place: PicturePlace) -> some View {
+        anchorPreference(key: PicturePlaceKey.self, value: .bounds) { [place: $0] }
+    }
+}
+
+/// The one picture of Poki, over the greeting on the home page at 80 points and at the top of the
+/// chat at 56. Sending the first message moves it up and makes it smaller in 0.3 s, and a new
+/// conversation brings it back; with Reduce Motion it is just there. A tap says hi and opens Poki's
+/// card. In the chat VoiceOver reads the top bar's Poki instead, which is the same button.
+struct PokiFlight: View {
+    var status: PokiStatus
+    var home: Bool
+    var places: [PicturePlace: CGRect]
+    var pokes: Int
+    var tap: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let side = home ? HomeMotion.homeAvatar : HomeMotion.avatar
+        if let place = places[home ? .home : .top] {
+            Button(action: tap) {
+                PokiPicture(mood: status.mood, side: side, pokes: pokes).contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
+            .accessibilityIdentifier("home.poki")
+            .accessibilityHidden(!home)
+            .position(x: place.midX, y: place.midY)
+            .animation(reduceMotion ? nil : HomeMotion.paced(.smooth(duration: 0.3)), value: place)
+        }
+    }
+}
+
+/// The middle of the chat's top bar (board 定稿 07): the place for Poki's picture, which the chat
+/// draws there (`PokiFlight`), and under it Poki's name on a capsule of glass. Where Poki stands shows
+/// in the picture's face; the word for it is at the top of Poki's card and in what VoiceOver reads.
+/// On the home page the picture is over the greeting and the bar's middle is empty.
+struct PokiHead: View {
+    var home: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
         VStack(spacing: 6) {
-            PokiPortrait(mood: status.mood, pokes: pokes)
-                .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.85 : 1), lineWidth: 2))
-                .shadow(color: dark ? Color(hex: 0x3C8DFF).opacity(0.35) : Color(hex: 0x0177FD).opacity(0.18), radius: dark ? 8 : 7, y: 4)
-            Text(verbatim: "Poki")
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(.label))
-                .padding(.horizontal, 12).frame(height: 24)
-                .glassSurface(in: Capsule())
+            Color.clear.frame(width: HomeMotion.avatar, height: HomeMotion.avatar).picturePlace(.top)
+            // Glass in a group is drawn by the group, so the capsule comes and goes rather than fading;
+            // its place stays, and the bar keeps its height on both pages.
+            ZStack {
+                if !home {
+                    Text(verbatim: "Poki")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(.label))
+                        .padding(.horizontal, 12).frame(height: 24)
+                        .glassSurface(in: Capsule())
+                        .glassAppearing()
+                }
+            }
+            .frame(height: 24)
+            .animation(HomeMotion.landing(home, reduceMotion), value: home)
         }
     }
 }
@@ -109,8 +181,8 @@ struct PokiHead: View {
 
 /// The chat's top as Messages draws a conversation's (ESP-468): the two round glass buttons float at
 /// the sides, the conversations on the left and a new conversation on the right, and between them
-/// Poki's picture with its state, on the home page as in the conversation. A tap on Poki opens its
-/// card. There is no bar behind them: the conversation passes under them through the system's scroll
+/// in the conversation Poki's picture and name (on the home page the picture is over the greeting,
+/// and the middle is empty). A tap on Poki opens its card. There is no bar behind them: the conversation passes under them through the system's scroll
 /// edge effect. On the home page the new-conversation button is grey and does nothing (the page
 /// already is a new conversation).
 struct ChatTopBar: View {
@@ -121,10 +193,9 @@ struct ChatTopBar: View {
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)?
     var newConversation: () -> Void
+    /// A tap on Poki: the bear says hi while its card opens.
     var openDetails: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The taps on Poki: the bear says hi while its card opens.
-    @State private var pokes = 0
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -148,13 +219,12 @@ struct ChatTopBar: View {
                 .accessibilityIdentifier("home.newChat")
             }
             .padding(.top, (HomeMotion.avatar - HomeMotion.button) / 2)
-            Button {
-                pokes += 1
-                openDetails()
-            } label: {
-                PokiHead(status: status, pokes: pokes).contentShape(.rect)
+            Button(action: openDetails) {
+                PokiHead(home: home).contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .allowsHitTesting(!home)
+            .accessibilityHidden(home)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
             .accessibilityAddTraits(.isButton)
@@ -291,6 +361,10 @@ struct HomePage<Footer: View>: View {
             ScrollView {
                 VStack(spacing: 0) {
                     VStack(spacing: 12) {
+                        // Poki's picture, 16 points over the greeting (board 头像位置 丙); the chat draws it here.
+                        Color.clear.frame(width: HomeMotion.homeAvatar, height: HomeMotion.homeAvatar)
+                            .picturePlace(.home)
+                            .padding(.bottom, 4)
                         // One line in Chinese on the narrowest iPhone; English may take two.
                         Text(verbatim: greeting)
                             .font(.custom("PingFangSC-Semibold", size: greetingSize))
@@ -303,7 +377,9 @@ struct HomePage<Footer: View>: View {
                     }
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
-                    .padding(.top, writing ? 24 : min(184, max(24, geometry.size.height * 0.29)))
+                    // The board's picture 258 points from the screen's top, the greeting 354: under the top
+                    // bar, whose middle keeps the chat's picture and name in height, that is 112 points.
+                    .padding(.top, writing ? 24 : max(24, min(112, geometry.size.height * 0.29 - 72)))
                     .opacity(home ? 1 : 0)
                     .animation(HomeMotion.words(home, reduceMotion), value: home)
                     .onChange(of: home) { _, shown in if shown { greeting = HomeGreeting.line() } }
