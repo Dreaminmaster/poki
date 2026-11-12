@@ -509,6 +509,77 @@ final class ApprovalTests: XCTestCase {
         XCTAssertTrue(again.text.contains("approval_required"), again.text)
     }
 
+    /// A step on a screen, in the app it is in, and what holds it back when asking is on.
+    private struct HeldStep { let app: String; let bundle: String; let screen: [(String, String)]; let action: JSON; let reason: String }
+
+    /// PokiCore started on the step's screen with the way of asking `mode` holds, and the screen read.
+    private func started(on step: HeldStep, mode: LockedBox<ApprovalMode>) async -> (PokiCore, FakeWDA) {
+        let wda = FakeWDA()
+        wda.source(step.screen, app: step.app)
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": .string(step.bundle), "name": .string(step.app)]]) }
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.approvalMode = { mode.value } }
+        _ = await core.call("look", [:])
+        return (core, wda)
+    }
+
+    /// The step sent once more: whether it asked, the input it sent, and the request's reason.
+    private func send(_ step: HeldStep, _ core: PokiCore, _ wda: FakeWDA) async -> (asked: Bool, sent: Int, text: String, reason: String?) {
+        let inputs = { wda.bodies("POST /wda/tap").count + wda.bodies("POST /wda/keys").count }
+        let before = inputs()
+        let result = await core.call("do", ["actions": [step.action]])
+        let reason = core.pendingApproval?.reason
+        if let pending = core.pendingApproval { core.resolveApproval(id: pending.id, approved: false) }
+        return (result.text.contains("approval_required"), inputs() - before, result.text, reason)
+    }
+
+    /// The way of asking counts from the next step, not from the next time Poki opens. Poki started
+    /// with Never Ask; the owner turns asking on while it runs, and the next message sent, password
+    /// typed and call placed waits for the owner and sends nothing.
+    func testAskingTurnedOnWhilePokiRunsHoldsTheNextSendPasswordAndCall() async {
+        let steps = [
+            HeldStep(app: "Messages", bundle: "com.apple.MobileSMS", screen: [("Button", "Send")], action: ["tap": 1], reason: "sending a message (\"send\")"),
+            HeldStep(app: "Settings", bundle: "com.apple.Preferences", screen: [("SecureTextField", "Password")], action: ["type": "hunter2", "ref": 1], reason: "typing into a password field"),
+            HeldStep(app: "Phone", bundle: "com.apple.mobilephone", screen: [("Cell", "Mom, mobile")], action: ["tap": 1], reason: "a call (in Phone)"),
+        ]
+        for step in steps {
+            let mode = LockedBox(ApprovalMode.off)
+            let (core, wda) = await started(on: step, mode: mode)
+            let before = await send(step, core, wda)
+            XCTAssertFalse(before.asked, "\(step.app) with Never Ask: \(before.text)")
+            XCTAssertGreaterThan(before.sent, 0, "\(step.app) with Never Ask went ahead: \(before.text)")
+            for asking in [ApprovalMode.confirm, .reply] {
+                mode.value = asking
+                let after = await send(step, core, wda)
+                XCTAssertTrue(after.asked, "\(step.app) after turning on \(asking): \(after.text)")
+                XCTAssertEqual(after.sent, 0, "\(step.app) after turning on \(asking) sent input: \(after.text)")
+                XCTAssertEqual(after.reason, step.reason, "\(step.app) after turning on \(asking)")
+            }
+        }
+    }
+
+    /// The other way: Poki started asking, and the owner turns asking off while it runs. The next
+    /// message goes ahead with no request; a payment, a deletion and input in Wallet still wait.
+    func testAskingTurnedOffWhilePokiRunsLetsTheNextSendGoAndStillHoldsPaymentsDeletionsAndWallet() async {
+        let steps = [
+            (HeldStep(app: "Messages", bundle: "com.apple.MobileSMS", screen: [("Button", "Send")], action: ["tap": 1], reason: "sending a message (\"send\")"), stillAsks: false),
+            (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Pay")], action: ["tap": 1], reason: "a payment (\"pay\")"), stillAsks: true),
+            (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Delete")], action: ["tap": 1], reason: "deleting (\"delete\")"), stillAsks: true),
+            (HeldStep(app: "Wallet", bundle: "com.apple.Passbook", screen: [("Button", "Apple Card")], action: ["tap": 1], reason: "input in Wallet"), stillAsks: true),
+        ]
+        for (step, stillAsks) in steps {
+            let mode = LockedBox(ApprovalMode.confirm)
+            let (core, wda) = await started(on: step, mode: mode)
+            let asking = await send(step, core, wda)
+            XCTAssertTrue(asking.asked, "\(step.screen[0].1) while asking: \(asking.text)")
+            XCTAssertEqual(asking.reason, step.reason)
+            mode.value = .off
+            let off = await send(step, core, wda)
+            XCTAssertEqual(off.asked, stillAsks, "\(step.screen[0].1) after turning asking off: \(off.text)")
+            XCTAssertEqual(off.sent, stillAsks ? 0 : 1, "\(step.screen[0].1) after turning asking off: \(off.text)")
+            XCTAssertEqual(off.reason, stillAsks ? step.reason : nil)
+        }
+    }
+
     func testTappingAContactInPhonePlacesNoCallWithoutTheOwner() async {
         let wda = FakeWDA()
         wda.source([("Cell", "Mom, mobile"), ("Button", "Keypad")], app: "Phone")
