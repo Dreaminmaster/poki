@@ -41,6 +41,8 @@ final class AppCapsuleTests: XCTestCase {
         XCTAssertEqual(apps("帮我发信息给小王"), [])
         XCTAssertEqual(apps("notes about the trip"), [])
         XCTAssertEqual(apps("fix the box"), [])
+        XCTAssertEqual(apps("Buy a red dress and find a podcast"), [])
+        XCTAssertEqual(apps("打开QQ 音乐放首歌"), ["com.tencent.QQMusic"])
         XCTAssertEqual(apps("Post on X"), ["com.atebits.Tweetie2"])
     }
 

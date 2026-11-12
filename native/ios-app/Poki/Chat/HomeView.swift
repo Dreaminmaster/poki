@@ -195,7 +195,7 @@ enum HomeIdea {
     private static func idea(_ app: String, _ text: String) -> HomeShortcut? {
         guard let capsule = AppCapsule.catalog.first(where: { $0.names.contains(app) }), let shown = ShortcutApp.named(capsule.id) else { return nil }
         return HomeShortcut(key: HomeShortcuts.normalize(text), app: shown.id, appName: shown.name, text: text,
-                            prompt: CapsuleText.prefill(app: capsule, sentence: text))
+                            prompt: CapsuleText.prefill(app: app, sentence: text))
     }
     /// An app by its bundle ID, the action its pill shows and the whole request a tap puts in the field.
     private static func idea(app: String, _ text: String, prompt: String) -> HomeShortcut? {

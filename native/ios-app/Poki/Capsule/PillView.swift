@@ -64,9 +64,22 @@ struct PillView: View {
         .accessibilityLabel(Text(verbatim: data.label))
     }
 
-    /// The capsule drawn as a picture, for the field's attachment and the bubble's inline image.
+    /// The capsule drawn as a picture, for the field's attachment and the bubble's inline image; each
+    /// one drawn once, so a bubble drawn again (a task's progress) does not draw its capsules again.
     @MainActor
     static func image(_ data: PillTextAttachmentData, scale: CGFloat, dark: Bool) -> UIImage? {
+        let key = "\(data.app.id)|\(data.label)|\(data.fontData.pointSize)|\(scale)|\(dark)|\(data.onAccent)"
+        if let drawn = drawn[key] { return drawn }
+        let image = draw(data, scale: scale, dark: dark)
+        if drawn.count > 200 { drawn.removeAll() }
+        drawn[key] = image
+        return image
+    }
+
+    @MainActor private static var drawn: [String: UIImage] = [:]
+
+    @MainActor
+    private static func draw(_ data: PillTextAttachmentData, scale: CGFloat, dark: Bool) -> UIImage? {
         let renderer = ImageRenderer(content: PillView(data: data).environment(\.colorScheme, dark ? .dark : .light))
         renderer.scale = scale > 0 ? scale : 3
         renderer.proposedSize = ProposedViewSize(PillMetrics(pointSize: data.fontData.pointSize).size(for: data.label))

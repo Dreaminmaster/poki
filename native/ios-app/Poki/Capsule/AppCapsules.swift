@@ -26,6 +26,7 @@ struct AppCapsule: Hashable, Identifiable {
         "Podcasts", "Calculator", "Compass", "Measure", "Shortcuts", "Settings", "Translate",
         "Freeform", "Journal", "Passwords", "Games", "Home", "Fitness", "Stocks", "Tips", "Find My",
         "X", "Threads", "Messenger", "Teams", "Zoom", "Outlook", "Chrome", "Amazon",
+        "RED", "Podcast", "Lark",
     ]
 
     /// Apple's apps whose Chinese names are everyday words: 发信息, 打电话, 拍照片 and 看地图 are not
@@ -111,9 +112,10 @@ enum CapsuleText {
         return before.isEmpty || ["打开", "打開", "用", "在", "去"].contains { before.hasSuffix($0) }
     }
 
-    /// The text a recommendation puts in the field: the app, then the sentence.
-    static func prefill(app: AppCapsule, sentence: String) -> String {
-        "\(app.name) \(sentence)"
+    /// The text a recommendation puts in the field: the app's name as the idea is written, then the
+    /// sentence, whatever language the iPhone names the app in.
+    static func prefill(app name: String, sentence: String) -> String {
+        "\(name) \(sentence)"
     }
 
     private static func wholeWord(_ name: NSString, at i: Int, in text: NSString) -> Bool {
