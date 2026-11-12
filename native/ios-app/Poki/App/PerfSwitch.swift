@@ -27,6 +27,8 @@ enum PerfSwitch: String, CaseIterable {
     // The earlier version of a change made to draw less, to compare the two on the same build.
     /// The suggestion rows ask for 120 frames a second again.
     case old120
+    /// The home light and the suggestion rows keep moving under the open drawer.
+    case oldUnderDrawer
 
     static func on(_ part: PerfSwitch) -> Bool { active.contains(part) }
 

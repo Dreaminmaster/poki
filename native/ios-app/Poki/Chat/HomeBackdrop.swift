@@ -30,8 +30,11 @@ struct HomeBackdrop: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    /// The open drawer lies over the page: the light holds where it is and goes on from there after.
+    @Environment(\.drawerCovers) private var drawerCovers
     /// False while another page is pushed over this one.
     @State private var shown = false
+    @State private var clock = HeldClock()
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     var body: some View {
@@ -39,12 +42,13 @@ struct HomeBackdrop: View {
         let resting = reduceMotion || frozen || lowPower || PerfSwitch.on(.backdropStill)
         let seen = shown && scenePhase == .active
         let breathing = home && !resting && seen ? 1.0 : 0
+        let held = drawerCovers && !PerfSwitch.on(.oldUnderDrawer)
         ZStack(alignment: .bottom) {
             Tint.page
             // Starting or stopping, the drift eases in and out over 600 ms; it never jumps back.
-            DriftingMesh(mesh: .chat, dark: dark, drift: working && !home && !resting && seen ? 1 : 0)
+            DriftingMesh(mesh: .chat, dark: dark, drift: working && !home && !resting && seen ? 1 : 0, held: held, clock: clock)
                 .animation(.easeInOut(duration: 0.6), value: working)
-            DriftingMesh(mesh: .home, dark: dark, drift: breathing)
+            DriftingMesh(mesh: .home, dark: dark, drift: breathing, held: held, clock: clock)
                 .overlay(alignment: .bottom) { EdgeLight(dark: dark) }
                 .offset(y: home || reduceMotion ? 0 : 260)
                 .opacity(home ? 1 : 0)
@@ -228,18 +232,40 @@ private struct DriftingMesh: View, Animatable {
     var mesh: LightMesh
     var dark: Bool
     var drift: Double
+    /// Holds still where it is, and goes on from that moment when let go.
+    var held = false
+    var clock: HeldClock
     var animatableData: Double {
         get { drift }
         set { drift = newValue }
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: drift <= 0)) { context in
-            let t = BackdropClock.fixed ?? context.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: drift <= 0 || held)) { context in
+            let t = BackdropClock.fixed ?? clock.time(context.date.timeIntervalSinceReferenceDate, held: held)
             let _ = BackdropLog.note(mesh.period, t, drift)
             mesh.gradient(at: t, drift: drift, dark: dark)
                 .opacity(mesh.strength(at: t, drift: drift))
         }
+    }
+}
+
+/// The moving lights' time: it stops while they are held and goes on from the same moment after, so a
+/// light let go carries on from the shape it held instead of jumping to where the clock has got to.
+final class HeldClock {
+    private var heldAt: TimeInterval?
+    private var lost: TimeInterval = 0
+
+    func time(_ now: TimeInterval, held: Bool) -> TimeInterval {
+        if held {
+            if heldAt == nil { heldAt = now }
+            return heldAt! - lost
+        }
+        if let heldAt {
+            lost += now - heldAt
+            self.heldAt = nil
+        }
+        return now - lost
     }
 }
 

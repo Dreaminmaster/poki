@@ -36,6 +36,8 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     /// itself: the progress jumps to its target and the spring only draws the way there, so a panel hidden
     /// by the progress would fade out on its way closed instead of sliding out.
     @State private var hidden = true
+    /// The panel is open and at rest: what moves on the page under it stops (`drawerCovers`).
+    @State private var covering = false
     /// True while a drag is under way, so a drag the system cancels (no `onEnded`) still settles.
     @GestureState private var dragging = false
     @State private var screen = CGSize(width: 402, height: 874)
@@ -54,6 +56,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .environment(\.drawerCovers, covering)
             // Under the panel's clear glass the chat itself blurs, so its colours and shapes show as soft outlines.
             .blur(radius: DrawerGlass.current == .soft && !reduceTransparency && !PerfSwitch.on(.drawerNoBlur) ? DrawerGlass.blur * settled : 0)
             // The chat moves back a little to the trailing side, as the panel comes in from the leading one.
@@ -159,9 +162,10 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     private func settle(_ open: Bool, speed: CGFloat) {
         let target: CGFloat = open ? 1 : 0
         let animation = reduceMotion ? ThreadsDrawerMotion.fade : ThreadsDrawerMotion.spring(from: progress, to: target, speed: speed)
-        if open { hidden = false }
+        if open { hidden = false } else { covering = false }
         withAnimation(animation, completionCriteria: .removed) { progress = target } completion: {
             if progress == 0, dragStart == nil { hidden = true }
+            if progress == 1, dragStart == nil { covering = true }
         }
         if isOpen != open { isOpen = open }
     }
@@ -181,6 +185,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                     // A mostly sideways drag in the drawer's direction; an up or down one belongs to the scroll view.
                     guard abs(dx) > abs(value.translation.height) * 1.5, isOpen ? dx < 0 : dx > 0, !scrolls(value) else { return }
                     dragStart = progress
+                    covering = false
                 }
                 guard let start = dragStart else { return }
                 var next = start + dx / layout.travel
@@ -275,6 +280,9 @@ enum DrawerGlass: String {
 extension EnvironmentValues {
     /// True inside the drawer's glass panel: the list and its bars draw no opaque ground of their own.
     @Entry var drawerOnGlass = false
+    /// True while the drawer is open and at rest over this view: the blurred, dimmed page shows only at
+    /// its edge, so what goes on by itself there (the home light, the suggestion rows) stops in place.
+    @Entry var drawerCovers = false
 }
 
 /// Where on the screen a sideways drag belongs to the content: such a view says where it is, and the

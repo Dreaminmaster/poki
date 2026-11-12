@@ -442,6 +442,7 @@ struct HomePage<Footer: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(\.drawerCovers) private var drawerCovers
     @Environment(AppModel.self) private var model
     private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
@@ -550,7 +551,7 @@ struct HomePage<Footer: View>: View {
     /// along, so the two rows do not line up.
     private func row(_ ideas: [HomeShortcut], speed: Double, start: CGFloat) -> some View {
         Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !writing && !PerfSwitch.on(.pillsStill),
-                active: home && scenePhase == .active, loops: !voiceOver, stopped: menuOpen) {
+                active: home && scenePhase == .active && (!drawerCovers || PerfSwitch.on(.oldUnderDrawer)), loops: !voiceOver, stopped: menuOpen) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
                     pill(idea).contentShape(.capsule)
