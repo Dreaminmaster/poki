@@ -216,6 +216,8 @@ struct ModelBear<Flat: View>: View {
         }
         .sensoryFeedback(.impact(weight: .light), trigger: pokes)
         .onChange(of: pokes) {
+            // With Reduce Motion the picture stays still: only the feel of the tap answers.
+            if reduceMotion { return }
             if showsModel { if handle.sayHi() { hops += 1 } } else if -hopped.timeIntervalSinceNow > 0.55 { hopped = .now; hops += 1 }
         }
         .task {
