@@ -254,18 +254,23 @@ private struct CardRowStyle: ButtonStyle {
 }
 
 extension View {
-    /// Poki's card under the top bar, over the page; a tap outside closes it. Add Model closes it and
-    /// opens Settings › Models. `leading` is where the chat begins: beside the conversations on iPad.
-    func pokiStatusCard(isPresented: Binding<Bool>, leading: CGFloat = 0, openModel: @escaping () -> Void) -> some View {
-        modifier(PokiStatusCardOverlay(isPresented: isPresented, leading: leading, openModel: openModel))
+    /// Poki's card over the page; a tap outside closes it. Add Model closes it and opens Settings › Models.
+    /// It opens under `under`, the bottom of Poki's picture over the home page's greeting in global
+    /// points, and under the top bar where that is nil. `leading` is where the chat begins: beside the
+    /// conversations on iPad.
+    func pokiStatusCard(isPresented: Binding<Bool>, under: CGFloat? = nil, leading: CGFloat = 0, openModel: @escaping () -> Void) -> some View {
+        modifier(PokiStatusCardOverlay(isPresented: isPresented, under: under, leading: leading, openModel: openModel))
     }
 }
 
 private struct PokiStatusCardOverlay: ViewModifier {
     @Binding var isPresented: Bool
+    var under: CGFloat?
     var leading: CGFloat
     var openModel: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The top of the overlay in global points, to place the card under the picture on the home page.
+    @State private var origin: CGFloat = 0
 
     func body(content: Content) -> some View {
         content.overlay(alignment: .top) {
@@ -283,8 +288,9 @@ private struct PokiStatusCardOverlay: ViewModifier {
                         openModel()
                     })
                     .padding(.horizontal, 16)
-                    // Under Poki's picture and its word.
-                    .padding(.top, 84)
+                    // Under Poki's picture: over the greeting on the home page, clear of it; in the chat,
+                    // under the picture and its name.
+                    .padding(.top, under.map { max(0, $0 - origin + 12) } ?? 84)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.9, anchor: .top).combined(with: .opacity))
                     .accessibilityAddTraits(.isModal)
                     .accessibilityAction(.escape) { isPresented = false }
@@ -292,6 +298,7 @@ private struct PokiStatusCardOverlay: ViewModifier {
             }
             .frame(maxWidth: .infinity)
             .padding(.leading, leading)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { origin = $0 }
             .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.18), value: isPresented)
         }
     }

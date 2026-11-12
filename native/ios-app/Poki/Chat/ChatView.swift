@@ -11,7 +11,9 @@ import SwiftUI
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
-    var openDetails: () -> Void
+    /// Opens Poki's card: under Poki's picture over the greeting on the home page (the bottom of the
+    /// picture, in global points), under the top bar in the chat (nil).
+    var openDetails: (_ under: CGFloat?) -> Void
     var openVoice: () -> Void
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
@@ -24,11 +26,13 @@ struct ChatView: View {
     private var voice: VoiceModel { model.voice }
     /// The taps on Poki's picture, for the bear to answer.
     @State private var pokes = 0
+    /// Where Poki's picture over the greeting ends, for the card to open under it.
+    @State private var homeBottom: CGFloat?
 
     /// A tap on Poki, on the home page or in the chat: the bear says hi and Poki's card opens.
     private func tapPoki() {
         pokes += 1
-        openDetails()
+        openDetails(isGreeting ? homeBottom : nil)
     }
     /// `-pokiDraft <text>` starts with a message already written, for recordings.
     @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
@@ -143,7 +147,8 @@ struct ChatView: View {
         .overlayPreferenceValue(PicturePlaceKey.self) { anchors in
             GeometryReader { proxy in
                 if !bare {
-                    PokiFlight(status: status, home: home, places: anchors.mapValues { proxy[$0] }, pokes: pokes, tap: tapPoki)
+                    PokiFlight(status: status, home: home, places: anchors.mapValues { proxy[$0] }, pokes: pokes, tap: tapPoki,
+                               landed: { homeBottom = $0 })
                 }
             }
         }

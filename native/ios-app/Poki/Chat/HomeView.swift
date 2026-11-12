@@ -125,6 +125,8 @@ struct PokiFlight: View {
     var places: [PicturePlace: CGRect]
     var pokes: Int
     var tap: () -> Void
+    /// The bottom of the picture over the greeting, in global points, for Poki's card to open under it.
+    var landed: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -137,6 +139,9 @@ struct PokiFlight: View {
             .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
             .accessibilityIdentifier("home.poki")
             .accessibilityHidden(!home)
+            .onGeometryChange(for: CGFloat?.self) { home ? $0.frame(in: .global).maxY : nil } action: {
+                if let bottom = $0 { landed(bottom) }
+            }
             .position(x: place.midX, y: place.midY)
             .animation(reduceMotion ? nil : HomeMotion.paced(.smooth(duration: 0.3)), value: place)
         }
