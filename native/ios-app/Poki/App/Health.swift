@@ -29,7 +29,7 @@ struct Health {
         switch monitor.state {
         case .working: return Health(word: String(localized: "On"), color: Site.ok)
         case .checking: return Health(word: String(localized: "Checking…"), color: .white)
-        case .noAnswer: return Health(word: monitor.cellularRefused ? String(localized: "Needs Wi-Fi") : String(localized: "No Answer"), color: Site.bad)
+        case .noAnswer: return Health(word: String(localized: "No Answer"), color: Site.bad)
         case .off: return Health(word: String(localized: "Off"), color: Site.bad)
         }
     }
@@ -80,7 +80,6 @@ struct Issue: Identifiable {
             } else if runner.state == "waiting_network", let fix = runner.fix, fix.contains("internet") {
                 out.append(Issue(id: "network", title: String(localized: "Waiting for the internet"), text: local(fix), fix: .none))
             } else if model.loopback.cellularRefused {
-                // A session already running keeps going on cellular; only a start from cellular is refused.
                 if !runner.isRunning {
                     out.append(Issue(id: "cellular", title: String(localized: "Connect to Wi-Fi first"), text: LoopbackMonitor.cellularHint, fix: .none))
                 }
@@ -111,7 +110,6 @@ struct Issue: Identifiable {
                                  text: String(localized: "Allow location access for Poki (Settings › Poki › Location › Always). Poki uses it only to keep running; it never records where you are."), fix: .settings))
             }
         }
-        // With Poki off, the old Home said this in its subtitle: a start from cellular alone is refused.
         if !model.sessionOn, model.loopback.cellularRefused {
             out.append(Issue(id: "cellular", title: String(localized: "Connect to Wi-Fi first"), text: LoopbackMonitor.cellularHint, fix: .none))
         }

@@ -3,7 +3,7 @@ import Network
 
 /// Live loopback status: every few seconds while Poki is in front (and on demand), a TCP connect to
 /// developer services at 10.7.0.1, which only answer when Poki or an external VPN reflects
-/// 10.7.0.1 back to this phone. Also whether Wi-Fi is up, which the phone's developer services need.
+/// 10.7.0.1 back to this phone. Network type is context, not proof of service availability.
 @MainActor
 @Observable
 final class LoopbackMonitor {
@@ -17,9 +17,7 @@ final class LoopbackMonitor {
     }
     private(set) var state = State.checking
     private(set) var onWiFi = false
-    /// The phone's only way out is cellular. iOS refuses the developer services' loopback on cellular
-    /// (remotepairingdeviced: "prohibited types: cellular loopback"), so a session cannot start from
-    /// here; one that is already up keeps running when the phone moves to cellular.
+    /// The physical interface monitors report cellular without a usable Wi-Fi path.
     private(set) var cellularOnly = false
     /// The interfaces the system path lists, for Diagnostics: a proxy app's tunnel can change what the path reports.
     private(set) var pathSummary = ""
@@ -87,8 +85,7 @@ final class LoopbackMonitor {
 
     var isWorking: Bool { state.isWorking }
 
-    /// The tunnel is on and refuses, and the phone has only cellular: the one case where the fix is
-    /// "start from Wi-Fi", not "turn the proxy app on".
+    /// No developer port answered while only cellular was available. This does not locate the failure.
     var cellularRefused: Bool { state == .noAnswer && cellularOnly }
 
     /// Checks every `interval` seconds until `pause` (3 s in front; the app uses a slower one in the
@@ -138,7 +135,7 @@ final class LoopbackMonitor {
     }
     #endif
 
-    static var cellularHint: String { String(localized: "Connect to Wi-Fi and open Poki first. Once it is on, you can switch to cellular and keep using it.") }
+    static var cellularHint: String { String(localized: "The local connection is not responding on cellular. Connect to Wi-Fi, reconnect it in Setup, then try again. A running automation session may continue on cellular. Starting again or renewing Poki may still need Wi-Fi.") }
 
     var text: String {
         switch state {
@@ -152,7 +149,7 @@ final class LoopbackMonitor {
     var detail: String {
         switch state {
         case .checking: String(localized: "Looking for this iPhone at 10.7.0.1.")
-        case .working(let ms): String(localized: "This iPhone answers at 10.7.0.1 (\(ms) ms).") + (onWiFi || cellularOnly ? "" : " " + String(localized: "Connect to Wi-Fi: the developer services need it."))
+        case .working(let ms): String(localized: "This iPhone answers at 10.7.0.1 (\(ms) ms).")
         case .noAnswer where cellularOnly: Self.cellularHint
         case .noAnswer: String(localized: "The local interface is present, but this iPhone does not answer at 10.7.0.1. Reconnect the local connection and check Wi-Fi. If it still does not answer, pair again in Setup › Pairing, then check Developer Mode.")
         case .off: String(localized: "This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup.")

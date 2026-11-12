@@ -81,41 +81,48 @@ on. After changing it, disconnect and connect again, on Wi-Fi. The app's Shadowr
 these steps and, when nothing answers, what to check next. On iOS 18.7.7 the route was reported
 never to appear (issue 124).
 
-### Which method does the work
+### Cellular connections and automation
 
-Poki has two ways to control the phone. Native services (iOS 27 and later) show no banner and need
-the connection at 10.7.0.1, which iOS opens only on Wi-Fi. The XCTest session shows iOS's
-"Automation Running" banner and needs no connection once the developer image is mounted (the idea
-of PR #91, issue 35); a mount lasts until the phone restarts.
+Internet access, the local developer connection, and an automation session are separate.
+A VPN reporting Connected does not prove that either developer port accepts a connection.
+A TCP connection does not prove that RemotePairing, its dynamic tunnel listener, or RSD works.
 
-`AutomationChooser` picks between them, and only between tasks: when Poki turns on, when an agent
-asks after a pause, when the connection changes while nothing runs, and when native services have
-failed twice in a row. A request under way always finishes on the method it began with.
+The current 0.3.1 product code uses the in-process XCTest session by default. Its launcher still
+opens the local developer connection before checking the developer image. A running session can
+outlive that connection, but a fresh launch can fail before it reaches the local XCTest service.
+The preserved `dev/esp-409-preserve-030` branch has a different design. It includes
+`AutomationChooser`, native services, and a mounted-image fallback. Its chooser excludes new native
+tunnels when `cellularOnly` is true, even if the loopback probe answers. Those features are not
+present in the current product code.
 
-- Before iOS 27 the XCTest session is the only method. It now starts without a loopback when the
-  image is already mounted.
-- From iOS 27 native services come first. When they cannot start, the page's "Ask Before the
-  Banner" switch decides: on (the default), the agent asks the owner; off, Poki uses
-  the XCTest session and goes back to native services when the connection returns.
-- The question has three forms. On Wi-Fi with the loopback off, the agent nudges the owner to turn
-  it on. With no Wi-Fi, it asks whether to connect or to start anyway. When native services keep
-  failing although the connection answers, it asks whether to go on with the banner method. The
-  owner answers the agent (which calls `use_banner_method` with `owner_said_yes: true`) or taps
-  the card in Poki's chat. A yes holds until Poki is turned off.
-- The page's Method picker (Automatic, Native Services, XCTest Session) starts on Automatic. A
-  method chosen there is never changed by Poki.
-- The XCTest session closes when it is not needed, and iOS's banner goes with it: when Poki
-  stands by, and 20 s after the last step once native services can start. The next request opens
-  a new session in the same launch. It counts only when its first read of the screen comes back.
-  Otherwise Poki restarts as a new process and posts a notification to open it.
-- With the XCTest session, text is typed through the Poki keyboard too (chosen from the globe
-  key's list), unless Paste is chosen under Advanced. XCTest's own typing is used only when the
-  keyboard declines, as in a password field.
-- An XCTest session closed in a launch cannot be opened again in that launch, so after going back
-  to native services the banner method is not offered again until Poki restarts.
+Two open contributions cover different automation cases:
 
-"Keep on Cellular" (on by default) opens the native-services tunnels as
-Poki turns on and keeps them between tasks, because a tunnel opened on Wi-Fi goes on over cellular.
+- [PR #91](https://github.com/JosssphZhou/poki/pull/91) tries local XCTest after a RemotePairing TCP
+  connect failure when the developer image is already mounted. It also lets Home start that path.
+  [Its field report](https://github.com/JosssphZhou/poki/issues/35#issuecomment-6735040996) includes
+  a configured iPhone using cellular with no working loopback. This does not prove first-time
+  image preparation or renewal works on cellular.
+- [PR #84](https://github.com/JosssphZhou/poki/pull/84) retains an automation session through idle
+  and adds explicit owner pause/resume behavior. It also changes relay reconnection handling.
+  It needs a prepared session and does not make an unavailable developer endpoint reachable.
+
+Both contributions require integration with the current branch and physical-device validation.
+When integrating #91, retain pairing verification and the signer's retry when loopback returns.
+When integrating #84, retain first-open passcode consent and explicit owner pause behavior.
+Do not use automation readiness as proof that pairing or renewal is ready.
+
+[Earlier Shadowrocket measurements](https://github.com/JosssphZhou/poki/issues/35#issuecomment-6705290849)
+stopped at TCP connect on cellular. They also found a route to 10.7.0.1 after switching networks.
+The reported localhost rejection is a different connection, so it does not establish the exact
+server-side cause on the reflected address. Neither those results nor this app's path monitor
+establish a universal iOS ban on cellular loopback.
+
+For a failed local connection, connect to Wi-Fi, reconnect the selected local connection, and
+retry. Test Wi-Fi enabled without an associated network separately; enabling the radio alone is
+not a verified workaround. [SideStore's JIT guide](https://docs.sidestore.io/docs/advanced/jit)
+describes starting a VPN, using Airplane Mode, and returning to cellular. That is an upstream
+workaround, not verified Poki support. It can interrupt internet access needed for a relay or
+Apple signing. The earlier Shadowrocket test did not succeed with cellular temporarily disabled.
 
 ## Acceptance
 

@@ -690,7 +690,7 @@ final class AppModel {
     }
 
     /// The way to the phone's developer services when a check or the runner fails, for the log:
-    /// whether Wi-Fi is up (iOS refuses the loopback on cellular) and which loopback carries it.
+    /// whether Wi-Fi is up and which loopback carries it.
     private var networkNote: String {
         "loopback \(setup.loopback.rawValue), local VPN \(tunnel.state), Wi-Fi \(loopback.onWiFi ? "on" : "off")\(loopback.cellularOnly ? ", cellular only" : ""), path \(loopback.pathSummary)"
     }
@@ -1118,7 +1118,7 @@ final class AppModel {
         if preLaunch, !loopback.isWorking, loopback.state != .checking || status.state == "waiting_network" {
             if loopback.cellularRefused {
                 let since = loopback.droppedAt.map { " since \(Self.clock.string(from: $0))" } ?? ""
-                return .starting("waiting for Wi-Fi\(since): the phone has only cellular, and iOS refuses the developer services' loopback there. The owner connects Wi-Fi and opens Poki; the runner starts by itself, and once it runs the phone can switch back to cellular. Nothing on the phone changes meanwhile")
+                return .starting("waiting for the local developer connection\(since): neither developer port answered while the phone had only cellular. Ask the owner to connect to Wi-Fi, reconnect the local connection in Setup, and try again. This check does not identify whether iOS or the VPN refused the connection. An existing automation session may keep working on cellular; a new connection for automation or renewal may still fail")
             }
             return .waitingForLoopback(since: loopback.droppedAt.map(Self.clock.string(from:)),
                                        tunnelWithoutAnswer: loopback.state == .noAnswer,

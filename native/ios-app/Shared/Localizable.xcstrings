@@ -2193,18 +2193,18 @@
         }
       }
     },
-    "Connect to Wi-Fi and open Poki first. Once it is on, you can switch to cellular and keep using it." : {
+    "The local connection is not responding on cellular. Connect to Wi-Fi, reconnect it in Setup, then try again. A running automation session may continue on cellular. Starting again or renewing Poki may still need Wi-Fi." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先连 Wi-Fi 打开 Poki，打开后可以切到蜂窝继续用"
+            "value" : "蜂窝网络下，本机连接未响应。请连接 Wi-Fi，在设置向导中重新连接后重试。正在运行的自动化会话可能继续使用蜂窝网络；重新启动或续签 Poki 仍可能需要 Wi-Fi。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先連 Wi-Fi 開啟 Poki，開啟後可以切到蜂窩繼續用"
+            "value" : "行動網路下，本機連線未回應。請連接 Wi-Fi，在設定精靈中重新連線後再試。正在執行的自動化工作階段可能繼續使用行動網路；重新啟動或續簽 Poki 仍可能需要 Wi-Fi。"
           }
         }
       }
