@@ -53,7 +53,7 @@ struct Marquee<Content: View>: UIViewRepresentable {
         view.configure(spacing: spacing, loops: loops) { copies in
             AnyView(HStack(spacing: spacing) {
                 ForEach(0..<copies, id: \.self) { _ in
-                    HStack(spacing: spacing) { content }.glassGroup(spacing: spacing)
+                    HStack(spacing: spacing) { content }.unless(.pillsNoGlass) { $0.glassGroup(spacing: spacing) }
                 }
             }
             .padding(.horizontal, loops ? 0 : 20)

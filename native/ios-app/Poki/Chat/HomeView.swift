@@ -549,7 +549,7 @@ struct HomePage<Footer: View>: View {
     /// once. The two ends fade out over 32 points, glass included. The first row starts a little way
     /// along, so the two rows do not line up.
     private func row(_ ideas: [HomeShortcut], speed: Double, start: CGFloat) -> some View {
-        Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !writing,
+        Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !writing && !PerfSwitch.on(.pillsStill),
                 active: home && scenePhase == .active, loops: !voiceOver, stopped: menuOpen) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
@@ -570,7 +570,7 @@ struct HomePage<Footer: View>: View {
                         .onAppear { menuOpen = true }
                         .onDisappear { menuOpen = false }
                 }
-                .glassSurface(in: Capsule(), interactive: true)
+                .unless(.pillsNoGlass) { $0.glassSurface(in: Capsule(), interactive: true) }
                 .accessibilityLabel(Text(verbatim: idea.appName + ", " + idea.text))
                 .accessibilityHint(Text("Puts this in the message field"))
                 .accessibilityIdentifier("home.idea." + idea.app)

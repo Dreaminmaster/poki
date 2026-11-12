@@ -55,7 +55,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     func body(content: Content) -> some View {
         content
             // Under the panel's clear glass the chat itself blurs, so its colours and shapes show as soft outlines.
-            .blur(radius: DrawerGlass.current == .soft && !reduceTransparency ? DrawerGlass.blur * settled : 0)
+            .blur(radius: DrawerGlass.current == .soft && !reduceTransparency && !PerfSwitch.on(.drawerNoBlur) ? DrawerGlass.blur * settled : 0)
             // The chat moves back a little to the trailing side, as the panel comes in from the leading one.
             .offset(x: reduceMotion ? 0 : ThreadsDrawerMotion.chatShift * settled)
             .accessibilityHidden(isOpen)
@@ -108,7 +108,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
                 // Without the blur (Reduce Transparency) the page's own colour covers most of the chat, so
                 // the chat's buttons in the strip don't look tappable.
                 Rectangle().fill(Color(.systemBackground).opacity(ThreadsDrawerMotion.cover * settled))
-            } else {
+            } else if !PerfSwitch.on(.drawerNoScrim) {
                 Rectangle().fill(.ultraThinMaterial).opacity(settled)
             }
             Rectangle().fill(Color.black.opacity((reduceTransparency ? ThreadsDrawerMotion.dimOpaque : ThreadsDrawerMotion.dim) * settled))
@@ -133,7 +133,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .frame(width: layout.panel.width, height: layout.panel.height)
             .clipShape(shape)
             .background { panelSurface(shape) }
-            .shadow(color: .black.opacity(0.12 * settled), radius: 24, x: 4, y: 8)
+            .unless(.drawerNoShadow) { $0.shadow(color: .black.opacity(0.12 * settled), radius: 24, x: 4, y: 8) }
             .offset(x: panelOffset)
             // Placed with padding, not an offset, so the list inside gets the safe area of where it really is.
             .padding(.leading, layout.panel.minX).padding(.top, layout.panel.minY)
@@ -145,7 +145,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     }
 
     @ViewBuilder private func panelSurface(_ shape: RoundedRectangle) -> some View {
-        if reduceTransparency {
+        if reduceTransparency || PerfSwitch.on(.drawerSolid) {
             shape.fill(Color(.systemBackground)).overlay(shape.strokeBorder(Color(.separator), lineWidth: 0.5))
         } else if #available(iOS 26.0, *), DrawerGlass.current != .regular {
             // Clear glass, veiled a little in the page's colour so the list reads over any chat.

@@ -36,7 +36,7 @@ struct HomeBackdrop: View {
 
     var body: some View {
         let dark = scheme == .dark
-        let resting = reduceMotion || frozen || lowPower
+        let resting = reduceMotion || frozen || lowPower || PerfSwitch.on(.backdropStill)
         let seen = shown && scenePhase == .active
         let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
@@ -235,7 +235,7 @@ private struct DriftingMesh: View, Animatable {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: drift <= 0)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
+            let t = BackdropClock.fixed ?? context.date.timeIntervalSinceReferenceDate
             let _ = BackdropLog.note(mesh.period, t, drift)
             mesh.gradient(at: t, drift: drift, dark: dark)
                 .opacity(mesh.strength(at: t, drift: drift))
@@ -308,6 +308,17 @@ enum BackdropLog {
     }
     #else
     @inline(__always) static func note(_ period: Double, _ now: TimeInterval, _ drift: Double) {}
+    #endif
+}
+
+/// `-pokiBackdropClock 100` holds the moving light at that moment of its motion, so two builds can be
+/// laid over each other pixel for pixel. Debug builds only.
+enum BackdropClock {
+    #if DEBUG
+    static let fixed: TimeInterval? = UserDefaults.standard.object(forKey: "pokiBackdropClock") == nil
+        ? nil : UserDefaults.standard.double(forKey: "pokiBackdropClock")
+    #else
+    static let fixed: TimeInterval? = nil
     #endif
 }
 

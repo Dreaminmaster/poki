@@ -622,7 +622,7 @@ struct ChatTranscript<Footer: View>: View {
         // Messages fade out before they reach the top bar's picture, name and buttons, which have no
         // ground of their own: under them the page shows, not a bubble cut in two.
         .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentInsets.top }) { _, top in topEdge = top }
-        .mask { TopFade(edge: topEdge).ignoresSafeArea() }
+        .unless(.chatNoFade) { $0.mask { TopFade(edge: topEdge).ignoresSafeArea() } }
         .overlay(alignment: .bottom) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }

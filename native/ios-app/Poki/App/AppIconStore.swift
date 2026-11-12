@@ -168,7 +168,7 @@ struct AppIconView: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-        let image = AppIconStore.shared.icon(app, dark: scheme == .dark)
+        let image = PerfSwitch.on(.iconsPlaceholder) ? nil : AppIconStore.shared.icon(app, dark: scheme == .dark)
         Group {
             if let image {
                 Image(uiImage: image).resizable().interpolation(.high).scaledToFill()
@@ -182,7 +182,7 @@ struct AppIconView: View {
         .clipShape(shape)
         // The edge of a white icon (Photos, Notes) on a light page.
         .overlay(shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-        .task(id: app) { if image == nil { await AppIconStore.shared.load(app) } }
+        .task(id: app) { if image == nil, !PerfSwitch.on(.iconsPlaceholder) { await AppIconStore.shared.load(app) } }
         .accessibilityHidden(true)
     }
 }
