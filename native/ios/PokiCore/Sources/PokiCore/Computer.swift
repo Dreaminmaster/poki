@@ -796,11 +796,13 @@ final class Computer: @unchecked Sendable {
         var logError: String?
         var lastKind: String?
         var moved = moved
+        // The last action that may have changed the screen, and when it was through.
+        var changed: (kind: String, at: Double)?
         defer { if let line = logError ?? error { failureLog.value = line } }
         for (i, action) in actions.enumerated() {
             let index = offset + i
-            defer { if ActionKind(action)?.changesScreen(action) == true { moved = true } }
-            if moved, let held = await pressNow(action, after: lastKind, approved: approved[index], until: until - config.readTimeout - 0.5) {
+            defer { if let kind = ActionKind(action), kind.changesScreen(action) { moved = true; changed = (kind.rawValue, now()) } }
+            if moved, let held = await pressNow(action, after: changed, approved: approved[index], until: until - config.readTimeout - 0.5) {
                 did.append("\(action.serialized()) (not_sent)")
                 error = "action \(index + 1) was not sent: \(held)\(i + 1 < actions.count ? "; the actions after it were not sent" : "")"
                 break
@@ -870,23 +872,47 @@ final class Computer: @unchecked Sendable {
     /// before it in the same do may have changed it: what lies where it will touch is read again and
     /// judged as the latest read was, so a Delete that came where Back was is not tapped. A press the
     /// owner approved goes on while it is still the step they approved (`approved`, its reason).
-    /// The read waits the pause the final read waits after the action before (`after`), so a page
-    /// still sliding in is not read as the one it covers.
-    func pressNow(_ action: JSON, after: String?, approved: String?, until: Double) async -> String? {
+    /// The read comes no sooner after the action that changed the screen (`after`) than the pause the
+    /// final read waits after it: a short wait between them does not take it away. It is the first of
+    /// two reads in a row that agree (as `wait_until: settled`), within `settleWindow`, so a page still
+    /// sliding in is not read as the one it covers; a screen that never holds still is judged on the
+    /// latest read.
+    func pressNow(_ action: JSON, after changed: (kind: String, at: Double)?, approved: String?, until: Double) async -> String? {
         let rules = config.sensitive
         guard rules.enabled, let kind = ActionKind(action), kind.presses(action) else { return nil }
-        let pause = min(Self.settle[after ?? "tap"] ?? 0.4, max(0, until - now() - 0.3))
-        if pause > 0.01 { await sleep(seconds: pause) }
-        guard until - now() > 0.3, let screen = size,
-              let tree = try? await runner.tree(timeout: min(config.readTimeout, until - now()), format: config.treeFormat) else {
+        if let changed {
+            let pause = min((Self.settle[changed.kind] ?? 0.4) - (now() - changed.at), until - now() - 0.3)
+            if pause > 0.01 { await sleep(seconds: pause) }
+        }
+        guard let screen = size, let elements = await settledRead(until: min(until, now() + Self.settleWindow)) else {
             return "the action before it may have changed the screen, and it could not be read again to check this one. Choose the remaining actions from the fresh screen below and send them in a new do"
         }
-        let scan = SensitiveScan(front: tree.foreground, secureOnScreen: false, elements: listable(tree.elements, screen))
+        let scan = SensitiveScan(front: elements.foreground, secureOnScreen: false, elements: listable(elements.all, screen))
         for press in presses(kind, action, scan, unread: false) {
             guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false), reason != approved else { continue }
             return "the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do"
         }
         return nil
+    }
+
+    /// How long `pressNow` reads for two reads in a row that agree.
+    static let settleWindow = 2.0
+
+    /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when
+    /// nothing could be read.
+    func settledRead(until: Double) async -> (all: [Element], foreground: Foreground)? {
+        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        var latest: (all: [Element], foreground: Foreground)?
+        var last: String?
+        while until - now() > 0.3 {
+            guard let tree = try? await runner.tree(timeout: min(config.readTimeout, until - now()), format: config.treeFormat) else { break }
+            let sig = signature(tree.elements)
+            latest = (tree.elements, tree.foreground)
+            if sig == last { break }
+            last = sig
+            await sleep(seconds: min(0.15, max(0, until - now() - 0.3)))
+        }
+        return latest
     }
 
     /// After a type that failed or timed out: what the focused field holds says what happened, so the

@@ -296,6 +296,28 @@ final class ApprovalTests: XCTestCase {
         }
     }
 
+    /// Seen in review: a short wait between the tap that opens a page and the press after it took the
+    /// tap's pause before the read away (the wait's own is 0), so a page that slides in 0.3 s after the
+    /// tap was read as the page before and back tapped the Delete that came where Back was. The pause
+    /// is the tap's, less the time since it, and the read is taken once two reads in a row agree.
+    func testAShortWaitAfterATapLeavesThePauseBeforeTheNextPress() async {
+        for (opened, asks) in [("Delete", true), ("Back", false)] {
+            let wda = FakeWDA()
+            wda.tree([Node("Button", "Back", [8, 50, 60, 40]), Node("Cell", "Orders", [0, 200, 390, 44])], app: "Shop")
+            let page = [Node("Button", opened, [8, 50, 60, 40]), Node("Cell", "Order 1", [0, 200, 390, 44])]
+            wda.set("POST /wda/tap") { [wda] _ in
+                Task { try? await Task.sleep(nanoseconds: 300_000_000); wda.tree(page, app: "Shop") }
+                return (200, ["value": .null])
+            }
+            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["tap": 2], ["wait": 10], ["back": true]]])
+            let backTaps = wda.bodies("POST /wda/tap").filter { $0["x"]?.double == 38 && $0["y"]?.double == 70 }
+            XCTAssertEqual(backTaps.count, asks ? 0 : 1, "opened \(opened): \(result.text)")
+            XCTAssertEqual(result.text.contains("action 3 was not sent: the action before it may have changed the screen, and where it touches now it needs the owner's approval (deleting (\"delete\"))"), asks, result.text)
+        }
+    }
+
     /// A routine's swipe went without a check: a step recorded without an element is judged on the screen
     /// read just before it, a swipe as any other, so one that would go down and lift inside a tall Pay
     /// stops the run there, and one across a list goes.
