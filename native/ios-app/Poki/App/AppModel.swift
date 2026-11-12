@@ -50,6 +50,10 @@ final class AppModel {
     private(set) var currentApp: String?
     /// The runner is stopped until the next agent request (idle, or the owner tapped Stop runner).
     private(set) var runnerPaused = false
+    /// The owner paused Poki (Pause, Stop Runner, Stop on the Live Activity), as opposed to the runner
+    /// standing by on its own after the idle time: Poki coming to the front does not start it again.
+    /// Cleared when the runner starts again.
+    private(set) var ownerPaused = false
     /// Stop the runner after this long without agent activity; 0 never stops it.
     /// 60 s by default. An agent can think for about a minute between steps of a long task; after a
     /// longer pause the runner stops, and the agent's next request starts it again.
@@ -838,10 +842,11 @@ final class AppModel {
     /// automation banner shows from then on. Where iOS will ask for the passcode first, the owner is
     /// right here when it does (ESP-451). The session's first open warms up as every open does: a
     /// shallow read of the app in front and a screenshot (`prepare`), not paid by the first step.
-    /// Not after the owner cancelled iOS's passcode screen (no new screen until they turn Poki on
-    /// again), nor once this launch's session was closed (opening Poki again starts a new process).
+    /// Not after the owner paused it, nor after they cancelled iOS's passcode screen (no new screen
+    /// until they turn Poki on again), nor once this launch's session was closed (opening Poki again
+    /// starts a new process).
     private func openWhileInFront(_ why: String) {
-        guard sessionOn, runnerPaused, inFront, !Self.onSimulator, !inProcessUsedUp, !InProcessWDA.automationDeclined else { return }
+        guard sessionOn, runnerPaused, !ownerPaused, inFront, !Self.onSimulator, !inProcessUsedUp, !InProcessWDA.automationDeclined else { return }
         wakeRunner(asked: why)
     }
 
@@ -930,6 +935,7 @@ final class AppModel {
         }
         idleTimer?.invalidate(); idleTimer = nil
         runnerPaused = false; host.setPaused(false)
+        ownerPaused = false
         background.stop()
         activity.end()
         sessionOn = false
@@ -967,7 +973,7 @@ final class AppModel {
 
     /// Stops the runner, and with it iOS's automation banner, while the relay stays connected; the
     /// next agent request starts it again. From the Stop runner button, the Live Activity, or idle.
-    func pauseRunner(reason: String = "Stopped") {
+    func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
         guard sessionOn, !runnerPaused, approvals.isEmpty else { return }
         // Allow on the Live Activity is followed by its layout changing under the finger: a Stop
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
@@ -976,6 +982,7 @@ final class AppModel {
             log.add("runner", "a Stop from the Live Activity right after an approval was ignored")
             return
         }
+        ownerPaused = byOwner
         if automationPath == .inProcess {
             // The in-process session is closed, and with it Automation Mode and iOS's banner; the
             // next agent request opens a new one (a few seconds, no passcode within the same boot).
@@ -1057,6 +1064,7 @@ final class AppModel {
 
     /// Starts a paused runner again (the next agent request, or the owner).
     func wakeRunner(asked: String = "an agent asked") {
+        ownerPaused = false
         guard sessionOn, runnerPaused else { return }
         runnerPaused = false
         host.setPaused(false)
@@ -1090,7 +1098,7 @@ final class AppModel {
                 guard let self else { return }
                 if let line { self.log.add("runner", line) }
                 guard self.activityText == "Idle", !self.inFront, Date().timeIntervalSince(self.lastAgentActivity) >= Double(self.idleStopSeconds) else { return }
-                self.pauseRunner(reason: reason)
+                self.pauseRunner(reason: reason, byOwner: false)
             }
         }
     }
