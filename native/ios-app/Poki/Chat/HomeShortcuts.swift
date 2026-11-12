@@ -2,20 +2,82 @@ import Foundation
 import Observation
 import PokiCore
 
-/// One quick action on the home page (ESP-450): what its pill shows, and what a tap puts in the
-/// message field.
+/// One quick action on the home page: an app and what to do in it, as its pill shows them (the app's
+/// icon, its name, the action), and what a tap puts in the message field.
 struct HomeShortcut: Identifiable, Equatable {
     /// The normalized request. Similar requests share it, and Forget stores it.
     var key: String
+    /// The app's bundle ID, which its icon comes by (`AppIconView`).
+    var app: String
+    /// The app's name as this iPhone shows it.
+    var appName: String
+    /// What to do in the app, without its name.
     var text: String
-    var app: AppCapsule?
     var prompt: String
     var id: String { key }
 }
 
+/// The app a quick action works in, found from what Poki has: a routine's recorded app, or the name
+/// a request starts with. Only apps `AppIconStore` knows by name: a pill always shows an app's icon
+/// and name, so an action without a known app is not a pill.
+@MainActor
+enum ShortcutApp {
+    /// A bundle ID or an app's name.
+    static func named(_ app: String?) -> (id: String, name: String)? {
+        guard let app, let id = AppIconStore.bundleID(app), let name = AppIconStore.name(id) else { return nil }
+        return (id, name)
+    }
+
+    /// The app a request names first and what it asks there: "打开设置看看电池" is Settings and
+    /// "看看电池", "Open Notes, add milk" is Notes and "add milk". Nil when it names no app first, or
+    /// nothing is left to do.
+    static func leading(_ words: String) -> (id: String, name: String, action: String)? {
+        var s = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        for lead in [openings, verbs] {
+            if let hit = lead.first(where: { s.lowercased().hasPrefix($0) }) { s = String(s.dropFirst(hit.count)).trimmingCharacters(in: .whitespaces) }
+        }
+        for candidate in candidates(s) {
+            guard let app = named(candidate) else { continue }
+            // "notes" or "home" in lower case is a word, not the app.
+            if AppCapsule.everydayWords.contains(where: { $0.caseInsensitiveCompare(candidate) == .orderedSame }),
+               candidate.first?.isUppercase != true { continue }
+            var action = String(s.dropFirst(candidate.count))
+            action = action.trimmingCharacters(in: CharacterSet.whitespaces.union(.punctuationCharacters))
+            for joint in joints where action.lowercased().hasPrefix(joint) {
+                action = String(action.dropFirst(joint.count)).trimmingCharacters(in: CharacterSet.whitespaces.union(.punctuationCharacters))
+            }
+            return action.isEmpty ? nil : (app.id, app.name, action)
+        }
+        return nil
+    }
+
+    /// The beginnings that could be an app's name, longest first: up to three words, or up to eight
+    /// characters when it begins in Chinese.
+    private static func candidates(_ s: String) -> [String] {
+        let words = s.split(separator: " ", omittingEmptySubsequences: true)
+        var out: [String] = []
+        if s.unicodeScalars.first?.isASCII == true {
+            for n in stride(from: min(3, words.count), through: 1, by: -1) {
+                out.append(words.prefix(n).joined(separator: " ").trimmingCharacters(in: .punctuationCharacters))
+            }
+        }
+        if s.unicodeScalars.first.map({ !$0.isASCII }) == true {
+            for n in stride(from: min(8, s.count), through: 2, by: -1) { out.append(String(s.prefix(n))) }
+        }
+        return out.filter { !$0.isEmpty }
+    }
+
+    private static let openings = ["please ", "can you ", "could you ", "help me ", "请帮我", "帮我", "麻烦", "请"]
+    private static let verbs = ["open ", "go to ", "in ", "打开", "去", "在", "用"]
+    private static let joints = ["and ", "then ", "to ", "里", "上", "中", "然后"]
+}
+
 /// The home page's quick actions, worked out on this iPhone from what the owner did before. Nothing
-/// is uploaded and no model is asked. In order: the routines Poki remembered, then requests the owner
-/// made at least twice (similar wordings counted as one), then the default examples.
+/// is uploaded and no model is asked. In order: the routines Poki remembered (their description, or
+/// their name, and the app they were recorded in), then requests the owner made at least twice
+/// (similar wordings counted as one) that begin with an app, then the default examples. Each is an app
+/// and an action; a routine or request without both is left out.
+@MainActor
 enum HomeShortcuts {
     struct Request: Equatable { var text: String; var at: Date }
     struct Remembered: Equatable { var text: String; var app: String?; var runs: Int; var at: Date }
@@ -33,25 +95,30 @@ enum HomeShortcuts {
             .map { (routine: $0, key: normalize($0.text), score: frecency(Double(max($0.runs, 1)), last: $0.at, now: now)) }
             .sorted { $0.score != $1.score ? $0.score > $1.score : $0.routine.at > $1.routine.at }
         for r in remembered where !taken(r.key) {
-            let app = r.routine.app.flatMap { name in AppCapsule.catalog.first { $0.names.contains(name) || $0.id == name } }
-            out.append(HomeShortcut(key: r.key, text: r.routine.text, app: app, prompt: r.routine.text))
+            guard let pill = routinePill(r.key, r.routine) else { continue }
+            out.append(pill)
         }
 
         for group in groups(requests, now: now) where group.count >= 2 && !taken(group.key) {
-            out.append(pill(group.key, group.latest))
+            guard let pill = requestPill(group.key, group.latest) else { continue }
+            out.append(pill)
         }
 
         for example in examples where !taken(example.key) { out.append(example) }
         return Array(out.prefix(shown))
     }
 
-    /// A request that starts with an app, as a quick action from the home page does, keeps its capsule.
-    private static func pill(_ key: String, _ words: String) -> HomeShortcut {
-        if case .app(let app, let name)? = CapsuleText.segments(words).first {
-            let rest = String(words.dropFirst(name.count)).trimmingCharacters(in: .whitespaces)
-            if !rest.isEmpty { return HomeShortcut(key: key, text: rest, app: app, prompt: words) }
-        }
-        return HomeShortcut(key: key, text: words, app: nil, prompt: words)
+    /// A routine's app is the one it was recorded in; its words lose the app's name if they begin with it.
+    private static func routinePill(_ key: String, _ routine: Remembered) -> HomeShortcut? {
+        guard let app = ShortcutApp.named(routine.app) else { return nil }
+        let action = ShortcutApp.leading(routine.text).flatMap { $0.id == app.id ? $0.action : nil } ?? routine.text
+        return HomeShortcut(key: key, app: app.id, appName: app.name, text: action, prompt: routine.text)
+    }
+
+    /// A request is a pill only when it begins with an app, as a quick action from the home page does.
+    private static func requestPill(_ key: String, _ words: String) -> HomeShortcut? {
+        guard let found = ShortcutApp.leading(words) else { return nil }
+        return HomeShortcut(key: key, app: found.id, appName: found.name, text: found.action, prompt: words)
     }
 
     /// Requests that normalize to the same or a similar key, most used first: the count weighed by how
