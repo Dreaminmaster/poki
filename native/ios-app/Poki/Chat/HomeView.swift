@@ -587,11 +587,16 @@ struct HomePage<Footer: View>: View {
 /// as that glass looks over the light (a sheet of the light's own colour, a bright rim inside the edge) and it
 /// samples nothing, so a pill that only moves is not drawn again. A press lifts the pill a little, as
 /// the glass's own reaction to a touch did. Reduce Transparency makes the sheet opaque and Increase
-/// Contrast gives it a firmer edge. `-pokiPerf oldPillGlass` brings back the live glass in a debug
-/// build; `pillsNoGlass` draws the pills with no surface at all.
+/// Contrast gives it a firmer edge.
+///
+/// Not yet the default: laid beside the live glass it shows (the glass bends the light at a pill's ends
+/// and, in dark mode, has a fine dark edge), so the owner chooses from the two side by side first. Until
+/// then the pills stay live glass. `drawnByDefault` turns the drawn surface on for every build;
+/// `-pokiPerf drawnPills` turns it on in a debug build, and `pillsNoGlass` draws no surface at all.
 enum PillLook {
-    static var live: Bool { PerfSwitch.on(.oldPillGlass) && !PerfSwitch.on(.pillsNoGlass) }
-    static var drawn: Bool { !PerfSwitch.on(.oldPillGlass) && !PerfSwitch.on(.pillsNoGlass) }
+    static let drawnByDefault = false
+    static var drawn: Bool { (drawnByDefault || PerfSwitch.on(.drawnPills)) && !PerfSwitch.on(.pillsNoGlass) }
+    static var live: Bool { !drawn && !PerfSwitch.on(.pillsNoGlass) }
 }
 
 extension View {

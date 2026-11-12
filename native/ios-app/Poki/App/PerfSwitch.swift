@@ -33,8 +33,8 @@ enum PerfSwitch: String, CaseIterable {
     case oldMeshDirect
     /// The moving light is drawn on the graphics processor, at the screen's full size.
     case oldMeshFullSize
-    /// The suggestion pills are live glass again.
-    case oldPillGlass
+    /// The suggestion pills are drawn to look like glass (`PillLook`) instead of being live glass.
+    case drawnPills
 
     static func on(_ part: PerfSwitch) -> Bool { active.contains(part) }
 

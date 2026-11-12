@@ -13,8 +13,8 @@ import SwiftUI
 // - Glass is the layer of controls and navigation that floats over content. Human Interface
 //   Guidelines: "Don't use Liquid Glass in the content layer." So the round buttons of the top bar,
 //   the message field and a card that asks for an answer are glass; bubbles, the task card and the
-//   settings cards are not. The suggestion pills look like glass but are drawn (`PillLook`): they move
-//   over a light that never stands still, and live glass resampled it every frame.
+//   settings cards are not. The suggestion pills are glass too; a drawn look-alike that samples
+//   nothing (`PillLook`) waits for the owner's choice.
 // - "Use Liquid Glass effects sparingly" (the same page): the few controls that matter most.
 // - No glass on glass: the owner's instruction, and WWDC25 session 219 as the research note for
 //   ESP-376 quotes it ("always avoid glass on glass"; I have not read the transcript myself). A
