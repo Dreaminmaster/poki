@@ -65,14 +65,8 @@ enum InProcessSession: Equatable {
 final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     private typealias Route = (_ body: JSON?, _ element: String?) throws -> JSON
     private let native = PKInProcess.shared()
-    /// One action or read at a time, as WDA serves its requests on one thread. Replaced when a request
-    /// holds it for good (see `send`), as a restarted runner is a new process.
-    private var queue = DispatchQueue(label: "poki.inprocess.wda", qos: .userInitiated)
-    private let state = NSLock()
-    /// The request the queue is serving now and when it began.
-    private var inFlight: (key: String, since: Double)?
-    /// Screenshots are answered beside the queue, as WDA does.
-    private let pictures = DispatchQueue(label: "poki.inprocess.screenshot", qos: .userInitiated)
+    /// When each request runs: one action or read at a time, screenshots beside them (PokiCore).
+    private var lanes: LocalRunner!
     private let screen: CGSize
     private var routes: [String: Route] = [:]
     /// The focused field from the latest `/element/active`, for the value and frame asked right after.
@@ -242,6 +236,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 return .null
             },
         ]
+        lanes = LocalRunner { [unowned self] request in
+            self.answer(request.key, session: request.session, element: request.element, body: request.body, route: self.routes[request.key])
+        }
     }
 
     private struct Refusal: Error {
@@ -251,43 +248,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        // "/session/<id>/wda/tap" -> "POST /wda/tap" for session <id>; "/element/<id>/rect" -> "/element/rect".
-        var parts = url.path.split(separator: "/").map(String.init)
-        var session: String?
-        if parts.first == "session", parts.count >= 2 { session = parts[1]; parts.removeFirst(2) }
-        var element: String?
-        if parts.first == "element", parts.count >= 3 { element = parts[1]; parts.remove(at: 1) }
-        let path = parts.isEmpty ? "/session" : "/" + parts.joined(separator: "/")
-        let key = "\(method) \(path)"
-        let parsed = body.flatMap { try? JSON.parse($0) }
-        let route = routes[key]
-        // A request that never comes back (the gym's dense screen: an accessibility snapshot of 1,500
-        // elements held the queue past PokiCore's 15 s wedge watchdog) would hold every request after
-        // it, the way a wedged WebDriverAgent holds its one thread. The watchdog drops the session and
-        // the next call opens a new one: that open gets a new queue, and the held request is left to
-        // end on its own, as a restarted runner leaves its old process.
-        let lane: DispatchQueue = state.withLock {
-            if key == "POST /session", let held = inFlight, Date().timeIntervalSince1970 - held.since > 8 {
-                queue = DispatchQueue(label: "poki.inprocess.wda", qos: .userInitiated)
-                inFlight = nil
-            }
-            return key == "GET /screenshot" ? pictures : queue
-        }
-        let asked = Date()
-        return await withCheckedContinuation { continuation in
-            lane.async { [self] in
-                let began = Date().timeIntervalSince1970
-                let started = Date()
-                if key != "GET /screenshot" { state.withLock { inFlight = (key, began) } }
-                let out = answer(key, session: session, element: element, body: parsed, route: route)
-                if key != "GET /screenshot" { state.withLock { if inFlight?.since == began { inFlight = nil } } }
-                // One line per request in the system log (PokiInProcess), with its wait in the queue and
-                // its own time, so a slow call can be traced to the request that took it.
-                let waited = Int(started.timeIntervalSince(asked) * 1000), took = Int(Date().timeIntervalSince(started) * 1000)
-                if waited > 5 || took > 5 { NSLog("%@", "PokiInProcess timing: \(key) \(took) ms\(waited > 5 ? " (queued \(waited) ms)" : "")") }
-                continuation.resume(returning: out)
-            }
-        }
+        try await lanes.send(method: method, url: url, body: body, timeout: timeout)
     }
 
     private func answer(_ key: String, session: String?, element: String?, body: JSON?, route: Route?) -> (status: Int, body: Data) {
