@@ -369,13 +369,14 @@ struct ChatTopBar: View {
 
 // MARK: Home page
 
-/// The default quick actions, until the owner's own take their place (`HomeShortcuts`). The words are
-/// placeholders for ESP-446 to write.
+/// The default quick actions, until the owner's own take their place (`HomeShortcuts`): each an app
+/// and what to do in it, the shape every pill on the home page has.
+@MainActor
 enum HomeIdea {
     private static func idea(_ app: String, _ text: String) -> HomeShortcut? {
-        AppCapsule.catalog.first { $0.name == app }.map {
-            HomeShortcut(key: HomeShortcuts.normalize(text), text: text, app: $0, prompt: CapsuleText.prefill(app: $0, sentence: text))
-        }
+        guard let capsule = AppCapsule.catalog.first(where: { $0.name == app }), let shown = ShortcutApp.named(capsule.id) else { return nil }
+        return HomeShortcut(key: HomeShortcuts.normalize(text), app: shown.id, appName: shown.name, text: text,
+                            prompt: CapsuleText.prefill(app: capsule, sentence: text))
     }
     static var examples: [HomeShortcut] {
         [idea("Slack", String(localized: "Tell the team I’m late")),
@@ -505,13 +506,18 @@ struct HomePage<Footer: View>: View {
         }
     }
 
-    /// A pill's words, with the app's capsule when it has one.
+    /// A pill: the app's icon, its name and the action, the name and the action in one size and told
+    /// apart by weight and shade (the owner: the name and the words after it did not match).
     private func pill(_ idea: HomeShortcut) -> some View {
         HStack(spacing: 8) {
-            if let app = idea.app { IdeaCapsule(app: app) }
-            Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
+            AppIconView(app: idea.app, size: 24)
+            HStack(spacing: 5) {
+                Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
+            }
+            .lineLimit(1)
         }
-        .padding(.leading, idea.app == nil ? 18 : 12).padding(.trailing, 18).frame(minHeight: 48)
+        .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
     }
 
     /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
@@ -542,35 +548,13 @@ struct HomePage<Footer: View>: View {
                         .onDisappear { menuOpen = false }
                 }
                 .glassSurface(in: Capsule(), interactive: true)
-                .accessibilityLabel(Text(verbatim: [idea.app?.name, idea.text].compactMap { $0 }.joined(separator: ", ")))
+                .accessibilityLabel(Text(verbatim: idea.appName + ", " + idea.text))
                 .accessibilityHint(Text("Puts this in the message field"))
-                .accessibilityIdentifier("home.idea." + (idea.app?.name ?? idea.key))
+                .accessibilityIdentifier("home.idea." + idea.app)
                 // Said here and not on the row: the pills live in the scroll view's own hosting view.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
         }
-    }
-}
-
-/// An app's icon and name on the app's own colour, as a suggestion shows it (the board's capsule: 24
-/// points high, a 16-point icon, the name at caption size). Solid, never glass, since it sits inside a
-/// glass pill. The colours are the message field's capsules' (`CapsuleColors`); on black, a thin light
-/// edge in dark keeps its outline.
-struct IdeaCapsule: View {
-    var app: AppCapsule
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        let colours = CapsuleColors.of(app)
-        HStack(spacing: 5) {
-            Image(app.asset).resizable().frame(width: 16, height: 16)
-                .clipShape(RoundedRectangle(cornerRadius: 4.5, style: .continuous))
-            Text(verbatim: app.name).font(.caption.weight(.semibold)).lineLimit(1)
-        }
-        .foregroundStyle(Color(uiColor: colours.foreground))
-        .padding(.leading, 4).padding(.trailing, 8).frame(minHeight: 24)
-        .background(Color(uiColor: colours.background), in: .capsule)
-        .overlay { if colours.edgeInDark, scheme == .dark { Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 1) } }
     }
 }
 
