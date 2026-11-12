@@ -12447,18 +12447,18 @@
         }
       }
     },
-    "Up late? Leave it to me." : {
+    "Up late? Leave it to me" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜深了，有事交给我。"
+            "value" : "夜深了，有事交给我"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜深了，有事交給我。"
+            "value" : "夜深了，有事交給我"
           }
         }
       }

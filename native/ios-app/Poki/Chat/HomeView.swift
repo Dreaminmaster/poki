@@ -241,7 +241,7 @@ enum HomeGreeting {
         case 5..<11: String(localized: "Good morning. Need a hand?")
         case 11..<18: String(localized: "Good afternoon. Need help?")
         case 18..<23: String(localized: "Good evening. Anything left?")
-        default: String(localized: "Up late? Leave it to me.")
+        default: String(localized: "Up late? Leave it to me")
         }
     }
 }
