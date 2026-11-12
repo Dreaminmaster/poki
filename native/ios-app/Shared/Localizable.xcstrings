@@ -30660,13 +30660,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 关着"
+            "value" : "Poki 已关闭"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 關著"
+            "value" : "Poki 已關閉"
           }
         }
       }
