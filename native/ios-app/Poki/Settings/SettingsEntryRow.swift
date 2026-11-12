@@ -14,6 +14,7 @@ extension EnvironmentValues {
 struct SettingsEntryRow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openPokiSettings) private var open
+    @Environment(\.drawerOnGlass) private var onGlass
 
     private var needsYou: Bool {
         !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update"
@@ -40,7 +41,8 @@ struct SettingsEntryRow: View {
                 .accessibilityValue(needsYou ? Text("Needs your attention") : Text(verbatim: ""))
                 .accessibilityIdentifier("threads.settings")
             }
-            .background(Color(.systemBackground))
+            // In the drawer's glass panel the glass is the ground.
+            .background(onGlass ? Color.clear : Color(.systemBackground))
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
     }

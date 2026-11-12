@@ -851,6 +851,22 @@
         }
       }
     },
+    "Add oat milk to my shopping list" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把燕麦奶加到我的购物清单"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把燕麥奶加到我的購物清單"
+          }
+        }
+      }
+    },
     "Add the Poki Keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -971,6 +987,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新增日期"
+          }
+        }
+      }
+    },
+    "Added “Oat milk” to Shopping in Notes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在备忘录的“购物”里加上“燕麦奶”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在備忘錄的「購物」裡加上「燕麥奶」。"
           }
         }
       }
@@ -6031,6 +6063,22 @@
         }
       }
     },
+    "Open Notes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“备忘录”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟「備忘錄」"
+          }
+        }
+      }
+    },
     "Open Notification Center" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6231,6 +6279,22 @@
         }
       }
     },
+    "Open Starbucks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“星巴克”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟「星巴克」"
+          }
+        }
+      }
+    },
     "Open TestFlight" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6271,6 +6335,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟 TestFlight 安裝最新版本的 Poki。"
+          }
+        }
+      }
+    },
+    "Open WeChat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“微信”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟「微信」"
           }
         }
       }
@@ -6346,6 +6426,22 @@
         }
       }
     },
+    "Open the chat with Alex" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开和 Alex 的对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟和 Alex 的對話"
+          }
+        }
+      }
+    },
     "Open the chat with Mom" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6358,6 +6454,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟與媽媽的對話"
+          }
+        }
+      }
+    },
+    "Open “Shopping”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“购物”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟「購物」"
           }
         }
       }
@@ -6687,6 +6799,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "再買一次燕麥奶"
+          }
+        }
+      }
+    },
+    "Ordered a grande oat latte for pickup at 9:10." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已点一杯大杯燕麦拿铁，9:10 到店自取。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已點一杯大杯燕麥拿鐵，9:10 到店自取。"
           }
         }
       }
@@ -9339,6 +9467,22 @@
         }
       }
     },
+    "Sent “Running 10 minutes late” to Alex on WeChat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在微信上给 Alex 发了“我晚到 10 分钟”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在微信上傳給 Alex「我晚到 10 分鐘」。"
+          }
+        }
+      }
+    },
     "Sent. Mom has it. Anything else?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10298,6 +10442,22 @@
         }
       }
     },
+    "Tap Order" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“点单”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輕點「點餐」"
+          }
+        }
+      }
+    },
     "Tap here, then switch keyboards" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10637,6 +10797,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "任務"
+          }
+        }
+      }
+    },
+    "Tell Alex I’m running late" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟 Alex 说我要晚点到"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟 Alex 說我會晚點到"
           }
         }
       }

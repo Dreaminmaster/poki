@@ -282,13 +282,17 @@ final class SessionStore {
             update(agent: id) { session in
                 session.entries.append(ChatEntry(.step(summary, ok: nil)))
             }
-        case .toolFinished(let summary, let delivery, _, _, _, let id?):
+        case .toolFinished(let summary, let delivery, let app, _, _, let id?):
             let failed = delivery.hasPrefix("failed")
             update(agent: id) { session in
+                // Each step keeps the app it ran in, for the app's icon on the session's row.
                 if let i = session.entries.lastIndex(where: { if case .step(_, nil) = $0.kind { return true }; return false }) {
                     session.entries[i].kind = .step(summary, ok: !failed)
+                    session.entries[i].app = app
                 } else {
-                    session.entries.append(ChatEntry(.step(summary, ok: !failed)))
+                    var step = ChatEntry(.step(summary, ok: !failed))
+                    step.app = app
+                    session.entries.append(step)
                 }
                 session.outcome = failed ? .failed : nil
             }
@@ -405,6 +409,8 @@ final class SessionStore {
     private static func samples() -> [SavedSession] {
         let now = Date()
         func at(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
+        /// An entry that ran in `app`, for the row's app icon.
+        func inApp(_ app: String, _ entry: ChatEntry) -> ChatEntry { var entry = entry; entry.app = app; return entry }
         let mom = String(localized: "Text Mom “On my way”, tell me when it’s sent.")
         return [
             SavedSession(id: "sample-handoff", kind: .handoff, client: "Claude", title: mom, started: at(1), updated: at(0), live: true, outcome: nil, entries: [
@@ -412,22 +418,44 @@ final class SessionStore {
                 ChatEntry(.step(String(localized: "Look at the screen"), ok: true)),
                 ChatEntry(.step(String(localized: "Tap “Messages”"), ok: true)),
                 ChatEntry(.request(mom, from: "Claude")),
-                ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done), PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                 PlanStep(String(localized: "Type “On my way”"), state: .done), PlanStep(String(localized: "Tap Send"), state: .waiting)])),
+                inApp("Messages", ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done), PlanStep(String(localized: "Open the chat with Mom"), state: .done),
+                                 PlanStep(String(localized: "Type “On my way”"), state: .done), PlanStep(String(localized: "Tap Send"), state: .waiting)]))),
                 ChatEntry(.note(.waiting)),
             ], calls: []),
             SavedSession(id: "sample-poki", kind: .poki, client: nil, title: String(localized: "What iOS version is this?"), started: at(32), updated: at(31), live: false, outcome: .done, entries: [
                 ChatEntry(.time(at(32))),
                 ChatEntry(.you(String(localized: "What iOS version is this?"), delivered: true)),
-                ChatEntry(.plan([PlanStep(String(localized: "Open Settings"), state: .done), PlanStep(String(localized: "Open General › About"), state: .done)])),
+                // Settings has no icon in Poki/AppIcons: this row shows the placeholder tile.
+                inApp("Settings", ChatEntry(.plan([PlanStep(String(localized: "Open Settings"), state: .done), PlanStep(String(localized: "Open General › About"), state: .done)]))),
                 ChatEntry(.poki(String(localized: "It’s iOS 27.3."))),
             ], calls: []),
             SavedSession(id: "sample-codex", kind: .agent, client: "Codex", title: "Codex", started: at(64), updated: at(61), live: false, outcome: .done, entries: [
-                ChatEntry(.time(at(64))), ChatEntry(.step(String(localized: "Open Photos"), ok: true)), ChatEntry(.step(String(localized: "Look at the screen"), ok: true)),
-                ChatEntry(.step(String(localized: "Tap “Albums”"), ok: true)),
+                ChatEntry(.time(at(64))), inApp("Photos", ChatEntry(.step(String(localized: "Open Photos"), ok: true))),
+                inApp("Photos", ChatEntry(.step(String(localized: "Look at the screen"), ok: true))),
+                inApp("Photos", ChatEntry(.step(String(localized: "Tap “Albums”"), ok: true))),
+            ], calls: []),
+            // The owner's own examples for the rows' app icons: Notes, Starbucks, WeChat.
+            SavedSession(id: "sample-notes", kind: .poki, client: nil, title: String(localized: "Add oat milk to my shopping list"), started: at(96), updated: at(95), live: false, outcome: .done, entries: [
+                ChatEntry(.time(at(96))),
+                ChatEntry(.you(String(localized: "Add oat milk to my shopping list"), delivered: true)),
+                inApp("Notes", ChatEntry(.plan([PlanStep(String(localized: "Open Notes"), state: .done), PlanStep(String(localized: "Open “Shopping”"), state: .done)]))),
+                ChatEntry(.poki(String(localized: "Added “Oat milk” to Shopping in Notes."))),
+            ], calls: []),
+            SavedSession(id: "sample-starbucks", kind: .poki, client: nil, title: String(localized: "Order my usual coffee"), started: at(180), updated: at(178), live: false, outcome: .done, entries: [
+                ChatEntry(.time(at(180))),
+                ChatEntry(.you(String(localized: "Order my usual coffee"), delivered: true)),
+                inApp("Starbucks", ChatEntry(.plan([PlanStep(String(localized: "Open Starbucks"), state: .done), PlanStep(String(localized: "Tap Order"), state: .done)]))),
+                ChatEntry(.poki(String(localized: "Ordered a grande oat latte for pickup at 9:10."))),
+            ], calls: []),
+            SavedSession(id: "sample-wechat", kind: .poki, client: nil, title: String(localized: "Tell Alex I’m running late"), started: at(420), updated: at(418), live: false, outcome: .done, entries: [
+                ChatEntry(.time(at(420))),
+                ChatEntry(.you(String(localized: "Tell Alex I’m running late"), delivered: true)),
+                inApp("WeChat", ChatEntry(.plan([PlanStep(String(localized: "Open WeChat"), state: .done), PlanStep(String(localized: "Open the chat with Alex"), state: .done)]))),
+                ChatEntry(.poki(String(localized: "Sent “Running 10 minutes late” to Alex on WeChat."))),
             ], calls: []),
             SavedSession(id: "sample-cc", kind: .agent, client: "Claude Code", title: "Claude Code", started: at(1500), updated: at(1490), live: false, outcome: .stopped, entries: [
-                ChatEntry(.time(at(1500))), ChatEntry(.step(String(localized: "Open the App Store"), ok: true)),
+                // The App Store has no icon in Poki/AppIcons: this row shows the agent's badge.
+                ChatEntry(.time(at(1500))), inApp("App Store", ChatEntry(.step(String(localized: "Open the App Store"), ok: true))),
                 ChatEntry(.step(String(localized: "Your turn, enter your Apple Account password"), ok: nil)),
             ], calls: []),
         ]

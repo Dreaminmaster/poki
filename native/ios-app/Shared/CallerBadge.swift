@@ -53,6 +53,13 @@ enum Caller {
 
     static func isLight(_ name: String) -> Bool { entry(name)?.tint == 0xFFFFFF }
 
+    /// A tile that disappears on a dark ground (OpenAI's black, Cursor's near-black): under a fifth of white.
+    static func isDark(_ name: String) -> Bool {
+        let hex = entry(name)?.tint ?? 0x8E8E93
+        let r = Double((hex >> 16) & 0xFF), g = Double((hex >> 8) & 0xFF), b = Double(hex & 0xFF)
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.2
+    }
+
     /// The logo's (or initials') colour on that tile.
     static func mark(_ name: String) -> Color { Color(hex: entry(name)?.mark ?? 0xFFFFFF) }
 
@@ -67,7 +74,10 @@ enum Caller {
 struct CallerBadge: View {
     var name: String
     var size: CGFloat
+    /// On a dark ground: a dark tile turns light with its logo dark (the conversations in dark mode).
+    var lifted = false
     var body: some View {
+        let invert = lifted && Caller.isDark(name)
         Group {
             if let logo = Caller.logo(name) {
                 Image(logo).resizable().renderingMode(.template).scaledToFit()
@@ -77,9 +87,9 @@ struct CallerBadge: View {
                     .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
             }
         }
-        .foregroundStyle(Caller.mark(name))
+        .foregroundStyle(invert ? Color(hex: 0x111111) : Caller.mark(name))
         .frame(width: size, height: size)
-        .background(Caller.tint(name), in: .circle)
+        .background(invert ? Color(hex: 0xF2F2F7) : Caller.tint(name), in: .circle)
         // A white tile (ChatGPT) keeps its edge on a white page.
         .overlay(Circle().strokeBorder(Color(.separator), lineWidth: Caller.isLight(name) ? 0.5 : 0))
         .accessibilityLabel(Text(verbatim: name))
