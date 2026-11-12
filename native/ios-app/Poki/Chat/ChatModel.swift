@@ -805,6 +805,33 @@ final class ChatModel {
                             expires: Date().addingTimeInterval(48), ask: "In Lunch, pay and delete something", kinds: ["payment", "deleting"])
         }
         /// A payment the agent words as nothing to approve: the rules' tag still says Payment.
+        /// A Delete, then a press the rules could not read: the review's widest pair of tags in English.
+        static var uncheckedApproval: PendingApproval {
+            PendingApproval(id: "unchecked", app: "Lunch", summary: "Tap “Delete”, then tap at (200, 640)",
+                            reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: unread", expires: Date().addingTimeInterval(48),
+                            ask: "In Lunch, delete something and take a step Poki could not check", kinds: ["deleting", "unread"])
+        }
+
+        /// Four kinds in one batch: the tags take more than one line wherever they are.
+        static var wideApproval: PendingApproval {
+            PendingApproval(id: "wide", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”, then tap “Send”, then tap at (200, 640)",
+                            reason: "multiple sensitive actions", expires: Date().addingTimeInterval(48),
+                            ask: "In Lunch, pay, delete something, send a message, and take a step Poki could not check",
+                            kinds: ["payment", "deleting", "sending", "unread"])
+        }
+
+        static func approval(_ scene: String?) -> PendingApproval {
+            switch scene {
+            case "cart": cartApproval
+            case "trick": trickApproval
+            case "unchecked": uncheckedApproval
+            case "wide": wideApproval
+            default: lunchApproval
+            }
+        }
+
+        static let approvalScenes = ["lunch", "cart", "trick", "unchecked", "wide"]
+
         static var trickApproval: PendingApproval {
             PendingApproval(id: "trick", app: "Lunch", summary: "Tap “Place order”", reason: "a payment (\"place order\")", expires: Date().addingTimeInterval(48),
                             ask: String(localized: "Payment cancelled, nothing to approve"), byAgent: true, kinds: ["payment"])
@@ -847,7 +874,7 @@ final class ChatModel {
             // The last step waits for your answer (the chat shows its card above the message field).
             modelPlan = Sample.momSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 3, then: .waiting)]
-        case "lunch", "cart", "trick":
+        case "lunch", "cart", "trick", "unchecked", "wide":
             entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Order my usual lunch"), delivered: true)), onIt,
                        ChatEntry(.note(.approval(Sample.lunchDeleted)))]
         case "handoff":

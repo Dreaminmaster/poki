@@ -204,6 +204,67 @@ struct PendingApproval: Codable, Hashable {
     }
 }
 
+extension PokiActivityAttributes.ContentState {
+    /// ActivityKit refuses an update over 4 KB, and with it the island and its alert. Every text an
+    /// agent or an app can make long is cut by UTF-8 bytes here (a few characters can carry thousands
+    /// of combining marks). If the state still does not fit, the agent's own words go first (the
+    /// approval's sentence, which the rules' own replaces, and the hand-off's note), then the plan, so
+    /// an update is never lost to its size.
+    func fitted(within limit: Int = 3_500) -> Self {
+        func size(_ state: Self) -> Int { (try? JSONEncoder().encode(state).count) ?? Int.max }
+        guard size(self) > limit else { return self }
+        var state = self
+        state.headline = state.headline.cut(toBytes: 240)
+        state.label = state.label?.cut(toBytes: 120)
+        state.app = state.app?.cut(toBytes: 120)
+        state.caller = state.caller?.cut(toBytes: 60)
+        state.pin = state.pin?.cut(toBytes: 32)
+        state.previous = nil
+        if let title = state.guide?.title { state.guide?.title = title.cut(toBytes: 160) }
+        if let text = state.event?.text { state.event?.text = text.cut(toBytes: 160) }
+        if var plan = state.plan {
+            plan.steps = plan.steps.map { $0.cut(toBytes: 90) }
+            plan.title = plan.title?.cut(toBytes: 160)
+            plan.to = plan.to?.cut(toBytes: 120)
+            state.plan = plan
+        }
+        if var handoff = state.handoff {
+            handoff.text = handoff.text?.cut(toBytes: 240)
+            handoff.app = handoff.app?.cut(toBytes: 120)
+            state.handoff = handoff
+        }
+        if var approval = state.approval {
+            approval.app = approval.app.cut(toBytes: 120)
+            approval.summary = approval.summary.cut(toBytes: 240)
+            approval.reason = approval.reason.cut(toBytes: 180)
+            approval.ask = approval.ask.cut(toBytes: 360)
+            state.approval = approval
+        }
+        guard size(state) > limit else { return state }
+        if var approval = state.approval {
+            approval.ask = ""; approval.byAgent = false; approval.summary = ""; approval.reason = ""
+            state.approval = approval
+        }
+        state.handoff?.text = nil
+        guard size(state) > limit else { return state }
+        state.plan = nil
+        return state
+    }
+}
+
+extension String {
+    /// At most `bytes` of UTF-8, cut between characters.
+    func cut(toBytes bytes: Int) -> String {
+        guard utf8.count > bytes else { return self }
+        var out = ""
+        for character in self {
+            guard out.utf8.count + character.utf8.count <= bytes else { break }
+            out.append(character)
+        }
+        return out
+    }
+}
+
 /// One kind the rules saw, as a tag over an approval's sentence.
 struct ApprovalTag: Hashable {
     var word: String

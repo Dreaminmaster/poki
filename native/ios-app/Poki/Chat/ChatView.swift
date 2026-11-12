@@ -61,7 +61,7 @@ struct ChatView: View {
 
     /// Poki is at work (or the sample scene shows it at work): the message field offers Stop.
     private var busy: Bool {
-        chat.running || ["working", "approval", "lunch", "cart", "trick", "handoff"].contains(sampleScene ?? "")
+        chat.running || ["working", "approval", "handoff"].contains(sampleScene ?? "") || ChatModel.Sample.approvalScenes.contains(sampleScene ?? "")
     }
 
     /// A newer Poki is on the channel, or downloaded and ready to install: its version, for the home
@@ -89,7 +89,7 @@ struct ChatView: View {
         let home = isGreeting
         ZStack {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
-                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || ["lunch", "cart", "trick"].contains(sampleScene ?? "") || chat.demoAsk != nil,
+                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || ChatModel.Sample.approvalScenes.contains(sampleScene ?? "") || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
                            shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
@@ -153,8 +153,8 @@ struct ChatView: View {
         if sampleScene == "approval" {
             let sample = ChatModel.Sample.approval, words = ChatModel.Sample.approvalWords
             ApprovalAskCard(title: words.title, detail: words.detail, tags: sample.tags, quote: words.quote, expires: sample.expires, answer: { _ in })
-        } else if let scene = sampleScene, ["lunch", "cart", "trick"].contains(scene) {
-            let sample = scene == "cart" ? ChatModel.Sample.cartApproval : scene == "trick" ? ChatModel.Sample.trickApproval : ChatModel.Sample.lunchApproval
+        } else if let scene = sampleScene, ChatModel.Sample.approvalScenes.contains(scene) {
+            let sample = ChatModel.Sample.approval(scene)
             ApprovalAskCard(title: sample.sentence, detail: "", tags: sample.tags, quote: "", expires: sample.expires, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})

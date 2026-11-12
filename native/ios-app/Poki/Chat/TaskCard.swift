@@ -435,17 +435,19 @@ struct ApprovalAskCard: View {
 
 /// The rules' kinds as small filled tags, in the app: money, deletions and protected apps in red, the
 /// rest grey. Each tag is whole; a long title wraps under them.
+/// The rules' kinds over an approval's sentence, on as many lines as they need (`TagFlow`): always
+/// whole at every text size, never cut.
 struct ApprovalKindTags: View {
     var tags: [ApprovalTag]
     var body: some View {
-        HStack(spacing: 4) {
+        TagFlow(spacing: 4, lineSpacing: 4) {
             ForEach(tags, id: \.self) { tag in
                 Text(verbatim: tag.word)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(tag.warning ? Tint.redInk : Color(.label))
-                    .lineLimit(1).fixedSize()
-                    .padding(.horizontal, 8).frame(minHeight: 22)
-                    .background(tag.warning ? Tint.redSoft : Color(.tertiarySystemFill), in: .capsule)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8).padding(.vertical, 3).frame(minHeight: 22)
+                    .background(tag.warning ? Tint.redSoft : Color(.tertiarySystemFill), in: .rect(cornerRadius: 11))
             }
         }
         .accessibilityElement(children: .combine)

@@ -380,12 +380,12 @@ final class ActivityController {
         let now = Date()
         guard now.timeIntervalSince(lastAlert) >= alertSpacing else { return nil }
         lastAlert = now
-        return AlertConfiguration(title: "\(title)", body: "\(body)", sound: .default)
+        return AlertConfiguration(title: "\(title)", body: "\(body.cut(toBytes: 600))", sound: .default)
     }
 
     private func critical(_ title: String, _ body: String) -> AlertConfiguration {
         lastAlert = Date()
-        return AlertConfiguration(title: "\(title)", body: "\(body)", sound: .default)
+        return AlertConfiguration(title: "\(title)", body: "\(body.cut(toBytes: 600))", sound: .default)
     }
 
     // MARK: Sending
@@ -443,36 +443,8 @@ final class ActivityController {
 
     private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    /// ActivityKit refuses a state over 4 KB, and with it the island and the alert. Ours is far
-    /// smaller, but long texts from an agent are cut by bytes (a few characters can carry thousands of
-    /// combining marks) so an update is never lost to size. If it still does not fit, the agent's
-    /// sentence goes and the rules' own sentence, which the kinds make, stands in for it.
-    private func trimToFit() {
-        func size() -> Int { (try? JSONEncoder().encode(state).count) ?? 0 }
-        func cut(_ text: String, _ bytes: Int) -> String {
-            guard text.utf8.count > bytes else { return text }
-            var out = ""
-            for character in text {
-                guard out.utf8.count + character.utf8.count <= bytes else { break }
-                out.append(character)
-            }
-            return out
-        }
-        guard size() > 3_500 else { return }
-        state.headline = cut(state.headline, 240)
-        state.previous = nil
-        if let steps = state.plan?.steps { state.plan?.steps = steps.map { cut($0, 90) } }
-        if var approval = state.approval {
-            approval.summary = cut(approval.summary, 240); approval.reason = cut(approval.reason, 180); approval.ask = cut(approval.ask, 360)
-            state.approval = approval
-        }
-        guard size() > 3_500, var approval = state.approval else { return }
-        approval.ask = ""; approval.byAgent = false; approval.summary = ""; approval.reason = ""
-        state.approval = approval
-    }
-
     private func content() -> ActivityContent<PokiState> {
-        trimToFit()
+        state = state.fitted()
         // Approvals are urgent; everything else is not. An approval goes stale when it expires.
         // An approval goes stale when it expires. A run goes stale when no update has come for ten
         // minutes (Poki was closed or suspended), and then says it is not updating.
