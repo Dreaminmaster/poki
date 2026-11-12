@@ -1916,19 +1916,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每次重启后需用一次，随后重试"
+            "value" : "每次重启后只需联网一次，连上后自动重试。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki needs it once after each restart, then tries again."
+            "value" : "Poki needs internet once after each restart, then retries automatically."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每次重啟後需用一次，隨後重試"
+            "value" : "每次重啟後只需連線一次，連上後自動重試。"
           }
         }
       }
