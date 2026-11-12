@@ -399,6 +399,10 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
             release::github_sign_in_finish(&pending).await?;
             ok(release::previews().await?)
         }
+        "github_sign_in_cancel" => {
+            release::github_sign_in_cancel();
+            ok(release::previews().await?)
+        }
         "github_sign_out" => {
             release::set_github_token("")?;
             ok(release::previews().await?)

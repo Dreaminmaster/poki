@@ -233,20 +233,26 @@ final class AppModel: ObservableObject {
     /// it was entered. The sign-in asks for no permissions.
     func signInToGitHub() async {
         githubError = nil
+        var started = ""
         do {
             let code: GithubSignIn = try await bridge.call("github_sign_in_start")
+            started = code.deviceCode
             githubCode = code
             let state: PreviewState = try await bridge.call("github_sign_in_finish", ["pending": code.wire])
-            // A sign-in that was cancelled meanwhile is not taken.
-            if githubCode == code {
-                await previewsChanged(state)
-            } else if let out: PreviewState = try? await bridge.call("github_sign_out") {
-                await previewsChanged(out)
-            }
+            await previewsChanged(state)
         } catch {
-            if githubCode != nil { githubError = error.localizedDescription }
+            // A cancelled sign-in, or one a newer sign-in replaced, ends here with nothing to say:
+            // the core took no token for it, and this never signs anything out.
+            if started.isEmpty || githubCode?.deviceCode == started { githubError = error.localizedDescription }
         }
+        // Only this sign-in's own code is cleared, not the code of one started after it.
+        if githubCode?.deviceCode == started { githubCode = nil }
+    }
+
+    /// Cancel on the code row: the core stops waiting for this code and takes no token for it.
+    func cancelGitHubSignIn() {
         githubCode = nil
+        Task { let _: PreviewState? = try? await bridge.call("github_sign_in_cancel") }
     }
 
     func signOutOfGitHub() async {

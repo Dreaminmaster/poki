@@ -188,7 +188,7 @@ struct GitHubAccountSection: View {
                             copyToPasteboard(code.userCode)
                             if let url = URL(string: code.verificationUri) { NSWorkspace.shared.open(url) }
                         }
-                        Button("Cancel") { model.githubCode = nil }
+                        Button("Cancel") { model.cancelGitHubSignIn() }
                     }
                 }
             } else {

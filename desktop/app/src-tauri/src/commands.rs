@@ -404,6 +404,13 @@ pub async fn github_sign_in_finish(pending: release::GithubSignIn) -> R<release:
     Ok(release::previews().await?)
 }
 
+/// Cancel on the code page: the wait in `github_sign_in_finish` ends and takes no token.
+#[tauri::command]
+pub async fn github_sign_in_cancel() -> R<release::PreviewState> {
+    release::github_sign_in_cancel();
+    Ok(release::previews().await?)
+}
+
 #[tauri::command]
 pub async fn github_sign_out() -> R<release::PreviewState> {
     release::set_github_token("")?;

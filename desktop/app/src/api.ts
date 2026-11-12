@@ -79,6 +79,7 @@ export const api = {
   setPreview: (pr: number | null) => invoke<PreviewState>("set_preview", { pr }),
   githubSignInStart: () => invoke<GithubSignIn>("github_sign_in_start"),
   githubSignInFinish: (pending: GithubSignIn) => invoke<PreviewState>("github_sign_in_finish", { pending }),
+  githubSignInCancel: () => invoke<PreviewState>("github_sign_in_cancel"),
   githubSignOut: () => invoke<PreviewState>("github_sign_out"),
   qrSvg: (text: string) => invoke<string>("qr_svg", { text }),
 };

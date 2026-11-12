@@ -239,22 +239,29 @@ final class SelfSigner {
     /// until GitHub says it was entered. The sign-in asks for no permissions.
     func signInToGitHub() async {
         githubError = nil
+        var started = ""
         do {
             let code = try await SignerBridge.decode(GitHubCode.self, ["op": "github_sign_in_start"])
+            started = code.device_code
             githubCode = code
             let pending: [String: Any] = ["device_code": code.device_code, "user_code": code.user_code, "verification_uri": code.verification_uri, "interval": code.interval, "expires_in": code.expires_in]
             _ = try await SignerBridge.call(["op": "github_sign_in_finish", "pending": pending])
-            // A sign-in that was cancelled meanwhile is not taken.
-            guard githubCode == code else { _ = try? await SignerBridge.call(["op": "github_sign_out"]); return }
             log.add("signing", "signed in to GitHub for preview builds")
         } catch {
-            if githubCode != nil { githubError = error.localizedDescription }
+            // A cancelled sign-in, or one a newer sign-in replaced, ends here with nothing to say:
+            // the signer took no token for it, and this never signs anything out.
+            if started.isEmpty || githubCode?.device_code == started { githubError = error.localizedDescription }
         }
-        githubCode = nil
+        // Only this sign-in's own code is cleared, not the code of one started after it.
+        if githubCode?.device_code == started { githubCode = nil }
         await reload()
     }
 
-    func cancelGitHubSignIn() { githubCode = nil }
+    /// Cancel on the code page: the signer stops waiting for this code and takes no token for it.
+    func cancelGitHubSignIn() {
+        githubCode = nil
+        Task { _ = try? await SignerBridge.call(["op": "github_sign_in_cancel"]) }
+    }
 
     /// Signing out forgets the GitHub sign-in and turns Preview Builds off.
     func signOutOfGitHub() async {

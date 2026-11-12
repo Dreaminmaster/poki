@@ -215,6 +215,11 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
             let login = release::github_sign_in_finish(&pending).await?;
             Ok(json!({"login": login}))
         }
+        // Cancel on the code page: the wait above ends and takes no token.
+        "github_sign_in_cancel" => {
+            release::github_sign_in_cancel();
+            Ok(json!({}))
+        }
         // Signing out forgets the token and turns preview builds off.
         "github_sign_out" => {
             release::set_github_token("")?;

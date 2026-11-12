@@ -10,24 +10,33 @@ export function GitHubCard() {
   const [state, setState] = useState<PreviewState | null>(null);
   const [pending, setPending] = useState<GithubSignIn | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The sign-in now waited for: one that was stopped meanwhile is not taken.
+  // The sign-in now waited for. Stopping it or starting another makes the core end the older wait
+  // without taking a token, so an older attempt never changes what a newer one did.
   const waiting = useRef<string | null>(null);
   useEffect(() => { api.previews().then(setState).catch((e) => setError(failureText(e))); }, []);
   const fail = (e: unknown) => setError(failureText(e));
   const signIn = async () => {
     setError(null);
+    let mine: string | null = null;
     try {
       const code = await api.githubSignInStart();
-      waiting.current = code.device_code;
+      mine = code.device_code;
+      waiting.current = mine;
       setPending(code);
       const s = await api.githubSignInFinish(code);
-      if (waiting.current === code.device_code) setState(s);
-      else setState(await api.githubSignOut());
+      setState(s);
     } catch (e) {
-      if (waiting.current) fail(e);
+      if (mine === null || waiting.current === mine) fail(e);
     }
+    if (waiting.current === mine) {
+      waiting.current = null;
+      setPending(null);
+    }
+  };
+  const stop = () => {
     waiting.current = null;
     setPending(null);
+    api.githubSignInCancel().catch(() => {});
   };
   const open = async (code: GithubSignIn) => {
     const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
@@ -53,7 +62,7 @@ export function GitHubCard() {
           <div className="mono" style={{ fontSize: 22, letterSpacing: "0.15em", userSelect: "text" }}>{pending.user_code}</div>
           <div className="row" style={{ alignItems: "center" }}>
             <Capsule onClick={() => open(pending)}>{t("Copy Code and Open GitHub")}</Capsule>
-            <Capsule kind="ghost" onClick={() => { waiting.current = null; setPending(null); }}>{t("Stop")}</Capsule>
+            <Capsule kind="ghost" onClick={stop}>{t("Stop")}</Capsule>
             <span className="muted small">{t("Waiting for GitHub")}</span>
           </div>
         </div>

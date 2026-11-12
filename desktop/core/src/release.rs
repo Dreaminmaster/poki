@@ -207,10 +207,8 @@ fn write_choice(choice: &ChannelFile) -> Result<()> {
 /// Pre-alpha is for people signed in to GitHub: without the sign-in a saved Pre-alpha choice
 /// acts as Alpha, and is Pre-alpha again once GitHub is signed in.
 pub fn channel() -> Channel {
-    if let Some(c) = std::env::var("POKI_RELEASE_CHANNEL").ok().and_then(|v| Channel::parse(&v)) {
-        return c;
-    }
-    match read_choice().channel {
+    let chosen = std::env::var("POKI_RELEASE_CHANNEL").ok().and_then(|v| Channel::parse(&v)).unwrap_or_else(|| read_choice().channel);
+    match chosen {
         Channel::PreAlpha if github_token().is_none() => Channel::Alpha,
         c => c,
     }
@@ -463,6 +461,24 @@ fn five() -> u64 { 5 }
 
 /// Starts GitHub's device sign-in. No scope is asked for, so the sign-in can read public data
 /// only, which is all a preview build's download needs.
+/// The device code of the GitHub sign-in now under way. Starting another sign-in or cancelling
+/// replaces it, and a wait for any other code then ends without saving or forgetting a token.
+static GITHUB_SIGN_IN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn github_sign_in_is(device_code: &str) -> bool {
+    GITHUB_SIGN_IN.lock().map(|c| c.as_deref() == Some(device_code)).unwrap_or(false)
+}
+
+/// Cancels the GitHub sign-in under way, if any: its wait ends and takes no token. A sign-in that
+/// already finished is not undone.
+pub fn github_sign_in_cancel() {
+    if let Ok(mut c) = GITHUB_SIGN_IN.lock() {
+        *c = None;
+    }
+}
+
+const GITHUB_SIGN_IN_CANCELLED: &str = "The GitHub sign-in was cancelled.";
+
 pub async fn github_sign_in_start() -> Result<GithubSignIn> {
     let res = client()?
         .post("https://github.com/login/device/code")
@@ -473,7 +489,11 @@ pub async fn github_sign_in_start() -> Result<GithubSignIn> {
         .await?
         .error_for_status()
         .map_err(|e| Error::msg(format!("GitHub did not start the sign-in ({e}). Try again.")))?;
-    Ok(res.json().await?)
+    let pending: GithubSignIn = res.json().await?;
+    if let Ok(mut c) = GITHUB_SIGN_IN.lock() {
+        *c = Some(pending.device_code.clone());
+    }
+    Ok(pending)
 }
 
 #[derive(Deserialize)]
@@ -493,7 +513,7 @@ fn github_poll_step(answer: &GithubTokenAnswer) -> std::result::Result<Option<St
     match answer.error.as_deref() {
         Some("authorization_pending") => Err(Ok(0)),
         Some("slow_down") => Err(Ok(5)),
-        Some("access_denied") => Err(Err("The GitHub sign-in was cancelled.")),
+        Some("access_denied") => Err(Err(GITHUB_SIGN_IN_CANCELLED)),
         Some("expired_token") => Err(Err("The GitHub code expired. Start the sign-in again.")),
         _ => Err(Err("GitHub did not finish the sign-in. Start it again.")),
     }
@@ -507,6 +527,9 @@ pub async fn github_sign_in_finish(pending: &GithubSignIn) -> Result<String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(pending.expires_in.clamp(60, 900));
     let token = loop {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        if !github_sign_in_is(&pending.device_code) {
+            return Err(Error::msg(GITHUB_SIGN_IN_CANCELLED));
+        }
         if std::time::Instant::now() > deadline {
             return Err(Error::msg("The GitHub code expired. Start the sign-in again."));
         }
@@ -527,7 +550,16 @@ pub async fn github_sign_in_finish(pending: &GithubSignIn) -> Result<String> {
             Err(Err(why)) => return Err(Error::msg(why)),
         }
     };
-    set_github_token(&token)?;
+    // Taken only if this sign-in is still the one under way: checked and saved under the lock, so
+    // a cancel or a newer sign-in cannot fall between the two.
+    {
+        let mut current = GITHUB_SIGN_IN.lock().map_err(|_| Error::msg(GITHUB_SIGN_IN_CANCELLED))?;
+        if current.as_deref() != Some(pending.device_code.as_str()) {
+            return Err(Error::msg(GITHUB_SIGN_IN_CANCELLED));
+        }
+        set_github_token(&token)?;
+        *current = None;
+    }
     #[derive(Deserialize)]
     struct User {
         login: String,
@@ -1192,6 +1224,32 @@ mod tests {
         assert_eq!(channel(), Channel::Alpha);
         set_github_token("gho_test").unwrap();
         assert_eq!(channel(), Channel::PreAlpha);
+        // The environment's channel is held to the same rule.
+        set_channel(Channel::Stable).unwrap();
+        unsafe { std::env::set_var("POKI_RELEASE_CHANNEL", "pre-alpha") };
+        assert_eq!(channel(), Channel::PreAlpha);
+        set_github_token("").unwrap();
+        assert_eq!(channel(), Channel::Alpha);
+        unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
+        assert_eq!(channel(), Channel::Stable);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_github_sign_in_takes_no_token() {
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        let pending = GithubSignIn { device_code: "old".into(), user_code: "AAAA-BBBB".into(), verification_uri: "https://github.com/login/device".into(), interval: 1, expires_in: 900 };
+        // A newer sign-in is the one under way: the older wait ends by itself, before it asks
+        // GitHub anything, and neither saves a token nor forgets one.
+        *GITHUB_SIGN_IN.lock().unwrap() = Some("new".into());
+        set_github_token("gho_newer").unwrap();
+        unsafe { std::env::set_var("POKI_GITHUB_CLIENT_ID", "test") };
+        assert!(github_sign_in_finish(&pending).await.is_err());
+        assert_eq!(github_token().as_deref(), Some("gho_newer"));
+        assert!(github_sign_in_is("new"));
+        github_sign_in_cancel();
+        assert!(!github_sign_in_is("new"));
+        unsafe { std::env::remove_var("POKI_GITHUB_CLIENT_ID") };
     }
 
     fn art(id: u64, name: &str, repo: u64, head: u64) -> GhArtifact {

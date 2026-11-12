@@ -101,6 +101,7 @@ pub fn run() {
             commands::set_github_token,
             commands::github_sign_in_start,
             commands::github_sign_in_finish,
+            commands::github_sign_in_cancel,
             commands::github_sign_out,
             commands::qr_svg,
         ])
