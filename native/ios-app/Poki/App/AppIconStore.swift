@@ -32,13 +32,19 @@ final class AppIconStore {
 
     /// The icon of `app` (a bundle ID, or an app's name in English or Chinese) from this iPhone, the
     /// app's own bundle or the disk cache; nil when only the App Store could have it, or nothing can.
-    func icon(_ app: String) -> UIImage? {
+    /// `dark`: the iPhone's own icons come in its dark style in dark mode, so each look is kept apart.
+    func icon(_ app: String, dark: Bool = false) -> UIImage? {
         _ = arrivals
         guard let key = Self.key(app) else { return nil }
-        if let hit = memory[key] { return hit }
+        let look = key + (dark ? "|dark" : "|light")
+        if let hit = memory[look] ?? memory[key] { return hit }
         if unknown.contains(key) { return nil }
         let id = Self.bundleID(app)
-        let found = id.flatMap(SystemIcons.icon) ?? Self.bundled(id) ?? id.flatMap(DiskCache.read)
+        if let installed = id.flatMap(SystemIcons.icon) {
+            memory[look] = installed
+            return installed
+        }
+        let found = Self.bundled(id) ?? id.flatMap(DiskCache.read)
         if let found { memory[key] = found } else if id == nil { unknown.insert(key) }
         return found
     }
@@ -146,10 +152,11 @@ final class AppIconStore {
 struct AppIconView: View {
     var app: String
     var size: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-        let image = AppIconStore.shared.icon(app)
+        let image = AppIconStore.shared.icon(app, dark: scheme == .dark)
         Group {
             if let image {
                 Image(uiImage: image).resizable().interpolation(.high).scaledToFill()
