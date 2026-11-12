@@ -27,7 +27,8 @@ enum ActivityWords {
     /// said as a status word. The names stay as they are: the app and the face compare them.
     static let states: [String: StatusWord] = [
         "Ready for the agent": .ready, "Waiting for agent": .ready,
-        "Runner asleep": .paused, "Sleeping": .paused,
+        // Standing by takes the next request by itself: Ready, as in the app (the owner, 2026-11-13).
+        "Runner asleep": .ready, "Sleeping": .ready,
         "Not started": .notStarted,
         "Starting the runner": .starting, "Starting native services": .starting,
         "Thinking": .thinking, "Listening": .listening, "Speaking": .speaking,

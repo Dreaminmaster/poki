@@ -105,31 +105,31 @@ final class AppIconStore {
         }
     }
 
-    /// Apps Poki's tasks often work in: bundle ID, the asset Poki carries (if any), and their names as
+    /// Apps Poki's tasks often work in: bundle ID, the icon Poki carries (Poki/AppIcons/<name>.png, if any), and their names as
     /// the iPhone shows them in English, Simplified and Traditional Chinese.
     private static let apps: [(id: String, asset: String?, names: [String])] = [
-        ("com.apple.MobileSMS", "App-messages", ["Messages", "信息", "訊息"]),
-        ("com.apple.mobilenotes", "App-notes", ["Notes", "备忘录", "備忘錄"]),
-        ("com.tencent.xin", "App-wechat", ["WeChat", "微信"]),
-        ("com.starbucks.mystarbucks", "App-starbucks", ["Starbucks", "星巴克"]),
-        ("com.ubercab.UberClient", "App-uber", ["Uber"]),
-        ("com.tinyspeck.chatlyio", "App-slack", ["Slack"]),
-        ("com.burbn.instagram", "App-instagram", ["Instagram"]),
-        ("com.apple.mobileslideshow", "App-photos", ["Photos", "照片"]),
-        ("com.apple.mobilesafari", "App-safari", ["Safari", "Safari浏览器", "Safari 浏览器", "Safari瀏覽器", "Safari 瀏覽器"]),
-        ("com.apple.mobilemail", "App-mail", ["Mail", "邮件", "郵件"]),
-        ("com.apple.Maps", "App-maps", ["Maps", "地图", "地圖"]),
-        ("com.apple.mobilecal", "App-calendar", ["Calendar", "日历", "行事曆"]),
-        ("com.apple.reminders", "App-reminders", ["Reminders", "提醒事项", "提醒事項"]),
-        ("com.apple.weather", "App-weather", ["Weather", "天气", "天氣"]),
-        ("com.apple.mobiletimer", "App-clock", ["Clock", "时钟", "時鐘"]),
-        ("com.apple.calculator", "App-calculator", ["Calculator", "计算器", "計算機"]),
-        ("com.apple.Music", "App-music", ["Music", "音乐", "音樂"]),
-        ("com.apple.shortcuts", "App-shortcuts", ["Shortcuts", "快捷指令", "捷徑"]),
-        ("com.apple.DocumentsApp", "App-files", ["Files", "文件", "檔案"]),
-        ("com.apple.TestFlight", "App-testflight", ["TestFlight"]),
-        ("com.apple.mobilephone", "App-phone", ["Phone", "电话", "電話"]),
-        ("com.apple.camera", "App-camera", ["Camera", "相机", "相機"]),
+        ("com.apple.MobileSMS", "messages", ["Messages", "信息", "訊息"]),
+        ("com.apple.mobilenotes", "notes", ["Notes", "备忘录", "備忘錄"]),
+        ("com.tencent.xin", "wechat", ["WeChat", "微信"]),
+        ("com.starbucks.mystarbucks", "starbucks", ["Starbucks", "星巴克"]),
+        ("com.ubercab.UberClient", "uber", ["Uber"]),
+        ("com.tinyspeck.chatlyio", "slack", ["Slack"]),
+        ("com.burbn.instagram", "instagram", ["Instagram"]),
+        ("com.apple.mobileslideshow", "photos", ["Photos", "照片"]),
+        ("com.apple.mobilesafari", "safari", ["Safari", "Safari浏览器", "Safari 浏览器", "Safari瀏覽器", "Safari 瀏覽器"]),
+        ("com.apple.mobilemail", "mail", ["Mail", "邮件", "郵件"]),
+        ("com.apple.Maps", "maps", ["Maps", "地图", "地圖"]),
+        ("com.apple.mobilecal", "calendar", ["Calendar", "日历", "行事曆"]),
+        ("com.apple.reminders", "reminders", ["Reminders", "提醒事项", "提醒事項"]),
+        ("com.apple.weather", "weather", ["Weather", "天气", "天氣"]),
+        ("com.apple.mobiletimer", "clock", ["Clock", "时钟", "時鐘"]),
+        ("com.apple.calculator", "calculator", ["Calculator", "计算器", "計算機"]),
+        ("com.apple.Music", "music", ["Music", "音乐", "音樂"]),
+        ("com.apple.shortcuts", "shortcuts", ["Shortcuts", "快捷指令", "捷徑"]),
+        ("com.apple.DocumentsApp", "files", ["Files", "文件", "檔案"]),
+        ("com.apple.TestFlight", "testflight", ["TestFlight"]),
+        ("com.apple.mobilephone", "phone", ["Phone", "电话", "電話"]),
+        ("com.apple.camera", "camera", ["Camera", "相机", "相機"]),
         // No App Store listing, so no artwork to carry: only this iPhone's own icon can show them.
         ("com.apple.Preferences", nil, ["Settings", "设置", "設定"]),
         ("com.apple.AppStore", nil, ["App Store"]),
@@ -150,23 +150,23 @@ final class AppIconStore {
         ("net.whatsapp.WhatsApp", nil, ["WhatsApp"]),
         ("ph.telegra.Telegraph", nil, ["Telegram"]),
         ("com.atebits.Tweetie2", nil, ["X"]),
-        ("com.xingin.discover", "App-xiaohongshu", ["Xiaohongshu", "小红书", "小紅書", "RED"]),
+        ("com.xingin.discover", "xiaohongshu", ["Xiaohongshu", "小红书", "小紅書", "RED"]),
         ("com.ss.iphone.ugc.Aweme", nil, ["Douyin", "抖音"]),
         ("com.zhiliaoapp.musically", nil, ["TikTok"]),
         ("com.google.ios.youtube", nil, ["YouTube"]),
         ("com.google.chrome.ios", nil, ["Chrome", "Google Chrome"]),
         ("com.spotify.client", nil, ["Spotify"]),
-        ("com.taobao.taobao4iphone", "App-taobao", ["Taobao", "淘宝", "淘寶"]),
+        ("com.taobao.taobao4iphone", "taobao", ["Taobao", "淘宝", "淘寶"]),
         ("com.alipay.iphoneclient", nil, ["Alipay", "支付宝", "支付寶"]),
         ("com.meituan.imeituan", nil, ["Meituan", "美团", "美團"]),
         // The home page's default quick actions in Simplified Chinese, with their China store artwork.
-        ("com.dianping.dpscope", "App-dianping", ["Dianping", "大众点评", "大眾點評"]),
-        ("com.meituan.itakeaway", "App-meituan-waimai", ["Meituan Waimai", "美团外卖", "美團外賣"]),
-        ("com.xunmeng.pinduoduo", "App-pinduoduo", ["Pinduoduo", "拼多多"]),
-        ("com.taobao.fleamarket", "App-xianyu", ["Xianyu", "闲鱼", "閒魚"]),
-        ("com.360buy.jdmobile", "App-jd", ["JD", "京东", "京東"]),
-        ("com.baidu.map", "App-baidu-maps", ["Baidu Maps", "百度地图", "百度地圖"]),
-        ("com.autonavi.amap", "App-amap", ["Amap", "高德地图", "高德地圖"]),
+        ("com.dianping.dpscope", "dianping", ["Dianping", "大众点评", "大眾點評"]),
+        ("com.meituan.itakeaway", "meituan-waimai", ["Meituan Waimai", "美团外卖", "美團外賣"]),
+        ("com.xunmeng.pinduoduo", "pinduoduo", ["Pinduoduo", "拼多多"]),
+        ("com.taobao.fleamarket", "xianyu", ["Xianyu", "闲鱼", "閒魚"]),
+        ("com.360buy.jdmobile", "jd", ["JD", "京东", "京東"]),
+        ("com.baidu.map", "baidu-maps", ["Baidu Maps", "百度地图", "百度地圖"]),
+        ("com.autonavi.amap", "amap", ["Amap", "高德地图", "高德地圖"]),
     ]
 
     private static let byName: [String: String] = Dictionary(
@@ -175,8 +175,13 @@ final class AppIconStore {
     private static let assets: [String: String] = Dictionary(
         apps.compactMap { app in app.asset.map { (app.id.lowercased(), $0) } }, uniquingKeysWith: { first, _ in first })
 
+    /// The PNG itself, which the build copies into the app as it is. Not the asset catalog's copy: the
+    /// catalog is generated (scripts/make-assets.sh), and a build from a catalog made before an icon was
+    /// added shipped without it (Taobao on 0.3.1 (865)).
     private static func bundled(_ id: String?) -> UIImage? {
-        id.flatMap { assets[$0.lowercased()] }.flatMap { UIImage(named: $0) }
+        guard let file = id.flatMap({ assets[$0.lowercased()] }), let path = Bundle.main.path(forResource: file, ofType: "png"),
+              let image = UIImage(contentsOfFile: path)?.cgImage else { return nil }
+        return UIImage(cgImage: image, scale: 3, orientation: .up)
     }
 }
 

@@ -669,6 +669,47 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertFalse(model.ownerPaused, "off is off, not resting")
     }
 
+    /// The owner (2026-11-13): standing by, after Turn On or after the owner's pause, takes the next
+    /// task by itself, so Poki's picture and word (home, chat, card) and the Live Activity say Ready.
+    /// Before, the owner's pause said Paused under a sleeping bear, and the island said it while
+    /// standing by.
+    func testStandingByAndTheOwnersPauseSayReady() throws {
+        UserDefaults.standard.removeObject(forKey: "wantsOn")
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let pairing = AppFiles.phonePairingFile
+        if !FileManager.default.fileExists(atPath: pairing.path) {
+            try Data("pairing".utf8).write(to: pairing)
+            addTeardownBlock { try? FileManager.default.removeItem(at: pairing) }
+        }
+        model.setup.runnerInstalled = true
+        model.setup.developerMode = true
+        model.setup.uiAutomation = true
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        _ = model.setRelay("https://relay.invalid")
+        defer {
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.set(nil as Any?, forKey: "relayEnabled")
+            UserDefaults.standard.removeObject(forKey: "wantsOn")
+        }
+        let chat = ChatModel(app: model)
+        model.startSession()
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertEqual(PokiStatus.current(model: model, chat: chat).word, "Ready", "standing by after Turn On")
+
+        model.wakeRunner()
+        model.pauseByOwner()
+        XCTAssertTrue(model.ownerPaused && model.runnerPaused)
+        let status = PokiStatus.current(model: model, chat: chat)
+        XCTAssertEqual(status.word, "Ready", "the owner's pause")
+        XCTAssertEqual(status.mood, .ready, "the bear is awake")
+
+        var island = PokiState(phase: .idle, headline: "Runner asleep", thumbnailVersion: 0)
+        island.runnerPaused = true
+        XCTAssertEqual(island.face.content, "Ready", "the Live Activity while standing by")
+    }
+
     /// 752's home warned in the last two days of signing (ESP-222); the redesigned home only notifies.
     /// The home line says it again, under 752's headline and ahead of an open setup step, and links to
     /// Updates.
