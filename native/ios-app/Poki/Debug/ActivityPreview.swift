@@ -149,6 +149,10 @@ struct ActivityPreview: View {
                                             reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: deleting (\"delete\"); action 3: deleting (\"delete\"); action 4: deleting (\"delete\")", expires: now.addingTimeInterval(48), ask: "Delete in Lunch", kinds: ["deleting"])
         var purpose = fourTaps
         purpose.approval = ChatModel.Sample.lunchApproval
+        var cart = fourTaps
+        cart.approval = ChatModel.Sample.cartApproval
+        var trick = fourTaps
+        trick.approval = ChatModel.Sample.trickApproval
 
         var deciding = approval
         deciding.phase = .deciding; deciding.decision = true
@@ -204,7 +208,7 @@ struct ActivityPreview: View {
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
 
-        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("fourtaps", fourTaps), ("purpose", purpose), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
+        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("fourtaps", fourTaps), ("purpose", purpose), ("cart", cart), ("trick", trick), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.

@@ -243,7 +243,7 @@ final class ActivityController {
         }
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
-            alert = critical(StatusWord.needsApproval.text, approval.islandLine ?? approval.sentence)
+            alert = critical(StatusWord.needsApproval.text, approval.alertLine)
             remindHalfway(approval)
         }
         if state.approval == nil, let was = old.approval {
@@ -292,7 +292,7 @@ final class ActivityController {
             try? await Task.sleep(for: .seconds(half))
             guard !Task.isCancelled, let self, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
             AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
-            self.send(alert: self.critical(StatusWord.needsApproval.text, approval.islandLine ?? approval.sentence), critical: true)
+            self.send(alert: self.critical(StatusWord.needsApproval.text, approval.alertLine), critical: true)
         }
     }
 
@@ -443,18 +443,32 @@ final class ActivityController {
 
     private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    /// ActivityKit refuses a state over 4 KB. Ours is far smaller, but long texts from an agent are cut
-    /// so an update is never lost to size.
+    /// ActivityKit refuses a state over 4 KB, and with it the island and the alert. Ours is far
+    /// smaller, but long texts from an agent are cut by bytes (a few characters can carry thousands of
+    /// combining marks) so an update is never lost to size. If it still does not fit, the agent's
+    /// sentence goes and the rules' own sentence, which the kinds make, stands in for it.
     private func trimToFit() {
         func size() -> Int { (try? JSONEncoder().encode(state).count) ?? 0 }
+        func cut(_ text: String, _ bytes: Int) -> String {
+            guard text.utf8.count > bytes else { return text }
+            var out = ""
+            for character in text {
+                guard out.utf8.count + character.utf8.count <= bytes else { break }
+                out.append(character)
+            }
+            return out
+        }
         guard size() > 3_500 else { return }
-        state.headline = String(state.headline.prefix(80))
+        state.headline = cut(state.headline, 240)
         state.previous = nil
-        if let steps = state.plan?.steps { state.plan?.steps = steps.map { String($0.prefix(30)) } }
+        if let steps = state.plan?.steps { state.plan?.steps = steps.map { cut($0, 90) } }
         if var approval = state.approval {
-            approval.summary = String(approval.summary.prefix(80)); approval.reason = String(approval.reason.prefix(60)); approval.ask = String(approval.ask.prefix(120))
+            approval.summary = cut(approval.summary, 240); approval.reason = cut(approval.reason, 180); approval.ask = cut(approval.ask, 360)
             state.approval = approval
         }
+        guard size() > 3_500, var approval = state.approval else { return }
+        approval.ask = ""; approval.byAgent = false; approval.summary = ""; approval.reason = ""
+        state.approval = approval
     }
 
     private func content() -> ActivityContent<PokiState> {

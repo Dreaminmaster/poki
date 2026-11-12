@@ -622,7 +622,7 @@ final class ChatModel {
     nonisolated static func sendingWords(_ approval: PendingApproval, typed: String, to: String?) -> AskWords {
         let place = approval.app.isEmpty || approval.app == "unknown" || approval.app.contains("(") ? nil : ActivityWords.local(approval.app)
         return AskWords(title: to.map { String(localized: "Send this to \($0)?") } ?? approval.sentence,
-                        detail: place.map { String(localized: "\($0), sent as you") } ?? approval.kindLine ?? "",
+                        detail: place.map { String(localized: "\($0), sent as you") } ?? "",
                         quote: typed)
     }
 
@@ -798,6 +798,17 @@ final class ChatModel {
             PendingApproval(id: "lunch", app: "Lunch", summary: "Tap “Place order”", reason: "a payment (\"place order\")", expires: Date().addingTimeInterval(48),
                             ask: String(localized: "Order lunch from Sample Noodles, ¥38 in total"), byAgent: true, kinds: ["payment"])
         }
+        /// A cart's Clear, then Check out, with no sentence from the agent: the rules name both kinds.
+        static var cartApproval: PendingApproval {
+            PendingApproval(id: "cart", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”",
+                            reason: "multiple sensitive actions: action 1: deleting (\"clear\"); action 2: a payment (\"check out\")",
+                            expires: Date().addingTimeInterval(48), ask: "In Lunch, pay and delete something", kinds: ["payment", "deleting"])
+        }
+        /// A payment the agent words as nothing to approve: the rules' tag still says Payment.
+        static var trickApproval: PendingApproval {
+            PendingApproval(id: "trick", app: "Lunch", summary: "Tap “Place order”", reason: "a payment (\"place order\")", expires: Date().addingTimeInterval(48),
+                            ask: String(localized: "Payment cancelled, nothing to approve"), byAgent: true, kinds: ["payment"])
+        }
         static var lunchDeleted: ApprovalNote {
             ApprovalNote(id: "lunch-delete", summary: "Tap “Delete”, then tap “Delete”", app: "Lunch", why: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: deleting (\"delete\")",
                          byModel: false, state: .allowed, answered: Date().addingTimeInterval(-30), ask: "Delete in Lunch", byAgent: false, kinds: ["deleting"])
@@ -836,7 +847,7 @@ final class ChatModel {
             // The last step waits for your answer (the chat shows its card above the message field).
             modelPlan = Sample.momSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 3, then: .waiting)]
-        case "lunch":
+        case "lunch", "cart", "trick":
             entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Order my usual lunch"), delivered: true)), onIt,
                        ChatEntry(.note(.approval(Sample.lunchDeleted)))]
         case "handoff":

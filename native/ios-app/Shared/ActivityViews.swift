@@ -149,7 +149,7 @@ struct LockScreenCard: View {
     private func words(_ palette: ActivityPalette) -> some View {
         let top: CGFloat = switch face.size { case .low: 30; case .working, .asking: 22; case .tall: 20 }
         let bottom: CGFloat = switch face.size { case .low: 0; case .working: 12; case .asking, .tall: 16 }
-        let hasKicker = face.kicker != nil || face.event != nil
+        let hasKicker = face.kicker != nil || face.event != nil || !face.tags.isEmpty
         // The screenshot stands in the top right corner, over the words' column and outside its
         // flow: the words keep clear of it, and it never pushes the control off the card.
         let shot = Thumbnail.picture
@@ -276,7 +276,7 @@ struct IslandBottom: View {
     }
 
     @ViewBuilder private func words(_ palette: ActivityPalette) -> some View {
-        let hasKicker = face.kicker != nil || face.event != nil
+        let hasKicker = face.kicker != nil || face.event != nil || !face.tags.isEmpty
         if case .progress(let step, let total, let stop) = face.bottom {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -303,7 +303,6 @@ struct IslandBottom: View {
             }
             .padding(.trailing, 20)
         } else {
-            let face = oneLine(self.face)
             let top: CGFloat = face.size == .tall ? 3 : 5
             // A capsule 14 up and 24 in clears the corner of the system's clip.
             let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking, .tall: 14 }
@@ -322,15 +321,6 @@ struct IslandBottom: View {
             .padding(.bottom, bottom)
         }
     }
-}
-
-/// The face with its island line, if it has one, as the title and no subtitle.
-private func oneLine(_ face: ActivityFace) -> ActivityFace {
-    guard let line = face.islandContent else { return face }
-    var island = face
-    island.content = line
-    island.subtitle = nil
-    return island
 }
 
 // MARK: Dynamic Island, compact and minimal
@@ -547,6 +537,7 @@ private struct Kicker: View {
     private let theme = ActivityTheme.current
     var body: some View {
         HStack(spacing: 7) {
+            if !face.tags.isEmpty { ApprovalTags(tags: face.tags, palette: palette).layoutPriority(2) }
             if let kicker = face.kicker {
                 Text(kicker).font(theme.kicker).foregroundStyle(palette.accent)
                     .contentTransition(.numericText())
@@ -561,6 +552,28 @@ private struct Kicker: View {
             if face.bottom.isProgress, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
         }
         .lineLimit(1).minimumScaleFactor(0.8)
+    }
+}
+
+/// The rules' kinds over an approval's sentence: small tags with a fill, money, deletions and
+/// protected apps in the warning colour. Always whole: the sentence beside or under them gives way.
+struct ApprovalTags: View {
+    var tags: [ApprovalTag]
+    var palette: ActivityPalette
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(tags, id: \.self) { tag in
+                Text(tag.word)
+                    .font(ActivityTheme.current.tag)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 6)
+                    .frame(height: 16)
+                    .background(tag.warning ? ActivityTheme.warning : palette.buttonFill, in: .capsule)
+            }
+        }
+        .fixedSize()
     }
 }
 

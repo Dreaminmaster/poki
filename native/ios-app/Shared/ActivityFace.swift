@@ -100,9 +100,9 @@ struct ActivityFace: Hashable {
     /// The secondary line under the title.
     var subtitle: String? = nil
     var subtitleLines = 1
-    /// The expanded island's one main line where it has no room for the title on two lines and the
-    /// subtitle under it: an agent's sentence led by the rules' kinds.
-    var islandContent: String? = nil
+    /// The rules' kinds over an approval's sentence, in the place of the kicker: never cut, so a long
+    /// sentence gives way first.
+    var tags: [ApprovalTag] = []
     /// The step before this one, ticked, under the title of the expanded island.
     var previous: String? = nil
     var bottom: Bottom
@@ -254,8 +254,7 @@ extension PokiState {
                     bear: allowed ? .phone : .needs, size: .asking,
                     meta: .none,
                     content: approval.sentence,
-                    subtitle: approval.kindLine,
-                    islandContent: approval.islandLine,
+                    tags: approval.tags,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
@@ -265,8 +264,7 @@ extension PokiState {
                 bear: .needs, size: .asking,
                 meta: .countdown(approval.expires),
                 content: approval.sentence,
-                subtitle: approval.kindLine,
-                islandContent: approval.islandLine,
+                tags: approval.tags,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))

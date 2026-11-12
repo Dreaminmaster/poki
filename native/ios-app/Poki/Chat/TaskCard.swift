@@ -380,6 +380,8 @@ private struct TaskStepRow: View {
 struct ApprovalAskCard: View {
     var title: String
     var detail: String
+    /// The rules' kinds, over the title: the agent words the title, never these.
+    var tags: [ApprovalTag] = []
     var quote: String
     var expires: Date?
     var answer: (Bool) -> Void
@@ -393,6 +395,7 @@ struct ApprovalAskCard: View {
             HStack(alignment: .center, spacing: 12) {
                 PokiAvatar(size: 48, mood: .needsYou)
                 VStack(alignment: .leading, spacing: 2) {
+                    if !tags.isEmpty { ApprovalKindTags(tags: tags).padding(.bottom, 4) }
                     Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
                     if !detail.isEmpty {
                         Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
@@ -427,6 +430,25 @@ struct ApprovalAskCard: View {
         .padding(18)
         // It floats over the conversation and asks for an answer: the control layer, so glass.
         .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
+    }
+}
+
+/// The rules' kinds as small filled tags, in the app: money, deletions and protected apps in red, the
+/// rest grey. Each tag is whole; a long title wraps under them.
+struct ApprovalKindTags: View {
+    var tags: [ApprovalTag]
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(tags, id: \.self) { tag in
+                Text(verbatim: tag.word)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tag.warning ? Tint.redInk : Color(.label))
+                    .lineLimit(1).fixedSize()
+                    .padding(.horizontal, 8).frame(minHeight: 22)
+                    .background(tag.warning ? Tint.redSoft : Color(.tertiarySystemFill), in: .capsule)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -97,6 +97,33 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(faces.map(\.subtitle), stages.map { ActivityWords.local($0) })
     }
 
+    /// A batch the rules saw as a payment and a deletion (a cart's Clear, then Check out) names both
+    /// wherever it is asked, also when the agent wrote no sentence: in the rules' sentence, the
+    /// notification's line, the alert and the tags.
+    func testABatchOfTwoKindsNamesBoth() {
+        let approval = PendingApproval(id: "a", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”",
+                                       reason: "multiple sensitive actions: action 1: deleting (\"clear\"); action 2: a payment (\"check out\")",
+                                       expires: .distantFuture, ask: "In Lunch, pay and delete something", kinds: ["payment", "deleting"])
+        XCTAssertEqual(approval.sentence, "In Lunch, about to pay and delete something")
+        XCTAssertEqual(approval.kindLine, "Payment and Deletion")
+        XCTAssertEqual(approval.alertLine, "Payment and Deletion: In Lunch, about to pay and delete something")
+        XCTAssertEqual(approval.tags.map(\.word), ["Payment", "Deletion"])
+    }
+
+    /// An agent can word a payment as nothing to approve. On the island and the Lock Screen the rules'
+    /// kind stands over its sentence as a tag in the warning colour, and the sentence is only the
+    /// title, never in the kind's place.
+    func testTheRulesKindStandsOverTheAgentsSentence() {
+        var state = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
+        state.approval = PendingApproval(id: "a", app: "Lunch", summary: "Tap “Pay”", reason: "a payment (\"pay\")",
+                                         expires: .now.addingTimeInterval(60), ask: "Payment cancelled, nothing to approve",
+                                         byAgent: true, kinds: ["payment"])
+        let face = state.face
+        XCTAssertEqual(face.tags, [ApprovalTag(word: "Payment", warning: true)])
+        XCTAssertEqual(face.content, "Payment cancelled, nothing to approve")
+        XCTAssertNil(face.subtitle)
+    }
+
     /// ESP-467: when iOS folds an approval's island back, the compact island says Poki waits for your
     /// answer, beside the time left, not a bare countdown.
     func testTheFoldedIslandSaysItWaitsForYourAnswer() {
