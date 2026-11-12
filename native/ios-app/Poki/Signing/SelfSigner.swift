@@ -431,8 +431,8 @@ final class SelfSigner {
 
     /// Installs the prepared build. iOS ends Poki when it lands; a notification brings it back.
     func install() async {
-        // The choice may have changed elsewhere (Poki Setup, the command line) since the status
-        // was read; next goes by the current one.
+        // The choice may have changed since the status was read (an update check drops a preview
+        // that is gone); next goes by the current one.
         await reload()
         guard let p = next else { log.add("signing", "install tapped, but no build is ready"); return }
         log.add("signing", "install tapped: \(p.kind) \(p.version) (\(p.build))")
