@@ -2,6 +2,9 @@
 // - agent-system.md is agent/prompts/system.md (the same text as agent/prompts/pi-app.md, which
 //   agent/task-runner.mjs loads), except two sentences that named tools the app lacks: a locked phone
 //   is the owner's to unlock and a password prompt is handed to them, and a purchase is a plain tap;
+//   and, for ESP-465, the Return sentence names the type answer's read-back as the check before
+//   Return, an action's check lines (the send check after Return) count as evidence, and finish_task
+//   comes in the reply right after the observation that verifies the result;
 // - the instructions put PokiCore's own MCP instructions first, as task-runner.mjs puts the MCP server's
 //   instructions first;
 // - look, do and status are PokiCore's tools with their MCP descriptions;
@@ -33,8 +36,11 @@ enum Harness {
         var parts = [instructions]
         // Poki learns the owner's repeated tasks: a saved routine runs them in one call next time.
         // The routines that fit are in the brief below, so the first call can be the routine itself:
-        // listing them first cost a whole model turn before anything happened on the phone.
-        parts.append("Start acting in your first reply: the saved routines that fit this task are listed below, so when one covers it, run it at once with do {run: name} and do not list routines first. Send report_plan together with your first look or do, not as a turn of its own. When a task worked and was not a routine yet, save it with routines {action: \"save\", name, description} before finish_task, with a short name the owner would use, so it can be repeated next time.")
+        // listing them first cost a whole model turn before anything happened on the phone. Poki is in
+        // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
+        // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
+        // step more; the save rides in the same reply instead of a turn before it.
+        parts.append("Start the task with a do in your first reply: do {run: name} with the routine below that covers it, else do {launch: bundle id} with the app it needs. Send report_plan together with that first do. Finish in one reply: finish_task, which also brings the phone back to this chat, and with it routines {action: \"save\", name, description} when the task worked and was not a routine yet, named the way the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
