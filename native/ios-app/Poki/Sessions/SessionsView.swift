@@ -23,6 +23,7 @@ struct SessionsView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var scheme
     @Environment(\.inThreadsDrawer) private var inDrawer
+    @Environment(\.drawerSliding) private var sliding
     /// The conversation's name: a step larger than the body, as a list of names only reads well.
     @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
 
@@ -76,6 +77,7 @@ struct SessionsView: View {
     private var controls: some View {
         HStack(alignment: .center) {
             Button {
+                guard !sliding else { return }
                 if !chat.running { chat.newConversation() }
                 openChat()
             } label: {
@@ -294,6 +296,7 @@ struct SessionsView: View {
     }
 
     private func open(_ session: SavedSession) {
+        guard !sliding else { return }
         if session.kind == .poki {
             if session.id != chat.sessionID, sampleHome == nil { chat.restore(session) }
             openChat()

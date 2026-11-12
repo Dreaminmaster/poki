@@ -40,8 +40,9 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
     /// True once the drawer has closed all the way. Set when the closing spring ends, not with the progress
     /// itself: the progress jumps to its target and the spring only draws the way there.
     @State private var hidden = true
-    /// From the moment a drag takes the drawer until its spring has settled. The list's buttons are off
-    /// meanwhile: a row lets its tap through when the finger lifts inside it, however far it went sideways.
+    /// From the moment a drag takes the drawer until its spring has settled. The list's buttons ignore
+    /// their taps meanwhile (`drawerSliding`): a row lets its tap through when the finger lifts inside it,
+    /// however far it went sideways.
     @State private var sliding = false
     /// True while a drag is under way, so a drag the system cancels (no `onEnded`) still settles.
     @GestureState private var dragging = false
@@ -153,7 +154,7 @@ struct ThreadsDrawer<Drawer: View>: ViewModifier {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .offset(x: reduceMotion ? 0 : (settled - 1) * ThreadsDrawerMotion.menuShift)
             .opacity(reduceMotion ? settled : (hidden ? 0 : 0.55 + 0.45 * settled))
-            .disabled(sliding)
+            .environment(\.drawerSliding, sliding)
             .allowsHitTesting(isOpen)
             .accessibilityHidden(!isOpen)
             .accessibilityAction(.escape) { settle(false, speed: 0) }
@@ -283,6 +284,9 @@ extension EnvironmentValues {
     @Entry var coveredByDrawer = false
     /// True inside the drawer, where a sideways drag over the list closes it rather than swiping a row.
     @Entry var inThreadsDrawer = false
+    /// True while a drag moves the drawer: a button in it that the finger lifts from does nothing. Not
+    /// `disabled`, which greys the list as it moves.
+    @Entry var drawerSliding = false
 }
 
 /// Where on the screen a sideways drag belongs to the content: such a view says where it is, and the

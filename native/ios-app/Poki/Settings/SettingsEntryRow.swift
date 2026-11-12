@@ -14,6 +14,7 @@ extension EnvironmentValues {
 struct SettingsEntryButton: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openPokiSettings) private var open
+    @Environment(\.drawerSliding) private var sliding
 
     private var needsYou: Bool {
         !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update"
@@ -21,7 +22,7 @@ struct SettingsEntryButton: View {
 
     var body: some View {
         if let open {
-            Button(action: open) {
+            Button { if !sliding { open() } } label: {
                 // The dot inside the label, so the glass draws it rather than covering it.
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "gearshape").font(.system(size: 20, weight: .medium)).foregroundStyle(Color(.label))
