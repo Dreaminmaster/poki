@@ -68,6 +68,17 @@ final class HomeShortcutsTests: XCTestCase {
         XCTAssertEqual(shown.first?.app, "com.starbucks.mystarbucks")
     }
 
+    /// The owner: every default pill shows its app's icon, also for an app this iPhone does not have
+    /// and before the App Store answers. On 0.3.1 (865) Taobao's was blank: the build's generated asset
+    /// catalog was older than the Chinese pills' icons.
+    func testEveryDefaultPillHasAnIconOnThePhone() {
+        for (language, count) in [(AppLanguage.simplifiedChinese, 10), (.english, 6)] {
+            let shown = HomeIdea.examples(for: language)
+            XCTAssertEqual(shown.count, count, "\(language)")
+            for pill in shown { XCTAssertNotNil(AppIconStore.shared.icon(pill.app), "\(language) \(pill.appName)") }
+        }
+    }
+
     func testAnAppIsFoundAtTheStartOfARequest() {
         XCTAssertEqual(ShortcutApp.leading("Open Notes, add milk to my list")?.action, "add milk to my list")
         XCTAssertEqual(ShortcutApp.leading("Open Notes, add milk to my list")?.id, "com.apple.mobilenotes")

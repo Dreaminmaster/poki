@@ -39,6 +39,7 @@ final class TaskAppsTests: XCTestCase {
         let apps = task(launching: ["com.apple.mobileslideshow", meituan], steps: ["照片", "照片", "照片", "美团外卖"])
         XCTAssertEqual(apps.target(request: "在美团外卖点下酒菜，菜名在照片里"), meituan, "both named: the last opened of them")
         XCTAssertEqual(apps.target(request: "Order bar snacks on Meituan Waimai"), meituan)
+        XCTAssertEqual(AppIconStore.bundleIDs(namedIn: "打开美团外卖点下酒菜"), [meituan], "the longer name, not Meituan inside it")
         XCTAssertEqual(task(launching: ["com.apple.mobileslideshow", meituan], steps: ["照片", "照片", "美团外卖"]).target(request: "点下酒菜"),
                        "com.apple.mobileslideshow", "none named: the most actions")
     }

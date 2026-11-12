@@ -1,4 +1,5 @@
 import ObjectiveC
+import OSLog
 import SwiftUI
 import UIKit
 
@@ -11,8 +12,11 @@ import UIKit
 //    `+[UIImage _applicationIconImageForBundleIdentifier:format:scale:]`. Poki is not distributed through
 //    the App Store, so it may call it. It is looked up at run time and called only when it exists, so an
 //    iOS that drops it only loses this source. For an app that is not installed (or that the sandbox
-//    hides) iOS draws its generic icon; that picture is recognised and skipped. `-pokiSystemIcons off`
-//    turns this source off, to compare.
+//    hides) iOS draws its generic icon; that picture is recognised and skipped, and so is an empty
+//    picture. An app with several editions is looked up by each edition's bundle ID (KnownApps).
+//    `-pokiSystemIcons off` turns this source off, to compare. When it has nothing for an app Poki
+//    carries an icon for, the log says so (category "icons"), and the carried icon shows: on 0.3.1
+//    (863) Taobao was installed and still showed the placeholder.
 // 2. The App Store artwork Poki carries for common apps (Poki/AppIcons, see AppIcons.md).
 // 3. An icon fetched earlier from the App Store and kept in Caches/AppIcons.
 // 4. The App Store's public lookup by bundle ID (itunes.apple.com/lookup), on a view's `.task`. The
@@ -42,6 +46,13 @@ final class AppIconStore {
     @ObservationIgnored private var memory: [String: UIImage] = [:]
     @ObservationIgnored private var unknown: Set<String> = []
     @ObservationIgnored private var fetching: Set<String> = []
+    /// The installed icon of a bundle ID in the light or dark look; the iPhone's own unless a test says.
+    @ObservationIgnored private let installedIcon: (String, Bool) -> UIImage?
+    private static let log = Logger(subsystem: "nz.zheha.poki", category: "icons")
+
+    init(installed: ((String, Bool) -> UIImage?)? = nil) {
+        installedIcon = installed ?? { SystemIcons.icon($0, dark: $1) }
+    }
 
     /// The icon of `app` (a bundle ID, or an app's name in English or Chinese) from this iPhone, the
     /// app's own bundle or the disk cache; nil when only the App Store could have it, or nothing can.
@@ -53,11 +64,14 @@ final class AppIconStore {
         if let hit = memory[look] ?? memory[key] { return hit }
         if unknown.contains(key) { return nil }
         let id = Self.bundleID(app)
-        if let installed = id.flatMap({ SystemIcons.icon($0, dark: dark) }) {
+        let ids = id.map { KnownApps.byID[$0.lowercased()]?.ids ?? [$0] } ?? []
+        if let installed = ids.lazy.compactMap({ self.installedIcon($0, dark) }).first(where: Self.isVisible) {
             memory[look] = installed
             return installed
         }
-        let found = Self.bundled(id) ?? id.flatMap(DiskCache.read)
+        let carried = Self.bundled(id)
+        if let carried, let id { Self.log.info("No installed icon for \(id, privacy: .public); showing the carried one") }
+        let found = carried ?? id.flatMap(DiskCache.read)
         if let found { memory[key] = found } else if id == nil { unknown.insert(key) }
         return found
     }
@@ -88,7 +102,8 @@ final class AppIconStore {
     /// The bundle ID for an app's name, or `app` itself when it already is one.
     static func bundleID(_ app: String) -> String? {
         let name = app.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let id = byName[name.lowercased()] { return id }
+        if let id = KnownApps.byName[name.lowercased()] { return id }
+        if let known = KnownApps.byID[name.lowercased()] { return known.id }
         // "com.tencent.xin": a reverse-DNS name with no spaces.
         if !name.contains(" "), name.split(separator: ".").count >= 3 { return name }
         return nil
@@ -97,103 +112,54 @@ final class AppIconStore {
     /// The name an app goes by on this iPhone, in its first language (English, Simplified or
     /// Traditional Chinese), from a bundle ID or any of its names; nil for an app not listed here.
     static func name(_ app: String) -> String? {
-        guard let id = bundleID(app), let names = apps.first(where: { $0.id == id })?.names else { return nil }
-        switch AppLanguage.current {
-        case .traditionalChinese: return names.count > 2 ? names[2] : names.last
-        case .simplifiedChinese: return names.count > 1 ? names[1] : names[0]
-        case .english: return names[0]
-        }
+        guard let id = bundleID(app), let known = KnownApps.byID[id.lowercased()] else { return nil }
+        return known.name(in: .current)
     }
 
     /// The bundle IDs of the apps `text` names, in any of their names: "打开美团外卖点下酒菜" names Meituan
-    /// Waimai. A Latin name counts only as a whole word, and one-letter names ("X") never.
+    /// Waimai and not Meituan, as the longest name wins where one starts another. A Latin name counts
+    /// only as a whole word, and one-letter names ("X") never.
     static func bundleIDs(namedIn text: String) -> [String] {
-        let lower = text.lowercased()
-        guard !lower.isEmpty else { return [] }
-        return apps.filter { app in
-            app.names.contains { name in
-                let name = name.lowercased()
-                guard name.count >= 2, let range = lower.range(of: name) else { return false }
-                guard name.unicodeScalars.allSatisfy(\.isASCII) else { return true }
-                let before = range.lowerBound == lower.startIndex ? nil : lower[lower.index(before: range.lowerBound)]
-                let after = range.upperBound == lower.endIndex ? nil : lower[range.upperBound]
-                return !(before?.isLetter ?? false) && !(after?.isLetter ?? false)
+        let text = Array(text.lowercased())
+        var found: [String] = []
+        var i = 0
+        while i < text.count {
+            let hit = namesLongestFirst.first { name in
+                let chars = Array(name)
+                guard i + chars.count <= text.count, Array(text[i..<i + chars.count]) == chars else { return false }
+                guard chars.allSatisfy(\.isASCII) else { return true }
+                return (i == 0 || !text[i - 1].isLetter) && (i + chars.count == text.count || !text[i + chars.count].isLetter)
             }
-        }.map(\.id)
+            guard let hit, let id = KnownApps.byName[hit] else { i += 1; continue }
+            if !found.contains(id) { found.append(id) }
+            i += hit.count
+        }
+        return found
     }
 
-    /// Apps Poki's tasks often work in: bundle ID, the asset Poki carries (if any), and their names as
-    /// the iPhone shows them in English, Simplified and Traditional Chinese.
-    private static let apps: [(id: String, asset: String?, names: [String])] = [
-        ("com.apple.MobileSMS", "App-messages", ["Messages", "信息", "訊息"]),
-        ("com.apple.mobilenotes", "App-notes", ["Notes", "备忘录", "備忘錄"]),
-        ("com.tencent.xin", "App-wechat", ["WeChat", "微信"]),
-        ("com.starbucks.mystarbucks", "App-starbucks", ["Starbucks", "星巴克"]),
-        ("com.ubercab.UberClient", "App-uber", ["Uber"]),
-        ("com.tinyspeck.chatlyio", "App-slack", ["Slack"]),
-        ("com.burbn.instagram", "App-instagram", ["Instagram"]),
-        ("com.apple.mobileslideshow", "App-photos", ["Photos", "照片"]),
-        ("com.apple.mobilesafari", "App-safari", ["Safari", "Safari浏览器", "Safari 浏览器", "Safari瀏覽器", "Safari 瀏覽器"]),
-        ("com.apple.mobilemail", "App-mail", ["Mail", "邮件", "郵件"]),
-        ("com.apple.Maps", "App-maps", ["Maps", "地图", "地圖"]),
-        ("com.apple.mobilecal", "App-calendar", ["Calendar", "日历", "行事曆"]),
-        ("com.apple.reminders", "App-reminders", ["Reminders", "提醒事项", "提醒事項"]),
-        ("com.apple.weather", "App-weather", ["Weather", "天气", "天氣"]),
-        ("com.apple.mobiletimer", "App-clock", ["Clock", "时钟", "時鐘"]),
-        ("com.apple.calculator", "App-calculator", ["Calculator", "计算器", "計算機"]),
-        ("com.apple.Music", "App-music", ["Music", "音乐", "音樂"]),
-        ("com.apple.shortcuts", "App-shortcuts", ["Shortcuts", "快捷指令", "捷徑"]),
-        ("com.apple.DocumentsApp", "App-files", ["Files", "文件", "檔案"]),
-        ("com.apple.TestFlight", "App-testflight", ["TestFlight"]),
-        ("com.apple.mobilephone", "App-phone", ["Phone", "电话", "電話"]),
-        ("com.apple.camera", "App-camera", ["Camera", "相机", "相機"]),
-        // No App Store listing, so no artwork to carry: only this iPhone's own icon can show them.
-        ("com.apple.Preferences", nil, ["Settings", "设置", "設定"]),
-        ("com.apple.AppStore", nil, ["App Store"]),
-        ("com.apple.MobileAddressBook", nil, ["Contacts", "通讯录", "聯絡人"]),
-        ("com.apple.Health", nil, ["Health", "健康"]),
-        ("com.apple.Passbook", nil, ["Wallet", "钱包", "錢包"]),
-        ("com.apple.findmy", nil, ["Find My", "查找", "尋找"]),
-        ("com.apple.facetime", nil, ["FaceTime"]),
-        ("com.apple.Passwords", nil, ["Passwords", "密码", "密碼"]),
-        // On the App Store; fetched by the lookup on first use.
-        ("com.apple.podcasts", nil, ["Podcasts", "播客", "Podcast"]),
-        ("com.apple.VoiceMemos", nil, ["Voice Memos", "语音备忘录", "語音備忘錄"]),
-        ("com.apple.Translate", nil, ["Translate", "翻译", "翻譯"]),
-        ("com.apple.freeform", nil, ["Freeform", "无边记", "無邊記"]),
-        ("com.apple.Fitness", nil, ["Fitness", "健身"]),
-        ("com.apple.stocks", nil, ["Stocks", "股市"]),
-        ("com.apple.Home", nil, ["Home", "家庭"]),
-        ("net.whatsapp.WhatsApp", nil, ["WhatsApp"]),
-        ("ph.telegra.Telegraph", nil, ["Telegram"]),
-        ("com.atebits.Tweetie2", nil, ["X"]),
-        ("com.xingin.discover", "App-xiaohongshu", ["Xiaohongshu", "小红书", "小紅書", "RED"]),
-        ("com.ss.iphone.ugc.Aweme", nil, ["Douyin", "抖音"]),
-        ("com.zhiliaoapp.musically", nil, ["TikTok"]),
-        ("com.google.ios.youtube", nil, ["YouTube"]),
-        ("com.google.chrome.ios", nil, ["Chrome", "Google Chrome"]),
-        ("com.spotify.client", nil, ["Spotify"]),
-        ("com.taobao.taobao4iphone", "App-taobao", ["Taobao", "淘宝", "淘寶"]),
-        ("com.alipay.iphoneclient", nil, ["Alipay", "支付宝", "支付寶"]),
-        ("com.meituan.imeituan", nil, ["Meituan", "美团", "美團"]),
-        // The home page's default quick actions in Simplified Chinese, with their China store artwork.
-        ("com.dianping.dpscope", "App-dianping", ["Dianping", "大众点评", "大眾點評"]),
-        ("com.meituan.itakeaway", "App-meituan-waimai", ["Meituan Waimai", "美团外卖", "美團外賣"]),
-        ("com.xunmeng.pinduoduo", "App-pinduoduo", ["Pinduoduo", "拼多多"]),
-        ("com.taobao.fleamarket", "App-xianyu", ["Xianyu", "闲鱼", "閒魚"]),
-        ("com.360buy.jdmobile", "App-jd", ["JD", "京东", "京東"]),
-        ("com.baidu.map", "App-baidu-maps", ["Baidu Maps", "百度地图", "百度地圖"]),
-        ("com.autonavi.amap", "App-amap", ["Amap", "高德地图", "高德地圖"]),
-    ]
+    private static let namesLongestFirst: [String] = KnownApps.byName.keys.filter { $0.count >= 2 }.sorted { $0.count > $1.count }
 
-    private static let byName: [String: String] = Dictionary(
-        apps.flatMap { app in app.names.map { ($0.lowercased(), app.id) } }, uniquingKeysWith: { first, _ in first })
+    /// A picture with something in it: not empty, not fully transparent.
+    private static func isVisible(_ image: UIImage) -> Bool {
+        guard let cg = image.cgImage, cg.width > 0, cg.height > 0 else { return false }
+        var pixels = [UInt8](repeating: 0, count: 8 * 8 * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: 8, height: 8))
+            return true
+        }
+        return drawn && stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 8 }
+    }
 
-    private static let assets: [String: String] = Dictionary(
-        apps.compactMap { app in app.asset.map { (app.id.lowercased(), $0) } }, uniquingKeysWith: { first, _ in first })
-
+    /// The PNG itself, which the build copies into the app as it is. Not the asset catalog's copy: the
+    /// catalog is generated (scripts/make-assets.sh), and a build from a catalog made before an icon was
+    /// added shipped without it (Taobao on 0.3.1 (865)).
     private static func bundled(_ id: String?) -> UIImage? {
-        id.flatMap { assets[$0.lowercased()] }.flatMap { UIImage(named: $0) }
+        guard let file = id.flatMap({ KnownApps.byID[$0.lowercased()]?.icon }), let path = Bundle.main.path(forResource: file, ofType: "png"),
+              let image = UIImage(contentsOfFile: path)?.cgImage else { return nil }
+        return UIImage(cgImage: image, scale: 3, orientation: .up)
     }
 }
 

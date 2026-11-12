@@ -371,14 +371,15 @@ extension PokiState {
                     ? String(activity: "The runner wakes when an agent asks.")
                     : String(activity: "Runner on. Waiting for the agent."))
             }
+        // Standing by looks ready: it takes the next request by itself (the owner, 2026-11-13).
         return ActivityFace(
-            symbol: runnerPaused ? "zzz" : "checkmark",
-            bear: runnerPaused ? .paused : .ready, size: .low,
+            symbol: "checkmark",
+            bear: .ready, size: .low,
             meta: .none,
             content: title,
             subtitle: subtitle,
             bottom: .none,
-            compact: .symbol(runnerPaused ? "zzz" : "checkmark", runnerPaused ? .quiet : .accent))
+            compact: .symbol("checkmark", .accent))
     }
 
     /// Maps `ContentState.headline` for `.problem` to an actionable title and explanatory subtitle

@@ -203,8 +203,10 @@ enum HomeIdea {
         return HomeShortcut(key: HomeShortcuts.normalize(prompt), app: shown.id, appName: shown.name, text: text, prompt: prompt)
     }
 
-    static var examples: [HomeShortcut] {
-        AppLanguage.current == .simplifiedChinese ? simplifiedChinese : english
+    static var examples: [HomeShortcut] { examples(for: .current) }
+
+    static func examples(for language: AppLanguage) -> [HomeShortcut] {
+        language == .simplifiedChinese ? simplifiedChinese : english
     }
 
     private static var english: [HomeShortcut] {
@@ -241,7 +243,7 @@ enum HomeGreeting {
         case 5..<11: String(localized: "Good morning. Need a hand?")
         case 11..<18: String(localized: "Good afternoon. Need help?")
         case 18..<23: String(localized: "Good evening. Anything left?")
-        default: String(localized: "Up late? Leave it to me.")
+        default: String(localized: "Up late? Leave it to me")
         }
     }
 }
