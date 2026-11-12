@@ -125,8 +125,6 @@ final class CapsuleScroll {
 final class CapsuleTextView: UITextView {
     static var bodyFont: UIFont { .preferredFont(forTextStyle: .body) }
 
-    var catalog = AppCapsule.catalog
-
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
         // The pills are pictures drawn for one appearance and one text size: draw them again.
@@ -160,7 +158,7 @@ final class CapsuleTextView: UITextView {
 
     /// Replaces everything with `plain`, caret at the end.
     func setPlain(_ plain: String) {
-        textStorage.setAttributedString(render(CapsuleText.segments(plain, catalog: catalog)))
+        textStorage.setAttributedString(render(CapsuleText.segments(plain)))
         selectedRange = NSRange(location: textStorage.length, length: 0)
         typingAttributes = baseAttributes
     }
@@ -170,14 +168,14 @@ final class CapsuleTextView: UITextView {
     /// keyboard is still composing (Pinyin before it commits), so the composition is never disturbed.
     func reconcile() {
         guard markedTextRange == nil else { return }
-        let wanted = CapsuleText.segments(plainText, catalog: catalog)
+        let wanted = CapsuleText.segments(plainText)
         guard wanted != segments() else { return }
         replaceKeepingSelection(with: wanted)
     }
 
     private func redraw() {
         guard markedTextRange == nil else { return }
-        replaceKeepingSelection(with: CapsuleText.segments(plainText, catalog: catalog))
+        replaceKeepingSelection(with: CapsuleText.segments(plainText))
     }
 
     private func replaceKeepingSelection(with wanted: [CapsuleText.Segment]) {
