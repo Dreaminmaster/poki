@@ -230,14 +230,10 @@ final class ChatModel {
 
     // MARK: Sending
 
-    func send(_ text: String) {
-        #if DEBUG && targetEnvironment(simulator)
-        if let attachment = TestAttachment.take() { return send(text, attachments: [attachment]) }
-        #endif
-        send(text, again: false)
-    }
+    func send(_ text: String) { send(text, again: false) }
 
-    /// A message with photos or PDFs: the model reads their pictures with the words.
+    /// A message with photos or PDFs from the plus menu: the model reads their pictures with the words.
+    /// The words may be left out.
     func send(_ text: String, attachments: [ChatAttachment]) {
         lastImages = attachments.flatMap(\.images)
         send(text, again: false, thumbnails: attachments.map(\.thumbnail))
@@ -257,6 +253,8 @@ final class ChatModel {
     }
 
     private var lastOwnerText: String?
+    /// What the model reads when the owner sent pictures without words.
+    private static let picturesOnly = "(The owner sent the attached pictures without a message.)"
     /// The pictures of the owner's last message, sent again with it by Try Again.
     private var lastImages: [Data] = []
 
@@ -274,7 +272,8 @@ final class ChatModel {
 
     private func send(_ text: String, again: Bool, thumbnails: [Data] = []) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !running else { return }
+        // Pictures may go without words, and Try Again sends them again.
+        guard !text.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
         if isDemo { playDemo(text); return }
         // Another conversation (an outside agent's hand-off) is working the phone: one task at a time.
         if kind == .poki, let busy = ChatModel.delegatedBusy {
@@ -360,7 +359,7 @@ final class ChatModel {
             await previous?.value
             guard let self, self.runToken == token else { return }
             self.began("pi", provider, model)
-            let outcome = await loop.run(text, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
+            let outcome = await loop.run(text.isEmpty ? Self.picturesOnly : text, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
                 self.awaitingModel = false

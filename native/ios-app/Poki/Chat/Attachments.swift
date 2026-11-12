@@ -1,10 +1,11 @@
 import ImageIO
 import PDFKit
+import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// A photo or a PDF sent with a message. The model reads `images`; the message keeps `thumbnail` to
-/// show what went with it.
+/// A photo or a PDF added to a message from the message field's plus menu. The model reads `images`;
+/// the strip over the message field and the sent message show `thumbnail`.
 struct ChatAttachment: Identifiable, Equatable {
     enum Kind: Equatable { case photo, pdf(name: String) }
     let id = UUID()
@@ -74,7 +75,8 @@ enum AttachmentReader {
 
 #if DEBUG && targetEnvironment(simulator)
 /// Simulator test runs only: `SIMCTL_CHILD_POKI_TEST_ATTACHMENT=<file>` names a picture or a PDF that
-/// goes with the first message sent, the way the plus menu's will, before the menu has its screen.
+/// the message field starts with, as if picked from the plus menu (the simulator has no camera and
+/// an empty photo library).
 @MainActor
 enum TestAttachment {
     private static var taken = false
@@ -93,3 +95,112 @@ enum TestAttachment {
     }
 }
 #endif
+
+// MARK: Over the message field and in the conversation
+
+/// The photos and PDFs picked for the next message, over the message field (board 定稿 06): each a
+/// 72-point picture with rounded corners and a small dark button on its corner that takes it off.
+struct AttachmentStrip: View {
+    var attachments: [ChatAttachment]
+    var remove: (ChatAttachment) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(attachments) { item in
+                    AttachmentThumb(data: item.thumbnail, side: 72, pdf: item.kind != .photo)
+                        .overlay(alignment: .topTrailing) { removeButton(item) }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(Text(item.label))
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 4).padding(.top, 6).padding(.bottom, 2)
+            // Room for the corner buttons, which stand out of the pictures.
+            .padding(.trailing, 8)
+        }
+        .scrollClipDisabled()
+        .accessibilityIdentifier("composer.attachments")
+    }
+
+    private func removeButton(_ item: ChatAttachment) -> some View {
+        Button { remove(item) } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.85), in: .circle)
+                .overlay(Circle().strokeBorder(.white, lineWidth: 2).padding(-2))
+                // The touch is larger than the mark.
+                .frame(width: 36, height: 36).contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .offset(x: 11, y: -11)
+        .accessibilityLabel(Text("Remove"))
+        .accessibilityIdentifier("composer.attachment.remove")
+    }
+}
+
+/// One attachment's small picture, over the message field and in a sent message.
+struct AttachmentThumb: View {
+    var data: Data
+    var side: CGFloat
+    var pdf = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: side * 16 / 72, style: .continuous)
+        Group {
+            if let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Color(.secondarySystemFill)
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(.white.opacity(0.95), lineWidth: 1))
+        .shadow(color: Color(red: 24 / 255, green: 56 / 255, blue: 120 / 255).opacity(0.12), radius: 6, y: 4)
+        .overlay(alignment: .bottomLeading) {
+            if pdf {
+                Text(verbatim: "PDF").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Color(.systemRed), in: .capsule)
+                    .padding(6)
+            }
+        }
+    }
+}
+
+extension ChatAttachment {
+    /// What VoiceOver says for it.
+    var label: String {
+        switch kind {
+        case .photo: String(localized: "Photo")
+        case .pdf(let name): name
+        }
+    }
+}
+
+/// The camera, for Take Photo: UIKit's picker, the system camera SwiftUI can present.
+struct CameraPicker: UIViewControllerRepresentable {
+    var done: (UIImage?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(done: done) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let done: (UIImage?) -> Void
+        init(done: @escaping (UIImage?) -> Void) { self.done = done }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            done(info[.originalImage] as? UIImage)
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { done(nil) }
+    }
+}

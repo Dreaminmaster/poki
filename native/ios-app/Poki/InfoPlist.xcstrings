@@ -32,19 +32,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki uses the camera only to scan the pairing code from Poki Setup on your computer."
+            "value" : "Poki uses the camera to take photos you send in a message, and to scan the pairing code from Poki Setup on your computer."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 仅使用相机扫描电脑上 Poki Setup 显示的配对码。"
+            "value" : "Poki 使用相机拍摄你在消息里发送的照片，以及扫描电脑上 Poki Setup 显示的配对码。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 僅使用相機掃描電腦上 Poki Setup 顯示的配對碼。"
+            "value" : "Poki 使用相機拍攝你在訊息裡傳送的照片，以及掃描電腦上 Poki Setup 顯示的配對碼。"
           }
         }
       }

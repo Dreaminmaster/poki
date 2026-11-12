@@ -758,6 +758,22 @@
         }
       }
     },
+    "Add Photos or Files" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加照片或文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入照片或檔案"
+          }
+        }
+      }
+    },
     "Add URL" : {
       "localizations" : {
         "zh-Hans" : {
@@ -770,6 +786,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新增地址"
+          }
+        }
+      }
+    },
+    "Add a message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入訊息"
           }
         }
       }
@@ -2425,6 +2457,22 @@
         }
       }
     },
+    "Couldn’t read this file." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取这个文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取這個檔案。"
+          }
+        }
+      }
+    },
     "Create a key at aistudio.google.com, then paste it here." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3218,6 +3266,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "失敗"
+          }
+        }
+      }
+    },
+    "Files" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案"
           }
         }
       }
@@ -5929,6 +5993,22 @@
         }
       }
     },
+    "Only photos and PDFs can be added." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能添加照片和 PDF。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能加入照片和 PDF。"
+          }
+        }
+      }
+    },
     "Open %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6819,6 +6899,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已點一杯大杯燕麥拿鐵，9:10 到店自取。"
+          }
+        }
+      }
+    },
+    "Photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        }
+      }
+    },
+    "Photos" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
           }
         }
       }
@@ -8937,6 +9049,22 @@
         }
       }
     },
+    "Remove" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
     "Remove Key" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9683,6 +9811,22 @@
         }
       }
     },
+    "Show Dictation Button in Message Field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在输入框显示听写按钮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在輸入框顯示聽寫按鈕"
+          }
+        }
+      }
+    },
     "Sign In" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10420,6 +10564,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用系統拼音鍵盤輸入中文"
+          }
+        }
+      }
+    },
+    "Take Photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍照"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍照"
           }
         }
       }
@@ -13229,6 +13389,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輪到你了"
+          }
+        }
+      }
+    },
+    "^[%lld attachment](inflect: true)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个附件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個附件"
           }
         }
       }
