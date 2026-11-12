@@ -440,9 +440,9 @@ struct HealthView: View {
 }
 
 /// Approvals (ESP-469 board "03 审批"): what always needs you, how Poki asks before a sensitive step, and
-/// how much your chat model may approve by itself. The same settings as main's Agents › Safety ›
-/// Approvals (ApprovalsSections, which the old tabs still use), drawn as cards: the ways of asking as
-/// choices, the sensitivity's four levels as segments in their own order, least asking first.
+/// how much your chat model may approve by itself. The way of asking is chosen on Poki's card only (the
+/// owner: one setting in one place); this page says which is in use and what it does. The sensitivity's
+/// four levels are segments in their own order, least asking first.
 struct ApprovalsSettingsView: View {
     @Environment(AppModel.self) private var model
     /// The way of asking says itself in one line; Learn More opens the whole of it.
@@ -462,19 +462,11 @@ struct ApprovalsSettingsView: View {
             }
 
             Section {
-                ForEach(ApprovalClassifier.Mode.allCases) { mode in
-                    SettingsChoiceCard(title: mode.title, selected: model.approvalMode == mode) {
-                        withAnimation(.snappy) { model.approvalMode = mode }
-                    }
-                    .accessibilityIdentifier("approvals.mode.\(mode.rawValue)")
-                }
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            } header: {
-                Text("Approval Method").textCase(nil)
+                LabeledContent("Approval Method", value: model.approvalMode.title)
+                    .accessibilityIdentifier("approvals.mode.current")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("Change it on Poki’s card: tap Poki’s picture at the top of the chat.")
                     switch model.approvalMode {
                     case .reply: Text("Poki asks in the chat and proceeds after you reply.")
                     case .confirm: Text("Tap Allow or Don’t Allow in the Live Activity, a notification, or Poki.")
@@ -487,7 +479,7 @@ struct ApprovalsSettingsView: View {
                         case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
                         }
                         Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                        Text("Turning asking on or off takes effect the next time Poki opens.")
+                        Text("Changes apply right away, starting from Poki’s next step.")
                     } else {
                         Button("Learn More") { withAnimation(.snappy) { more = true } }
                             .font(.footnote.weight(.semibold))

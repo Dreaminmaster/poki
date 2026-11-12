@@ -1,8 +1,9 @@
 import SwiftUI
 
-// ESP-469: tapping Poki's picture shows where Poki stands, on a card under the picture, with Pause and the
-// way into Settings. Settings itself opens from the bottom of the conversations (SettingsEntryButton) and
-// from this card.
+// Tapping Poki's picture, on the home page, in the conversation or on the voice page, opens Poki's card
+// under it (the owner's home of 2026-11-12, boards 定稿 08 and 01c): the model that answers, changed on
+// the spot; how Poki asks before a sensitive step; Pause or Resume. These live only here: Settings keeps
+// the accounts. Settings opens from the bottom of the conversations (SettingsEntryButton).
 
 /// The one place the settings card and the status card take Poki's status words from. They are the
 /// bear's own (PokiMood.word, from `StatusWord`), the same words the Live Activity says ("Ready",
@@ -78,86 +79,202 @@ extension PowerTile {
     }
 }
 
-/// The card under Poki's picture: the status, the model, Poki's line, then Pause (or Resume, or Turn On)
-/// and Settings.
+/// Poki's card under its picture (board 定稿 08): a system-style menu card of three groups. The model
+/// that answers, which opens in place to the chat models of every account that is set up (07b), or
+/// Add Model with none; the three ways of asking, the one in use ticked, the same setting Settings ›
+/// Approvals reads; and Pause, Resume or Turn On. Each acts at once.
 struct PokiStatusCard: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @Environment(\.colorScheme) private var scheme
-    var openSettings: () -> Void
+    /// Settings › Models, for Add Model.
+    var openModel: () -> Void
+    @State private var choosingModel = false
+    /// Bumped when the chosen model changes (ModelKeys is not observable).
+    @State private var modelVersion = 0
+
+    private var dark: Bool { scheme == .dark }
+    private var soft: Color { Color(.secondaryLabel) }
 
     var body: some View {
         let power = PowerTile.card(model: model)
-        let status = PokiStatusCopy.card(PokiStatusCopy.current(model: model, chat: chat), power: power)
-        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Circle().fill(status.mood.dot).frame(width: 8, height: 8)
-                Text(verbatim: PokiStatusCopy.word(status)).font(.headline).foregroundStyle(Color(.label)).lineLimit(1)
-                Spacer(minLength: 8)
-                if ModelKeys.hasUsableKey {
-                    Text(verbatim: ModelKeys.selectedModelName).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+        let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
+        VStack(alignment: .leading, spacing: 0) {
+            modelRow
+            if choosingModel { modelChoices }
+            rule
+            approvals
+            rule
+            Button { power.act(model: model, chat: chat) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: power.symbol).font(.body.weight(.semibold)).frame(width: 20)
+                    Text(power.title).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .foregroundStyle(power == .pause ? Color(.label) : Tint.blue)
+                .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
+            }
+            .buttonStyle(CardRowStyle())
+            .accessibilityIdentifier("status.\(power.name)")
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: 330, alignment: .leading)
+        .background(.regularMaterial, in: shape)
+        .background(Color(dark ? .secondarySystemBackground : .systemBackground).opacity(0.6), in: shape)
+        .overlay(shape.strokeBorder(Color.white.opacity(dark ? 0.12 : 0.95), lineWidth: 1))
+        .shadow(color: .black.opacity(dark ? 0.4 : 0.16), radius: 24, y: 16)
+        .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+        .animation(.snappy(duration: 0.28), value: choosingModel)
+        // A container, so each row keeps its own identifier.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("status.card")
+    }
+
+    private var rule: some View {
+        Rectangle().fill(Color(.separator)).frame(height: 1 / 3).padding(.leading, 20)
+    }
+
+    private var providers: [ModelProvider] {
+        ModelProvider.allCases.filter { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }
+    }
+
+    // MARK: Model
+
+    @ViewBuilder private var modelRow: some View {
+        if ModelKeys.hasUsableKey {
+            Button { choosingModel.toggle() } label: {
+                HStack(spacing: 8) {
+                    Text("Model").foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(verbatim: ModelKeys.selectedModelName).foregroundStyle(soft).lineLimit(1)
+                    Image(systemName: choosingModel ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+                }
+                .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
+            }
+            .buttonStyle(CardRowStyle())
+            .id(modelVersion)
+            .accessibilityValue(Text(verbatim: ModelKeys.selectedModelName))
+            .accessibilityIdentifier("status.model")
+        } else {
+            Button(action: openModel) {
+                HStack(spacing: 8) {
+                    Text("Add Model").foregroundStyle(Tint.blue).frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+                }
+                .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
+            }
+            .buttonStyle(CardRowStyle())
+            .accessibilityIdentifier("status.addModel")
+        }
+    }
+
+    /// The chat models of every account that is set up, by account, the one that answers ticked.
+    private var modelChoices: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(providers) { provider in
+                Text(verbatim: provider.name).font(.footnote).foregroundStyle(soft)
+                    .padding(.horizontal, 36).padding(.top, 8).padding(.bottom, 2)
+                ForEach(ModelCatalog.available(provider)) { choice in
+                    let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
+                    Button {
+                        ModelKeys.selectedProvider = provider
+                        ModelKeys.selectedModel = choice.id
+                        ModelKeys.saved += 1
+                        modelVersion += 1
+                        choosingModel = false
+                    } label: {
+                        tickRow(choice.name, ticked: chosen, inset: 36)
+                    }
+                    .buttonStyle(CardRowStyle())
+                    .accessibilityAddTraits(chosen ? .isSelected : [])
                 }
             }
-            .accessibilityElement(children: .combine)
-            Text(verbatim: PokiStatusCopy.line(power))
-                .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                SettingsPill(title: power.title, symbol: power.symbol, prominent: true) { power.act(model: model, chat: chat) }
-                    .accessibilityIdentifier("status.\(power.name)")
-                SettingsPill(title: "Settings", chevron: true, action: openSettings)
-                    .accessibilityIdentifier("status.settings")
-            }
         }
-        .padding(18)
-        .frame(maxWidth: 360, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: shape)
-        .overlay(shape.strokeBorder(Tint.ring, lineWidth: 1))
-        .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.14), radius: 20, y: 12)
-        .accessibilityIdentifier("status.card")
+        .padding(.bottom, 4)
+        .id(modelVersion)
+        .transition(.opacity)
+    }
+
+    // MARK: Approvals
+
+    private var approvals: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Approval Method").font(.footnote).foregroundStyle(soft)
+                .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 4)
+            ForEach(ApprovalClassifier.Mode.allCases) { mode in
+                let chosen = model.approvalMode == mode
+                Button { if !chosen { model.approvalMode = mode } } label: {
+                    tickRow(mode.title, ticked: chosen, inset: 20, height: 44)
+                }
+                .buttonStyle(CardRowStyle())
+                .accessibilityAddTraits(chosen ? .isSelected : [])
+                .accessibilityIdentifier("status.approvals.\(mode.rawValue)")
+            }
+            Text("Payments, deletions and actions in Wallet always need your confirmation.")
+                .font(.footnote).foregroundStyle(soft)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 12)
+        }
+        .sensoryFeedback(.selection, trigger: model.approvalMode)
+    }
+
+    private func tickRow(_ title: String, ticked: Bool, inset: CGFloat, height: CGFloat = 44) -> some View {
+        HStack(spacing: 8) {
+            Text(verbatim: title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blue)
+                .opacity(ticked ? 1 : 0).frame(width: 20)
+        }
+        .padding(.leading, inset).padding(.trailing, 20).frame(minHeight: height).contentShape(.rect)
+    }
+}
+
+/// A row of the card: a light press highlight, as a system menu's.
+private struct CardRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Color(.label).opacity(configuration.isPressed ? 0.08 : 0))
     }
 }
 
 extension View {
-    /// The status card over the page, under the top bar, with the page dimmed behind it; a tap outside
-    /// closes it. Settings closes it and opens Settings.
-    /// `leading` is where the chat begins: beside the conversations on iPad.
-    func pokiStatusCard(isPresented: Binding<Bool>, leading: CGFloat = 16, openSettings: @escaping () -> Void) -> some View {
-        modifier(PokiStatusCardOverlay(isPresented: isPresented, leading: leading, openSettings: openSettings))
+    /// Poki's card under the top bar, over the page; a tap outside closes it. Add Model closes it and
+    /// opens Settings › Models. `leading` is where the chat begins: beside the conversations on iPad.
+    func pokiStatusCard(isPresented: Binding<Bool>, leading: CGFloat = 0, openModel: @escaping () -> Void) -> some View {
+        modifier(PokiStatusCardOverlay(isPresented: isPresented, leading: leading, openModel: openModel))
     }
 }
 
 private struct PokiStatusCardOverlay: ViewModifier {
     @Binding var isPresented: Bool
     var leading: CGFloat
-    var openSettings: () -> Void
+    var openModel: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        content.overlay(alignment: .topLeading) {
-            ZStack(alignment: .topLeading) {
+        content.overlay(alignment: .top) {
+            ZStack(alignment: .top) {
                 if isPresented {
-                    // The chat blurs and dims behind the card, so none of its words read beside it.
-                    Rectangle().fill(.ultraThinMaterial)
-                        .overlay(Color.black.opacity(0.2))
+                    // The page stays as it is behind the card (the board); a tap anywhere else closes it.
+                    Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .contentShape(.rect)
                         .onTapGesture { isPresented = false }
                         .accessibilityLabel(Text("Close"))
                         .accessibilityAddTraits(.isButton)
-                        .transition(.opacity)
-                    PokiStatusCard(openSettings: {
+                    PokiStatusCard(openModel: {
                         isPresented = false
-                        openSettings()
+                        openModel()
                     })
-                    .padding(.leading, leading).padding(.trailing, 16)
-                    .padding(.top, 64)
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.92, anchor: .topLeading).combined(with: .opacity))
+                    .padding(.horizontal, 16)
+                    // Under Poki's picture and its word.
+                    .padding(.top, 84)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.9, anchor: .top).combined(with: .opacity))
                     .accessibilityAddTraits(.isModal)
                     .accessibilityAction(.escape) { isPresented = false }
                 }
             }
+            .frame(maxWidth: .infinity)
+            .padding(.leading, leading)
             .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.18), value: isPresented)
         }
     }

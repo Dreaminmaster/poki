@@ -30,6 +30,8 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var app: String?
     var ended: Date?
     var total: Int?
+    /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
+    var attachments: [Data]?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
     var isPoki: Bool { switch kind { case .poki, .plan: true; default: false } }
@@ -230,6 +232,13 @@ final class ChatModel {
 
     func send(_ text: String) { send(text, again: false) }
 
+    /// A message with photos or PDFs from the plus menu: the model reads their pictures with the words.
+    /// The words may be left out.
+    func send(_ text: String, attachments: [ChatAttachment]) {
+        lastImages = attachments.flatMap(\.images)
+        send(text, again: false, thumbnails: attachments.map(\.thumbnail))
+    }
+
     /// The last message again, after a problem (the Retry button under it).
     func retry() {
         guard !running, let last = entries.last(where: { if case .you = $0.kind { return true }; return false }), case .you(let text, _) = last.kind else { return }
@@ -244,6 +253,10 @@ final class ChatModel {
     }
 
     private var lastOwnerText: String?
+    /// What the model reads when the owner sent pictures without words.
+    private static let picturesOnly = "(The owner sent the attached pictures without a message.)"
+    /// The pictures of the owner's last message, sent again with it by Try Again.
+    private var lastImages: [Data] = []
 
     /// What was said in this chat, oldest first, for the auto-classifier.
     var ownerContext: [String] {
@@ -257,9 +270,10 @@ final class ChatModel {
         }
     }
 
-    private func send(_ text: String, again: Bool) {
+    private func send(_ text: String, again: Bool, thumbnails: [Data] = []) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !running else { return }
+        // Pictures may go without words, and Try Again sends them again.
+        guard !text.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
         if isDemo { playDemo(text); return }
         // Another conversation (an outside agent's hand-off) is working the phone: one task at a time.
         if kind == .poki, let busy = ChatModel.delegatedBusy {
@@ -273,7 +287,9 @@ final class ChatModel {
         if again, let last = entries.last(where: { if case .you = $0.kind { return true }; return false }) {
             you = last
         } else {
-            you = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
+            var entry = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
+            if !thumbnails.isEmpty { entry.attachments = thumbnails } else { lastImages = [] }
+            you = entry
             entries.append(you)
         }
         lastOwnerText = text
@@ -297,6 +313,7 @@ final class ChatModel {
         planID = nil; noteID = nil; modelPlan = nil
         sendTo = nil; lastTyped = nil; typedAtDo = 0; doCalls = 0; askWords = [:]; taskApp = nil
         let instructions = Harness.instructions(for: text)
+        let images = lastImages
         if Self.direct, provider == .anthropic || provider == .openai {
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
@@ -342,7 +359,7 @@ final class ChatModel {
             await previous?.value
             guard let self, self.runToken == token else { return }
             self.began("pi", provider, model)
-            let outcome = await loop.run(text, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
+            let outcome = await loop.run(text.isEmpty ? Self.picturesOnly : text, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
                 self.awaitingModel = false

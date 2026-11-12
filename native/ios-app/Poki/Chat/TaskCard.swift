@@ -62,11 +62,29 @@ struct TaskCard: View {
     private var isOpen: Bool { blue || (open ?? (state == .failed || state == .yourTurn)) }
     private var ink: Color { blue ? .white : Color(.label) }
     private var soft: Color { blue ? .white.opacity(0.74) : Color(.secondaryLabel) }
+    /// Over: the result card (board 定稿 07), the app's icon, what was done, where and how long, and a
+    /// mark for how it ended.
+    private var over: Bool { state == .done || state == .failed || state == .stopped }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: over ? 20 : 26, style: .continuous)
         Group {
-            if blue {
+            if over {
+                VStack(alignment: .leading, spacing: 0) {
+                    // A tap on the row shows the steps; there is no chevron on the board.
+                    Button { withAnimation(.snappy) { open = !isOpen } } label: { header.contentShape(.rect) }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(Text(isOpen ? "Expanded" : "Collapsed"))
+                        .accessibilityHint(Text(isOpen ? "Hides the steps" : "Shows the steps"))
+                    if isOpen {
+                        VStack(alignment: .leading, spacing: 14) { details }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 14)
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.vertical, 12).padding(.horizontal, 14)
+            } else if blue {
                 VStack(alignment: .leading, spacing: 14) {
                     header
                     details
@@ -95,18 +113,33 @@ struct TaskCard: View {
     // MARK: The row every state has
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: over ? 12 : 10) {
             mark
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: over ? 2 : 1) {
                 Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? 3 : 1)
-                subline.font(.caption).foregroundStyle(soft).lineLimit(big ? 2 : 1)
+                subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? 2 : 1)
                 // At the accessibility text sizes the title wraps and the label goes under it.
-                if big { pill }
+                if big, !over || asker != nil { pill }
             }
             .multilineTextAlignment(.leading)
             Spacer(minLength: 6)
-            if !big { pill }
+            if !big, !over || asker != nil { pill }
+            if over { ending }
         }
+    }
+
+    /// How a task ended, at the end of its result row: a green tick, a red cross or a grey stop.
+    @ViewBuilder private var ending: some View {
+        switch state {
+        case .done: endMark("checkmark", Tint.green).accessibilityLabel(Text("Done"))
+        case .failed: endMark("xmark", Tint.red).accessibilityLabel(Text("Failed"))
+        default: endMark("stop.fill", Color(.systemGray), size: 7).accessibilityLabel(Text("Stopped"))
+        }
+    }
+
+    private func endMark(_ name: String, _ color: Color, size: CGFloat = 9) -> some View {
+        Image(systemName: name).font(.system(size: size, weight: .heavy)).foregroundStyle(.white)
+            .frame(width: 20, height: 20).background(color, in: .circle)
     }
 
     /// Poki's face while the task is alive; a tick, a cross or a stop sign once it is over.
@@ -118,16 +151,9 @@ struct TaskCard: View {
                 .clipShape(.rect(cornerRadius: 10, style: .continuous))
         case .needsYou: PokiAvatar(size: 34, mood: .needsYou)
         case .yourTurn: PokiAvatar(size: 34, mood: .yourTurn)
-        case .done: glyph("checkmark", Tint.green, on: Tint.greenSoft)
-        case .failed: glyph("xmark", Tint.red, on: Tint.redSoft)
-        case .stopped: glyph("stop.fill", Color(.secondaryLabel), on: Color(.tertiarySystemFill), size: 11)
+        // Over, the app Poki did it in: its real icon, or the placeholder tile when none is known.
+        case .done, .failed, .stopped: AppIconView(app: app ?? "", size: 32)
         }
-    }
-
-    private func glyph(_ name: String, _ color: Color, on ground: Color, size: CGFloat = 15) -> some View {
-        Image(systemName: name).font(.system(size: size, weight: .bold)).foregroundStyle(color)
-            .frame(width: 34, height: 34).background(ground, in: .circle)
-            .accessibilityHidden(true)
     }
 
     /// "Messages, 0:42" while the card is open and alive; where it is or how it ended otherwise.
@@ -138,13 +164,16 @@ struct TaskCard: View {
             if let ended {
                 let took = Duration.seconds(max(0, ended.timeIntervalSince(started).rounded())).formatted(.time(pattern: .minuteSecond))
                 if let app, !app.isEmpty { Text("\(app), done in \(took)") } else { Text("Done in \(took)") }
+            } else if let app, !app.isEmpty {
+                Text(verbatim: app)
             } else {
-                Text("Done in ^[\(steps.count) step](inflect: true)")
+                Text("Done")
             }
+        // The result card counts no steps (the owner, board 定稿 07): where it was and how it ended.
         case .failed:
-            if let plannedTotal, plannedTotal > 1 { Text("Tripped at step \(min(at, plannedTotal)) of \(plannedTotal)") } else { Text("Tripped at step \(at)") }
+            if let app, !app.isEmpty { Text("\(app), didn’t finish") } else { Text("Didn’t finish") }
         case .stopped:
-            if let plannedTotal, plannedTotal > 1 { Text("Stopped at step \(min(at, plannedTotal)) of \(plannedTotal)") } else { Text("Stopped at step \(at)") }
+            if let app, !app.isEmpty { Text("\(app), stopped") } else { Text("Stopped") }
         case .running, .needsYou, .yourTurn:
             if isOpen {
                 HStack(spacing: 0) {

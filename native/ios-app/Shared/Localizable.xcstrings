@@ -233,6 +233,38 @@
         }
       }
     },
+    "%@, didn’t finish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，没办完"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，沒辦完"
+          }
+        }
+      }
+    },
+    "%@, stopped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，已停止"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，已停止"
+          }
+        }
+      }
+    },
     "%@, waiting for you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -758,6 +790,22 @@
         }
       }
     },
+    "Add Photos or Files" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加照片或文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入照片或檔案"
+          }
+        }
+      }
+    },
     "Add URL" : {
       "localizations" : {
         "zh-Hans" : {
@@ -770,6 +818,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新增地址"
+          }
+        }
+      }
+    },
+    "Add a message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入訊息"
           }
         }
       }
@@ -1852,6 +1916,54 @@
         }
       }
     },
+    "Change it on Poki’s card: tap Poki’s picture at the top of the chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片里更改：轻点对话顶部 Poki 的头像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片裡更改：輕點對話頂部 Poki 的頭像。"
+          }
+        }
+      }
+    },
+    "Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片里更换聊天模型：轻点对话顶部 Poki 的头像。输入框听写不需要账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 的卡片裡更換聊天模型：輕點對話頂部 Poki 的頭像。輸入框聽寫不需要帳戶。"
+          }
+        }
+      }
+    },
+    "Changes apply right away, starting from Poki’s next step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改立即生效，自 Poki 的下一步操作开始。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "變更立即生效，自 Poki 的下一步操作開始。"
+          }
+        }
+      }
+    },
     "Check that Developer Mode is on (Settings → Privacy & Security → Developer Mode) and that iOS is 17.4 or later." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2426,6 +2538,22 @@
         }
       }
     },
+    "Couldn’t read this file." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取这个文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取這個檔案。"
+          }
+        }
+      }
+    },
     "Create a key at aistudio.google.com, then paste it here." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2718,6 +2846,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "診斷"
+          }
+        }
+      }
+    },
+    "Didn’t finish" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没办完"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒辦完"
           }
         }
       }
@@ -3218,6 +3362,22 @@
         }
       }
     },
+    "Files" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案"
+          }
+        }
+      }
+    },
     "Finish setting up this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3555,6 +3715,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter a request to run a task on this iPhone."
+          }
+        }
+      }
+    },
+    "Hides the steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起步骤"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起步驟"
           }
         }
       }
@@ -5903,6 +6079,22 @@
         }
       }
     },
+    "Only photos and PDFs can be added." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能添加照片和 PDF。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能加入照片和 PDF。"
+          }
+        }
+      }
+    },
     "Open %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7129,6 +7321,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要在 %@ 中付款嗎？"
+          }
+        }
+      }
+    },
+    "Photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        }
+      }
+    },
+    "Photos" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "照片"
           }
         }
       }
@@ -8551,6 +8775,22 @@
         }
       }
     },
+    "Remove" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
     "Remove Key" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9271,6 +9511,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "共享"
+          }
+        }
+      }
+    },
+    "Show Dictation Button in Message Field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在输入框显示听写按钮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在輸入框顯示聽寫按鈕"
+          }
+        }
+      }
+    },
+    "Shows the steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示步骤"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示步驟"
           }
         }
       }
@@ -10012,6 +10284,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用系統拼音鍵盤輸入中文"
+          }
+        }
+      }
+    },
+    "Take Photo" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍照"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍照"
           }
         }
       }
@@ -12821,6 +13109,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輪到你了"
+          }
+        }
+      }
+    },
+    "^[%lld attachment](inflect: true)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个附件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個附件"
           }
         }
       }
@@ -17925,22 +18229,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "透過 Poki 控制此 iPhone 的智慧體"
-          }
-        }
-      }
-    },
-    "Turning asking on or off takes effect the next time Poki opens." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开启或关闭询问会在下次打开 Poki 时生效。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟或關閉詢問會在下次開啟 Poki 時生效。"
           }
         }
       }
@@ -28288,13 +28576,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，用时 %2$@"
+            "value" : "%1$@，%2$@ 完成"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，用時 %2$@"
+            "value" : "%1$@，%2$@ 完成"
           }
         }
       }

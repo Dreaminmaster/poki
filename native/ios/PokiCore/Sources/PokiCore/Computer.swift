@@ -954,7 +954,7 @@ final class Computer: @unchecked Sendable {
     /// sliding in is not read as the one it covers; a screen that never holds still is judged on the
     /// latest read.
     func pressNow(_ action: JSON, after changed: (kind: String, at: Double)?, approved: String?, until: Double) async -> String? {
-        let rules = config.sensitive
+        let rules = config.rules
         guard rules.enabled, let kind = ActionKind(action), kind.presses(action) else { return nil }
         if let changed {
             let pause = min((Self.settle[changed.kind] ?? 0.4) - (now() - changed.at), until - now() - 0.3)
@@ -1195,7 +1195,7 @@ final class Computer: @unchecked Sendable {
     /// Why this action needs the owner's approval, or nil; `scan` moves on past it. `do` checks its
     /// actions with it before sending any, and a routine run each step before it sends it.
     func sensitive(_ action: JSON, _ scan: inout SensitiveScan) -> String? {
-        let rules = config.sensitive
+        let rules = config.rules
         guard rules.enabled, let kind = ActionKind(action) else { return nil }
         defer { if kind.movesScreen { scan.moved = true } }
         let messaging = scan.front?.bundleID.map(rules.messagingApps.contains) ?? false
