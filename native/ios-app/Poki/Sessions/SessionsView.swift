@@ -18,6 +18,15 @@ struct SessionsView: View {
     var openSession: (String) -> Void
     @State private var renaming: SavedSession?
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.drawerOnGlass) private var onGlass
+    @Environment(\.colorScheme) private var scheme
+
+    /// The time and the summary line. On the drawer's glass in dark mode a step lighter than the
+    /// system's secondary label, so they still read where a bright part of the chat (the home page's
+    /// bear) shows through, without a ground under the row.
+    private var secondary: Color {
+        onGlass && scheme == .dark ? Color(white: 0.92, opacity: 0.9) : Color(.secondaryLabel)
+    }
     @State private var newName = ""
 
     private var store: SessionStore { SessionStore.shared }
@@ -26,16 +35,22 @@ struct SessionsView: View {
     var body: some View {
         List {
             Section {
-                ForEach(shown) { session in row(session) }
+                ForEach(shown) { session in
+                    row(session)
+                        .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(rowGround(session))
+                }
                 if shown.isEmpty { empty }
             }
             .listSectionSeparator(.hidden)
         }
         .listStyle(.plain)
+        .scrollContentBackground(onGlass ? .hidden : .automatic)
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { SettingsEntryRow() }
-        .background(Color(.systemBackground))
+        .background(onGlass ? Color.clear : Color(.systemBackground))
         .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
@@ -62,40 +77,66 @@ struct SessionsView: View {
             .accessibilityLabel(Text("New Conversation"))
             .accessibilityIdentifier("threads.newChat")
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
+        .background(onGlass ? Color.clear : Color(.systemBackground))
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     private var big: Bool { typeSize.isAccessibilitySize }
 
+    /// The conversation on screen in the chat, marked as the selected row.
+    private func current(_ session: SavedSession) -> Bool {
+        session.kind == .poki && session.id == chat.sessionID && sampleHome == nil
+    }
+
+    /// The selected row's soft fill; on glass every other row is clear, elsewhere the list's own ground.
+    @ViewBuilder private func rowGround(_ session: SavedSession) -> some View {
+        if current(session) {
+            RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)).padding(.horizontal, 8)
+        } else {
+            onGlass ? Color.clear : Color(.systemBackground)
+        }
+    }
+
+    /// The app it worked in: for the chat's own task under way, the app it is in now.
+    private func app(_ session: SavedSession) -> String? {
+        if session.live, session.id == chat.sessionID, let now = chat.taskApp, !now.isEmpty { return now }
+        return session.app
+    }
+
+    /// One conversation: its app's icon, the name and the time on the first line, one line of what
+    /// happened last under it, amber with a dot while a step waits for you. The chat's own type
+    /// sizes: the body for the name as for a bubble, the footnote for the time as for a bubble's.
     private func row(_ session: SavedSession) -> some View {
         let needs = needsYou(session)
         return Button { open(session) } label: {
-            HStack(alignment: .top, spacing: 12) {
-                SessionAvatar(session: session, size: 36)
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 12) {
+                SessionAvatar(session: session, app: app(session), size: 40)
+                VStack(alignment: .leading, spacing: 3) {
                     if big {
-                        Text(verbatim: session.name).font(.body.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(2)
+                        Text(verbatim: session.name).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(2)
                     } else {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: session.name).font(.body.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
+                            Text(verbatim: session.name).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
                             Spacer(minLength: 4)
-                            Text(verbatim: stamp(session)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: stamp(session)).font(.footnote).monospacedDigit().foregroundStyle(secondary)
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(verbatim: line(session))
-                            .font(.subheadline).foregroundStyle(needs ? Tint.amberInk : Color(.secondaryLabel))
-                            .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                            .font(.subheadline).foregroundStyle(needs ? Tint.amberInk : secondary)
+                            .lineLimit(big ? 2 : 1).frame(maxWidth: .infinity, alignment: .leading)
                         if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
                     }
-                    if big { Text(verbatim: stamp(session)).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                    if big { Text(verbatim: stamp(session)).font(.footnote).foregroundStyle(secondary) }
                 }
             }
+            .padding(.horizontal, 10).padding(.vertical, 10)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
+        .accessibilityValue(app(session).flatMap(AppIconStore.name) ?? "")
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !session.live, sampleHome == nil {
                 Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
@@ -257,41 +298,66 @@ extension View {
     }
 }
 
-/// What kind of conversation a row is: a chat with Poki, a voice conversation, an outside agent's own
-/// session (its badge), or a task it handed to Poki (its badge with Poki's face).
+/// What a row shows on its leading side: the icon of the app the conversation worked in, with the
+/// outside agent's badge on its corner for an agent's session or hand-off. Without an app icon, an
+/// agent's badge, or for a chat with Poki the one placeholder tile.
 struct SessionAvatar: View {
     var session: SavedSession
+    /// The app it worked in, when the row knows better than what is saved (a task under way).
+    var app: String? = nil
     var size: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        switch session.kind {
-        case .poki: tile("bubble.left")
-        case .voice: tile("waveform")
-        case .agent: AgentBadge(name: session.client ?? "", size: size)
-        case .handoff:
-            ZStack(alignment: .bottomTrailing) {
+        let app = app ?? session.app
+        let agent = session.kind == .agent || session.kind == .handoff
+        // An agent's session shows the app only once its icon is at hand; a chat with Poki shows the
+        // placeholder while the icon is fetched.
+        let icon = app.flatMap { name in agent ? (AppIconStore.shared.icon(name, dark: scheme == .dark) != nil ? name : nil) : name }
+        ZStack(alignment: .bottomTrailing) {
+            if let icon {
+                AppIconView(app: icon, size: size)
+            } else if agent {
                 AgentBadge(name: session.client ?? "", size: size)
-                PokiAvatar(size: size * 0.5).overlay(RoundedRectangle(cornerRadius: size * 0.14, style: .continuous).strokeBorder(Color(.systemBackground), lineWidth: 2))
+            } else {
+                tile(session.kind == .voice ? "waveform" : "bubble.left")
+            }
+            if agent, icon != nil {
+                // Whose session it is, on the app's corner.
+                AgentBadge(name: session.client ?? "", size: size * 0.46, edge: true).offset(x: 4, y: 4)
+            } else if session.kind == .handoff {
+                PokiAvatar(size: size * 0.46)
+                    .overlay(RoundedRectangle(cornerRadius: size * 0.13, style: .continuous).strokeBorder(Color(.systemBackground), lineWidth: 1.5))
                     .offset(x: 4, y: 4)
             }
         }
+        .frame(width: size, height: size)
+        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
+        .accessibilityHidden(true)
     }
 
+    /// The placeholder: the same icon shape as an app's, on the system's quiet fill.
     private func tile(_ symbol: String) -> some View {
-        Image(systemName: symbol).font(.system(size: size * 0.44, weight: .medium)).foregroundStyle(Color(.secondaryLabel))
+        Image(systemName: symbol).font(.system(size: size * 0.42, weight: .medium)).foregroundStyle(Color(.secondaryLabel))
             .frame(width: size, height: size)
-            .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: size * 0.28, style: .continuous))
+            .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: size * 0.225, style: .continuous))
             .accessibilityHidden(true)
     }
 }
 
-/// An outside agent's badge: its provider's logo, or its initials (see `CallerBadge`).
+/// An outside agent's badge: its provider's logo, or its initials (see `CallerBadge`). In dark mode a
+/// dark badge (OpenAI's is black) turns light, so it never is a black disc on a dark panel.
 struct AgentBadge: View {
     var name: String
     var size: CGFloat
+    /// On another icon's corner: a ring in the page's colour sets it apart from the icon.
+    var edge = false
+    @Environment(\.colorScheme) private var scheme
+
     var body: some View {
-        // A dark badge (OpenAI's is black) keeps its edge on the dark background with a hairline.
-        CallerBadge(name: name, size: size).overlay(Circle().strokeBorder(Tint.ring, lineWidth: 1)).accessibilityHidden(true)
+        CallerBadge(name: name, size: size, lifted: scheme == .dark)
+            .overlay(Circle().strokeBorder(edge ? Color(.systemBackground) : Tint.ring, lineWidth: edge ? 1.5 : 1))
+            .accessibilityHidden(true)
     }
 }
 
