@@ -203,8 +203,10 @@ enum HomeIdea {
         return HomeShortcut(key: HomeShortcuts.normalize(prompt), app: shown.id, appName: shown.name, text: text, prompt: prompt)
     }
 
-    static var examples: [HomeShortcut] {
-        AppLanguage.current == .simplifiedChinese ? simplifiedChinese : english
+    static var examples: [HomeShortcut] { examples(for: .current) }
+
+    static func examples(for language: AppLanguage) -> [HomeShortcut] {
+        language == .simplifiedChinese ? simplifiedChinese : english
     }
 
     private static var english: [HomeShortcut] {
