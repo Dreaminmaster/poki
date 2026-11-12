@@ -133,7 +133,7 @@ private struct PokiStatusCardOverlay: ViewModifier {
         content.overlay(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 if isPresented {
-                    Color.black.opacity(0.18).ignoresSafeArea()
+                    Color.black.opacity(0.28).ignoresSafeArea()
                         .onTapGesture { isPresented = false }
                         .accessibilityLabel(Text("Close"))
                         .accessibilityAddTraits(.isButton)

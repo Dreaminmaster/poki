@@ -32,7 +32,10 @@ struct ModelSettingsView: View {
                 ForEach(ModelProvider.allCases.filter(ModelAccounts.isSetUp)) { provider in
                     NavigationLink { AccountDetail(provider: provider) } label: { AccountRow(provider: provider) }
                 }
-                Button("Add Account", systemImage: "plus") { adding = true }
+                // With no account yet the card above has Add Account already.
+                if ModelKeys.hasUsableKey || ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
+                    Button("Add Account", systemImage: "plus") { adding = true }
+                }
             } header: {
                 Text("Accounts").textCase(nil)
             } footer: {

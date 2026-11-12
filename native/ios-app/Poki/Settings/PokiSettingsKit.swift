@@ -94,6 +94,7 @@ struct SettingsLabelStyle: LabelStyle {
 }
 
 private struct SettingsLabelIcon<Icon: View>: View {
+    @Environment(\.isEnabled) private var isEnabled
     @ScaledMetric(relativeTo: .body) private var size = 30.0
     @ViewBuilder var icon: Icon
     var body: some View {
@@ -102,6 +103,8 @@ private struct SettingsLabelIcon<Icon: View>: View {
             .foregroundStyle(Tint.blueText)
             .frame(width: size, height: size)
             .background(Tint.blueSoft, in: .circle)
+            // A row that can't be used yet (Add Agent before the relay) greys its icon too.
+            .opacity(isEnabled ? 1 : 0.4)
             .padding(.vertical, -4)
     }
 }
