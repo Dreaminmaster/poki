@@ -506,7 +506,7 @@ struct TurnCard: View {
                 .foregroundStyle(Tint.amberInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Button(action: done) { Text("Done, carry on") }
+            Button(action: done) { Text("Continue") }
                 .buttonStyle(SolidCapsuleButtonStyle())
                 .accessibilityIdentifier("handoff.done")
         }

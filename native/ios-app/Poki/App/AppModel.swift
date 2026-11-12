@@ -1561,7 +1561,7 @@ final class AppModel {
         }, ApprovalMailbox.handoffDone as CFString, nil, .deliverImmediately)
     }
 
-    /// The person tapped "Done, carry on" on the Live Activity's "Your turn" card.
+    /// The person tapped "Continue" on the Live Activity's "Your turn" card.
     func handoffDone() {
         guard let id = ApprovalMailbox.drainHandoffDone() else { return }
         handoffDone(id: id)

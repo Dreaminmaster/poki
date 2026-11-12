@@ -67,7 +67,7 @@ struct ActivityFace: Hashable {
         case approval(id: String)
         /// The answer is on its way to PokiCore.
         case deciding(String)
-        /// "Done, carry on" for a screen the agent handed to the person.
+        /// "Continue" for a screen the agent handed to the person.
         case handoff(id: String)
         /// Open Poki to fix a stopped runner or pairing error.
         case openPoki

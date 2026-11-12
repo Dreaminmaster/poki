@@ -761,7 +761,7 @@ struct HandoffDoneButton: View {
         let palette = theme.palette(surface)
         let height = ActivityMetrics.button
         Button(intent: HandoffDoneIntent(handoffID: handoffID)) {
-            Text(String(activity: "Done, carry on"))
+            Text(String(activity: "Continue"))
                 .font(theme.button)
                 .foregroundStyle(palette.primaryText)
                 .lineLimit(1).minimumScaleFactor(0.85)

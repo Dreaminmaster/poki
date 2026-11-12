@@ -2226,6 +2226,12 @@
     },
     "Continue" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2787,28 +2793,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 步完成"
-          }
-        }
-      }
-    },
-    "Done, carry on" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "好了，继续"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Done, carry on"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "好了，繼續"
           }
         }
       }
