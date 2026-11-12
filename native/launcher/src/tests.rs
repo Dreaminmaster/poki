@@ -1,5 +1,5 @@
 use super::*;
-use crate::device::{Device, LOOPBACK_FIX, PAIRING_FIX, Pairing, PairingKind};
+use crate::device::{Device, LOOPBACK_FIX, PAIRING_FIX, PAIRING_PORT_FIX, Pairing, PairingKind};
 use idevice::remote_pairing::RpPairingFile;
 use serde_json::json;
 use std::{
@@ -51,21 +51,47 @@ fn pairing_files_of_either_kind_are_told_apart() {
     std::fs::remove_file(&path).unwrap();
 }
 
-/// The tests that need 127.0.0.1:49152 free, or that listen on it, take turns.
+/// The tests that need 127.0.0.1:49152 free, or that listen on it, take turns. They also take turns
+/// with what the app tells the launcher (`AppSays`), which holds for the whole process.
 static PORT_49152_TAKEN: Mutex<()> = Mutex::new(());
 
+/// What the app told the launcher: the port it found, and whether it looks for a moved one. Both go
+/// back to the start when this is dropped, also when an assertion fails. Hold `PORT_49152_TAKEN`.
+struct AppSays;
+
+impl AppSays {
+    fn searching() -> Self {
+        poki_set_pairing_port_search(true);
+        AppSays
+    }
+}
+
+impl Drop for AppSays {
+    fn drop(&mut self) {
+        poki_set_pairing_port_search(false);
+        poki_set_remote_pairing_port(0);
+    }
+}
+
+/// The loopback is on and the phone's remote pairing service is not on the port Poki uses: iOS
+/// answers the connection with a refusal, and the app looks for the moved port. That is not "turn
+/// on the loopback" (the owner's loopback works); the launcher says the port moved, and keeps trying
+/// until the app sets the port it found.
 #[test]
-fn without_the_loopback_it_waits_for_the_network_and_keeps_trying() {
+fn a_refused_port_is_not_called_a_loopback_that_is_off_and_it_keeps_trying() {
     let _port = PORT_49152_TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    let _app = AppSays::searching();
     let path = temp("rp2.plist");
     std::fs::write(&path, RpPairingFile::generate("Poki").to_bytes()).unwrap();
-    // Nothing listens on 127.0.0.1:49152 here, as on a phone whose loopback is off.
+    // Nothing listens on 127.0.0.1:49152 here, and the address answers: a refusal.
     let config: Config = serde_json::from_value(json!({"pairing_file": path, "device_address": "127.0.0.1"})).unwrap();
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = events.clone();
     let launcher = Arc::new(Launcher::new(config, Box::new(move |e| sink.lock().unwrap().push(e))));
     launcher.clone().start();
-    assert!(wait_for(&events, 5, |e| e.iter().any(|v| v["state"] == "waiting_network" && v["fix"] == LOOPBACK_FIX)));
+    assert!(wait_for(&events, 5, |e| e.iter().any(|v| v["state"] == "waiting_network" && v["fix"] == PAIRING_PORT_FIX && v["code"] == "pairing_port")));
+    let said = events.lock().unwrap().iter().find(|v| v["code"] == "pairing_port").unwrap()["detail"].as_str().unwrap().to_string();
+    assert!(said.contains("127.0.0.1:49152") && !said.contains("Is the loopback on"), "{said}");
     // A restart cuts the backoff short: a second attempt comes at once.
     launcher.restart();
     assert!(wait_for(&events, 3, |e| e.iter().filter(|v| v["state"] == "connecting").count() >= 2));
@@ -86,7 +112,19 @@ enum Loopback {
 /// Starts a launcher against `loopback`, with the developer disk image's marker file on the phone or
 /// not, and returns what it said once `until` holds (or after 5 s).
 fn launch_without_the_device(in_process: bool, mounted: bool, loopback: Loopback, until: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+    launch_without_the_device_while(false, in_process, mounted, loopback, until)
+}
+
+/// The same, with the app looking for a moved remote pairing port (`searching`) or not.
+fn launch_without_the_device_while(
+    searching: bool,
+    in_process: bool,
+    mounted: bool,
+    loopback: Loopback,
+    until: impl Fn(&[Value]) -> bool,
+) -> Vec<Value> {
     let _port = PORT_49152_TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    let _app = searching.then(AppSays::searching);
     let name = format!("{in_process}-{mounted}-{}", loopback == Loopback::Refuses);
     let path = temp(&format!("rp-without-device-{name}.plist"));
     std::fs::write(&path, RpPairingFile::generate("Poki").to_bytes()).unwrap();
@@ -166,6 +204,48 @@ fn a_dropped_handshake_is_not_handed_to_the_mounted_image() {
     let events = launch_without_the_device(true, true, Loopback::DropsTheHandshake, settled);
     assert!(events.iter().any(|v| v["code"] == "handshake"), "{events:?}");
     assert!(!events.iter().any(|v| v["state"] == "running"), "{events:?}");
+}
+
+/// On Wi-Fi with the image mounted, while the app looks for a moved remote pairing port, a refusal
+/// waits for that port and is not handed to the mounted image. The app never looks on cellular
+/// alone, so there the same refusal starts Poki's own session at once
+/// (`with_the_image_mounted_a_refused_loopback_starts_the_local_session`), and it does here too once
+/// the search has ended.
+#[test]
+fn a_refusal_waits_for_the_port_only_while_the_app_looks_for_it() {
+    let events = launch_without_the_device_while(true, true, true, Loopback::Refuses, settled);
+    assert!(events.iter().any(|v| v["state"] == "waiting_network" && v["code"] == "pairing_port"), "{events:?}");
+    assert!(!events.iter().any(|v| v["state"] == "running"), "{events:?}");
+}
+
+/// iOS moved the remote pairing service off 49152 (it names the port in Bonjour). Once the app sets
+/// the port it found, the connection goes there: 49152 is refused here, and the moved service is
+/// reached (it closes the connection, so the failure is the handshake, past the connect).
+#[tokio::test]
+async fn the_port_the_app_found_is_the_one_connected_to() {
+    let _port = PORT_49152_TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    let app = AppSays::searching();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let moved = listener.local_addr().unwrap().port();
+    assert_ne!(moved, crate::remote::REMOTE_PAIRING_PORT);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
+    let path = temp("rp-moved.plist");
+    std::fs::write(&path, RpPairingFile::generate("Poki").to_bytes()).unwrap();
+    let mut pairing = Pairing::read(&path, None).unwrap();
+    let address: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+    let before = Device::open(address, &mut pairing, Duration::from_secs(5)).await.err().expect("no phone here");
+    assert_eq!(before.code, Some("pairing_port"), "{}", before.detail);
+    poki_set_remote_pairing_port(moved);
+    let after = Device::open(address, &mut pairing, Duration::from_secs(5)).await.err().expect("no phone here");
+    drop(app);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(crate::remote::port(), crate::remote::REMOTE_PAIRING_PORT);
+    assert_eq!(after.code, Some("handshake"), "{}", after.detail);
+    assert!(after.detail.starts_with("remote pairing handshake failed"), "{}", after.detail);
 }
 
 /// GitHub issue 69: the loopback takes the connection, then the phone's remote pairing service never
@@ -291,7 +371,7 @@ fn only_the_phone_saying_so_is_called_developer_mode_off() {
     let says_developer_mode_off = |failure: &crate::device::Failure| {
         failure.code == Some("developer_mode") || failure.fix.as_deref().is_some_and(|fix| fix.starts_with("Turn on Developer Mode"))
     };
-    for stage in [Stage::Connect, Stage::Handshake, Stage::PairVerify, Stage::Listener, Stage::Tunnel, Stage::Rsd] {
+    for stage in [Stage::Connect, Stage::NotListening, Stage::Handshake, Stage::PairVerify, Stage::Listener, Stage::Tunnel, Stage::Rsd] {
         let failure = crate::device::remote_failure(RemoteError { stage, detail: "device socket io failed".into() });
         assert!(!says_developer_mode_off(&failure), "{stage:?}: {:?}", failure.fix);
     }

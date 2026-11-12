@@ -62,6 +62,8 @@ struct RunnerStatus: Sendable, Equatable, Decodable {
         case "mounting_ddi": "Preparing"
         case "launching": "Starting"
         case "running": "Running"
+        // The loopback works here: the phone refused the remote pairing port, and Poki looks it up.
+        case "waiting_network" where code == "pairing_port": "Finding the pairing port"
         case "waiting_network": "Needs loopback"
         case "failed": "Stopped"
         default: state
