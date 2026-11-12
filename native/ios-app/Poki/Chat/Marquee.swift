@@ -33,6 +33,8 @@ struct Marquee<Content: View>: UIViewRepresentable {
     var active = true
     /// Endless. False draws the content once, as a plain row that scrolls (VoiceOver reads each thing once).
     var loops = true
+    /// Stands still at once, as under a finger, while something lifted from it is open (a pill's menu).
+    var stopped = false
     @ViewBuilder var content: Content
 
     func makeUIView(context: Context) -> MarqueeScrollView {
@@ -58,6 +60,7 @@ struct Marquee<Content: View>: UIViewRepresentable {
         view.speed = speed
         view.running = running
         view.active = active
+        view.stopped = stopped
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: MarqueeScrollView, context: Context) -> CGSize? {
@@ -72,6 +75,7 @@ final class MarqueeScrollView: UIScrollView {
     var speed: Double = 0
     var running = true { didSet { if running != oldValue { wake() } } }
     var active = true { didSet { if active != oldValue { wake() } } }
+    var stopped = false { didSet { if stopped != oldValue { wake() } } }
     var start: CGFloat = 0
     private(set) var stripHeight: CGFloat = 48
 
@@ -203,9 +207,9 @@ final class MarqueeScrollView: UIScrollView {
         let delta = last > 0 ? min(max(0, now - last), 0.1) : 0
         last = now
         guard loops, period > 0 else { return }
-        if isTracking || isDragging || isDecelerating {
-            // A finger is on the row, or the row still glides from its flick: it stops going by
-            // itself at once and is the scroll view's to move.
+        if isTracking || isDragging || isDecelerating || stopped {
+            // A finger is on the row, the row still glides from its flick, or a pill's menu is open:
+            // it stops going by itself at once and is the scroll view's to move.
             held = true
             velocity = 0
             MarqueeLog.note(self, now, "held")

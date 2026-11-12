@@ -431,6 +431,8 @@ struct HomePage<Footer: View>: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     private let shortcutStore = HomeShortcutStore.shared
+    /// A pill's Forget menu is open: both rows stand still under it.
+    @State private var menuOpen = false
     /// Everything but the bear: the two lines, the pills and the room between them.
     @ScaledMetric(relativeTo: .title) private var rest: CGFloat = 268
 
@@ -512,6 +514,15 @@ struct HomePage<Footer: View>: View {
         }
     }
 
+    /// A pill's words, with the app's capsule when it has one.
+    private func pill(_ idea: HomeShortcut) -> some View {
+        HStack(spacing: 8) {
+            if let app = idea.app { IdeaCapsule(app: app) }
+            Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
+        }
+        .padding(.leading, idea.app == nil ? 18 : 12).padding(.trailing, 18).frame(minHeight: 48)
+    }
+
     /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
     /// moves and flicks (`Marquee`). It stands still with Reduce Motion and while the keyboard is up,
     /// and its clock stops when the page is not in front. With VoiceOver it is a plain row, each pill
@@ -519,21 +530,25 @@ struct HomePage<Footer: View>: View {
     /// rows do not line up.
     private func row(_ ideas: [HomeShortcut], speed: Double, start: CGFloat) -> some View {
         Marquee(speed: speed, spacing: 8, start: start, running: !reduceMotion && !writing,
-                active: home && scenePhase == .active, loops: !voiceOver) {
+                active: home && scenePhase == .active, loops: !voiceOver, stopped: menuOpen) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
-                    HStack(spacing: 8) {
-                        if let app = idea.app { IdeaCapsule(app: app) }
-                        Text(verbatim: idea.text).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label)).lineLimit(1)
-                    }
-                    .padding(.leading, idea.app == nil ? 18 : 12).padding(.trailing, 18).frame(minHeight: 48)
-                    .contentShape(.capsule)
+                    pill(idea).contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
                 // Under the glass: with the menu on the outside, the glass took the long press and the
-                // pill fired as a tap.
+                // pill fired as a tap. The lifted pill is drawn on its own, on a capsule of its own
+                // size: a snapshot of the pill left its glass behind and stood still while the row
+                // went on under it.
+                .contentShape(.contextMenuPreview, Capsule())
                 .contextMenu {
                     Button("Forget", systemImage: "eye.slash", role: .destructive) { shortcutStore.forget(idea) }
+                } preview: {
+                    pill(idea)
+                        .background(.regularMaterial, in: Capsule())
+                        .clipShape(.capsule)
+                        .onAppear { menuOpen = true }
+                        .onDisappear { menuOpen = false }
                 }
                 .glassSurface(in: Capsule(), interactive: true)
                 .accessibilityLabel(Text(verbatim: [idea.app?.name, idea.text].compactMap { $0 }.joined(separator: ", ")))
