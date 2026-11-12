@@ -383,5 +383,51 @@ pub async fn set_channel(channel: String) -> R<Vec<release::ChannelInfo>> {
     Ok(release::channels().await?)
 }
 
+/// Preview builds of pull requests: the hidden switch, the chosen one, and those on offer.
+#[tauri::command]
+pub async fn previews() -> R<release::PreviewState> { Ok(release::previews().await?) }
+
+#[tauri::command]
+pub async fn set_preview_switch(on: bool) -> R<release::PreviewState> {
+    release::set_preview_switch(on)?;
+    Ok(release::previews().await?)
+}
+
+/// GitHub's device sign-in: start answers with the code to show, finish waits until the person
+/// has entered it on github.com.
+#[tauri::command]
+pub async fn github_sign_in_start() -> R<release::GithubSignIn> { Ok(release::github_sign_in_start().await?) }
+
+#[tauri::command]
+pub async fn github_sign_in_finish(pending: release::GithubSignIn) -> R<release::PreviewState> {
+    release::github_sign_in_finish(&pending).await?;
+    Ok(release::previews().await?)
+}
+
+/// Cancel on the code page: the wait in `github_sign_in_finish` ends and takes no token.
+#[tauri::command]
+pub async fn github_sign_in_cancel() -> R<release::PreviewState> {
+    release::github_sign_in_cancel();
+    Ok(release::previews().await?)
+}
+
+#[tauri::command]
+pub async fn github_sign_out() -> R<release::PreviewState> {
+    release::set_github_token("")?;
+    Ok(release::previews().await?)
+}
+
+#[tauri::command]
+pub async fn set_github_token(token: String) -> R<release::PreviewState> {
+    release::set_github_token(&token)?;
+    Ok(release::previews().await?)
+}
+
+#[tauri::command]
+pub async fn set_preview(pr: Option<u64>) -> R<release::PreviewState> {
+    release::set_preview(pr)?;
+    Ok(release::previews().await?)
+}
+
 #[tauri::command]
 pub fn qr_svg(text: String) -> R<String> { Ok(pairshare::qr_svg(&text)?) }

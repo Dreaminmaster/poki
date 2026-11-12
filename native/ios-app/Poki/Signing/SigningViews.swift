@@ -87,7 +87,7 @@ struct SigningSection: View {
     var body: some View {
         Section {
             LabeledContent {
-                Text(verbatim: "\(signer.installedVersion) (\(signer.installedBuild))")
+                Text(verbatim: signer.installedTitle)
             } label: {
                 Label("Poki Version", systemImage: "info.circle")
             }
@@ -105,16 +105,16 @@ struct SigningSection: View {
             // A newer build that isn't downloaded yet shows even when a refresh (or an older update) is
             // ready, so it is never hidden behind it.
             if signer.updateNotReady, let latest = signer.latest {
-                LabeledContent { Text(verbatim: "\(latest.version) (\(latest.build))") } label: { Label("Update Available", systemImage: "sparkles") }
+                LabeledContent { Text(verbatim: SelfSigner.title(version: latest.version, build: latest.build, pr: latest.preview_pr)) } label: { Label("Update Available", systemImage: "sparkles") }
             } else if let next = signer.next {
                 LabeledContent {
-                    Text(next.kind == "update" ? "\(next.version) (\(next.build))" : "Until \(next.expires.formatted(.dateTime.month(.abbreviated).day().year()))").lineLimit(1)
+                    Text(next.kind == "update" ? SelfSigner.title(version: next.version, build: next.build, pr: next.preview_pr) : "Until \(next.expires.formatted(.dateTime.month(.abbreviated).day().year()))").lineLimit(1)
                 } label: {
                     Label(next.kind == "update" ? "Update Ready" : "Refresh Ready", systemImage: "checkmark.seal")
                 }
             }
             NavigationLink { SigningOptionsPage() } label: {
-                Label("Signing Options", systemImage: "slider.horizontal.3")
+                Label("Build Options", systemImage: "slider.horizontal.3")
             }
             // The actions last, under what they act on. A newer build not yet downloaded comes first:
             // one tap downloads and installs it (or, without an Apple Account, opens the sign-in).
@@ -226,16 +226,22 @@ struct SigningOptionsPage: View {
             } header: {
                 Text("Release Channel")
             } footer: {
-                Text("Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta, Alpha and Pre-alpha get earlier builds.")
+                // Pre-alpha is offered, and so named, only to people signed in to GitHub.
+                Text(signer.githubSignedIn
+                     ? "Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta, Alpha and Pre-alpha get earlier builds."
+                     : "Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta and Alpha get earlier builds.")
             }
+            if signer.previewsEnabled { PreviewBuildsSection(signer: signer) }
             Section {
-                LabeledContent("Installed") { Text(verbatim: "\(signer.installedVersion) (\(signer.installedBuild))") }
-                LabeledContent("Newest on This Channel") {
+                LabeledContent("Installed") { Text(verbatim: signer.installedTitle) }
+                LabeledContent {
                     if let latest = signer.latest {
-                        Text(verbatim: "\(latest.version) (\(latest.build))")
+                        Text(verbatim: SelfSigner.title(version: latest.version, build: latest.build, pr: latest.preview_pr))
                     } else {
                         (checked ? Text("Not Found") : Text("Checking…")).foregroundStyle(Color(.secondaryLabel))
                     }
+                } label: {
+                    signer.status?.preview == nil ? Text("Newest on This Channel") : Text("Newest Preview Build")
                 }
                 if let latest = signer.latest {
                     LabeledContent("Status") { signer.isNewer(latest) ? Text("Update Available") : Text("Up to Date") }
@@ -245,7 +251,7 @@ struct SigningOptionsPage: View {
             } footer: {
                 Text("Poki looks on GitHub for the newest build on the chosen channel.")
             }
-            .task(id: signer.status?.channel) {
+            .task(id: "\(signer.status?.channel ?? "") \(signer.status?.preview ?? 0)") {
                 checked = false
                 await signer.checkLatest()
                 checked = true
@@ -275,13 +281,117 @@ struct SigningOptionsPage: View {
                         Label("Apple Account", systemImage: "person.crop.circle")
                     }
                 }
+                NavigationLink {
+                    GitHubAccountPage()
+                } label: {
+                    LabeledContent {
+                        if signer.githubSignedIn { Text(verbatim: signer.status?.github_login ?? "") }
+                        else { Text("Optional").foregroundStyle(Color(.secondaryLabel)) }
+                    } label: {
+                        Label("GitHub Account", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                }
             } footer: {
-                Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+                Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here. A GitHub Account is only for people developing Poki.")
             }
             SignerActivityRows(signer: signer)
         }
-        .navigationTitle("Signing")
+        .navigationTitle("Build Options")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { anisette = signer.status?.anisette ?? "" }
+    }
+}
+
+/// The GitHub Account, under the Apple Account in Build Options: GitHub's device sign-in, and
+/// the Preview Builds switch, which is there only while signed in. With the switch on, Build
+/// Options lists the preview builds under the release channels.
+struct GitHubAccountPage: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+    @State private var copied = false
+    private var signer: SelfSigner { model.signer }
+
+    var body: some View {
+        Form {
+            if signer.githubSignedIn {
+                Section {
+                    LabeledContent("GitHub Account") {
+                        if let login = signer.status?.github_login, !login.isEmpty { Text(verbatim: login) } else { Text("Signed In") }
+                    }
+                }
+                Section {
+                    Toggle("Preview Builds", isOn: Binding(get: { signer.previewsEnabled }, set: { on in Task { await signer.setPreviewsEnabled(on) } }))
+                } footer: {
+                    Text("Preview builds come from pull requests that are not merged, for testing a change before it reaches any channel. Choose one under the release channels in Build Options.")
+                }
+                Section { Button("Sign Out", role: .destructive) { Task { await signer.signOutOfGitHub() } } }
+            } else if let code = signer.githubCode {
+                Section {
+                    LabeledContent("Code") { Text(verbatim: code.user_code).font(.title3.monospaced().weight(.semibold)).textSelection(.enabled) }
+                    Button(copied ? "Copied" : "Copy Code and Open GitHub") {
+                        UIPasteboard.general.string = code.user_code
+                        copied = true
+                        if let url = URL(string: code.verification_uri) { openURL(url) }
+                    }
+                    LabeledContent { ProgressView() } label: { Text("Waiting for GitHub") }
+                } footer: {
+                    Text("Enter this code on GitHub, then come back to Poki.")
+                }
+                Section { Button("Cancel", role: .cancel) { signer.cancelGitHubSignIn() } }
+            } else {
+                Section {
+                    Button("Sign In with GitHub") { copied = false; Task { await signer.signInToGitHub() } }
+                } footer: {
+                    Text("For people developing Poki. Poki asks GitHub for no permissions, and the sign-in stays in this iPhone’s Keychain.")
+                }
+            }
+            if let error = signer.githubError {
+                Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+            }
+        }
+        .navigationTitle("GitHub Account")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Preview builds of pull requests, shown in Build Options while Preview Builds is on (the
+/// switch on the GitHub Account page). A preview build is on no channel: choosing one makes Poki follow that pull
+/// request's builds, and None goes back to the release channel.
+struct PreviewBuildsSection: View {
+    let signer: SelfSigner
+    @State private var loaded = false
+
+    var body: some View {
+        Section {
+            Picker("Preview Build", selection: Binding(get: { signer.status?.preview ?? 0 }, set: { pr in Task { await signer.setPreview(pr == 0 ? nil : pr) } })) {
+                Text("None").tag(0)
+                ForEach(signer.previews, id: \.tag) { build in
+                    if let pr = build.preview_pr {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: SelfSigner.title(version: build.version, build: build.build, pr: pr))
+                            if let title = build.title, !title.isEmpty {
+                                Text(verbatim: title).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+                            }
+                        }
+                        .tag(pr)
+                    }
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            if let error = signer.previewError {
+                Label { Text(verbatim: error) } icon: { Image(systemName: "exclamationmark.triangle") }.foregroundStyle(.orange)
+            } else if signer.previews.isEmpty {
+                (loaded ? Text("No Preview Builds") : Text("Checking…")).foregroundStyle(Color(.secondaryLabel))
+            }
+        } header: {
+            Text("Preview Build")
+        } footer: {
+            Text("A preview build comes from a pull request that is not merged. It is not on any channel and it can break. Choose None to go back to your release channel.")
+        }
+        .task {
+            await signer.loadPreviews()
+            loaded = true
+        }
     }
 }

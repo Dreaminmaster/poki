@@ -27,7 +27,10 @@ export type Connector = { name: string; url: string; added_at: number; last_chec
 export type AppInfo = { version: string; os: string; arch: string; data_dir: string; can_use_system_anisette: boolean };
 export type ChannelId = "stable" | "beta" | "alpha" | "pre-alpha";
 export type UpdateInfo = { current: string; latest: string | null; url: string | null; asset_url?: string | null; asset_name?: string | null; newer: boolean; channel?: ChannelId };
-export type Release = { tag: string; version: string; build: string; published_at: string; ipa_name: string; channel?: ChannelId };
+export type Release = { tag: string; version: string; build: string; published_at: string; ipa_name: string; channel?: ChannelId; preview?: PreviewInfo | null };
+export type PreviewInfo = { pr: number; sha: string; title: string; artifact_id: number };
+export type PreviewState = { enabled: boolean; selected: number | null; has_token: boolean; github_login: string | null; can_sign_in: boolean; builds: Release[] };
+export type GithubSignIn = { device_code: string; user_code: string; verification_uri: string; interval: number; expires_in: number };
 export type ChannelInfo = { id: ChannelId; title: string; selected: boolean; latest: Release | null };
 
 export const api = {
@@ -71,6 +74,13 @@ export const api = {
   installUpdate: () => invoke<{ path: string; relaunching: boolean }>("install_update"),
   channels: () => invoke<ChannelInfo[]>("channels"),
   setChannel: (channel: ChannelId) => invoke<ChannelInfo[]>("set_channel", { channel }),
+  previews: () => invoke<PreviewState>("previews"),
+  setPreviewSwitch: (on: boolean) => invoke<PreviewState>("set_preview_switch", { on }),
+  setPreview: (pr: number | null) => invoke<PreviewState>("set_preview", { pr }),
+  githubSignInStart: () => invoke<GithubSignIn>("github_sign_in_start"),
+  githubSignInFinish: (pending: GithubSignIn) => invoke<PreviewState>("github_sign_in_finish", { pending }),
+  githubSignInCancel: () => invoke<PreviewState>("github_sign_in_cancel"),
+  githubSignOut: () => invoke<PreviewState>("github_sign_out"),
   qrSvg: (text: string) => invoke<string>("qr_svg", { text }),
 };
 
