@@ -140,6 +140,7 @@ final class Computer: @unchecked Sendable {
         let treeRead = !reading.elements.isEmpty || reading.notes.isEmpty
         let sameApp = reading.foreground?.bundleID == nil || reading.foreground?.bundleID == lastForeground?.bundleID
         lastForeground = reading.foreground ?? lastForeground
+        if config.isPoki(reading.foreground) { return pokiInFront(reading, did: did, error: error, extra: extra) }
         if reading.png != nil { lastPNGAt = now() }
         lastPNG = reading.png ?? lastPNG
 
@@ -367,6 +368,26 @@ final class Computer: @unchecked Sendable {
         return ToolResult(text: text + (jpeg == nil ? "" : "\nscreenshot: the screen now (nothing was sent)"), jpeg: jpeg, isError: jpeg == nil && isErrorWithoutPicture)
     }
 
+    /// The answer when Poki is in front, as when a task asked in Poki's chat begins (ESP-465: the first
+    /// look of 3 of 5 tasks read the owner's chat with Poki, and the task card showed it). The chat is
+    /// the owner's, not a screen of the task: the answer lists none of it, carries no picture, and keeps
+    /// none for the task card or the Live Activity; it says how a task starts instead.
+    func pokiInFront(_ reading: Reading, did: [String], error: String?, extra: [String]) -> ToolResult {
+        refs = [:]
+        listed = []
+        lastAll = []
+        lastTree = nil
+        lastPicture = nil
+        lastPNG = nil
+        lastPNGAt = nil
+        var lines = ["app: \(reading.foreground?.describe ?? "Poki")   read: \(ISO8601DateFormatter().string(from: Date())) (\(reading.ms) ms)"]
+        lines += did.map { "did: \($0)" }
+        if let error { lines.append("error: \(error)") }
+        lines += extra
+        lines.append("poki: Poki is in front, showing the owner's chat with you, so no screen of the task is read yet. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved routine.")
+        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil && did.isEmpty)
+    }
+
     /// The `handoff:` line: a step handed to the owner that is waiting, or just done (reported once).
     func handoffLine(clear: Bool) -> String? {
         guard let h = handoff.value else { return nil }
@@ -520,15 +541,15 @@ final class Computer: @unchecked Sendable {
             return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true)
         }
 
+        // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.
+        if landsInPoki(actions) {
+            return ToolResult(text: "not_sent: \(CoreConfig.ownAppRefusal). Nothing was sent. Leave Poki first ({button: \"home\"} or {launch: \"bundle id\"}).", jpeg: nil, isError: true)
+        }
+
         // A number that is not in the latest read is refused before anything is sent.
         let stale = Set(actions.flatMap(Self.refs(in:))).filter { refs[$0] == nil }.sorted()
         if !stale.isEmpty {
             return await readAndReply(until: until, full: true, error: "element \(stale.map(String.init).joined(separator: ", ")) is not in the latest read; nothing was sent. The current elements are below.")
-        }
-
-        // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.
-        if landsInPoki(actions) {
-            return ToolResult(text: "not_sent: \(CoreConfig.ownAppRefusal). Nothing was sent. Leave Poki first ({button: \"home\"} or {launch: \"bundle id\"}).", jpeg: nil, isError: true)
         }
 
         if config.sensitive.enabled {

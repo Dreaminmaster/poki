@@ -34,8 +34,9 @@ enum Harness {
         var parts = [instructions]
         // Poki learns the owner's repeated tasks: a saved routine runs them in one call next time.
         // The routines that fit are in the brief below, so the first call can be the routine itself:
-        // listing them first cost a whole model turn before anything happened on the phone.
-        parts.append("Start acting in your first reply: the saved routines that fit this task are listed below, so when one covers it, run it at once with do {run: name} and do not list routines first. Send report_plan together with your first look or do, not as a turn of its own. When a task worked and was not a routine yet, save it with routines {action: \"save\", name, description} before finish_task, with a short name the owner would use, so it can be repeated next time.")
+        // listing them first cost a whole model turn before anything happened on the phone. Poki is in
+        // front when a task begins, so a first look reads only the owner's chat (ESP-465).
+        parts.append("Start the task with a do in your first reply: do {run: name} with the routine below that covers it, else do {launch: bundle id} with the app it needs. Send report_plan together with that first do. When a task worked and was not a routine yet, save it with routines {action: \"save\", name, description} before finish_task, with a short name the owner would use, so it can be repeated next time.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
