@@ -267,6 +267,12 @@ struct RootView: View {
     private func openRun(_ id: String, entryID: UUID? = nil) {
         searchJump = entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }
         if let session = SessionStore.shared.session(id), session.kind == .poki {
+            // A running chat cannot be replaced. Open the searched history read-only
+            // instead of silently leaving the user in the wrong conversation.
+            if chat.running, session.id != chat.sessionID {
+                show(.session(id))
+                return
+            }
             if session.id != chat.sessionID { chat.restore(session) }
             show(.chat)
         } else {
