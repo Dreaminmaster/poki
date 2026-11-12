@@ -774,24 +774,24 @@
         }
       }
     },
-    "Add a model key first. Tap my picture, then Brain." : {
+    "Add a model key first. Tap my picture, then Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先添加模型密钥：轻点我的头像，再点“大脑”。"
+            "value" : "请先添加模型密钥：轻点我的头像，再点“模型”。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add a model key first. Tap my picture, then Brain."
+            "value" : "Add a model key first. Tap my picture, then Models."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先新增模型金鑰：輕點我的頭像，再點「大腦」。"
+            "value" : "請先新增模型金鑰：輕點我的頭像，再點「模型」。"
           }
         }
       }
@@ -883,24 +883,24 @@
         }
       }
     },
-    "Add your %@ key. Tap my picture, then Brain." : {
+    "Add your %@ key. Tap my picture, then Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请添加 %@ 密钥：轻点我的头像，再点“大脑”。"
+            "value" : "请添加 %@ 密钥：轻点我的头像，再点“模型”。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add your %@ key. Tap my picture, then Brain."
+            "value" : "Add your %@ key. Tap my picture, then Models."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請新增 %@ 金鑰：輕點我的頭像，再點「大腦」。"
+            "value" : "請新增 %@ 金鑰：輕點我的頭像，再點「模型」。"
           }
         }
       }
@@ -1545,13 +1545,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "批准"
+            "value" : "审批"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "批准"
+            "value" : "審批"
           }
         }
       }
@@ -3081,25 +3081,25 @@
         }
       }
     },
-    "Enter your relay’s address first in Poki › Guests › Address. Poki has no default relay." : {
+    "Enter your relay’s address first in Poki › External Agents › Address. Poki has no default relay." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先在“Poki › 访客 › 服务地址”中填写中转地址。Poki 没有默认中转。"
+            "value" : "请先在“Poki › 外部智能体 › 服务地址”中填写中转地址。Poki 没有默认中转。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enter your relay address in Poki › Guests › Address first. Poki has no default relay."
+            "value" : "Enter your relay address in Poki › External Agents › Address first. Poki has no default relay."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先在「Poki › 訪客 › 服務位址」中填寫中轉位址。Poki 沒有預設中轉。"
+            "value" : "請先在「Poki › 外部智慧體 › 服務位址」中填寫中轉位址。Poki 沒有預設中轉。"
           }
         }
       }
@@ -3417,40 +3417,24 @@
         }
       }
     },
-    "Guests" : {
+    "External Agents ›" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "客人"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "訪客"
-          }
-        }
-      }
-    },
-    "Guests ›" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "访客 ›"
+            "value" : "外部智能体 ›"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Guests ›"
+            "value" : "External Agents ›"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "訪客 ›"
+            "value" : "外部智慧體 ›"
           }
         }
       }
@@ -6400,24 +6384,24 @@
         }
       }
     },
-    "OpenAI did not accept the key. Check it in Poki › Brain." : {
+    "OpenAI did not accept the key. Check it in Poki › Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请前往“Poki › 大脑”检查密钥。OpenAI 拒绝了该密钥。"
+            "value" : "请前往“Poki › 模型”检查密钥。OpenAI 拒绝了该密钥。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Check your OpenAI key in Poki › Brain. OpenAI rejected it."
+            "value" : "Check your OpenAI key in Poki › Models. OpenAI rejected it."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請前往「Poki › 大腦」檢查金鑰。OpenAI 拒絕了該金鑰。"
+            "value" : "請前往「Poki › 模型」檢查金鑰。OpenAI 拒絕了該金鑰。"
           }
         }
       }
@@ -8586,24 +8570,24 @@
         }
       }
     },
-    "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, tap my picture, then Rules." : {
+    "Right now I don’t ask before sensitive steps such as paying, deleting, or sending. To change that, tap my picture, then Approvals." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前付款、删除、发送等敏感步骤不会先询问。如需更改，请轻点头像，再选择“规则”。"
+            "value" : "当前付款、删除、发送等敏感步骤不会先询问。如需更改，请轻点头像，再选择“审批”。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sensitive steps such as paying, deleting, or sending currently proceed without asking first. To change this, tap the profile icon, then Rules."
+            "value" : "Sensitive steps such as paying, deleting, or sending currently proceed without asking first. To change this, tap the profile icon, then Approvals."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "目前付款、刪除、傳送等敏感步驟不會先詢問。如需更改，請輕點頭像，再選擇「規則」。"
+            "value" : "目前付款、刪除、傳送等敏感步驟不會先詢問。如需更改，請輕點頭像，再選擇「審批」。"
           }
         }
       }
@@ -9131,24 +9115,24 @@
         }
       }
     },
-    "Set up Poki’s model first. Tap to open Poki › Brain." : {
+    "Set up Poki’s model first. Tap to open Poki › Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先设置模型。轻点前往“Poki › 大脑”。"
+            "value" : "请先设置模型。轻点前往“Poki › 模型”。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Set up a model first. Tap to open Poki › Brain."
+            "value" : "Set up a model first. Tap to open Poki › Models."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先設定模型。輕點前往「Poki › 大腦」。"
+            "value" : "請先設定模型。輕點前往「Poki › 模型」。"
           }
         }
       }
@@ -9299,46 +9283,46 @@
         }
       }
     },
-    "Sign in to ChatGPT again. Tap my picture, then Brain." : {
+    "Sign in to ChatGPT again. Tap my picture, then Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请重新登录 ChatGPT：轻点我的头像，再点“大脑”。"
+            "value" : "请重新登录 ChatGPT：轻点我的头像，再点“模型”。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sign in to ChatGPT again. Tap my picture, then Brain."
+            "value" : "Sign in to ChatGPT again. Tap my picture, then Models."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請重新登入 ChatGPT：輕點我的頭像，再點「大腦」。"
+            "value" : "請重新登入 ChatGPT：輕點我的頭像，再點「模型」。"
           }
         }
       }
     },
-    "Sign in to ChatGPT first. Tap my picture, then Brain." : {
+    "Sign in to ChatGPT first. Tap my picture, then Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先登录 ChatGPT：轻点我的头像，再点“大脑”。"
+            "value" : "请先登录 ChatGPT：轻点我的头像，再点“模型”。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sign in to ChatGPT first. Tap my picture, then Brain."
+            "value" : "Sign in to ChatGPT first. Tap my picture, then Models."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先登入 ChatGPT：輕點我的頭像，再點「大腦」。"
+            "value" : "請先登入 ChatGPT：輕點我的頭像，再點「模型」。"
           }
         }
       }
@@ -13383,24 +13367,24 @@
         }
       }
     },
-    "A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Model. Dictation in the message field works with every model." : {
+    "A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Poki › Models. Dictation in the message field works with every model." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "实时语音使用 OpenAI Realtime，需在“Poki › 大脑”中添加 OpenAI API 密钥。输入框听写支持所有模型。"
+            "value" : "实时语音使用 OpenAI Realtime，需在“Poki › 模型”中添加 OpenAI API 密钥。输入框听写支持所有模型。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即時語音使用 OpenAI Realtime，需在「Poki › 大腦」中新增 OpenAI API 金鑰。輸入框聽寫支援所有模型。"
+            "value" : "即時語音使用 OpenAI Realtime，需在「Poki › 模型」中新增 OpenAI API 金鑰。輸入框聽寫支援所有模型。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Live Voice uses OpenAI Realtime and requires an OpenAI API key in Poki › Brain. Message dictation works with any model."
+            "value" : "Live Voice uses OpenAI Realtime and requires an OpenAI API key in Poki › Models. Message dictation works with any model."
           }
         }
       }
@@ -15087,24 +15071,24 @@
         }
       }
     },
-    "Anthropic did not accept the key. Check it in Poki › Brain." : {
+    "Anthropic did not accept the key. Check it in Poki › Models." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请前往“Poki › 大脑”检查密钥。Anthropic 拒绝了该密钥。"
+            "value" : "请前往“Poki › 模型”检查密钥。Anthropic 拒绝了该密钥。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Check your Anthropic key in Poki › Brain. Anthropic rejected it."
+            "value" : "Check your Anthropic key in Poki › Models. Anthropic rejected it."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請前往「Poki › 大腦」檢查金鑰。Anthropic 拒絕了該金鑰。"
+            "value" : "請前往「Poki › 模型」檢查金鑰。Anthropic 拒絕了該金鑰。"
           }
         }
       }
@@ -16193,24 +16177,24 @@
         }
       }
     },
-    "Models and accounts" : {
+    "Accounts and active models" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "模型与账户"
+            "value" : "账户与当前模型"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Models and accounts"
+            "value" : "Accounts and active models"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "模型與帳號"
+            "value" : "帳號與目前模型"
           }
         }
       }
@@ -17082,13 +17066,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "活动日志"
+            "value" : "活动记录"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "活動日誌"
+            "value" : "活動記錄"
           }
         }
       }
@@ -17541,24 +17525,24 @@
         }
       }
     },
-    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Rules." : {
+    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Approvals." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "默认关闭。ask_poki 允许外部智能体将重复性任务交给 Poki 内置智能体。下次启动生效。自动判断位于“Poki › 规则”。"
+            "value" : "默认关闭。ask_poki 允许外部智能体将重复性任务交给 Poki 内置智能体。下次启动生效。自动判断位于“Poki › 审批”。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。自動判斷位於「Poki › 規則」。"
+            "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。自動判斷位於「Poki › 審批」。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Off by default. ask_poki lets external agents hand repetitive tasks to Poki’s built-in agent. Takes effect next launch. Auto-Classifier is in Poki › Rules."
+            "value" : "Off by default. ask_poki lets external agents hand repetitive tasks to Poki’s built-in agent. Takes effect next launch. Auto-Classifier is in Poki › Approvals."
           }
         }
       }
@@ -17851,24 +17835,24 @@
         }
       }
     },
-    "Agents that use Poki’s hands" : {
+    "Agents controlling this iPhone via Poki" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 Poki 双手的智能体"
+            "value" : "通过 Poki 控制此 iPhone 的智能体"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Agents that use Poki’s hands"
+            "value" : "Agents controlling this iPhone via Poki"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 Poki 雙手的智慧體"
+            "value" : "透過 Poki 控制此 iPhone 的智慧體"
           }
         }
       }
@@ -18198,7 +18182,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "活动"
+            "value" : "活动记录"
           }
         },
         "en" : {
@@ -18210,7 +18194,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "活動"
+            "value" : "活動記錄"
           }
         }
       }
@@ -19831,28 +19815,6 @@
         }
       }
     },
-    "Rules" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "规则"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rules"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "規則"
-          }
-        }
-      }
-    },
     "An agent saves a routine after a task that worked. The next time it repeats the task in one step and stops where the screen differs. Swipe a routine to forget it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -21009,24 +20971,24 @@
         }
       }
     },
-    "Brain" : {
+    "Models" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "大脑"
+            "value" : "模型"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Brain"
+            "value" : "Models"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "大腦"
+            "value" : "模型"
           }
         }
       }
@@ -21091,24 +21053,24 @@
         }
       }
     },
-    "Phone control, pairing, typing" : {
+    "Touch, typing, and pairing" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "手机操作、配对、输入"
+            "value" : "触控、输入与配对"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Phone control, pairing, typing"
+            "value" : "Touch, typing, and pairing"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "手機操作、配對、輸入"
+            "value" : "觸控、輸入與配對"
           }
         }
       }
@@ -24977,90 +24939,68 @@
         }
       }
     },
-    "Hands" : {
+    "Automation On" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "双手"
+            "value" : "自动化已开启"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hands"
+            "value" : "Automation On"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "雙手"
+            "value" : "自動化已開啟"
           }
         }
       }
     },
-    "Hands On" : {
+    "Automation is on" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "双手已开启"
+            "value" : "自动化已开启"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hands On"
+            "value" : "Automation is on"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "雙手已開啟"
+            "value" : "自動化已開啟"
           }
         }
       }
     },
-    "Hands are on" : {
+    "General" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "双手已开启"
+            "value" : "通用"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hands are on"
+            "value" : "General"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "雙手已開啟"
-          }
-        }
-      }
-    },
-    "Health" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "状态检查"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Health"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "狀態檢查"
+            "value" : "一般"
           }
         }
       }
@@ -25102,19 +25042,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“Poki › 大脑”中添加 OpenCode Go API 密钥。"
+            "value" : "请在“Poki › 模型”中添加 OpenCode Go API 密钥。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請在「Poki › 大腦」中新增 OpenCode Go API 金鑰。"
+            "value" : "請在「Poki › 模型」中新增 OpenCode Go API 金鑰。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add your OpenCode Go API key in Poki › Brain."
+            "value" : "Add your OpenCode Go API key in Poki › Models."
           }
         }
       }
@@ -30040,6 +29980,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的電腦"
+          }
+        }
+      }
+    },
+    "Automation Banner" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化横幅"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動化橫幅"
           }
         }
       }

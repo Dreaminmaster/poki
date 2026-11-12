@@ -453,7 +453,7 @@ extension SetupIssueHint {
         if case .offline = model.relayStatus {
             return SetupIssueHint(
                 message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
-                link: String(localized: "Guests ›"),
+                link: String(localized: "External Agents ›"),
                 target: .agents
             )
         }
@@ -1195,7 +1195,7 @@ struct ComposerInputView: View {
         let state = handsNow
         return Toggle(isOn: Binding(get: { state == .on }, set: setHands)) {
             switch state {
-            case .on: Label("Hands On", systemImage: "hand.tap.fill")
+            case .on: Label("Automation On", systemImage: "hand.tap.fill")
             case .resting: Label("Resting", systemImage: "moon.zzz.fill")
             case .off: Label("Off", systemImage: "power")
             }

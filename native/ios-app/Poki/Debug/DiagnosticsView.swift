@@ -94,9 +94,9 @@ struct LogView: View {
     }
 }
 
-/// Poki › Health › Testing Options: switches being tried, all in one place, and 752's Diagnostics
+/// Poki › General › Testing Options: switches being tried, all in one place, and 752's Diagnostics
 /// tools for testers: the automation path switch with its probes, and the background hold experiment.
-/// Ask Before Sensitive Steps and the Auto-Classifier are in Poki › Rules.
+/// Ask Before Sensitive Steps and the Auto-Classifier are in Poki › Approvals.
 struct TestingOptionsView: View {
     @Environment(AppModel.self) private var model
     @StateObject private var hold = Hold()
@@ -108,7 +108,7 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Rules.")
+                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Poki › Approvals.")
             }
             // The in-process path's switch and probes (ESP-173, ESP-175).
             InProcessSection()
