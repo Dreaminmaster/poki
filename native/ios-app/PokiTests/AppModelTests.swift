@@ -17,13 +17,15 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     private let lock = NSLock()
     private var open = false
     private var gate: DispatchSemaphore?
+    private var heldOpenStarted = false
     private var answer: [String: Any]?
     /// The next open waits until `answer(_:)`.
-    func holdNextOpen() { lock.withLock { gate = DispatchSemaphore(value: 0) } }
+    func holdNextOpen() { lock.withLock { gate = DispatchSemaphore(value: 0); heldOpenStarted = false } }
+    var isHoldingOpen: Bool { lock.withLock { gate != nil && heldOpenStarted } }
     /// Lets a held open go on, with this answer instead of opening (nil opens).
     func answer(_ result: [String: Any]?) { lock.withLock { answer = result; gate?.signal(); gate = nil } }
     func prepare() -> [String: Any] {
-        if let held = lock.withLock({ gate }) {
+        if let held = lock.withLock({ () -> DispatchSemaphore? in heldOpenStarted = gate != nil; return gate }) {
             held.wait()
             if let given = lock.withLock({ () -> [String: Any]? in defer { answer = nil }; return answer }) { return given }
         }
@@ -256,12 +258,14 @@ final class InProcessPasscodeTests: XCTestCase {
     private var saved: (relay: String?, relayEnabled: Any?, setup: SetupState)!
     private var model: AppModel!
     private var session: FakeAutomation!
+    private var launcher: FakeLauncher!
 
     override func setUp() async throws {
         try XCTSkipUnless(AutomationPath.current == .inProcess, "Poki Runner path")
         saved = (UserDefaults.standard.string(forKey: "relayAddress"), UserDefaults.standard.object(forKey: "relayEnabled"), SetupState.load())
         session = FakeAutomation()
-        model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: session)
+        launcher = FakeLauncher()
+        model = AppModel(launcher: launcher, pairer: FakePairing(), automation: session)
         model.loopback.simulate(.working(ms: 9))
         model.setup.loopback = .proxy
         XCTAssertTrue(model.setRelay("https://relay.invalid"))
@@ -282,6 +286,57 @@ final class InProcessPasscodeTests: XCTestCase {
         let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
         done.expectationDescription = what
         await fulfillment(of: [done], timeout: 5)
+    }
+
+    /// On cellular the launcher reports `local_ddi`: the image is mounted, and nothing reached the
+    /// phone's developer services. Holds the session's open that this starts.
+    private func handOverToTheMountedImage() async {
+        model.wakeRunner()
+        // On the simulator the launcher is WebDriverAgent on the Mac; its answer comes first.
+        await waitFor("the simulator's runner check answered") { ["failed", "running"].contains(self.model.runner.state) }
+        await withCheckedContinuation { done in model.closeInProcess("a new task on cellular") { done.resume() } }
+        model.loopback.simulate(.noAnswer)
+        model.setup.developerMode = false
+        model.setup.uiAutomation = false
+        session.holdNextOpen()
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        await waitFor("the local open is under way") { self.session.isHoldingOpen }
+    }
+
+    /// ESP-448: set up on Wi-Fi, then a new task on cellular. Automation is ready only once the
+    /// session really opens, and the launcher's hand-over does not count as a pairing check.
+    func testOnCellularTheMountedImageCountsOnceTheSessionOpens() async {
+        let lastPairingCheck = model.pairingVerifiedAt
+        await handOverToTheMountedImage()
+        XCTAssertEqual(model.pairingVerifiedAt, lastPairingCheck, "nothing reached the phone's pairing service")
+        XCTAssertFalse(model.isDone(.loopback))
+        XCTAssertFalse(model.setup.developerMode)
+        session.answer(nil)
+        await waitFor("the local session opens") { self.model.isDone(.loopback) }
+        XCTAssertFalse(model.loopback.isWorking)
+        XCTAssertEqual(model.host.currentRunner.describe, "running")
+        XCTAssertTrue(model.setup.developerMode)
+        XCTAssertTrue(model.setup.uiAutomation)
+        XCTAssertEqual(model.pairingVerifiedAt, lastPairingCheck)
+    }
+
+    /// A local open that fails waits for the loopback; when it answers again the launcher goes the
+    /// normal way once, as before the hand-over.
+    func testAFailedLocalOpenRetriesOverTheLoopbackOnce() async {
+        await handOverToTheMountedImage()
+        let restarts = launcher.restarts
+        session.answer(["ok": false, "code": "missing_framework"])
+        await waitFor("the local failure is reported") { self.model.host.currentRunner.describe.contains("missing_framework") }
+        XCTAssertEqual(launcher.restarts, restarts)
+        model.loopback.simulate(.working(ms: 9))
+        XCTAssertEqual(launcher.restarts, restarts + 1)
+
+        session.holdNextOpen()
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        await waitFor("the next local open is under way") { self.session.isHoldingOpen }
+        session.answer(["ok": false, "code": "missing_framework"])
+        await waitFor("the second local failure is reported") { self.model.host.currentRunner.describe.contains("missing_framework") }
+        XCTAssertEqual(launcher.restarts, restarts + 1, "one retry while the loopback stays up")
     }
 
     func testAPasscodeWaitAsksTheOwnerAndTellsTheAgentWhoMustEnterIt() async {

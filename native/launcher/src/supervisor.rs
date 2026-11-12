@@ -71,6 +71,8 @@ pub struct Launcher {
     /// How often the runner is checked, and after how many misses it is launched again.
     pub check_every: Duration,
     pub misses_allowed: u32,
+    /// Whether the developer disk image is mounted, as the app's own process sees it.
+    pub mounted_locally: fn() -> bool,
 }
 
 impl Launcher {
@@ -85,6 +87,7 @@ impl Launcher {
             thread: Mutex::new(None),
             check_every: Duration::from_secs(5),
             misses_allowed: 2,
+            mounted_locally: ddi::mounted_locally,
         }
     }
 

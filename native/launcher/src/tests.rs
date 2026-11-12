@@ -74,6 +74,44 @@ fn without_the_loopback_it_waits_for_the_network_and_keeps_trying() {
     std::fs::remove_file(&path).unwrap();
 }
 
+/// Starts an in-process launcher against a loopback that refuses every connection (cellular only, as
+/// in GitHub issue 35) and returns what it said.
+fn in_process_without_the_loopback(mounted_locally: fn() -> bool, until: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+    let _port = PORT_49152_TAKEN.lock().unwrap_or_else(|e| e.into_inner());
+    let path = temp(&format!("rp-cellular-{}.plist", mounted_locally()));
+    std::fs::write(&path, RpPairingFile::generate("Poki").to_bytes()).unwrap();
+    let config: Config = serde_json::from_value(json!({"pairing_file": path, "device_address": "127.0.0.1", "in_process": true})).unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let mut launcher = Launcher::new(config, Box::new(move |e| sink.lock().unwrap().push(e)));
+    launcher.mounted_locally = mounted_locally;
+    let launcher = Arc::new(launcher);
+    launcher.clone().start();
+    wait_for(&events, 5, until);
+    launcher.stop();
+    std::fs::remove_file(&path).unwrap();
+    events.lock().unwrap().clone()
+}
+
+/// ESP-448: set up on Wi-Fi, then a new task on cellular. The image is still mounted, so the app's
+/// own session needs no loopback: the launcher hands over to it instead of waiting for the network.
+#[test]
+fn with_the_image_mounted_a_refused_loopback_starts_the_local_session() {
+    let events = in_process_without_the_loopback(|| true, |e| e.iter().any(|v| v["state"] == "running"));
+    let running = events.iter().find(|v| v["state"] == "running").unwrap_or_else(|| panic!("no running state: {events:?}"));
+    assert_eq!(running["code"], "local_ddi", "{running}");
+    assert_eq!(running["runner"], "in-process", "{running}");
+    assert!(!events.iter().any(|v| v["state"] == "waiting_network"), "{events:?}");
+}
+
+/// Mounting the image needs the developer services, so without it the loopback error stands.
+#[test]
+fn without_the_image_a_refused_loopback_still_waits_for_the_network() {
+    let events = in_process_without_the_loopback(|| false, |e| e.iter().any(|v| v["state"] == "waiting_network"));
+    assert!(events.iter().any(|v| v["state"] == "waiting_network" && v["code"] == "loopback" && v["fix"] == LOOPBACK_FIX), "{events:?}");
+    assert!(!events.iter().any(|v| v["state"] == "running"), "{events:?}");
+}
+
 /// GitHub issue 69: the loopback takes the connection, then the phone's remote pairing service never
 /// answers. Developer Mode is on (it cannot go off without a restart), so that is not the fix, and
 /// the pairing was never checked, so the app must not read it as refused.
