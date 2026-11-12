@@ -52,9 +52,10 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
     /// reaches `Runner`'s watchdog through /status, which restarts the runner past this time, and the
     /// new session (POST /session) then lets requests through again.
     var heldFor: Double = 60
-    /// The error of a request refused because an earlier one is still held: `Runner` does not take this
-    /// answer for the runner being through with what it was finishing.
-    public static let heldError = "earlier request unanswered"
+    /// A request on the queue is held. Answers given meanwhile (refusals, and what this process answers
+    /// alone, such as the lock state every look asks) are not the queue being through with it, as an
+    /// answer from WDA's one queue would be: `Runner` keeps its stall, and with it its watchdog.
+    public var holdsARequest: Bool { state.value.held != nil }
     /// Requests answered in this process alone, never through testmanagerd: served while a request is held.
     static let local: Set<String> = ["GET /wda/screen", "GET /wda/locked", "POST /appium/settings", "POST /session", "DELETE /session",
                                      "POST /wda/getPasteboard", "POST /wda/setPasteboard",
@@ -100,8 +101,8 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
         return (200, (["value": value] as JSON).data())
     }
 
-    private static func refused(_ message: String, error: String = "unknown error") -> (status: Int, body: Data) {
-        (500, (["value": ["error": .string(error), "message": .string(message)]] as JSON).data())
+    private static func refused(_ message: String) -> (status: Int, body: Data) {
+        (500, (["value": ["error": "unknown error", "message": .string(message)]] as JSON).data())
     }
 
     public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
@@ -136,7 +137,7 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
                 }
                 let holder = holding(s, at: began)
                 if !picture, !Self.local.contains(key), let holder {
-                    continuation.resume(returning: Self.refused("not sent: the app in front has not answered \(holder.what) for \(Int(holder.seconds.rounded())) s (its main thread is busy), and the phone serves one such request at a time; nothing is read or touched until it answers, so nothing lands late", error: Self.heldError))
+                    continuation.resume(returning: Self.refused("not sent: the app in front has not answered \(holder.what) for \(Int(holder.seconds.rounded())) s (its main thread is busy), and the phone serves one such request at a time; nothing is read or touched until it answers, so nothing lands late"))
                     return
                 }
                 request.whileHeld = holder != nil

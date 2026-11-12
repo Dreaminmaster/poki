@@ -237,8 +237,9 @@ public final class Runner: @unchecked Sendable {
         state.update { $0.misses = 0 }
         let parsed = (try? JSON.parse(result.body)) ?? (result.body.isEmpty ? .object([:]) : ["value": .string(String(decoding: result.body, as: UTF8.self))])
         let value = parsed["value"] ?? parsed
-        // An answer is the runner through with what it was finishing, unless it says that is still held.
-        if queued, value["error"]?.string != LocalRunner.heldError { stall.value = nil }
+        // An answer is the runner through with what it was finishing, unless Poki's own process still
+        // holds that request (it answers others beside it).
+        if queued, (transport as? LocalRunner)?.holdsARequest != true { stall.value = nil }
         if let code = value["error"]?.string {
             let message = (value["message"]?.string ?? code).split(separator: "\n").first.map(String.init) ?? code
             throw RunnerError(message: "the runner refused \(method) \(Self.short(path)): \(message)", delivery: .notSent, status: result.status, code: code)
