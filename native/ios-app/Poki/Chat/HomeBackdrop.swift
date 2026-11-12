@@ -61,6 +61,48 @@ struct HomeBackdrop: View {
     }
 }
 
+/// The home light's breathing (ESP-470: the owner asked for a breathing like the Gemini app's, on
+/// the colours as they are), its settings in one place to tune on a phone.
+///
+/// Once a `period` the band of light rises and settles: the lowest of the three middle rows by
+/// `rise` of the page's height, the two above it by less, all together. The lower blues and the
+/// bottom edge drift sideways by up to `flow` of the page's width: each row as a piece at its own
+/// pace, and each point a little on its own, so the colours slide past each other rather than sway in
+/// step. The band also dims and brightens by `glow`, a quarter breath after it rises, so it does not
+/// swell as one block. No two paces divide evenly, so the light never comes back to the same shape in
+/// step and is never seen to start again. The top row and the four corners never move; the side
+/// points only slide along their edge.
+enum HomeBreath {
+    /// Seconds for one breath.
+    static let period: Double = 7.5
+    /// How far the band rises and settles, as a share of the page's height.
+    static let rise: Float = 0.11
+    /// How far the lower blues drift sideways at most, as a share of the page's width.
+    static let flow: Float = 0.15
+    /// How much the band dims at the bottom of its breath, as a share of its strength.
+    static let glow: Double = 0.09
+
+    static let motion: [PointMotion] =
+        PointMotion.breath(row: 1, rise * 0.45) + PointMotion.breath(row: 2, rise * 0.8) + PointMotion.breath(row: 3, rise)
+        + sway(row: 2, frequency: 0.62, phase: 0, own: [(0.83, 1.0), (0.91, 3.0)])
+        + sway(row: 3, frequency: 0.71, phase: 2.0, own: [(0.77, 5.0), (0.87, 2.4)])
+        + sway(row: 4, frequency: 0.53, phase: 4.1, own: [(0.67, 0.7), (0.59, 3.6)])
+        + [PointMotion(index: 9, axis: .y, amplitude: 0.02, frequency: 0.79, phase: 1.0),
+           PointMotion(index: 10, axis: .y, amplitude: 0.02, frequency: 0.93, phase: 3.0),
+           PointMotion(index: 13, axis: .y, amplitude: 0.02, frequency: 0.69, phase: 5.0),
+           PointMotion(index: 14, axis: .y, amplitude: 0.02, frequency: 0.97, phase: 2.4)]
+
+    /// The middle two points of a row going sideways: three quarters of `flow` together, the last
+    /// quarter each at its own pace.
+    private static func sway(row: Int, frequency: Double, phase: Double, own: [(frequency: Double, phase: Double)]) -> [PointMotion] {
+        own.enumerated().flatMap { column, alone in
+            let index = row * LightMesh.columns + 1 + column
+            return [PointMotion(index: index, axis: .x, amplitude: flow * 0.75, frequency: frequency, phase: phase),
+                    PointMotion(index: index, axis: .x, amplitude: flow * 0.25, frequency: alone.frequency, phase: alone.phase)]
+        }
+    }
+}
+
 /// One of the two grids of the design's final table: four points across, five down.
 struct LightMesh {
     /// Each row's height at its four points, from the top.
@@ -73,19 +115,16 @@ struct LightMesh {
     var period: Double
     /// How each point moves about its place at full drift.
     var motion: [PointMotion]
+    /// How much the whole mesh dims at the bottom of its breath at full drift, a quarter turn after
+    /// the motion at `frequency` 1.
+    var glow: Double = 0
 
     static let columns = 4
     /// Where the points stand across the page: the two middle rows are a little out of line on
     /// purpose, so the edge of the light is not a regular arc.
     private static let across: [[Float]] = [[0, 0.34, 0.67, 1], [0, 0.34, 0.67, 1], [0, 0.32, 0.70, 1], [0, 0.36, 0.67, 1], [0, 0.34, 0.67, 1]]
 
-    /// The home page (sections 1 and 4), breathing once in 10 seconds (ESP-470: the owner asked for a
-    /// slow breathing like the Gemini app's, on the colours as they are). The breath lifts the three middle rows together and lets them
-    /// settle, the lower ones further, by up to 4.5 % of the page. The blues of the lower rows and the
-    /// bottom edge drift sideways by up to 7 % of the page, each point at its own pace, once in 11 to
-    /// 19 seconds; as no two paces divide evenly the light never comes back to the same shape in step,
-    /// so there is no moment where it is seen to start again. The top row and the four corners never
-    /// move, and the side points only slide along their edge.
+    /// The home page (sections 1 and 4), breathing as `HomeBreath` says.
     static let home = LightMesh(
         rows: [[0, 0, 0, 0], [0.42, 0.44, 0.41, 0.43], [0.56, 0.60, 0.55, 0.59], [0.76, 0.80, 0.75, 0.81], [1, 1, 1, 1]], darkDrop: 0.02,
         light: [0xF5F7FA, 0xF5F7FA, 0xF5F7FA, 0xF5F7FA,
@@ -98,19 +137,7 @@ struct LightMesh {
                0x06101F, 0x071226, 0x08102A, 0x070C1C,
                0x0B3C8A, 0x0C4FC0, 0x173FB0, 0x14286E,
                0x1260D8, 0x1A6FF0, 0x2056E0, 0x2440B8],
-        period: 10,
-        motion: PointMotion.breath(row: 1, 0.02) + PointMotion.breath(row: 2, 0.035) + PointMotion.breath(row: 3, 0.045) + [
-            PointMotion(index: 9, axis: .x, amplitude: 0.05, frequency: 0.62),
-            PointMotion(index: 10, axis: .x, amplitude: 0.05, frequency: 0.77, phase: 2.1),
-            PointMotion(index: 13, axis: .x, amplitude: 0.06, frequency: 0.71, phase: 4.0),
-            PointMotion(index: 14, axis: .x, amplitude: 0.06, frequency: 0.53, phase: 1.3),
-            PointMotion(index: 17, axis: .x, amplitude: 0.07, frequency: 0.58, phase: 3.2),
-            PointMotion(index: 18, axis: .x, amplitude: 0.07, frequency: 0.67, phase: 5.1),
-            PointMotion(index: 9, axis: .y, amplitude: 0.015, frequency: 0.83, phase: 1.0),
-            PointMotion(index: 10, axis: .y, amplitude: 0.015, frequency: 0.91, phase: 3.0),
-            PointMotion(index: 13, axis: .y, amplitude: 0.02, frequency: 0.69, phase: 5.0),
-            PointMotion(index: 14, axis: .y, amplitude: 0.02, frequency: 0.87, phase: 2.4),
-        ])
+        period: HomeBreath.period, motion: HomeBreath.motion, glow: HomeBreath.glow)
 
     /// The conversation (section 10): the home's bottom colours taken 85 % of the way back to the
     /// page, starting three quarters of the way down. While Poki works, the middle of the third and
@@ -146,6 +173,11 @@ struct LightMesh {
         let turn = t * 2 * .pi / period
         for move in motion { move.apply(to: &points[move.index], at: turn, drift: Float(drift)) }
         return points
+    }
+
+    /// How strongly the mesh shows at time `t`: 1 at rest, down to 1 - 2 × `glow` at full drift.
+    func strength(at t: TimeInterval, drift: Double) -> Double {
+        1 - drift * glow * (1 - cos(t * 2 * .pi / period - .pi / 2))
     }
 }
 
@@ -197,6 +229,7 @@ private struct DriftingMesh: View, Animatable {
                          points: mesh.points(at: t, drift: drift, dark: dark),
                          colors: (dark ? mesh.dark : mesh.light).map { Color(hex: $0) },
                          smoothsColors: true, colorSpace: .perceptual)
+                .opacity(mesh.strength(at: t, drift: drift))
         }
     }
 }
@@ -211,7 +244,7 @@ enum BackdropLog {
     private static var flushed: TimeInterval = 0
     static func note(_ period: Double, _ now: TimeInterval, _ drift: Double) {
         guard on, drift > 0 else { return }
-        lines.append(String(format: "%.4f period %.0f drift %.3f", now, period, drift))
+        lines.append(String(format: "%.4f period %.1f drift %.3f", now, period, drift))
         guard now - flushed > 0.5, let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
         flushed = now
         try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("backdrop.log"), atomically: true, encoding: .utf8)
