@@ -17,6 +17,9 @@ struct ChatEntry: Identifiable, Equatable, Codable {
         case step(String, ok: Bool?)
         /// An outside agent's request to Poki (`ask_poki`), on the requester's side.
         case request(String, from: String)
+        /// Poki's browser, where a task began using it: above the answer the task gives. The live page
+        /// while it is this conversation's page in use, then the site it showed.
+        case browser(BrowserVisit)
     }
     let id: UUID
     var kind: Kind
@@ -59,6 +62,12 @@ enum ChatNote: Equatable, Codable {
     case approval(ApprovalNote)
 }
 
+/// What Poki's browser showed in a task, for its card once the live page is no longer this card's.
+struct BrowserVisit: Equatable, Codable {
+    var host = ""
+    var title = ""
+}
+
 /// One approval in the chat: the step, why it needed an answer, who answered and what they said.
 struct ApprovalNote: Equatable, Codable {
     enum State: String, Codable { case asking, allowed, refused, expired }
@@ -85,6 +94,8 @@ struct ApprovalNote: Equatable, Codable {
 @Observable
 final class ChatModel {
     private(set) var entries: [ChatEntry] = [] { didSet { persist() } }
+    /// The browser card that shows the live page: the one this conversation's latest browsing task added.
+    private(set) var liveBrowser: UUID?
     private(set) var running = false
     /// The model has the turn: nothing from it yet since the owner's message or the last tool answer
     /// (the chat shows the typing bubble).
@@ -554,6 +565,7 @@ final class ChatModel {
             return PokiCore.ToolAnswer(text: Harness.resultRecorded, jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):
             if let refusal = selectRoute(.web) { return refusal }
+            showBrowser(opening: name == "web_open")
             return await WebTools.perform(name, arguments: call.arguments)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
@@ -688,8 +700,30 @@ final class ChatModel {
         entries.append(entry)
     }
 
+    /// The task's first browser step puts the browser's card in the conversation at that point, so it
+    /// comes before the answer the browsing leads to. One card per task; the last task's card stops
+    /// being the live one and keeps what it showed.
+    private func showBrowser(opening: Bool) {
+        guard opening || PokiBrowser.shared.isOpen else { return }
+        let task = entries.lastIndex { switch $0.kind { case .you, .request: true; default: false } } ?? -1
+        guard !entries[(task + 1)...].contains(where: { if case .browser = $0.kind { true } else { false } }) else { return }
+        keepBrowserVisit()
+        let card = ChatEntry(.browser(BrowserVisit()))
+        entries.append(card)
+        liveBrowser = card.id
+    }
+
+    /// The live card keeps the site and the page's title, for when it shows them in place of the page:
+    /// in a later task, after Close and in the saved conversation.
+    private func keepBrowserVisit() {
+        let browser = PokiBrowser.shared
+        guard let id = liveBrowser, let i = entries.firstIndex(where: { $0.id == id }), browser.isOpen else { return }
+        entries[i].kind = .browser(BrowserVisit(host: browser.host, title: browser.title))
+    }
+
     /// The task ended: a step still marked current was the last one done.
     private func finishPlan() {
+        keepBrowserVisit()
         updatePlan { steps in for i in steps.indices where steps[i].state == .current { steps[i].state = .done } }
         guard let id = planID, let i = entries.firstIndex(where: { $0.id == id }), entries[i].ended == nil else { return }
         entries[i].ended = Date()
