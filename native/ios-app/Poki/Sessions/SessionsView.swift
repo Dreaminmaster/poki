@@ -130,15 +130,30 @@ struct SessionsView: View {
     }
 
 
-    /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for you.
+    /// What its last run ended in, when that was not well: failed or stopped. Nothing for a conversation
+    /// still running, one that finished, or one that has not run.
+    private func lastRunProblem(_ session: SavedSession) -> SavedSession.Outcome? {
+        guard !session.live, let outcome = session.outcome, outcome != .done else { return nil }
+        return outcome
+    }
+
+    /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for
+    /// you, or else a quiet mark when its last run failed or was stopped. Your turn comes first: it is the
+    /// one thing in the list to act on.
     private func row(_ session: SavedSession) -> some View {
         let needs = needsYou(session)
+        let trouble = needs ? nil : lastRunProblem(session)
         let app = app(session)
         return Button { open(session) } label: {
             HStack(spacing: 12) {
                 ConversationTitle(session: session, app: app)
                 Spacer(minLength: 8)
                 if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
+                else if let trouble {
+                    Image(systemName: trouble == .failed ? "exclamationmark.circle.fill" : "pause.circle.fill")
+                        .font(.system(size: 14)).foregroundStyle(trouble == .failed ? Tint.red : Color.secondary)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 48)
             .background(ground(session))
@@ -150,7 +165,8 @@ struct SessionsView: View {
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
-        .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil]
+        .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil,
+                                                         trouble.map { $0 == .failed ? String(localized: "Failed") : String(localized: "Stopped") }]
             .compactMap { $0 }.joined(separator: ", ")))
         // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
