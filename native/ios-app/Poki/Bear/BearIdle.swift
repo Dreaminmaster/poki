@@ -349,8 +349,11 @@ struct BearIdleJoints {
         let shift = Self.shift(pose.gaze)
         for eye in eyes where eye < joints.count { joints[eye].translation += shift }
         if let (upper, fore) = arms, joints.count > max(upper.right, upper.left, fore.right, fore.left) {
-            joints[fore.left].rotation *= simd_quatf(angle: pose.lower.x, axis: [1, 0, 0])
-            joints[fore.right].rotation *= simd_quatf(angle: pose.lower.y, axis: [1, 0, 0])
+            // Only as far as a paw rests: turned down while it is up, it would go into the head. The right
+            // paw going up to rub is still beside the lowered head, and keeps its lowering.
+            let resting = max(1 - pose.arms, 0)
+            joints[fore.left].rotation *= simd_quatf(angle: pose.lower.x * min(max(resting - pose.raise, 0), 1), axis: [1, 0, 0])
+            joints[fore.right].rotation *= simd_quatf(angle: pose.lower.y * min(resting, 1), axis: [1, 0, 0])
             let bend = Self.cheer.bend * pose.arms, reach = Self.cheer.reach * pose.arms
             joints[upper.left].rotation *= simd_quatf(angle: -0.6 * (pose.reach + reach), axis: [1, 0, 0])
             joints[fore.left].rotation *= simd_quatf(angle: -1.4 * (pose.bend + bend), axis: [0, 0, 1])
