@@ -54,6 +54,8 @@ Each line is one JSON event with an `at` time:
 - `{"event":"result","ok":true,"check":{...}}` is the last line only when the checks passed without manual steps left unverified.
 - A result with `ok:false` and `unverified` exits with code 3. Relay every entry's `say`, including instructions from skipped steps. Have the user finish them in Poki and confirm each result. Report what was manually confirmed and what remains unverified; do not call the phone ready just because the app was installed. Older Poki Setup without Xcode can require manual model-key entry and loopback setup.
 
+Some helper prompts still name older pages. After relaying the prompt, give the 0.4.0 path: Setup > Connect to this iPhone means Settings > Automation > Setup > Local Connection; Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
+
 Several iPhones plugged in: list them with `node bin/install-iphone.mjs phones` and add `--udid <udid>`.
 
 ## The steps
@@ -123,7 +125,7 @@ Poki reaches the iPhone's developer services at 10.7.0.1, and a VPN app on the p
 Tell the user these after the result:
 
 - **Poki Setup on the Mac renews Poki.** The installer runs Poki Setup's helper only while it runs. Renewal on the Mac is done by the Poki Setup app while it is open (closing its window leaves it in the menu bar): every 6 hours it renews each iPhone this Mac set up that has 2 days of signing left or fewer, with the Apple Account password it kept. The Mac must be awake and the iPhone reachable and trusted. USB is the fallback when network discovery on the same Wi-Fi does not find it. Ask the user to open Poki Setup and keep it open, and not to sign out of it or delete it.
-- **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > General > Updates > Signing Options > Apple Account, Poki prepares a refreshed build 3 days before signing ends and asks the user to tap Install.
+- **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > General > Updates > Signing Options > Apple Account, Poki prepares a refreshed build 3 days before signing ends and asks the user to tap Install Refresh or Install Update.
 - **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and refreshes.
 
 With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below for renewal too; keep the same version if only renewing an expired signature. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
@@ -147,7 +149,7 @@ The source audit supports this restricted external-build path; an end-to-end, se
 
 ## When Poki's own update stalls
 
-After the user taps Install in Poki (Settings > General > Updates), Poki can stay on "Finishing the update: Poki will close to finish it", after the alert "Poki Will Close to Finish the Update". Poki shows this once iOS has begun installing the new copy, and iOS finishes only after the old Poki leaves the screen. For the reported 0.4.0 case where installation has succeeded, tell the user the new version is installed and to swipe Poki away in the app switcher and reopen it. This closes the process without deleting the app or its data. The status text alone is not proof that installation succeeded; always read back the version. Done when Settings > General > Updates > Poki Version shows the new build. If it still shows the old build a minute later, or Poki does not open, follow "Update an installed Poki".
+After the user taps Install Update or Download and Install Update in Poki (Settings > General > Updates), Poki can stay on "Finishing the update: Poki will close to finish it", after the alert "Poki Will Close to Finish the Update". Poki shows this once iOS has begun installing the new copy, and iOS finishes only after the old Poki leaves the screen. For the reported 0.4.0 case where installation has succeeded, tell the user the new version is installed and to swipe Poki away in the app switcher and reopen it. This closes the process without deleting the app or its data. The status text alone is not proof that installation succeeded; always read back the version. Done when Settings > General > Updates > Poki Version shows the new build. If it still shows the old build a minute later, or Poki does not open, follow "Update an installed Poki".
 
 ## When a step fails
 
@@ -191,7 +193,7 @@ Before an upgrade, ask the user to save their work and leave Poki for the Home S
 
 ## Without Node.js, or on Windows
 
-Poki Setup 0.2.2 and later carry their own command line tool, which needs no checkout and no Node.js: `"/Applications/Poki Setup.app/Contents/MacOS/poki-setup"` on a Mac (or under `~/Applications`), `"$env:LOCALAPPDATA\Poki Setup\poki-setup.exe"` on Windows. When Node.js 24 is missing (`node_too_old`) or the computer runs Windows, ask the user to install Poki Setup from https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest and open it once, then run `"<tool>" prompt` and follow what it prints. In short: `"<tool>" next --json` lists what is done and what is next, with `who`, `command` and `say` for each step; exit code 2 means a person has to act and 3 that Apple's sign-in code is needed. The person signs in by running `"<tool>" login <email> --keep-password` in their own terminal.
+Poki Setup 0.2.2 and later carry their own command line tool, which needs no checkout and no Node.js: `"/Applications/Poki Setup.app/Contents/MacOS/poki-setup"` on a Mac (or under `~/Applications`), `"$env:LOCALAPPDATA\Poki Setup\poki-setup.exe"` on Windows. When Node.js 24 is missing (`node_too_old`) or the computer runs Windows, ask the user to install Poki Setup from https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest and open it once, then, for a first install, run `"<tool>" prompt` and follow what it prints. For an existing app, return to "Update an installed Poki" and apply its preservation gate before any command that installs or renews. If this tool lacks the documented read-only commands or `renew`, stop and report the unsupported build. In short: `"<tool>" next --json` lists what is done and what is next, with `who`, `command` and `say` for each step; exit code 2 means a person has to act and 3 that Apple's sign-in code is needed. The person signs in by running `"<tool>" login <email> --keep-password` in their own terminal.
 
 ## Read Poki's records on the Mac
 
