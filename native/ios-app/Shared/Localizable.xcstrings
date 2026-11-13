@@ -16239,6 +16239,22 @@
         }
       }
     },
+    "Ask All" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部询问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部詢問"
+          }
+        }
+      }
+    },
     "Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider." : {
       "localizations" : {
         "zh-Hans" : {
@@ -21975,22 +21991,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "置頂"
-          }
-        }
-      }
-    },
-    "Ask for Everything" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部询问"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部詢問"
           }
         }
       }
@@ -29289,7 +29289,7 @@
         }
       }
     },
-    "Ask for Everything. Nothing is approved automatically. Each request needs your answer." : {
+    "Ask All. Nothing is approved automatically. Each request needs your answer." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
