@@ -13,8 +13,14 @@ import SwiftUI
 /// What an account can power is worked out from its type: any wired provider can run the text chat;
 /// live voice needs OpenAI's Realtime API, so only an OpenAI API key can run it.
 struct ModelSettingsView: View {
+    /// Opened from Talk with Poki without a key: the OpenAI key's form at once, or Live Voice when the
+    /// key is there but Live Voice is turned off.
+    var opensVoiceKey = false
     @State private var adding = false
     @State private var version = ModelKeys.saved
+    @State private var enteringVoiceKey = false
+    @State private var showingLiveVoice = false
+    @State private var openedForVoice = false
 
     var body: some View {
         List {
@@ -25,17 +31,6 @@ struct ModelSettingsView: View {
                 Text("In Use").textCase(nil)
             } footer: {
                 Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
-            }
-
-            Section {
-                NavigationLink(value: DetailsRoute.voice) {
-                    LabeledContent {
-                        Text(VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? "Live Voice" : "Dictation Only")
-                    } label: {
-                        SettingsLabel("Voice", systemImage: "waveform")
-                    }
-                }
-                .accessibilityIdentifier("details.voice")
             }
 
             // With no account yet the card above has Add Account, and an empty group would only be a heading.
@@ -61,6 +56,13 @@ struct ModelSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
+        .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
+        .navigationDestination(isPresented: $showingLiveVoice) { LiveVoiceFeature() }
+        .task {
+            guard opensVoiceKey, !openedForVoice else { return }
+            openedForVoice = true
+            if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if !VoiceDirect.enabled { showingLiveVoice = true }
+        }
     }
 }
 

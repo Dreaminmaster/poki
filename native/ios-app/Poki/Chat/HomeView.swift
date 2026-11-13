@@ -51,8 +51,9 @@ enum HomeMotion {
 // MARK: Poki's picture
 
 extension PokiMood {
-    /// The faces the three-dimensional bear has so far: ready, and at work. The others stay flat.
-    var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking].contains(self) }
+    /// The faces the three-dimensional bear has so far: ready, at work, and done, where it waves (its
+    /// one happy gesture). The others stay flat.
+    var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking, .done].contains(self) }
 }
 
 /// Poki's round picture: the bear's face for its state, on a pale blue ground. Ready
@@ -70,7 +71,7 @@ struct PokiPortrait: View {
             Circle().fill(Tint.portrait)
             // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
             // cuts it at the chest.
-            ModelBear(modelled: mood.modelled, side: side * 50 / 56, pokes: pokes) {
+            ModelBear(modelled: mood.modelled, side: side * 50 / 56, pokes: pokes, cheer: mood == .done) {
                 BlinkingFace(mood: mood, side: side * 50 / 56)
             }
             .frame(width: side * 50 / 56, height: side * 50 / 56)
@@ -82,9 +83,10 @@ struct PokiPortrait: View {
     }
 }
 
-/// Poki's picture as it shows on a page: in a white ring with a soft blue shadow (boards 定稿 07 and
-/// 头像位置 丙). It is drawn at the home page's 80 points and scaled, so one picture, and one
-/// three-dimensional bear, goes from the home page to the top of the chat without being made again.
+/// Poki's picture as it shows on a page: its round pale blue ground with a soft blue shadow, and no
+/// white ring around it (boards 定稿 07 and 头像位置 丙 drew one; the owner had it taken off). It is
+/// drawn at the home page's 80 points and scaled, so one picture, and one three-dimensional bear, goes
+/// from the home page to the top of the chat without being made again.
 struct PokiPicture: View {
     var mood: PokiMood
     var side: CGFloat
@@ -97,7 +99,6 @@ struct PokiPicture: View {
         PokiPortrait(mood: mood, side: HomeMotion.homeAvatar, pokes: pokes)
             .scaleEffect(side / HomeMotion.homeAvatar)
             .frame(width: side, height: side)
-            .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.85 : 1), lineWidth: 2))
             .shadow(color: dark ? Color(hex: 0x3C8DFF).opacity(0.35) : Color(hex: 0x0177FD).opacity(0.18), radius: dark ? 8 : 7, y: 4)
     }
 }
@@ -200,7 +201,7 @@ struct PokiHead: View {
 // The middle of the bar, Poki's picture over its state, is IMessageChannelHeaderModifier from
 // GetStream/stream-tutorial-projects (commit 04c8dbb, AI/AgentSkills/iMessageCloneWithSkills/
 // IMessageScreens.swift; the repository has no licence file). Changed: a bar of its own instead of a
-// toolbar item; the picture at the board's 56 points in a white ring; a dot and Poki's state under it
+// toolbar item; the picture at the board's 56 points, with no white ring; a dot and Poki's state under it
 // (board 定稿 07).
 
 /// The chat's top as Messages draws a conversation's (ESP-468): the two round glass buttons float at
@@ -417,8 +418,19 @@ struct HomePage<Footer: View>: View {
     private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
     @State private var greetedAt = Date.now
-    /// A pill's Forget menu is open: both rows stand still under it.
-    @State private var menuOpen = false
+    /// The pill whose menu is open, and where it is on the screen: both rows stand still under it.
+    @State private var held: HeldShortcut?
+    /// The pill whose Edit popup is open.
+    @State private var editing: HomeShortcut?
+    /// Edit was picked from the menu: its popup opens once the menu has gone.
+    @State private var editNext: HomeShortcut?
+    /// The Edit popup's sentence has the keyboard: the suggestions yield their space, as they do to the
+    /// message field's, which rises over that keyboard too.
+    @State private var editorTyping = false
+    /// The page's place on the screen, for the menu's anchor.
+    @State private var page = CGRect.zero
+    /// Counts the long presses, for a tap in the hand.
+    @State private var holds = 0
 
     var body: some View {
         GeometryReader { geometry in
@@ -443,7 +455,7 @@ struct HomePage<Footer: View>: View {
                     .onChange(of: home) { _, shown in if shown { greetedAt = .now } }
 
                     Spacer(minLength: 24)
-                    if !writing {
+                    if !writing, !editorTyping {
                         VStack(spacing: 8) {
                             let shortcuts = shortcutStore.shortcuts
                             // Three on top, or the larger half of more than six.
@@ -466,26 +478,46 @@ struct HomePage<Footer: View>: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .animation(HomeMotion.lift, value: writing)
+        .animation(HomeMotion.lift, value: editorTyping)
         .task(id: SessionStore.shared.sessions.count) {
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }
         .onChange(of: AppLocalization.language) { _, _ in
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { page = $0 }
+        // The menu, over the pill (the owner: it opened under the pill, on the message field). The
+        // system's context menu chooses its own side and took the lower one, so the menu is a popover,
+        // which takes the side it is given, stays on the screen and points at the pill. The arrow is on
+        // the popover's bottom edge, so the popover is over the pill (seen on iOS 27: `.top` put it under).
+        .popover(item: $held, attachmentAnchor: .rect(.rect(menuAnchor)), arrowEdge: .bottom) { held in
+            ShortcutMenu(edit: { editNext = held.shortcut; self.held = nil },
+                         forget: { self.held = nil; shortcutStore.forget(held.shortcut) })
+                // One presentation at a time: the popup waits for the menu to go.
+                .onDisappear { if let next = editNext { editNext = nil; edit(next) } }
+        }
+        .fullScreenCover(item: $editing) { shortcut in
+            ShortcutEditor(shortcut: shortcut, typing: { editorTyping = $0 }) { sentence, app in
+                shortcutStore.edit(shortcut, sentence: sentence, app: app)
+            }
+        }
+        .onChange(of: editing) { _, open in if open == nil { editorTyping = false } }
+        .sensoryFeedback(.impact(weight: .medium), trigger: holds)
     }
 
-    /// A pill: the app's icon, its name and the action, the name and the action in one size and told
-    /// apart by weight and shade (the owner: the name and the words after it did not match).
-    private func pill(_ idea: HomeShortcut) -> some View {
-        HStack(spacing: 8) {
-            AppIconView(app: idea.app, size: 24, alwaysLight: true)
-            HStack(spacing: 5) {
-                Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
-                Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
-            }
-            .lineLimit(1)
-        }
-        .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
+    /// The part of the pressed pill that shows, in the page's own points: a pill at an end of a row is
+    /// partly off the screen, and the menu's arrow points at what can be seen of it.
+    private var menuAnchor: CGRect {
+        guard let frame = held?.frame else { return .zero }
+        let seen = frame.intersection(page.insetBy(dx: 16, dy: 0))
+        return (seen.isNull ? frame : seen).offsetBy(dx: -page.minX, dy: -page.minY)
+    }
+
+    /// The Edit popup comes without the cover's slide; its card fades in itself (`ShortcutEditor`).
+    private func edit(_ shortcut: HomeShortcut) {
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { editing = shortcut }
     }
 
     /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
@@ -495,34 +527,126 @@ struct HomePage<Footer: View>: View {
     /// along, so the two rows do not line up.
     private func row(_ ideas: [HomeShortcut], at index: Int, speed: Double, start: CGFloat) -> some View {
         Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !DeviceStrain.shared.resting && !writing && !PerfSwitch.on(.pillsStill),
-                active: home && scenePhase == .active && !covered, loops: !voiceOver, stopped: menuOpen) {
+                active: home && scenePhase == .active && !covered, loops: !voiceOver, stopped: busy) {
             ForEach(ideas) { idea in
-                Button { pick(idea.prompt) } label: {
-                    pill(idea).contentShape(.capsule)
-                }
-                .pillButtonStyle(row: index)
-                // Under the glass: with the menu on the outside, the glass took the long press and the
-                // pill fired as a tap. The lifted pill is drawn on its own, on a capsule of its own
-                // size: a snapshot of the pill left its glass behind and stood still while the row
-                // went on under it.
-                .contentShape(.contextMenuPreview, Capsule())
-                .contextMenu {
-                    Button("Forget", systemImage: "eye.slash", role: .destructive) { shortcutStore.forget(idea) }
-                } preview: {
-                    pill(idea)
-                        .background(.regularMaterial, in: Capsule())
-                        .clipShape(.capsule)
-                        .onAppear { menuOpen = true }
-                        .onDisappear { menuOpen = false }
-                }
-                .livePillGlass()
-                .accessibilityLabel(Text(verbatim: idea.appName + ", " + idea.text))
-                .accessibilityHint(Text("Puts this in the message field"))
-                .accessibilityIdentifier("home.idea." + idea.app)
-                // Said here and not on the row: the pills live in the scroll view's own hosting view.
-                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                ShortcutPill(idea: idea, row: index, locked: busy, pick: { pick(idea.prompt) },
+                             hold: { frame in
+                                 guard home, !busy else { return }
+                                 holds += 1
+                                 held = HeldShortcut(shortcut: idea, frame: frame)
+                             },
+                             edit: { edit(idea) }, forget: { shortcutStore.forget(idea) })
             }
         }
+    }
+
+    /// A pill's menu or its Edit popup is open, or about to: the rows stand still, and no pill is tapped.
+    private var busy: Bool { held != nil || editing != nil || editNext != nil }
+}
+
+/// A pill under a long press: the quick action, and where its pill is on the screen.
+private struct HeldShortcut: Identifiable {
+    var shortcut: HomeShortcut
+    var frame: CGRect
+    var id: String { shortcut.id }
+}
+
+/// One pill of a row: the app's icon, its name and the action, the name and the action in one size and
+/// told apart by weight and shade (the owner: the name and the words after it did not match). An edited
+/// one with no app this iPhone knows is Poki's icon and the words. A tap picks it and a long press
+/// opens its menu. `Marquee` lays every pill out several times over, so where the one under the
+/// finger is on the screen is kept here, by each copy.
+private struct ShortcutPill: View {
+    var idea: HomeShortcut
+    /// 0 for the top row, 1 for the bottom one.
+    var row: Int
+    /// A menu or the Edit popup is open: the finger lifting after the long press is not a tap.
+    var locked: Bool
+    var pick: () -> Void
+    /// A long press, with the pill's frame on the screen.
+    var hold: (CGRect) -> Void
+    var edit: () -> Void
+    var forget: () -> Void
+    @State private var place = ScreenPlace.Probe()
+
+    var body: some View {
+        Button { if !locked { pick() } } label: {
+            HStack(spacing: 8) {
+                AppIconView(app: idea.app, size: 24, alwaysLight: true)
+                HStack(spacing: 5) {
+                    if !idea.appName.isEmpty {
+                        Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                    }
+                    Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
+                }
+                .lineLimit(1)
+            }
+            .padding(.leading, 12).padding(.trailing, 18).frame(minHeight: 48)
+            .contentShape(.capsule)
+        }
+        .pillButtonStyle(row: row)
+        .background(ScreenPlace(probe: place))
+        // Under the glass: on the outside, the glass took the long press and the pill fired as a tap.
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in hold(place.frame) })
+        .livePillGlass()
+        .accessibilityLabel(Text(verbatim: [idea.appName, idea.text].filter { !$0.isEmpty }.joined(separator: ", ")))
+        .accessibilityHint(Text("Puts this in the message field"))
+        // What the menu offers, for VoiceOver, which has no long press.
+        .accessibilityAction(named: Text("Edit"), edit)
+        .accessibilityAction(named: Text("Forget"), forget)
+        .accessibilityIdentifier("home.idea." + (idea.app.isEmpty ? "poki" : idea.app))
+        // Said here and not on the row: the pills live in the scroll view's own hosting view.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+}
+
+/// Where a view is on the screen at this moment, asked of UIKit: a row goes by on a transform of its
+/// hosting view and on its scroll view's position (`Marquee`), and SwiftUI's own geometry follows neither.
+private struct ScreenPlace: UIViewRepresentable {
+    final class Probe {
+        weak var view: UIView?
+        var frame: CGRect { view.map { $0.convert($0.bounds, to: nil) } ?? .zero }
+    }
+
+    var probe: Probe
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        probe.view = view
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) { probe.view = view }
+}
+
+/// A pill's menu: Edit and Forget, listed as a system menu lists them, in a popover over the pill.
+private struct ShortcutMenu: View {
+    var edit: () -> Void
+    var forget: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            item("Edit", symbol: "pencil", ink: Color(.label), action: edit)
+                .accessibilityIdentifier("shortcut.menu.edit")
+            item("Forget", symbol: "eye.slash", ink: Color(.systemRed), action: forget)
+                .accessibilityIdentifier("shortcut.menu.forget")
+        }
+        .padding(.vertical, 6)
+        .frame(minWidth: 190)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    private func item(_ title: LocalizedStringKey, symbol: String, ink: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).frame(width: 24)
+                Text(title).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.body).foregroundStyle(ink)
+            .padding(.horizontal, 18).frame(minHeight: 46).contentShape(.rect)
+        }
+        .buttonStyle(ShortcutRowStyle())
     }
 }
 

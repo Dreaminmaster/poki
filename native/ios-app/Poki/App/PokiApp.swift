@@ -121,7 +121,7 @@ struct RootView: View {
         case .setup: openDetails([DetailsRoute.connection])
         case .model: openDetails([DetailsRoute.model])
         case .agents: openDetails([DetailsRoute.agents])
-        case .updates: openDetails([DetailsRoute.connection, DetailsRoute.updates])
+        case .updates: openDetails([DetailsRoute.updates])
         }
     }
 
@@ -135,6 +135,7 @@ struct RootView: View {
             openSetup: { fix(.setup, split: split) },
             openSetupStep: { fix(.step($0), split: split) },
             openModel: { fix(.model, split: split) },
+            openVoiceKey: { openDetails([DetailsRoute.voiceKey]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
             openAgents: { fix(.agents, split: split) },
             openUpdates: { fix(.updates, split: split) }
@@ -195,6 +196,9 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
+            // Every page's top scroll edge is the system's soft one: the chat, the conversations, and
+            // the pages pushed over them under the system's bar.
+            .softTopEdge()
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
             .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
@@ -206,14 +210,12 @@ struct RootView: View {
             .sheet(isPresented: Binding(get: { detailsOpen && width == .regular }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
+            .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
+            .onChange(of: scenePhase) { takeEntry() }
     }
 
     private var profilePage: some View {
         PokiDetailsView(
-            openVoice: {
-                detailsOpen = false
-                openLiveVoice()
-            },
             openSetup: {
                 var next = NavigationPath()
                 next.append(DetailsRoute.connection)
@@ -225,6 +227,9 @@ struct RootView: View {
             },
             path: $detailsPath
         )
+        // Presented on its own, so it says the edge's style itself rather than counting on the
+        // presenting page's.
+        .softTopEdge()
     }
 
     var body: some View {
@@ -268,7 +273,7 @@ struct RootView: View {
             if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
-        // the setup step, or the Activity Log for a problem; `poki://voice` opens the voice page.
+        // the setup step, or the Activity Log for a problem; `poki://voice` brings the chat to the front.
         .onOpenURL { url in open(link: url) }
         // On the window, not the view: sheets and full-screen covers take it too, and Automatic hands back to iOS.
         .onChange(of: appearance, initial: true) { _, value in
@@ -282,7 +287,7 @@ struct RootView: View {
             #if DEBUG
             // Development builds: `-pokiVoiceLink "poki://voice?…"` at launch starts a silent test run.
             if let link = UserDefaults.standard.string(forKey: "pokiVoiceLink"), let url = URL(string: link), url.host() == "voice" {
-                show(.voice)
+                show(.chat)
                 model.voice.openAtLaunch(url)
             }
             #endif
@@ -311,20 +316,41 @@ struct RootView: View {
         } else if url.host() == "voice" {
             detailsOpen = false
             model.voice.open(url)
-            show(.voice)
+            show(.chat)
+            // A link never turns on the microphone: it brings the chat to the front, where the message
+            // field's button starts a talk, and says what Talk with Poki is missing when it has no key.
+            if !model.voice.isOn, !model.voice.canTalkLive { model.voice.keyAsked = true }
         } else {
             detailsOpen = false
             show(.chat)
         }
     }
 
-    /// Opens the full-screen Voice page over Poki's chat and starts the live voice conversation if ready.
+    /// Talk with Poki: a live conversation starts in the chat, which stays in front (pull request #250's
+    /// way). Without a live voice (no OpenAI key, no voice bridge) the message field says so, with the
+    /// way to the key in Settings.
     private func openLiveVoice() {
-        show(.voice)
-        if !model.voice.isOn, model.voice.canTalkLive {
+        show(.chat)
+        guard model.voice.canTalkLive else { model.voice.keyAsked = true; return }
+        if !model.voice.isOn {
             ApprovalNotice.requestPermission()
             Task { await model.voice.start() }
         }
+    }
+
+    /// The Action Button, Control Center, Shortcuts or Spotlight (PokiEntry), once Poki is in front. A task
+    /// under way is shown, not interrupted: Talk starts only when Poki is free. Pairing stays on its step,
+    /// and the first run stays up: its record is asked, not `welcoming`, because at a cold launch the
+    /// request can be here before the cover is.
+    private func takeEntry() {
+        guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay, !FirstRun.isDue() else { return }
+        detailsOpen = false
+        statusOpen = false
+        if let handoff = AskPoki.liveSessionID { show(.session(handoff)); return }
+        show(.chat)
+        guard request == .talk, !chat.running, !model.voice.isOn else { return }
+        // Without a live voice (no OpenAI key, no voice bridge) Talk opens the message field instead.
+        if model.voice.canTalkLive { openLiveVoice() } else { MessageFieldAsk.shared.ask() }
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.
@@ -374,15 +400,15 @@ struct RootView: View {
         case "hands", "connection":
             openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+            openDetails([DetailsRoute.approvals])
         case "health", "advanced":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+            openDetails([DetailsRoute.advanced])
         case "connect", "settings", "agents":
             openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
                 openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
@@ -395,6 +421,12 @@ struct RootView: View {
             openDetails([SettingsRoute.memory])
         case "appearance":
             openDetails([DetailsRoute.appearance])
+        case "voiceSettings":
+            openDetails([DetailsRoute.voice])
+        case "conversations":
+            openDetails([DetailsRoute.conversations])
+        case "updates":
+            openDetails([DetailsRoute.updates])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break
