@@ -39,7 +39,7 @@ final class TalkRehearsal: VoiceConnection, @unchecked Sendable {
 
     func connect(secret: String, microphone: Bool, direct: Bool) async throws {
         try await Task.sleep(for: .milliseconds(Self.hold == .connecting ? 3_600_000 : 900))
-        let zh = Locale.preferredLanguages.first?.hasPrefix("zh") == true
+        let zh = AppLocalization.language.hasPrefix("zh")
         let asks = zh ? "打开设置，把屏幕调亮一点" : "Open Settings and turn the brightness up a little"
         let answer = zh ? "已经把亮度调高了。现在大约是百分之八十，还需要" : "Brightness is up. It’s at about eighty percent now, do you want"
         let stops = zh ? "够了，谢谢" : "That’s enough, thanks"

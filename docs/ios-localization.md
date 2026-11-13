@@ -36,7 +36,8 @@ its creation-time language. System-owned permission prompts and pickers remain c
 User/model messages, task plans, user-supplied app/account names, diagnostic logs and recorded conversation text
 remain content in their original language. Only the current untouched introduction has retained
 in-memory UI identity and can be reworded on a language change; its entry IDs, timestamps and session
-ID stay intact. Opening a saved conversation does not translate its history. UI language does not
+ID stay intact. Opening a saved conversation does not translate its history. A talk's step lines and notes are
+worded in the chosen language when they are listed and keep those words afterwards. UI language does not
 alter speech recognition, model prompts, provider routing, credentials or approval decisions.
 
 ## Adding a language
@@ -74,6 +75,10 @@ Simulator with `-only-testing:PokiTests/LanguageTests`. The tests cover native r
 system/unsupported language matching, region preservation, shared preferences, activity/approval
 state, untouched introduction identity, and language changes during a local scripted model request.
 `GreetingTests` and `LiveActivityTests` provide nearby regressions; no live model account is needed.
+`VoiceModelTests.testATalksWordsFollowTheLanguageChosenInPoki` drives a scripted talk and reads the
+talk bar's words, step lines and connection-lost note in each language;
+`HomeShortcutsTests.testTheEditorsNoneChoiceFollowsTheLanguageChosenInPoki` reads the shortcut
+editor's None choice. Run them under an English and a Chinese simulator language.
 
 In Settings › Language, switch English → 简体中文 → 繁體中文 → Follow System. Check the active navigation title,
 section labels, Settings back navigation, Home greeting/suggestions/status, and the message field's

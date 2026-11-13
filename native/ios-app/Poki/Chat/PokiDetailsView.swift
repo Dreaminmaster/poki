@@ -220,7 +220,7 @@ struct PokiDetailsView: View {
 
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
     /// The version is the page's last line, so the row only speaks up when an update waits.
-    private var updatesValue: String? { updateWaits ? String(localized: "Update Available") : nil }
+    private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
@@ -370,7 +370,7 @@ struct ConnectionView: View {
                 ForEach(SetupStep.shown) { step in
                     let done = model.isDone(step)
                     NavigationLink(value: step) {
-                        SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : String(localized: "Turn On"),
+                        SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : AppLocalization.text(LocalizedStringResource("Turn On")),
                                     warns: !done, accessory: done ? .done : nil)
                     }
                 }

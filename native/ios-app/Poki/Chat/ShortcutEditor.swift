@@ -36,7 +36,7 @@ struct ShortcutEditor: View {
         self.save = save
         _sentence = State(initialValue: shortcut.prompt)
         _app = State(initialValue: shortcut.app)
-        choices = [("", String(localized: "None"))] + KnownApps.all.map { app -> (id: String, name: String) in (app.id, app.name(in: .current)) }
+        choices = [("", AppLocalization.text(LocalizedStringResource("None")))] + KnownApps.all.map { app -> (id: String, name: String) in (app.id, app.name(in: .current)) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 

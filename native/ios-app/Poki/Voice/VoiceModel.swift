@@ -582,7 +582,7 @@ final class VoiceModel {
                 if left > .zero { wait = left; continue }
                 if waitingOnServer {
                     log.add("voice", "the server said nothing for \(inBackground ? Self.backgroundStall : Self.stall) while Poki waited on it: conversation ended")
-                    lines.append(VoiceLine(role: .note, text: String(localized: "The server did not answer. The talk ended.")))
+                    lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("The server did not answer. The talk ended."))))
                     stop()
                     return
                 }
@@ -720,7 +720,7 @@ final class VoiceModel {
         guard number == session, link != nil else { return }
         endSession()
         phase = .lost(TalkState.connectionLost)
-        lines.append(VoiceLine(role: .note, text: String(localized: "Connection lost. Nothing is sent again. Talk again to hear how running steps ended.")))
+        lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
     }
@@ -970,14 +970,14 @@ final class VoiceModel {
 
     private static func describe(_ call: VoiceCall) -> String {
         switch call.name {
-        case "get_ios_version": String(localized: "Reading the iOS version")
-        case "open_settings": String(localized: "Opening Settings")
-        case "read_screen": String(localized: "Reading the screen")
-        case "open_app": String(localized: "Opening an app")
-        case "tap_text": String(localized: "Tapping")
-        case "go_home": String(localized: "Going Home")
-        case "look": String(localized: "Looking at the screen")
-        case "do": String(localized: "Using the phone")
+        case "get_ios_version": AppLocalization.text(LocalizedStringResource("Reading the iOS version"))
+        case "open_settings": AppLocalization.text(LocalizedStringResource("Opening Settings"))
+        case "read_screen": AppLocalization.text(LocalizedStringResource("Reading the screen"))
+        case "open_app": AppLocalization.text(LocalizedStringResource("Opening an app"))
+        case "tap_text": AppLocalization.text(LocalizedStringResource("Tapping"))
+        case "go_home": AppLocalization.text(LocalizedStringResource("Going Home"))
+        case "look": AppLocalization.text(LocalizedStringResource("Looking at the screen"))
+        case "do": AppLocalization.text(LocalizedStringResource("Using the phone"))
         default: call.name
         }
     }
