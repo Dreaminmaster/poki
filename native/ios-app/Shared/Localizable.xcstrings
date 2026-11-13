@@ -1646,6 +1646,57 @@
         }
       }
     },
+    "Archive" : {
+      "comment" : "Moves a conversation out of the conversations list into Settings > Conversations.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归档"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "封存"
+          }
+        }
+      }
+    },
+    "Archived Conversations" : {
+      "comment" : "The heading of the archived conversations in Settings > Conversations.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已封存的對話"
+          }
+        }
+      }
+    },
+    "Archived and search" : {
+      "comment" : "The caption under Conversations in Settings.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档和搜索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已封存和搜尋"
+          }
+        }
+      }
+    },
     "Ask Before Sensitive Steps" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2453,6 +2504,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "對話"
+          }
+        }
+      }
+    },
+    "Conversations you archive appear here." : {
+      "comment" : "Under No Archived Conversations.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你归档的对话会显示在这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你封存的對話會顯示在這裡。"
           }
         }
       }
@@ -5499,6 +5567,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無應答"
+          }
+        }
+      }
+    },
+    "No Archived Conversations" : {
+      "comment" : "Settings > Conversations when nothing is archived.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有已归档的对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有已封存的對話"
           }
         }
       }
@@ -12427,6 +12512,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用你的代理 App"
+          }
+        }
+      }
+    },
+    "Unarchive" : {
+      "comment" : "Brings an archived conversation back to the conversations list.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消封存"
           }
         }
       }

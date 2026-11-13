@@ -85,7 +85,8 @@ struct PokiDetailsView: View {
 
                 Section {
                     NavigationLink(value: DetailsRoute.conversations) {
-                        SettingsRow(title: "Conversations", caption: "Search", symbol: "magnifyingglass")
+                        SettingsRow(title: "Conversations", caption: "Archived and search", symbol: "bubble.left.and.bubble.right",
+                                    value: isSample ? nil : archivedValue)
                     }
                     .accessibilityIdentifier("details.searchConversations")
                     NavigationLink(value: DetailsRoute.health) {
@@ -114,7 +115,7 @@ struct PokiDetailsView: View {
                 case .history:
                     ActionLogView(openSession: { id in dismiss(); openSession(id) })
                 case .conversations:
-                    ConversationSearchView(openSession: { id in dismiss(); openSession(id) })
+                    ConversationsSettingsView(openSession: { id in dismiss(); openSession(id) })
                 case .voice:
                     VoiceView(embedded: true)
                 case .hands:
@@ -164,6 +165,11 @@ struct PokiDetailsView: View {
         isSample || VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? String(localized: "Live Voice") : String(localized: "Dictation Only")
     }
 
+    private var archivedValue: String? {
+        let count = SessionStore.shared.archivedSessions.count
+        return count == 0 ? nil : "\(count)"
+    }
+
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
     private var healthValue: String? {
         if isSample { return nil }
@@ -175,37 +181,69 @@ enum DetailsRoute: Hashable {
     case model, history, conversations, voice, hands, health, settings, setup, updates, approvals
 }
 
-private struct ConversationSearchView: View {
+/// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring
+/// back or delete; and a search through every conversation, archived or not.
+private struct ConversationsSettingsView: View {
     var openSession: (String) -> Void
     @State private var query = ""
+    private var store: SessionStore { SessionStore.shared }
 
     private var matches: [SavedSession] {
         let words = query.trimmingCharacters(in: .whitespaces)
-        return SessionStore.shared.ordered.filter { session in
-            words.isEmpty || [session.name, session.title, session.lastLine, session.client ?? ""]
-                .contains { $0.localizedCaseInsensitiveContains(words) }
+        return store.ordered.filter { session in
+            [session.name, session.title, session.lastLine, session.client ?? ""].contains { $0.localizedCaseInsensitiveContains(words) }
         }
     }
 
     var body: some View {
         List {
-            ForEach(matches) { session in
-                Button { openSession(session.id) } label: {
-                    HStack(spacing: 12) {
-                        SessionAvatar(session: session, size: 36)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: session.name).foregroundStyle(Color(.label))
-                            Text(verbatim: session.lastLine).font(.subheadline)
-                                .foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                let archived = store.archivedSessions
+                Section {
+                    ForEach(archived) { session in
+                        Button { openSession(session.id) } label: {
+                            ConversationTitle(session: session)
+                                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                                .contentShape(.rect)
                         }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+                            Button("Unarchive", systemImage: "tray.and.arrow.up") { store.unarchive(session.id) }.tint(Tint.blue)
+                        }
+                        .contextMenu {
+                            Button("Unarchive", systemImage: "tray.and.arrow.up") { store.unarchive(session.id) }
+                            Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+                        }
+                        .accessibilityIdentifier("archived.row")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(.rect)
+                } header: {
+                    Text("Archived Conversations").textCase(nil)
                 }
-                .buttonStyle(.plain)
-            }
-            if matches.isEmpty {
-                ContentUnavailableView.search(text: query)
+                if archived.isEmpty {
+                    ContentUnavailableView("No Archived Conversations", systemImage: "archivebox",
+                                           description: Text("Conversations you archive appear here."))
+                        .listRowBackground(Color.clear)
+                }
+            } else {
+                ForEach(matches) { session in
+                    Button { openSession(session.id) } label: {
+                        HStack(spacing: 12) {
+                            SessionAvatar(session: session, size: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: session.name).foregroundStyle(Color(.label))
+                                Text(verbatim: session.lastLine).font(.subheadline)
+                                    .foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if matches.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                }
             }
         }
         .navigationTitle("Conversations")

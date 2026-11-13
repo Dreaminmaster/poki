@@ -127,17 +127,27 @@ struct LimitedWidth<Content: View>: View {
     var body: some View {
         if preview {
             content(true)
-        } else if #available(iOS 27.0, *) {
-            System(content: content)
         } else {
+            #if compiler(>=6.4)
+            if #available(iOS 27.0, *) {
+                System(content: content)
+            } else {
+                content(false)
+            }
+            #else
             content(false)
+            #endif
         }
     }
 
+    // The width signal is in the iOS 27 SDK (Xcode 27, Swift 6.4). An older Xcode builds without it,
+    // and the island then lays out as if it always had its full width.
+    #if compiler(>=6.4)
     @available(iOS 27.0, *)
     private struct System: View {
         @Environment(\.isDynamicIslandLimitedInWidth) private var limited
         var content: (Bool) -> Content
         var body: some View { content(limited) }
     }
+    #endif
 }

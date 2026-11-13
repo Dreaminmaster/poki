@@ -20,12 +20,8 @@ struct SessionsView: View {
     var openSession: (String) -> Void
     @State private var renaming: SavedSession?
     @State private var newName = ""
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.inThreadsDrawer) private var inDrawer
     @Environment(\.drawerSliding) private var sliding
-    /// The conversation's name: a step larger than the body, as a list of names only reads well.
-    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
 
     private var store: SessionStore { SessionStore.shared }
     private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
@@ -39,7 +35,7 @@ struct SessionsView: View {
                     row(session)
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
-                        .listRowBackground(ground(session))
+                        .listRowBackground(Color.clear)
                 }
             }
             if groups.isEmpty { empty }
@@ -120,13 +116,11 @@ struct SessionsView: View {
         session.kind == .poki && session.id == chat.sessionID && sampleHome == nil
     }
 
-    /// The selected row's soft fill; every other row stands on the list's ground.
-    @ViewBuilder private func ground(_ session: SavedSession) -> some View {
-        if current(session) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected).padding(.horizontal, 16)
-        } else {
-            Color.clear
-        }
+    /// The row's own ground, the drawer's colour (the selected row's soft blue over it): a long press
+    /// lifts a clean card, not the row's words over a grey shadow.
+    private func ground(_ session: SavedSession) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebar)
+            .overlay { if current(session) { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected) } }
     }
 
     /// The app it worked in: for the chat's own task under way, the app it is in now.
@@ -135,11 +129,6 @@ struct SessionsView: View {
         return session.app
     }
 
-    /// The app whose icon the row shows: only once the icon is at hand, so a row without one starts at the
-    /// same place as the heading rather than leaving a gap.
-    private func icon(_ session: SavedSession) -> String? {
-        app(session).flatMap { AppIconStore.shared.icon($0, dark: scheme == .dark) != nil ? $0 : nil }
-    }
 
     /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for you.
     private func row(_ session: SavedSession) -> some View {
@@ -147,29 +136,30 @@ struct SessionsView: View {
         let app = app(session)
         return Button { open(session) } label: {
             HStack(spacing: 12) {
-                if let icon = icon(session) { AppIconView(app: icon, size: 22) }
-                Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
-                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                ConversationTitle(session: session, app: app)
                 Spacer(minLength: 8)
                 if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
             }
             .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 48)
+            .background(ground(session))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         // A long press lifts the row's own rounded shape, not the list's whole width, so the lifted row
         // and its menu stay inside the drawer rather than over the chat beside it.
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
         .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil]
             .compactMap { $0 }.joined(separator: ", ")))
-        // In the drawer a sideways drag closes it, so Rename and Delete are only in the menu there.
+        // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !inDrawer {
                 if !session.live, sampleHome == nil {
                     Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+                }
+                if !session.live, sampleHome == nil {
+                    Button("Archive", systemImage: "archivebox") { store.archive(session.id) }.tint(Tint.blue)
                 }
                 Button("Rename", systemImage: "pencil") { startRename(session) }
             }
@@ -177,6 +167,7 @@ struct SessionsView: View {
         .contextMenu {
             Button("Rename", systemImage: "pencil") { startRename(session) }
             if !session.live, sampleHome == nil {
+                Button("Archive", systemImage: "archivebox") { store.archive(session.id) }
                 Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
             }
         }
@@ -190,7 +181,7 @@ struct SessionsView: View {
 
     private var shown: [SavedSession] {
         if sampleHome == "paused" { return [] }
-        return sampleHome == "sessions" ? Self.sampleSessions : store.ordered
+        return sampleHome == "sessions" ? Self.sampleSessions : store.listed
     }
 
     /// When a conversation last moved, for the faint headings between the days.
@@ -343,6 +334,28 @@ extension View {
     /// The line under the title (iOS 26's navigation subtitle); nothing before iOS 26.
     @ViewBuilder func sessionSubtitle(_ text: String) -> some View {
         if #available(iOS 26.0, *), !text.isEmpty { navigationSubtitle(Text(verbatim: text)) } else { self }
+    }
+}
+
+/// A conversation as the lists show it (the drawer, Settings > Conversations): the small icon of the app
+/// it worked in, only once the icon is at hand so a row without one starts where the others' names do,
+/// then its name, a step larger than the body, as a list of names only reads well.
+struct ConversationTitle: View {
+    var session: SavedSession
+    /// The app it worked in, when the row knows better than what is saved (a task under way).
+    var app: String? = nil
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
+
+    var body: some View {
+        let app = app ?? session.app
+        HStack(spacing: 12) {
+            if let app, AppIconStore.shared.icon(app, dark: scheme == .dark) != nil { AppIconView(app: app, size: 22) }
+            Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
+                .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+        }
+        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
     }
 }
 
