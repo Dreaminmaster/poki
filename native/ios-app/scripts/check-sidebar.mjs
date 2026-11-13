@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // check-sidebar.mjs POKI_MCP_ROOT SIMULATOR_NAME OUTPUT_DIR: drives Poki on a simulator through Poki MCP and
-// checks that the conversation drawer holds only Poki's name, the reminder row while something needs fixing, the day
-// headings, the conversations, New Conversation and Settings, and that switching, renaming and deleting (from the
-// long-press menu) and starting a conversation still work from it.
+// checks that the conversation drawer holds only Poki's name, the day headings, the conversations, New Conversation
+// and Settings, and that switching, renaming and deleting (from the long-press menu) and starting a conversation
+// still work from it.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -49,8 +49,7 @@ try {
   call('save_screenshot', { path: join(directory, 'drawer.png'), overwrite: true });
   evidence.drawer = drawer.map(e => ({ type: e.type, identifier: e.identifier ?? null, label: e.label ?? null }));
   const furniture = new Set(['Poki', 'Today', 'Yesterday', 'Earlier', 'Close Conversations']);
-  const furnitureIds = new Set(['threads.newChat', 'threads.settings', 'threads.issue']);
-  const extra = drawer.filter(e => e.type !== 'Application' && !furnitureIds.has(e.identifier)
+  const extra = drawer.filter(e => e.type !== 'Application' && e.identifier !== 'threads.newChat' && e.identifier !== 'threads.settings'
     && !furniture.has(e.label ?? '') && !(e.type === 'Button' && !e.identifier) && !(e.type === 'Group' && !e.label));
   assert.deepEqual(extra.map(e => `${e.type}: ${e.identifier ?? e.label}`), [], 'The drawer must list only conversations');
   assert(row(drawer, 'Codex') && row(drawer, 'What iOS version is this?'), 'The drawer must list the saved conversations');

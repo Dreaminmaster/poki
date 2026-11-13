@@ -91,11 +91,10 @@ struct RootView: View {
         detailsOpen = true
     }
 
-    private func sessions(split: Bool) -> some View {
+    private var sessions: some View {
         SessionsView(
             openChat: { show(.chat) },
-            openSession: { show(.session($0)) },
-            openFix: { fix($0, split: split) }
+            openSession: { show(.session($0)) }
         )
     }
 
@@ -166,7 +165,7 @@ struct RootView: View {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
-                NavigationStack { sessions(split: true) }
+                NavigationStack { sessions }
                     .frame(width: 375)
                 Divider().ignoresSafeArea()
                 NavigationStack {
@@ -180,7 +179,7 @@ struct RootView: View {
                     .navigationDestination(for: HomeRoute.self) { destination($0, split: false) }
                     .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
             }
-            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions(split: false) }
+            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions }
         }
     }
 
