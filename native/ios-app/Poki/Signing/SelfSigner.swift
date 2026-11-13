@@ -103,7 +103,7 @@ final class SelfSigner {
     var installMessage: String? {
         switch installFinish {
         case .idle: nil
-        case .installing: String(localized: "Installing the update. Features are unavailable until you reopen Poki.")
+        case .installing: String(localized: "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki.")
         case .waitingForExit: String(localized: "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.")
         case .needsReopen(let installed): installed
             ? String(localized: "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki.")
@@ -348,10 +348,7 @@ final class SelfSigner {
         foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.steppedAside else { return }
-                self.requireReopen()
-            }
+            Task { @MainActor in self?.exitWaitEnded() }
         }
         beforeInstall()
         steppedAside = false
@@ -381,7 +378,10 @@ final class SelfSigner {
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [reopen])
             requireReopen()
         } else {
-            installFinish = needsReopen ? .needsReopen(installed: true) : .waitingForExit
+            installFinish = .waitingForExit
+            finishTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.exitWaitEnded() }
+            }
             if !steppedAside { stepAside() }
             working = installMessage
         }
@@ -419,9 +419,6 @@ final class SelfSigner {
         guard !steppedAside else { return }
         log.add("signing", "the install's last step: telling the owner Poki will close to finish")
         steppedAside = true
-        finishTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.requireReopen() }
-        }
         working = String(localized: "Finishing the update: Poki will close to finish it")
         // The last step: the owner is told Poki will close (the alert's OK steps aside, and iOS ends
         // Poki by itself otherwise); the notice says it again in case the alert was missed.
@@ -439,6 +436,13 @@ final class SelfSigner {
             guard let self, !self.needsReopen else { return }
             UIApplication.shared.perform(NSSelectorFromString("suspend"))
         }
+    }
+
+    /// iOS has not ended Poki after the install. Until the install returns, Poki carries the upload
+    /// and the upgrade request, so nothing asks the owner to close it before then.
+    private func exitWaitEnded() {
+        guard installFinish == .waitingForExit else { return }
+        requireReopen()
     }
 
     private func requireReopen() {

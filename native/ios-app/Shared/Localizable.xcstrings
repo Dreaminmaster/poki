@@ -31015,25 +31015,25 @@
         }
       }
     },
-    "Installing the update. Features are unavailable until you reopen Poki." : {
+    "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Installing the update. Features are unavailable until you reopen Poki."
+            "value" : "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在安装更新。重新打开 Poki 前，功能暂不可用。"
+            "value" : "正在安装更新。请不要在多任务界面划掉 Poki。重新打开 Poki 前，功能暂不可用。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在安裝更新。重新開啟 Poki 前，功能暫不可用。"
+            "value" : "正在安裝更新。請不要在多工處理畫面滑掉 Poki。重新開啟 Poki 前，功能暫不可用。"
           }
         }
       }
