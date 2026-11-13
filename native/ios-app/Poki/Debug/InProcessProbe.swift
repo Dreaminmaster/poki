@@ -300,6 +300,9 @@ final class InProcessProbe: ObservableObject {
         ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
         ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
         ModelKeys.selectedProvider = .custom
+        // ask_poki is off by default (Diagnostics, Testing); this check hands a task over with it, so it
+        // turns it on as the owner would.
+        model.askPokiTool = true
         AskPoki.refresh()
         guard let chat = AskPoki.chat else { note("no chat", ["step": "chat_missing"]); return }
         chat.newConversation()
