@@ -82,9 +82,10 @@ struct PokiPortrait: View {
     }
 }
 
-/// Poki's picture as it shows on a page: in a white ring with a soft blue shadow (boards 定稿 07 and
-/// 头像位置 丙). It is drawn at the home page's 80 points and scaled, so one picture, and one
-/// three-dimensional bear, goes from the home page to the top of the chat without being made again.
+/// Poki's picture as it shows on a page: its round pale blue ground with a soft blue shadow, and no
+/// white ring around it (boards 定稿 07 and 头像位置 丙 drew one; the owner had it taken off). It is
+/// drawn at the home page's 80 points and scaled, so one picture, and one three-dimensional bear, goes
+/// from the home page to the top of the chat without being made again.
 struct PokiPicture: View {
     var mood: PokiMood
     var side: CGFloat
@@ -97,7 +98,6 @@ struct PokiPicture: View {
         PokiPortrait(mood: mood, side: HomeMotion.homeAvatar, pokes: pokes)
             .scaleEffect(side / HomeMotion.homeAvatar)
             .frame(width: side, height: side)
-            .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.85 : 1), lineWidth: 2))
             .shadow(color: dark ? Color(hex: 0x3C8DFF).opacity(0.35) : Color(hex: 0x0177FD).opacity(0.18), radius: dark ? 8 : 7, y: 4)
     }
 }
@@ -200,7 +200,7 @@ struct PokiHead: View {
 // The middle of the bar, Poki's picture over its state, is IMessageChannelHeaderModifier from
 // GetStream/stream-tutorial-projects (commit 04c8dbb, AI/AgentSkills/iMessageCloneWithSkills/
 // IMessageScreens.swift; the repository has no licence file). Changed: a bar of its own instead of a
-// toolbar item; the picture at the board's 56 points in a white ring; a dot and Poki's state under it
+// toolbar item; the picture at the board's 56 points, with no white ring; a dot and Poki's state under it
 // (board 定稿 07).
 
 /// The chat's top as Messages draws a conversation's (ESP-468): the two round glass buttons float at
