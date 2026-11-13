@@ -17,6 +17,16 @@ final class LaunchScreenTests: XCTestCase {
             XCTAssertEqual(bear.center.y, view.bounds.midY, accuracy: 0.5)
             XCTAssertEqual(bear.contentMode, .scaleAspectFit)
             XCTAssertNotNil(bear.image)
+            for style: UIUserInterfaceStyle in [.light, .dark] {
+                controller.overrideUserInterfaceStyle = style
+                view.layoutIfNeeded()
+                let picture = UIGraphicsImageRenderer(bounds: view.bounds).image { context in
+                    view.layer.render(in: context.cgContext)
+                }
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("LaunchScreenEvidence")
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try picture.pngData()?.write(to: folder.appendingPathComponent("launch-\(Int(size.width))-\(style.rawValue).png"))
+            }
         }
     }
 
@@ -25,7 +35,14 @@ final class LaunchScreenTests: XCTestCase {
         let light = background.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
         let dark = background.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
         XCTAssertNotEqual(light, dark)
-        XCTAssertEqual(light, UIColor(red: 245 / 255.0, green: 248 / 255.0, blue: 252 / 255.0, alpha: 1))
-        XCTAssertEqual(dark, UIColor(red: 5 / 255.0, green: 7 / 255.0, blue: 13 / 255.0, alpha: 1))
+        // UIColor 的色彩空间不同也可能表示相同颜色，比较解析后的 RGB 通道。
+        for (colour, expected) in [(light, [245.0, 248.0, 252.0]), (dark, [5.0, 7.0, 13.0])] {
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            XCTAssertTrue(colour.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+            for (actual, channel) in zip([red, green, blue], expected) {
+                XCTAssertEqual(actual, channel / 255, accuracy: 0.001)
+            }
+            XCTAssertEqual(alpha, 1)
+        }
     }
 }
