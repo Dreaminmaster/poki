@@ -73,8 +73,15 @@ function openTestingOptions() {
   pause(3000);
   const alert = elements().find(e => e.type === 'Button' && /^(Allow|允许)$/.test(e.label ?? ''));
   if (alert) tap(alert);
-  const row = elements().find(e => e.identifier === 'moreSettings.testingOptions');
-  assert(row, 'General must offer Testing Options');
+  // Testing Options is the last row of Settings › Advanced, under Connection's, Voice's and Memory's groups.
+  let row;
+  for (let round = 0; round < 4 && !row; round++) {
+    row = elements().find(e => e.identifier === 'moreSettings.testingOptions');
+    if (row) break;
+    call('swipe', { from_x: 200, from_y: 650, to_x: 200, to_y: 250 });
+    pause(800);
+  }
+  assert(row, 'Advanced must offer Testing Options');
   tap(row);
 }
 
