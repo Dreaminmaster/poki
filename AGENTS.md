@@ -37,7 +37,7 @@ Follow these steps for the selected path. At each **STOP**, tell the user what t
 
    Report the version, commit, `total_tools`, and whether the intended device appears. The default MCP `tools/list` exposes the tools for phone tasks. `total_tools` counts the complete catalog, including tools callable without default discovery. `POKI_MCP_TOOLS=all` exposes the complete list. Verify current output instead of treating either count as proof that installation works. For the Poki Agent path, run `poki status` after login. After authorization for a phone task, use `poki "<user task>"` and verify its actual result. With multiple devices, pass `--device '<device UUID>'`. Report any untested pairing, login, channel, or phone operation explicitly.
 
-## Update Poki MCP or Poki Agent
+## Update
 
 For the iPhone app, use [install-poki](skills/install-poki/SKILL.md#update-an-installed-poki). The command below updates the computer installation.
 

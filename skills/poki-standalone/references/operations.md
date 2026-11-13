@@ -146,7 +146,7 @@ deploy/cf-relay/deploy.sh --name "$RELAY_NAME" \
   > "$relay_task_dir/deploy.log" 2>&1
 ```
 
-Enter the HTTPS address in Poki at Settings > External Agents > Relay. Keep existing secrets on redeployment so connected clients remain valid. Read the deployment guide for production logging settings. After the relay is ready, use Add Agent to create a separate connector for this client.
+Enter the HTTPS address in Poki at Settings > External Agents > Address (under MCP Relay). Keep existing secrets on redeployment so connected clients remain valid. Read the deployment guide for production logging settings. After the relay is ready, use Add Agent to create a separate connector for this client.
 
 Connector URLs contain credentials and belong only in private client configuration. The relay uses MCP Streamable HTTP and OAuth registration, PKCE and token exchange. Possession of the connector URL grants access to its authorization flow, so treat the URL as a secret. Done when a real authenticated client receives a reply from the phone. A deployment dry run or reachable URL alone does not pass.
 
