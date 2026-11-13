@@ -113,7 +113,7 @@ struct RootView: View {
         case .setup: openDetails([DetailsRoute.connection])
         case .model: openDetails([DetailsRoute.model])
         case .agents: openDetails([DetailsRoute.agents])
-        case .updates: openDetails([DetailsRoute.connection, DetailsRoute.updates])
+        case .updates: openDetails([DetailsRoute.updates])
         }
     }
 
@@ -205,10 +205,6 @@ struct RootView: View {
 
     private var profilePage: some View {
         PokiDetailsView(
-            openVoice: {
-                detailsOpen = false
-                openLiveVoice()
-            },
             openSetup: {
                 var next = NavigationPath()
                 next.append(DetailsRoute.connection)
@@ -390,15 +386,15 @@ struct RootView: View {
         case "hands", "connection":
             openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+            openDetails([DetailsRoute.approvals])
         case "health", "advanced":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+            openDetails([DetailsRoute.advanced])
         case "connect", "settings", "agents":
             openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
                 openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
@@ -411,6 +407,12 @@ struct RootView: View {
             openDetails([SettingsRoute.memory])
         case "appearance":
             openDetails([DetailsRoute.appearance])
+        case "voiceSettings":
+            openDetails([DetailsRoute.voice])
+        case "conversations":
+            openDetails([DetailsRoute.conversations])
+        case "updates":
+            openDetails([DetailsRoute.updates])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break
