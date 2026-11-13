@@ -2565,6 +2565,7 @@ dependencies = [
  "cms",
  "der",
  "directories",
+ "ed25519-dalek",
  "futures-util",
  "hex",
  "hmac",

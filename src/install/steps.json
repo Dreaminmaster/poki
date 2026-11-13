@@ -3,7 +3,7 @@
   "steps": [
     { "id": "setup_app", "who": "agent", "title": "Get Poki Setup", "does": "Downloads the Poki Setup DMG from the channel's release, checks it against SHA256SUMS-desktop.txt, checks its Developer ID signature and notarization, and copies the app to ~/Applications." },
     { "id": "bridge", "who": "agent", "title": "Start Poki Setup without a window", "does": "Starts the app's poki-setup-bridge helper over a pipe and reads its version." },
-    { "id": "channel", "who": "agent", "title": "Choose the release channel", "does": "Sets the channel (alpha by default) for the install and for later renewals." },
+    { "id": "channel", "who": "agent", "title": "Find the Beta update", "does": "Finds the current Beta release for installation and later renewals." },
     { "id": "apple_account", "who": "input", "title": "Sign in with the Apple Account", "does": "Reuses Poki Setup's own sign-in, or a password from the environment or the login keychain; otherwise asks in Poki Setup windows for the email, the password and then the two-factor code." },
     { "id": "phone", "who": "phone", "title": "Find the iPhone", "does": "Waits until one iPhone is plugged in by USB." },
     { "id": "install", "who": "phone", "title": "Pair, turn on Developer Mode, sign and install Poki", "does": "Runs Poki Setup's install: Trust This Computer, Developer Mode, team, release, signing, install, pairing file and developer disk image." },

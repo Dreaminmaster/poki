@@ -3,6 +3,8 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
+    ReleaseUnavailable(&'static str),
+    #[error("{0}")]
     UpdateCheck(&'static str),
     /// A plain sentence for the person.
     #[error("{0}")]
@@ -49,6 +51,7 @@ impl Error {
     pub fn kind(&self) -> &'static str {
         match self {
             Error::Message(_) => "message",
+            Error::ReleaseUnavailable(_) => "release_unavailable",
             Error::UpdateCheck(_) => "update_preflight",
             Error::Device(_) => "device",
             Error::Apple { .. } => "apple",

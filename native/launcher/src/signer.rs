@@ -107,7 +107,7 @@ async fn signer(state: &mut State) -> std::result::Result<&mut Signer, Failure> 
 }
 
 fn channels() -> Value {
-    Value::Array(Channel::ALL.iter().map(|c| json!({"id": c.id(), "title": c.title()})).collect())
+    Value::Array([Channel::Beta].iter().map(|c| json!({"id": c.id(), "title": c.title()})).collect())
 }
 
 /// Runs one request. `emit` gets progress events while it runs.
@@ -194,12 +194,12 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "set_channel" => {
             let channel = Channel::parse(str_of(&request, "channel")?).ok_or_else(|| fail("unknown channel", "config"))?;
             release::set_channel(channel)?;
-            Ok(json!({"channel": channel.id()}))
+            Ok(json!({"channel": release::channel().id()}))
         }
         "import_identity" => import_identity(&request).await,
         "check_update" => {
             let r = release::latest().await?;
-            Ok(json!({"tag": r.tag, "version": r.version, "build": r.build, "channel": r.channel.id(), "published_at": r.published_at, "notes": r.notes}))
+            Ok(json!({"tag": r.tag, "version": r.version, "build": r.build, "channel": r.channel.id(), "published_at": r.published_at, "notes": r.notes, "source": r.source, "source_notice": r.source_notice}))
         }
         "udid" => {
             let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;

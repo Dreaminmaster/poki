@@ -177,9 +177,9 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// Show or set the release channel (stable, beta, alpha, pre-alpha) for installs, renewals and updates.
+    /// Show the Beta update channel. Historical channel arguments also resolve to Beta.
     Channel {
-        /// The channel to use from now on.
+        /// A legacy channel argument, normalized to Beta.
         set: Option<String>,
     },
 }

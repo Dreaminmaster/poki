@@ -58,6 +58,8 @@ final class SelfSigner {
         let version: String
         let build: String
         let channel: String
+        let source: String?
+        let source_notice: String?
     }
 
     /// Prepare a fresh build when the installed profile has this many days left or fewer.
@@ -69,6 +71,7 @@ final class SelfSigner {
     private(set) var teams: [Team] = []
     private(set) var ready: [String: Prepared] = [:]
     private(set) var latest: Release?
+    private(set) var updateCheckError: String?
     /// What the signer is doing now, for the Setup page.
     private(set) var working: String?
     private(set) var fraction: Double?
@@ -274,17 +277,20 @@ final class SelfSigner {
         }
     }
 
-    /// Looks up the newest build on the chosen channel without preparing it, for the version rows.
-    /// Works without an Apple Account. False when GitHub could not be read.
+    /// Looks up Beta updates without preparing a signed copy.
     @discardableResult
     func checkLatest() async -> Bool {
-        guard let rel = try? await SignerBridge.decode(Release.self, ["op": "check_update"]) else { return false }
-        latest = rel
-        lastCheck = Date()
-        // Found here first (the Signing page looks without waiting for the 3-hour check): the
-        // download starts now too, as it would from that check.
-        if updateNotReady { maintain() }
-        return true
+        do {
+            latest = try await SignerBridge.decode(Release.self, ["op": "check_update"])
+            lastCheck = Date()
+            updateCheckError = nil
+            if updateNotReady { maintain() }
+            return true
+        } catch {
+            latest = nil
+            updateCheckError = error.localizedDescription
+            return false
+        }
     }
 
     /// Download and Install Update, in one tap: gets the newest build and signs it, then installs it.

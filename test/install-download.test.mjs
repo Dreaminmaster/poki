@@ -19,7 +19,7 @@ test('DMG 504 falls back to the asset API but still rejects a checksum mismatch'
   const dir = await scratch(t);
   const name = 'PokiSetup-0.2.1-999999-macos.dmg';
   t.mock.method(globalThis, 'fetch', async (url, options) => {
-    if (url.includes('/releases?')) return Response.json([{ tag_name: 'ios-alpha-latest', assets: [asset(name), asset('SHA256SUMS-desktop.txt')] }]);
+    if (url.includes('/releases?')) return Response.json([{ tag_name: 'app-0.4.2-beta.700', prerelease: true, assets: [asset(name), asset('SHA256SUMS-desktop.txt')] }]);
     if (url.startsWith('https://github.com/')) return new Response('', { status: 504 });
     assert.equal(options.headers.Accept, 'application/octet-stream');
     return new Response(url.endsWith('.dmg') ? 'corrupt' : `${hash('expected')}  ${name}\n`);
@@ -50,7 +50,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   const name = 'Poki-external-0.2.8-501.ipa';
   const bodies = { [name]: 'IPA', 'Poki-signing.zip': 'SIGNING', SHA256SUMS: `${hash('IPA')}  ${name}\n` };
   t.mock.method(globalThis, 'fetch', async (url, options) => {
-    if (url.includes('/releases/tags/')) return Response.json({ assets: Object.keys(bodies).map(asset) });
+    if (url.includes('/releases/tags/')) return Response.json({ tag_name: decodeURIComponent(url.split('/').at(-1)), assets: Object.keys(bodies).map(asset) });
     if (url.startsWith('https://github.com/')) return new Response('', { status: 504 });
     assert.equal(options.headers.Accept, 'application/octet-stream');
     return new Response(bodies[url.split('/').at(-1)]);

@@ -13,7 +13,7 @@ For a first install, start the installer, relay its person stops, and verify its
 Pick one branch:
 
 - **First install.** Poki is not on the iPhone. Follow "Before you start", "Run it", "Check the version" and "What to keep running".
-- **Update.** Poki is on the iPhone and the user asks to update it, or Poki's own update failed, could not download or stopped moving. Follow "Update an installed Poki". Poki's own update downloads from GitHub on the iPhone, and that download sometimes cannot reach GitHub; this branch is the backup, where the Mac downloads the build and installs it over USB.
+- **Update.** Poki is on the iPhone and the user asks to update it, or Poki's own update failed, could not download or stopped moving. Follow "Update an installed Poki". Poki's own update downloads from R2 with a GitHub network-failure fallback on the iPhone, and that download sometimes cannot reach GitHub; this branch is the backup, where the Mac downloads the build and installs it over USB.
 - **Stuck on "Finishing the update".** Follow "When Poki's own update stalls".
 
 In Poki 0.4.0, open the conversations drawer and tap the Settings button at the bottom. Paths below such as Settings > General > Updates start there. Current builds group these pages under Settings > Connection: Settings > General > Updates is Settings > Connection > Signing & Updates, and Settings > Automation > Setup is Settings > Connection. Give the user the path their build shows.
@@ -28,7 +28,7 @@ In Poki 0.4.0, open the conversations drawer and tap the Settings button at the 
 
 ## Which Poki you get
 
-The installer installs the newest build on its channel: Alpha, unless you pass `--channel stable`, `beta` or `pre-alpha`. A channel also offers the more stable channels' builds, and a channel with no release yet takes the next less stable channel's newest (Stable, then Beta, then Alpha, then Pre-alpha). Stable and Beta therefore use the Alpha build while neither Stable nor Beta offers an installable release. Do not state a version from memory; read it from the run:
+The installer uses Beta. Historical stable, alpha and pre-alpha preferences also resolve to Beta. R2 is the primary source and GitHub is the network-failure fallback. Do not state a version from memory; read it from the run:
 
 - The `channel` step prints `<channel>: Poki <version> (<build>)`, the release this run installs. For a Beta or Stable release the part in brackets is the release name (`beta.1`) or empty, not the build number.
 - The `install` step prints `Poki <version> (<build>) installed`, with the build number from the app itself.
@@ -64,7 +64,7 @@ The installer runs these in order. Most need nobody. Each step is complete when 
 
 1. **`setup_app`** Downloads Poki Setup and checks its SHA-256, Developer ID team (`Q64ZL36CJN`) and notarization. Nobody acts.
 2. **`bridge`** Starts Poki Setup's helper without a window. Nobody acts.
-3. **`channel`** Chooses the release channel, Alpha by default, and saves it as Poki Setup's channel on this Mac. Nobody acts.
+3. **`channel`** Finds the newest Beta release for this installation. Nobody acts.
 4. **`apple_account`** Signs in with the Apple Account, on the Mac only. Poki Setup keeps the sign-in for renewals. Stops `apple_dialog` and `apple_code_dialog` when this Mac was never signed in.
 5. **`phone`** Waits for the iPhone. Stop `phone_plug`.
 6. **`install`** Pairs, turns on Developer Mode, signs and installs Poki, gives it its pairing file and disk image. Stops `pair` and `devmode` on a phone that needs them, `pairing_file` rarely.
@@ -75,6 +75,14 @@ The installer runs these in order. Most need nobody. Each step is complete when 
 11. **`check`** Self-check: the install record, Developer Mode, pairing, disk image and relay.
 
 Poki turns itself on after this install, and ticks Developer Mode and UI Automation in Settings > Automation > Setup once it runs. The iPhone's own switch for UI Automation (iOS Settings > Developer > Enable UI Automation) is still the user's to turn on; Poki's UI Automation row and Allow UI Automation page says so. When Poki first opens it asks for Automation Mode: tell the user to tap Continue and enter the iPhone passcode on iOS's screen. If they cancel, Poki does not ask again until they turn it on again.
+
+## Download source and failures
+
+Configured builds read an Ed25519-signed R2 catalog. Every R2 resource, including the signing archive, must match the signed size and SHA-256. One operation keeps the selected metadata even if the catalog changes during download.
+
+When R2 is unreachable, the updater reports that it is using GitHub. If an R2 resource was already selected, its GitHub copy must have the same release tag, filename, size and signed checksum. A catalog signature error, redirect, unsafe address or checksum mismatch stops the operation. Report that error and retry after the source is repaired. Do not bypass it with a manual download.
+
+A build without R2 configuration explicitly reports that it uses GitHub. This does not prove the R2 migration is deployed. GitHub-only discovery retains the existing GitHub release checksum policy; older signing archives may lack a checksum. Keep that distinction in any validation report.
 
 ## Person stops
 
@@ -108,7 +116,7 @@ When `open_poki` ended with "the person said Poki is open" or "a version that do
 
 - `install` was `skipped` with "already installed from this computer": nothing was installed. Follow "Update an installed Poki" before forcing another install.
 - Poki Version still shows the old build: the old copy may still be running while iOS finishes replacing it. Ask the user to swipe Poki away in the app switcher, wait a moment, open it again and read Poki Version again.
-- Poki Version matches the `install` line but not what the user expected: the channel chose it (see "Which Poki you get"). Tell the user the channel and build. Change the channel only when they ask, and only to one whose newest build is not lower than the phone's.
+- Poki Version matches the `install` line but not what the user expected: the channel chose it (see "Which Poki you get"). Tell the user the channel and build. Do not switch to preview releases to work around a missing Beta.
 
 Done when Poki Version equals the selected release's actual version and numeric build, as well as the `install` line. Otherwise report the installation as incomplete and name the mismatch. On an existing installation, use the preservation checks below before any retry.
 
@@ -141,7 +149,7 @@ Use this branch when an existing Poki cannot download its update on the iPhone. 
    node bin/install-iphone.mjs --update-only --json
    ```
 
-3. Read the installed version, numeric build, channel and team verification status, followed by the target version and build. Team and device identifiers are deliberately withheld from output. The helper reads the live installation, requests fresh public metadata from the running app, checks the original record and public certificate, and inspects the downloaded IPA. It rejects equal or lower builds, channel or identity mismatches, changed app groups, and missing extensions. It preserves the saved phone and computer channels, and performs no pairing, model-key transfer, signing-identity import or relay deployment.
+3. Read the installed version, numeric build, channel and team verification status, followed by the target version and build. Team and device identifiers are deliberately withheld from output. The helper reads the live installation, requests fresh public metadata from the running app, checks the original record and public certificate, and inspects the downloaded IPA. It rejects equal or lower builds, non-Beta targets or identity mismatches, changed app groups, and missing extensions. Historical phone and computer channel preferences converge to Beta. It performs no pairing, model-key transfer, signing-identity import or relay deployment.
 4. On exit **2**, quote the single `reason` sentence and stop. Say that installation did not start; the only phone-side preflight write is a non-secret freshness request. Do not fall back to `run --reinstall`, unguarded `renew`, uninstalling the app, replacing certificates or clearing its data. An unavailable public snapshot is a compatibility limitation, not permission to infer identity from the Mac's record.
 5. On exit **3**, report installation as failed or unconfirmed and keep Poki installed. On exit **4**, report that installation finished but the target version was not verified. Resolve the named failure before another update-only attempt. Never describe either result as success.
 6. Exit **0** means the live installed version and build matched the inspected target after guarded renewal. A result with `simulated: true` proves only the simulated path. For a real update, ask the user to open Poki and confirm conversations, model accounts, settings, signing options, release channel, connections and required extensions. Do not display secret values. Done only when the version matches and those retained items are confirmed.
@@ -158,8 +166,8 @@ The installer exits with code 2. The last `error` event has `code`, `reason` and
 
 | Code | Meaning | What you do |
 |---|---|---|
-| `setup_download_failed` | GitHub did not serve a release asset or its metadata. | A 403 or 429 from `api.github.com` is usually GitHub's hourly limit on anonymous requests, shared by everyone on the same network, and is not retried: ask the user to switch to another network or proxy node and run the same command again, or to wait an hour. Other failures make at most 3 attempts per request, and asset requests switch to the release asset API after a 5xx or connection failure. Report the failed URL/status and rerun later if both routes fail. |
-| `setup_checksum_mismatch` | The DMG does not match `SHA256SUMS-desktop.txt`. | Fetched again once. Then stop and report. Never open the file. |
+| `setup_download_failed` | Release metadata or an asset could not be read or trusted. | Read the source notice. Network failures can fall back to GitHub. Signature, redirect and address-validation failures stop the operation; report them without switching sources manually. For a GitHub refusal, report the status and retry later. |
+| `setup_checksum_mismatch` | A downloaded file differs from its expected checksum or signed size. | Stop and report. Keep the installed app and its data. Never open the downloaded file. |
 | `setup_signature_invalid` | Poki Setup is not signed by team `Q64ZL36CJN` or not notarized. | Stop. Do not run it. Report it. |
 | `setup_app_missing` | `phones` or `diagnose` cannot find Poki Setup.app. | Run `run`, which installs it, or pass `--app-dir` or `--bridge`. |
 | `bridge_start_failed` | Poki Setup's helper did not start. | Delete `~/Applications/Poki Setup.app` if the installer put it there, and run again. |
@@ -186,15 +194,15 @@ The installer exits with code 2. The last `error` event has `code`, `reason` and
 
 ## Download and upgrade recovery
 
-When Poki Setup reports an HTTP error during installation, the installer downloads the selected release's external IPA, SHA256SUMS and Poki-signing.zip into a fresh folder. It checks the IPA's SHA-256, then passes the local IPA to the helper; the helper reads the signing zip beside it. Current releases do not list the signing zip in SHA256SUMS, so its integrity is provided by HTTPS, not a published checksum. If a release lists its checksum, the installer checks it too. Local installation records use a `local:` tag. No desktop update is required for this fallback.
+When Poki Setup reports an HTTP error during installation, the installer retries the selected release through its download code and passes the verified IPA and matching signing archive to the helper. R2 downloads verify both against the signed catalog. GitHub-only discovery uses SHA256SUMS and checks a signing archive checksum when the release includes one. Local installation records use a `local:` tag.
 
-If both download routes fail, do not skip checksum checks or substitute another release's signing zip. A manual recovery can use `gh release download <selected-tag> --repo JosssphZhou/poki --pattern '<selected-IPA-name>' --pattern SHA256SUMS --pattern Poki-signing.zip --dir <new-empty-folder>`. Check the IPA against that release's SHA256SUMS before using Poki Setup's local IPA install. This is a manual fallback, not an installer success.
+If both sources fail, retain the installed app and report the error. A signature or checksum failure must not be bypassed through manual downloads or another release's signing archive. See "Download source and failures" for the allowed recovery boundary.
 
 Before an upgrade, ask the user to save their work and leave Poki for the Home Screen. If installation stalls, retry with the phone unlocked and Poki swiped away. Do not delete Poki or revoke certificates without explaining the data/signing impact and getting permission. An unavailable old app is not proof that its data is lost.
 
 ## Without Node.js, or on Windows
 
-Poki Setup 0.2.2 and later carry their own command line tool, which needs no checkout and no Node.js: `"/Applications/Poki Setup.app/Contents/MacOS/poki-setup"` on a Mac (or under `~/Applications`), `"$env:LOCALAPPDATA\Poki Setup\poki-setup.exe"` on Windows. When Node.js 24 is missing (`node_too_old`) or the computer runs Windows, ask the user to install Poki Setup from https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest and open it once, then, for a first install, run `"<tool>" prompt` and follow what it prints. For an existing app, return to "Update an installed Poki" and apply its preservation gate before any command that installs or renews. If this tool lacks the documented read-only commands or `renew`, stop and report the unsupported build. In short: `"<tool>" next --json` lists what is done and what is next, with `who`, `command` and `say` for each step; exit code 2 means a person has to act and 3 that Apple's sign-in code is needed. The person signs in by running `"<tool>" login <email> --keep-password` in their own terminal.
+Poki Setup 0.2.2 and later carry their own command line tool, which needs no checkout and no Node.js: `"/Applications/Poki Setup.app/Contents/MacOS/poki-setup"` on a Mac (or under `~/Applications`), `"$env:LOCALAPPDATA\Poki Setup\poki-setup.exe"` on Windows. When Node.js 24 is missing (`node_too_old`) or the computer runs Windows, ask the user to install Poki Setup from the newest Beta at https://github.com/JosssphZhou/poki/releases and open it once, then, for a first install, run `"<tool>" prompt` and follow what it prints. For an existing app, return to "Update an installed Poki" and apply its preservation gate before any command that installs or renews. If this tool lacks the documented read-only commands or `renew`, stop and report the unsupported build. In short: `"<tool>" next --json` lists what is done and what is next, with `who`, `command` and `say` for each step; exit code 2 means a person has to act and 3 that Apple's sign-in code is needed. The person signs in by running `"<tool>" login <email> --keep-password` in their own terminal.
 
 ## Read Poki's records on the Mac
 

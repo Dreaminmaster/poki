@@ -33,15 +33,12 @@ pub struct Prepared {
 
 fn stop(message: &'static str) -> Error { Error::UpdateCheck(message) }
 
-fn check_installed(installed: &Installed, app: &device::install::InstalledApp, record: &keeper::Record, channel: release::Channel) -> Result<()> {
+fn check_installed(installed: &Installed, app: &device::install::InstalledApp, record: &keeper::Record) -> Result<()> {
     if installed.schema != "poki.update/1" || installed.version != app.version || installed.build != app.build || installed.bundle_id != app.bundle_id {
         return Err(stop("Poki's update information is missing or stale; open the installed Poki and retry update-only."));
     }
     if installed.team.is_empty() || app.team.as_deref() != Some(installed.team.as_str()) || installed.team != record.team_id || installed.bundle_id != record.bundle_id {
         return Err(stop("The installed app and this computer have different signing teams; keep Poki installed and use the original signing computer."));
-    }
-    if installed.channel != channel {
-        return Err(stop("The phone and computer use different update channels; keep both settings unchanged and ask for help choosing the matching update."));
     }
     if installed.app_group != sign::team_app_group(&record.team_id) || installed.certificate_sha256.len() != 64 || !installed.certificate_sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(stop("Poki's app group or public signing identity cannot be verified; keep Poki installed and use its original update method."));
@@ -55,8 +52,8 @@ fn check_target(installed: &Installed, unpacked: &sign::Unpacked, channel: relea
     if old.is_none() || new.is_none() || new <= old {
         return Err(stop("The target build is not newer than the installed build; keep Poki installed and wait for a newer build on the same channel."));
     }
-    if channel != installed.channel {
-        return Err(stop("The selected release belongs to another channel; keep the current channel and wait for a matching release."));
+    if channel != release::Channel::Beta {
+        return Err(stop("The selected release is not a Beta update; keep Poki installed and check for a Beta release."));
     }
     if unpacked.bundles.first().map(|b| b.new_id.as_str()) != Some(installed.bundle_id.as_str()) || unpacked.app_group != installed.app_group {
         return Err(stop("The target app identifier or app group differs from the installed app; keep Poki installed and use its original update method."));
@@ -113,7 +110,7 @@ pub async fn prepare(signer: &mut setup::Signer, udid: Option<&str>, reporter: &
     }
     let app = installed_app(&phone, &record).await?;
     let installed = public_snapshot(&phone, &app.bundle_id).await?;
-    check_installed(&installed, &app, &record, release::channel())?;
+    check_installed(&installed, &app, &record)?;
     if signer.account.team_id.as_deref().is_some_and(|id| id != record.team_id) {
         return Err(stop("The computer selected a different signing team; use the original signing setup without changing the phone."));
     }
@@ -146,7 +143,7 @@ impl Prepared {
         }
         let current = installed_app(&self.phone, &self.record).await?;
         let installed = public_snapshot(&self.phone, &self.record.bundle_id).await?;
-        check_installed(&installed, &current, &self.record, release::channel())?;
+        check_installed(&installed, &current, &self.record)?;
         check_target(&installed, &self.unpacked, self.release.channel)?;
         if installed.certificate_sha256 != self.installed.certificate_sha256 {
             return Err(stop("The installed signing identity changed during preparation; keep Poki installed and rerun update-only."));
@@ -183,7 +180,7 @@ mod tests {
         let app = dir.path().join("Poki.app");
         let widget = app.join("PlugIns/PokiWidgets.appex");
         std::fs::create_dir_all(&widget).unwrap();
-        let info = serde_json::json!({"CFBundleIdentifier": "nz.zheha.poki", "CFBundleShortVersionString": "0.4.0", "CFBundleVersion": build, "PokiAppGroup": "group.nz.zheha.poki"});
+        let info = serde_json::json!({"CFBundleIdentifier": "nz.zheha.poki", "CFBundleShortVersionString": "0.4.2", "CFBundleVersion": build, "PokiAppGroup": "group.nz.zheha.poki"});
         plist::to_file_xml(app.join("Info.plist"), &info).unwrap();
         plist::to_file_xml(widget.join("Info.plist"), &serde_json::json!({"CFBundleIdentifier": "nz.zheha.poki.widgets"})).unwrap();
         let ipa = dir.path().join("target.ipa");
@@ -195,22 +192,29 @@ mod tests {
     fn target_preserves_build_channel_and_extensions() {
         let installed = installed();
         let target = target("101");
-        assert_eq!(check_target(&installed, &target, release::Channel::Alpha).unwrap(), Target { version: "0.4.0".into(), build: "101".into() });
+        for version in ["0.4.0", "0.4.1"] {
+            for channel in release::Channel::ALL {
+                let mut old = installed.clone();
+                old.version = version.into();
+                old.channel = channel;
+                assert_eq!(check_target(&old, &target, release::Channel::Beta).unwrap(), Target { version: "0.4.2".into(), build: "101".into() });
+            }
+        }
         for build in ["101", "102", "unknown"] {
             let mut changed = installed.clone();
             changed.build = build.into();
-            assert!(check_target(&changed, &target, release::Channel::Alpha).unwrap_err().to_string().contains("not newer"));
+            assert!(check_target(&changed, &target, release::Channel::Beta).unwrap_err().to_string().contains("not newer"));
         }
-        assert!(check_target(&installed, &target, release::Channel::Beta).unwrap_err().to_string().contains("another channel"));
+        assert!(check_target(&installed, &target, release::Channel::Alpha).unwrap_err().to_string().contains("Beta"));
         let mut changed = installed.clone();
         changed.extensions.push("nz.zheha.poki.TESTTEAM.tunnel".into());
-        assert!(check_target(&changed, &target, release::Channel::Alpha).unwrap_err().to_string().contains("every installed extension"));
+        assert!(check_target(&changed, &target, release::Channel::Beta).unwrap_err().to_string().contains("every installed extension"));
         let mut changed = installed.clone();
         changed.app_group = "group.custom".into();
-        assert!(check_target(&changed, &target, release::Channel::Alpha).unwrap_err().to_string().contains("app group"));
+        assert!(check_target(&changed, &target, release::Channel::Beta).unwrap_err().to_string().contains("app group"));
         let mut changed = installed;
         changed.bundle_id = "custom.poki".into();
-        assert!(check_target(&changed, &target, release::Channel::Alpha).unwrap_err().to_string().contains("app identifier"));
+        assert!(check_target(&changed, &target, release::Channel::Beta).unwrap_err().to_string().contains("app identifier"));
     }
 
     #[test]
@@ -224,16 +228,20 @@ mod tests {
             "version": "0.3.0", "build": "90", "release_tag": "app-alpha-latest", "signed_at": 0,
             "profile_expires_at": 0, "pairing_handed_off": true,
         })).unwrap();
-        check_installed(&installed, &app, &record, release::Channel::Alpha).unwrap();
+        check_installed(&installed, &app, &record).unwrap();
         let mut changed = app.clone();
         changed.team = Some("OTHERTEAM".into());
-        assert!(check_installed(&installed, &changed, &record, release::Channel::Alpha).unwrap_err().to_string().contains("different signing teams"));
+        assert!(check_installed(&installed, &changed, &record).unwrap_err().to_string().contains("different signing teams"));
         changed.team = None;
-        assert!(check_installed(&installed, &changed, &record, release::Channel::Alpha).is_err());
+        assert!(check_installed(&installed, &changed, &record).is_err());
         let mut changed = app;
         changed.build = "99".into();
-        assert!(check_installed(&installed, &changed, &record, release::Channel::Alpha).unwrap_err().to_string().contains("stale"));
+        assert!(check_installed(&installed, &changed, &record).unwrap_err().to_string().contains("stale"));
         changed.build = "100".into();
-        assert!(check_installed(&installed, &changed, &record, release::Channel::Beta).unwrap_err().to_string().contains("different update channels"));
+        for channel in release::Channel::ALL {
+            let mut old = installed.clone();
+            old.channel = channel;
+            check_installed(&old, &changed, &record).unwrap();
+        }
     }
 }

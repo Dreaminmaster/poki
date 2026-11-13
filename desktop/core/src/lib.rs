@@ -32,6 +32,7 @@ pub mod paths;
 pub mod progress;
 pub mod relay;
 pub mod release;
+mod release_catalog;
 pub mod setup;
 pub mod sign;
 #[cfg(feature = "device")]

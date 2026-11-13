@@ -13,7 +13,7 @@ export default function Settings({ info }: { info: AppInfo | null }) {
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [prompt, setPrompt] = useState<string | null>(null);
   const load = () => api.account().then((a) => { setAcct(a); if (a.anisette.kind === "remote") setServer(a.anisette.url); }).catch(() => {});
-  useEffect(() => { load(); api.channels().then(setChannels).catch(() => {}); api.agentPrompt().then(setPrompt).catch(() => {}); }, []);
+  useEffect(() => { load(); api.channels().then(setChannels).catch((e) => setError(failureText(e))); api.agentPrompt().then(setPrompt).catch(() => {}); }, []);
   const chosen = channels.find((c) => c.selected);
   const system = acct?.anisette.kind === "system";
   return (
@@ -34,13 +34,11 @@ export default function Settings({ info }: { info: AppInfo | null }) {
       </Card>
       <Card>
         <h2>{t("Updates")}</h2>
-        <p className="muted small">{t("Stable has tested releases only. Beta adds test builds. Alpha adds early builds. Pre-alpha adds every snapshot, which can break. Poki Setup installs and renews Poki from this channel and checks it for its own updates.")}</p>
+        <p className="muted small">Beta</p>
         <div className="row" style={{ alignItems: "center" }}>
-          <div className="seg" role="radiogroup" aria-label={t("Channel")}>
-            {channels.map((c) => <button key={c.id} role="radio" aria-checked={c.selected} className={c.selected ? "on" : ""} onClick={() => api.setChannel(c.id).then((l) => { setChannels(l); setUpdate(null); }).catch((e) => setError(failureText(e)))}>{t(c.title)}</button>)}
-          </div>
           <span className="muted small">{chosen?.latest ? `${t("Newest Poki")}: ${chosen.latest.version} (${chosen.latest.build})` : t("None published")}</span>
         </div>
+        {chosen?.latest?.source_notice && <p className="muted small">{chosen.latest.source_notice}</p>}
       </Card>
       <Card>
         <h2>{t("Use an agent")}</h2>
@@ -55,6 +53,7 @@ export default function Settings({ info }: { info: AppInfo | null }) {
           {update && (update.newer ? <Capsule disabled={updating} onClick={() => { setUpdating(true); api.installUpdate().then(() => {}).catch((e) => setError(failureText(e))).finally(() => setUpdating(false)); }}>{updating ? t("Downloading…") : `${t("Install update")}: ${displayVersion(update.latest)}`}</Capsule> : <span className="muted">{t("Up to date")}</span>)}
           <Capsule kind="ghost" onClick={async () => { const { openUrl } = await import("@tauri-apps/plugin-opener"); openUrl("https://github.com/JosssphZhou/poki/blob/main/desktop/README.md"); }}>README</Capsule>
         </div>
+        {update?.source_notice && <p className="muted small">{update.source_notice}</p>}
         <p className="muted small" style={{ marginBottom: 0 }}>AGPL-3.0. Sign-in protocol after SideStore's icloud-auth (MPL-2.0) and Sideloader (GPL-3.0); signer: apple-codesign (MPL-2.0); device: idevice (MIT); type: Geist (OFL). See THIRD_PARTY_NOTICES.md.</p>
       </Card>
     </>

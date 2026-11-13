@@ -1,12 +1,20 @@
-//! Poki's releases on GitHub: `ios-v*` (Stable, Beta) and `ios-alpha-*` (Alpha), `ios-prealpha-*` (Pre-alpha) tags with `Poki-external-<v>-<b>.ipa`, `Poki-<v>-<b>.ipa`,
-//! `Poki-signing.zip` and `SHA256SUMS`. Poki Setup installs the external edition: its loopback
-//! comes from the person's proxy app, which a team profile can sign; the built-in tunnel cannot.
+//! Beta releases from a signed R2 catalog, with GitHub as the network-failure fallback.
+//! Poki Setup installs the external edition because a team profile cannot sign its built-in tunnel.
 use crate::{Error, Result, Reporter, paths};
+pub use crate::release_catalog::Pin;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 pub const DEFAULT_REPO: &str = "JosssphZhou/poki";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReleaseSource {
+    R2,
+    #[default]
+    Github,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Release {
@@ -22,6 +30,14 @@ pub struct Release {
     pub signing_url: Option<String>,
     pub sums_url: Option<String>,
     pub notes: String,
+    #[serde(default)]
+    pub source: ReleaseSource,
+    #[serde(default)]
+    pub source_notice: Option<String>,
+    #[serde(default)]
+    pub ipa_pin: Option<Pin>,
+    #[serde(default)]
+    pub signing_pin: Option<Pin>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -34,22 +50,26 @@ struct GhRelease {
     #[serde(default)]
     html_url: Option<String>,
     assets: Vec<GhAsset>,
+    #[serde(skip)]
+    source: ReleaseSource,
+    #[serde(skip)]
+    source_notice: Option<String>,
 }
 #[derive(Deserialize, Clone)]
 struct GhAsset {
     name: String,
     browser_download_url: String,
+    #[serde(flatten)]
+    pin: Option<Pin>,
 }
 
 pub fn repo() -> String { std::env::var("POKI_RELEASE_REPO").unwrap_or_else(|_| DEFAULT_REPO.into()) }
 
-/// Which releases Poki Setup installs, renews with and offers as its own updates. Each channel
-/// includes the ones above it: Beta takes the newest Stable or Beta, Alpha adds alpha builds, Pre-alpha the newest of all.
-/// See docs/release-channels.md upstream.
+/// Historical release stages retained for tags and serialized state. Clients select Beta.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Channel {
-    /// `ios-vX.Y.Z` / `desktop-vX.Y.Z` full releases. The default.
+    /// Full releases recognized by older clients.
     Stable,
     /// The same tags published as prereleases.
     Beta,
@@ -149,7 +169,7 @@ impl Channel {
 
 impl std::str::FromStr for Channel {
     type Err = Error;
-    fn from_str(s: &str) -> Result<Self> { Channel::parse(s).ok_or_else(|| Error::msg(format!("Unknown channel “{s}”. Use stable, beta, alpha or pre-alpha."))) }
+    fn from_str(s: &str) -> Result<Self> { Channel::parse(s).ok_or_else(|| Error::msg(format!("Unknown channel “{s}”. Use beta."))) }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -159,23 +179,13 @@ struct ChannelFile {
 
 fn channel_file() -> Result<PathBuf> { Ok(paths::state_dir()?.join("channel.json")) }
 
-/// The chosen channel: `POKI_RELEASE_CHANNEL` when set, else the saved choice, else Stable.
-pub fn channel() -> Channel {
-    if let Some(c) = std::env::var("POKI_RELEASE_CHANNEL").ok().and_then(|v| Channel::parse(&v)) {
-        return c;
-    }
-    channel_file()
-        .ok()
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice::<ChannelFile>(&b).ok())
-        .map(|f| f.channel)
-        .unwrap_or_default()
-}
+/// Historical channel preferences converge to Beta without changing signing or account data.
+pub fn channel() -> Channel { Channel::Beta }
 
-pub fn set_channel(channel: Channel) -> Result<()> {
+pub fn set_channel(_channel: Channel) -> Result<()> {
     let p = channel_file()?;
     let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&ChannelFile { channel })?)?;
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&ChannelFile { channel: Channel::Beta })?)?;
     std::fs::rename(tmp, p)?;
     Ok(())
 }
@@ -184,7 +194,7 @@ fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder().user_agent(format!("PokiSetup/{}", crate::VERSION)).timeout(std::time::Duration::from_secs(600)).build()?)
 }
 
-async fn list() -> Result<Vec<GhRelease>> {
+async fn github_list() -> Result<Vec<GhRelease>> {
     let mut list: Vec<GhRelease> = client()?
         .get(format!("https://api.github.com/repos/{}/releases?per_page=100", repo()))
         .header("Accept", "application/vnd.github+json")
@@ -197,6 +207,24 @@ async fn list() -> Result<Vec<GhRelease>> {
         .await?;
     list.retain(|r| !r.draft);
     // Newest first by publication, whatever order GitHub lists them in.
+    list.sort_by(|a, b| b.published_at.cmp(&a.published_at));
+    Ok(list)
+}
+
+async fn list() -> Result<Vec<GhRelease>> {
+    let (mut list, source, notice) = match crate::release_catalog::read().await {
+        Ok(releases) => (releases.into_iter().map(serde_json::from_value).collect::<std::result::Result<Vec<GhRelease>, _>>()?, ReleaseSource::R2, None),
+        Err(Error::ReleaseUnavailable(notice)) => (github_list().await?, ReleaseSource::Github, Some(notice.to_string())),
+        Err(error) => return Err(error),
+    };
+    list.retain(|r| !r.draft && release_channel(r) == Some(Channel::Beta));
+    if list.is_empty() {
+        return Err(Error::msg(format!("{}No Beta releases are available. Try again later.", notice.as_deref().map(|n| format!("{n} ")).unwrap_or_default())));
+    }
+    for release in &mut list {
+        release.source = source;
+        release.source_notice = notice.clone();
+    }
     list.sort_by(|a, b| b.published_at.cmp(&a.published_at));
     Ok(list)
 }
@@ -225,6 +253,10 @@ fn installable(r: &GhRelease) -> Option<(Channel, Release)> {
             signing_url: r.assets.iter().find(|a| a.name == "Poki-signing.zip").map(|a| a.browser_download_url.clone()),
             sums_url: r.assets.iter().find(|a| a.name == "SHA256SUMS").map(|a| a.browser_download_url.clone()),
             notes: r.body.clone().unwrap_or_default(),
+            source: r.source,
+            source_notice: r.source_notice.clone(),
+            ipa_pin: ipa.pin.clone(),
+            signing_pin: r.assets.iter().find(|a| a.name == "Poki-signing.zip").and_then(|a| a.pin.clone()),
         },
     ))
 }
@@ -249,17 +281,13 @@ fn pick(list: &[GhRelease], channel: Channel) -> Option<Release> {
     channel.fallbacks().find_map(|c| pick_exact(list, c))
 }
 
-fn none_in(channel: Channel) -> Error {
-    Error::msg(format!("No Poki release with an installable IPA is published on the {} channel at github.com/{}. Pick another channel, or choose an IPA file.", channel.title(), repo()))
+pub async fn latest() -> Result<Release> { latest_in(Channel::Beta).await }
+
+pub async fn latest_in(_channel: Channel) -> Result<Release> {
+    pick(&list().await?, Channel::Beta).ok_or_else(|| Error::msg("No Beta release with an installable IPA is available. Try again later."))
 }
 
-/// The newest installable release on the chosen channel.
-pub async fn latest() -> Result<Release> { latest_in(channel()).await }
-
-/// The newest installable release that a channel offers.
-pub async fn latest_in(channel: Channel) -> Result<Release> { pick(&list().await?, channel).ok_or_else(|| none_in(channel)) }
-
-/// One channel's row for the picker: its newest release, if any.
+/// Update information in the legacy channel-list response format.
 #[derive(Debug, Clone, Serialize)]
 pub struct ChannelInfo {
     pub id: Channel,
@@ -268,14 +296,10 @@ pub struct ChannelInfo {
     pub latest: Option<Release>,
 }
 
-/// Every channel with its newest release (one GitHub request), the chosen one marked.
+/// The single Beta row, retaining the bridge response format.
 pub async fn channels() -> Result<Vec<ChannelInfo>> {
-    let chosen = channel();
-    let list = list().await.ok();
-    Ok(Channel::ALL
-        .iter()
-        .map(|&c| ChannelInfo { id: c, title: c.title(), selected: c == chosen, latest: list.as_deref().and_then(|l| pick(l, c)) })
-        .collect())
+    let list = list().await?;
+    Ok(vec![ChannelInfo { id: Channel::Beta, title: "Beta", selected: true, latest: pick(&list, Channel::Beta) }])
 }
 
 /// Poki Setup's own update on the chosen channel. Any release on the channel can carry it (an
@@ -295,6 +319,10 @@ pub struct UpdateInfo {
     /// The release's SHA256SUMS-desktop.txt, to check the download against.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sums_url: Option<String>,
+    pub source: ReleaseSource,
+    pub source_notice: Option<String>,
+    pub tag: Option<String>,
+    pub asset_pin: Option<Pin>,
 }
 
 /// The installer name suffix for this platform.
@@ -331,9 +359,9 @@ pub async fn desktop_update() -> Result<UpdateInfo> {
     Ok(match found {
         Some((r, a, v)) => {
             let sums_url = r.assets.iter().find(|a| a.name == "SHA256SUMS-desktop.txt").map(|a| a.browser_download_url.clone());
-            UpdateInfo { current, latest: Some(v), url: r.html_url.clone(), asset_url: Some(a.browser_download_url.clone()), asset_name: Some(a.name.clone()), newer, channel, sums_url }
+            UpdateInfo { current, latest: Some(v), url: r.html_url.clone(), asset_url: Some(a.browser_download_url.clone()), asset_name: Some(a.name.clone()), newer, channel, sums_url, source: r.source, source_notice: r.source_notice.clone(), tag: Some(r.tag_name.clone()), asset_pin: a.pin.clone() }
         }
-        None => UpdateInfo { current, latest: None, url: None, asset_url: None, asset_name: None, newer, channel, sums_url: None },
+        None => UpdateInfo { current, latest: None, url: None, asset_url: None, asset_name: None, newer, channel, sums_url: None, source: list[0].source, source_notice: list[0].source_notice.clone(), tag: None, asset_pin: None },
     })
 }
 
@@ -347,36 +375,39 @@ pub struct Installed {
     pub relaunching: bool,
 }
 
-/// Downloads the newer Poki Setup, checks it against the release's SHA256SUMS-desktop.txt, and
-/// installs it over this one: on a Mac the app inside the disk image replaces this app bundle and
-/// a helper opens the new one after this one quits; on Windows the installer runs in passive mode
-/// and starts Poki Setup again. When the swap is not possible (the app is not in a writable
-/// place, for example) the disk image or installer is opened for the person instead.
-pub async fn install_desktop_update(reporter: &Reporter) -> Result<Installed> {
-    let info = desktop_update().await?;
+/// Downloads and verifies the selected installer without running it.
+pub async fn fetch_desktop_update(info: UpdateInfo, reporter: &Reporter) -> Result<PathBuf> {
+    if let Some(notice) = &info.source_notice { reporter.note("update", notice); }
     let (Some(url), Some(name), true) = (info.asset_url, info.asset_name, info.newer) else {
         return Err(Error::msg("Poki Setup is up to date."));
     };
     let dir = paths::cache_dir()?.join("updates");
     std::fs::create_dir_all(&dir)?;
     let to = dir.join(&name);
-    let expected = match &info.sums_url {
-        Some(u) => client()?.get(u).send().await?.error_for_status()?.text().await.ok().and_then(|t| sum_for(&t, &name)),
-        None => None,
-    };
-    let good = |p: &std::path::Path| p.is_file() && expected.as_deref().map(|e| sha256_file(p).ok().as_deref() == Some(e)).unwrap_or(true);
-    if !good(&to) {
-        let part = dir.join(format!("{name}.part"));
-        download(&url, &part, reporter, "update").await?;
-        if let Some(e) = &expected {
-            let got = sha256_file(&part)?;
-            if &got != e {
-                let _ = std::fs::remove_file(&part);
-                return Err(Error::msg(format!("The downloaded update did not match its checksum ({got}). Try again.")));
-            }
+    if info.source == ReleaseSource::R2 {
+        let pin = info.asset_pin.as_ref().ok_or_else(|| Error::msg("Installer integrity metadata is missing"))?;
+        if !pin.matches(&to) {
+            download_pinned(&url, pin, info.tag.as_deref().ok_or_else(|| Error::msg("Installer release tag is missing"))?, &name, &to, reporter).await?;
         }
-        std::fs::rename(&part, &to)?;
+    } else {
+        let sums_url = info.sums_url.as_deref().ok_or_else(|| Error::msg("The installer has no checksum file"))?;
+        let sums = client()?.get(sums_url).send().await?.error_for_status()?.text().await?;
+        let expected = sum_for(&sums, &name).ok_or_else(|| Error::msg("The installer is missing its checksum"))?;
+        if !to.is_file() || sha256_file(&to)? != expected {
+            let part = dir.join(format!("{name}.part"));
+            download(&url, &part, reporter, "update").await?;
+            if sha256_file(&part)? != expected {
+                let _ = std::fs::remove_file(&part);
+                return Err(Error::msg("The downloaded update did not match its checksum. Try again."));
+            }
+            std::fs::rename(&part, &to)?;
+        }
     }
+    Ok(to)
+}
+
+pub async fn install_desktop_update(reporter: &Reporter) -> Result<Installed> {
+    let to = fetch_desktop_update(desktop_update().await?, reporter).await?;
     match install_in_place(&to) {
         Ok(()) => Ok(Installed { path: to, relaunching: true }),
         Err(e) => {
@@ -521,20 +552,31 @@ pub async fn fetch(release: &Release, reporter: &Reporter) -> Result<(PathBuf, O
     let dir = paths::cache_dir()?.join(&release.tag);
     std::fs::create_dir_all(&dir)?;
     let ipa = dir.join(&release.ipa_name);
-    let sums = match &release.sums_url {
-        Some(u) => Some(client()?.get(u).send().await?.error_for_status()?.text().await?),
-        None => None,
-    };
-    let expected = sums.as_ref().and_then(|s| s.lines().find(|l| l.ends_with(&release.ipa_name)).and_then(|l| l.split_whitespace().next()).map(|h| h.to_lowercase()));
-    if !(ipa.is_file() && expected.as_deref().map(|e| sha256_file(&ipa).ok().as_deref() == Some(e)).unwrap_or(false)) {
-        download(&release.ipa_url, &ipa, reporter, "release").await?;
-        if let Some(e) = &expected {
-            let got = sha256_file(&ipa)?;
-            if &got != e {
-                let _ = std::fs::remove_file(&ipa);
-                return Err(Error::msg("The downloaded IPA does not match the release's SHA256SUMS. Try again; if it repeats, the download is being altered on the way."));
-            }
+    if let Some(notice) = &release.source_notice { reporter.note("release", notice); }
+    if release.source == ReleaseSource::R2 {
+        let pin = release.ipa_pin.as_ref().ok_or_else(|| Error::msg("IPA integrity metadata is missing"))?;
+        if !pin.matches(&ipa) {
+            download_pinned(&release.ipa_url, pin, &release.tag, &release.ipa_name, &ipa, reporter).await?;
         }
+        let signing = if let Some(url) = &release.signing_url {
+            let pin = release.signing_pin.as_ref().ok_or_else(|| Error::msg("Signing archive integrity metadata is missing"))?;
+            let path = dir.join("Poki-signing.zip");
+            if !pin.matches(&path) { download_pinned(url, pin, &release.tag, "Poki-signing.zip", &path, reporter).await?; }
+            Some(path)
+        } else { None };
+        return Ok((ipa, signing));
+    }
+    let sums_url = release.sums_url.as_deref().ok_or_else(|| Error::msg("The IPA has no checksum file"))?;
+    let sums = client()?.get(sums_url).send().await?.error_for_status()?.text().await?;
+    let expected = sum_for(&sums, &release.ipa_name).ok_or_else(|| Error::msg("The IPA is missing its checksum"))?;
+    if !ipa.is_file() || sha256_file(&ipa)? != expected {
+        let part = dir.join(format!("{}.part", release.ipa_name));
+        download(&release.ipa_url, &part, reporter, "release").await?;
+        if sha256_file(&part)? != expected {
+            let _ = std::fs::remove_file(&part);
+            return Err(Error::msg("The downloaded IPA does not match the release's checksum. Try again."));
+        }
+        std::fs::rename(&part, &ipa)?;
     }
     let signing = match &release.signing_url {
         Some(u) => {
@@ -579,6 +621,14 @@ pub async fn relay_worker(want: &RelayFor) -> Result<Option<(String, String, Str
     });
     let Some(r) = found else { return Ok(None) };
     let url = &r.assets.iter().find(|a| a.name == RELAY_ASSET).unwrap().browser_download_url;
+    if r.source == ReleaseSource::R2 {
+        let asset = r.assets.iter().find(|a| a.name == RELAY_ASSET).unwrap();
+        let pin = asset.pin.as_ref().ok_or_else(|| Error::msg("Relay integrity metadata is missing"))?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join(RELAY_ASSET);
+        download_pinned(url, pin, &r.tag_name, RELAY_ASSET, &path, &Reporter::silent()).await?;
+        return Ok(Some((r.tag_name.clone(), std::fs::read_to_string(path)?, url.clone())));
+    }
     let sums_url = r.assets.iter().find(|a| a.name == "SHA256SUMS").map(|a| a.browser_download_url.clone())
         .ok_or_else(|| Error::msg(format!("Release {} has the relay but no SHA256SUMS to check it against.", r.tag_name)))?;
     let http = client()?;
@@ -591,6 +641,42 @@ pub async fn relay_worker(want: &RelayFor) -> Result<Option<(String, String, Str
         return Err(Error::msg(format!("The relay in release {} does not match its SHA256SUMS. Try again; if it repeats, the download is being altered on the way.", r.tag_name)));
     }
     Ok(Some((r.tag_name.clone(), body, url.clone())))
+}
+
+async fn download_pinned(url: &str, pin: &Pin, tag: &str, name: &str, to: &std::path::Path, reporter: &Reporter) -> Result<()> {
+    let temp = tempfile::NamedTempFile::new_in(to.parent().ok_or_else(|| Error::msg("Download has no parent directory"))?)?;
+    let path = temp.path();
+    let result = download_r2(url, pin, path, reporter).await;
+    match result {
+        Err(Error::ReleaseUnavailable(notice)) => {
+            reporter.note("release", notice);
+            let mut mirror = reqwest::Url::parse(&format!("https://github.com/{}/releases/download/", repo())).map_err(|_| Error::msg("Invalid release repository"))?;
+            mirror.path_segments_mut().map_err(|_| Error::msg("Invalid release repository"))?.pop_if_empty().push(tag).push(name);
+            download(mirror.as_str(), path, reporter, "release").await?;
+        }
+        Err(error) => return Err(error),
+        Ok(()) => {},
+    }
+    if !pin.matches(path) { return Err(Error::msg("Download does not match the signed release catalog")); }
+    temp.persist(to).map_err(|e| Error::Io(e.error))?;
+    Ok(())
+}
+
+async fn download_r2(url: &str, pin: &Pin, to: &std::path::Path, reporter: &Reporter) -> Result<()> {
+    use futures_util::StreamExt;
+    let response = crate::release_catalog::get(url, std::time::Duration::from_secs(600)).await?;
+    let mut stream = response.bytes_stream();
+    let mut file = tokio::fs::File::create(to).await?;
+    let mut got = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| Error::ReleaseUnavailable("R2 download was interrupted. Using GitHub."))?;
+        got += chunk.len() as u64;
+        if got > pin.size { return Err(Error::msg("Download exceeds the signed size")); }
+        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await?;
+        if pin.size > 0 { reporter.part("release", got as f64 / pin.size as f64, None); }
+    }
+    tokio::io::AsyncWriteExt::flush(&mut file).await?;
+    Ok(())
 }
 
 pub async fn download(url: &str, to: &std::path::Path, reporter: &Reporter, step: &str) -> Result<()> {
@@ -626,6 +712,63 @@ pub fn sha256_file(path: &std::path::Path) -> Result<String> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn signed_update_keeps_its_snapshot_and_preserves_existing_files_on_corruption() {
+        use crate::release_catalog::{Source, fixture::{Reply, Server, asset, public_key, release, signed}};
+        let (_guard, _home) = paths::test_home();
+        let server = Server::start().await;
+        let ipa_name = "Poki-external-0.4.2-700.ipa";
+        let ipa_url = server.url("/releases/700/Poki-external-0.4.2-700.ipa");
+        let zip_url = server.url("/releases/700/Poki-signing.zip");
+        let entries = vec![release("app-0.4.2-beta.700", vec![asset(ipa_name, &ipa_url, b"ipa"), asset("Poki-signing.zip", &zip_url, b"zip")])];
+        server.put("/catalog.json", Reply::Body(signed(entries)));
+        server.put("/releases/700/Poki-external-0.4.2-700.ipa", Reply::Body(b"ipa".to_vec()));
+        server.put("/releases/700/Poki-signing.zip", Reply::Body(b"zip".to_vec()));
+        let entries = crate::release_catalog::read_from(&Source { url: server.url("/catalog.json"), public_key: public_key() }).await.unwrap();
+        let mut entry: GhRelease = serde_json::from_value(entries[0].clone()).unwrap();
+        entry.source = ReleaseSource::R2;
+        let (_, selected) = installable(&entry).unwrap();
+        server.put("/catalog.json", Reply::Body(signed(vec![])));
+        let (ipa, signing) = fetch(&selected, &Reporter::silent()).await.unwrap();
+        assert_eq!(std::fs::read(&ipa).unwrap(), b"ipa");
+        assert_eq!(std::fs::read(signing.unwrap()).unwrap(), b"zip");
+        server.put("/releases/700/Poki-external-0.4.2-700.ipa", Reply::Body(b"bad".to_vec()));
+        let output = ipa.with_file_name("existing.ipa");
+        std::fs::write(&output, b"keep this file").unwrap();
+        let error = download_pinned(&ipa_url, selected.ipa_pin.as_ref().unwrap(), &selected.tag, ipa_name, &output, &Reporter::silent()).await.unwrap_err();
+        assert!(error.to_string().contains("does not match"));
+        assert_eq!(std::fs::read(output).unwrap(), b"keep this file");
+    }
+
+    #[tokio::test]
+    async fn github_updates_require_checksums_before_using_cached_files() {
+        use crate::release_catalog::fixture::{Reply, Server};
+        let (_guard, _home) = paths::test_home();
+        let server = Server::start().await;
+        server.put("/file", Reply::Body(b"new bytes".to_vec()));
+        let mut entry = gh("app-0.4.2-beta.700", true, "", Some("Poki-external-0.4.2-700.ipa"));
+        entry.assets[0].browser_download_url = server.url("/file");
+        let (_, selected) = installable(&entry).unwrap();
+        let dir = paths::cache_dir().unwrap().join(&selected.tag);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ipa = dir.join(&selected.ipa_name);
+        std::fs::write(&ipa, b"existing IPA").unwrap();
+        let ipa_result = fetch(&selected, &Reporter::silent()).await;
+        let dir = paths::cache_dir().unwrap().join("updates");
+        std::fs::create_dir_all(&dir).unwrap();
+        let installer = dir.join("PokiSetup-0.3.0-700-macos.dmg");
+        std::fs::write(&installer, b"existing installer").unwrap();
+        let info = UpdateInfo { current: "0.2.2-1".into(), latest: Some("0.3.0-700".into()), url: None,
+            asset_url: Some(server.url("/file")), asset_name: Some("PokiSetup-0.3.0-700-macos.dmg".into()),
+            newer: true, channel: Channel::Beta, sums_url: None, source: ReleaseSource::Github,
+            source_notice: None, tag: Some(selected.tag), asset_pin: None };
+        let desktop_result = fetch_desktop_update(info, &Reporter::silent()).await;
+        assert!(ipa_result.unwrap_err().to_string().contains("checksum"));
+        assert!(desktop_result.unwrap_err().to_string().contains("checksum"));
+        assert_eq!(std::fs::read(ipa).unwrap(), b"existing IPA");
+        assert_eq!(std::fs::read(installer).unwrap(), b"existing installer");
+    }
+
     fn gh(tag: &str, pre: bool, at: &str, ipa: Option<&str>) -> GhRelease {
         GhRelease {
             tag_name: tag.into(),
@@ -634,7 +777,9 @@ mod tests {
             published_at: Some(at.into()),
             body: None,
             html_url: None,
-            assets: ipa.map(|n| vec![GhAsset { name: n.into(), browser_download_url: format!("https://x/{n}") }]).unwrap_or_default(),
+            source: ReleaseSource::Github,
+            source_notice: None,
+            assets: ipa.map(|n| vec![GhAsset { name: n.into(), browser_download_url: format!("https://x/{n}"), pin: None }]).unwrap_or_default(),
         }
     }
 
@@ -700,19 +845,23 @@ mod tests {
     }
 
     #[test]
-    fn choice_is_saved() {
+    fn saved_channels_converge_to_beta() {
         let (_g, _d) = paths::test_home();
-        unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
-        assert_eq!(channel(), Channel::Stable);
-        set_channel(Channel::PreAlpha).unwrap();
-        assert_eq!(channel(), Channel::PreAlpha);
+        assert_eq!(channel(), Channel::Beta);
+        for historical in Channel::ALL {
+            std::fs::write(channel_file().unwrap(), serde_json::to_vec(&ChannelFile { channel: historical }).unwrap()).unwrap();
+            assert_eq!(channel(), Channel::Beta);
+            set_channel(historical).unwrap();
+            let saved: ChannelFile = serde_json::from_slice(&std::fs::read(channel_file().unwrap()).unwrap()).unwrap();
+            assert_eq!(saved.channel, Channel::Beta);
+        }
     }
 
     #[test]
     fn desktop_installer_found_on_any_release() {
         let mut ios = gh("ios-prealpha-0.2.8-441", true, "2026-11-08T08:00:00Z", Some("Poki-external-0.2.8-441.ipa"));
-        ios.assets.push(GhAsset { name: "PokiSetup-0.2.1-300-macos.dmg".into(), browser_download_url: "https://x/dmg".into() });
-        ios.assets.push(GhAsset { name: "PokiSetup-0.2.1-300-windows-x64-setup.exe".into(), browser_download_url: "https://x/exe".into() });
+        ios.assets.push(GhAsset { name: "PokiSetup-0.2.1-300-macos.dmg".into(), browser_download_url: "https://x/dmg".into(), pin: None });
+        ios.assets.push(GhAsset { name: "PokiSetup-0.2.1-300-windows-x64-setup.exe".into(), browser_download_url: "https://x/exe".into(), pin: None });
         let list = vec![ios];
         let (_, a, v) = pick_desktop(&list, Channel::Stable, "-macos.dmg").unwrap();
         assert_eq!((a.name.as_str(), v.as_str()), ("PokiSetup-0.2.1-300-macos.dmg", "0.2.1-300"));
@@ -777,7 +926,7 @@ mod tests {
         assert_eq!(pick(&list[4..], Channel::PreAlpha).unwrap().tag, "ios-prealpha-latest");
 
         let mut app = gh("app-alpha-latest", true, "2026-11-09T06:00:00Z", None);
-        app.assets.push(GhAsset { name: "PokiSetup-0.2.2-640-macos.dmg".into(), browser_download_url: "https://x/a".into() });
+        app.assets.push(GhAsset { name: "PokiSetup-0.2.2-640-macos.dmg".into(), browser_download_url: "https://x/a".into(), pin: None });
         assert_eq!(pick_desktop(&[app], Channel::Alpha, "-macos.dmg").unwrap().2, "0.2.2-640");
     }
 
@@ -799,9 +948,9 @@ mod tests {
         assert_eq!(pick(&list, Channel::PreAlpha).unwrap().build, "700");
 
         let mut beta = gh("desktop-v0.3.0-beta.1", true, "2026-11-11T05:00:00Z", None);
-        beta.assets.push(GhAsset { name: "PokiSetup-0.3.0-beta.1-macos.dmg".into(), browser_download_url: "https://x/b".into() });
+        beta.assets.push(GhAsset { name: "PokiSetup-0.3.0-beta.1-macos.dmg".into(), browser_download_url: "https://x/b".into(), pin: None });
         let mut stable = gh("desktop-v0.3.0", false, "2026-11-10T05:00:00Z", None);
-        stable.assets.push(GhAsset { name: "PokiSetup-0.3.0-macos.dmg".into(), browser_download_url: "https://x/s".into() });
+        stable.assets.push(GhAsset { name: "PokiSetup-0.3.0-macos.dmg".into(), browser_download_url: "https://x/s".into(), pin: None });
         let desk = vec![beta, stable];
         assert_eq!(pick_desktop(&desk, Channel::Beta, "-macos.dmg").unwrap().2, "0.3.0");
         assert!(version_key("0.3.0") > version_key("0.3.0-beta.1"));

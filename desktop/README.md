@@ -18,7 +18,7 @@ desktop/
 | Developer Mode | turned on through AMFI; the phone restarts once and asks |
 | Signs in | Apple's GSA (SRP-6a, 2FA by trusted device or SMS); anisette from macOS itself, or an anisette v3 server on Windows |
 | Developer portal | registers the phone, makes an RSA key and certificate for this computer, App IDs `nz.zheha.poki.<TEAM>` and `.widgets`, the app group, team profiles |
-| Signs Poki | the newest release on the chosen channel (Settings › Updates, or `poki-setup channel`): Stable (default) = `ios-v*` full releases, Beta = `ios-v*` prereleases too, Alpha = `ios-alpha-*` builds too, Pre-alpha = `ios-prealpha-*` snapshots too, and a channel with no release yet falls back one step at a time toward Pre-alpha; its external edition, re-signed with apple-codesign (pure Rust); the packet-tunnel extension is left out because a team profile cannot carry its entitlement |
+| Signs Poki | the newest Beta release from R2, with GitHub as a network-failure fallback; re-signs the external edition with the existing signing identity |
 | Installs | installation_proxy, profiles through misagent |
 | Pairing file | written straight into Poki's container, and offered as a `poki://pairing?url=…&sha256=…` QR on the LAN |
 | Keeps it alive | the phones this computer set up, with their expiry; renewal is due with 2 days left and runs by itself every 6 h when the password is kept |
@@ -33,7 +33,7 @@ Poki Setup ships its command line tool, `poki-setup`, inside the app: `/Applicat
 - `poki-setup next --json` reads the computer's state and lists what is done, what comes next, who has to act and the command to run. It changes nothing.
 - With `--json`, every command prints its result on stdout and its progress on stderr, one JSON object per line. Exit codes: 0 done, 1 failed, 2 a person has to act, 3 waiting for Apple's sign-in code.
 - Sign-in works without a terminal: `login <email> --password-stdin`, then `login --code <code>` when Apple asks for one. The person can also run `login <email>` in their own terminal, which keeps the password out of the agent.
-- `poki-setup update` updates Poki Setup itself on the chosen channel.
+- `poki-setup update` updates Poki Setup itself to the newest Beta.
 - `poki-setup prompt` prints the instructions to hand an agent ([AGENT-PROMPT.md](AGENT-PROMPT.md)). The app copies the same text: Poki > Copy Prompt for Your Agent on a Mac, Settings > Use an agent on Windows.
 
 ## Build

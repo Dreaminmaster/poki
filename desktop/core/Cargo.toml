@@ -20,6 +20,7 @@ rustls-pemfile.workspace = true
 reqwest.workspace = true
 sha1.workspace = true
 sha2.workspace = true
+ed25519-dalek = "2.2"
 hmac.workspace = true
 pbkdf2.workspace = true
 aes.workspace = true

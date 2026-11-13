@@ -1,39 +1,26 @@
 # Release channels
 
-Poki's iPhone builds are published as GitHub Releases on this repository. Poki Setup (the desktop
-installer) reads them and lets each person pick a channel in Settings. A channel decides which
-releases Poki Setup installs and renews with.
+Poki and Poki Setup offer Beta updates. The phone and desktop settings no longer ask users to choose a channel. Historical Stable, Alpha and Pre-alpha preferences also use Beta. A missing Beta does not select a preview build.
 
-| Channel | Tag | Title | GitHub release | Who it is for |
-| --- | --- | --- | --- | --- |
-| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release | everyone |
-| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease, which can be made a full release marked Latest | testers |
-| Alpha | `app-X.Y.Z-alpha.N` | Poki v0.3.0 (712) Alpha | rolling `app-alpha-latest`, prerelease | early testers |
-| Pre-alpha | `app-X.Y.Z-prealpha.N` | Poki v0.3.0 (712) Pre-alpha | rolling `app-prealpha-latest`, prerelease | developers |
+Configured clients read a signed R2 catalog first. Network failures fall back to GitHub with a visible notice. Invalid signatures, unsafe URLs, redirects and corrupt downloads stop the operation. For an asset already selected from R2, fallback uses the same GitHub release and filename and still verifies the signed size and checksum. See [Update sources](update-sources.md) for configuration and recovery.
 
-A channel includes the channels above it: Beta installs the newest Stable or Beta release, Alpha
-the newest Stable, Beta or Alpha, and Pre-alpha the newest release of any kind. Poki Setup's own
-updates (`desktop-v*`, `desktop-alpha-*` and `desktop-prealpha-*` tags) follow the same channel.
-If no installable release exists in a channel or any more stable channel it includes, Poki Setup
-tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. This is `pick` in
-`desktop/core/src/release.rs`, not a change to the saved channel.
+The build and approval stages below remain in place. Their tags describe release preparation and compatibility with installed clients; they are not channel choices in the new app.
 
-**When Stable and Beta have no release of their own, they fall back to Alpha.** A person on Stable
-or Beta then installs and renews with the newest Alpha build until a Beta or Stable release is
-published, and keeps the channel they chose.
+| Stage | Tag | GitHub release |
+| --- | --- | --- |
+| Stable compatibility | `app-X.Y.Z` | full release for older Stable clients |
+| Beta | `app-X.Y.Z-beta.K` | the user-facing update |
+| Alpha | `app-X.Y.Z-alpha.N` | approved testing before Beta |
+| Pre-alpha | `app-X.Y.Z-prealpha.N` | automatic development build |
 
-The checkout installer defaults to Alpha (`bin/install-iphone.mjs`); Poki Setup without a saved
-choice defaults to Stable. Read current release metadata on each run, and do not silently switch
-an existing user's channel.
+Older clients retain their original selection rules. Stable takes Stable if one exists; Beta includes Stable; Alpha adds Alpha; Pre-alpha adds all previews. Removing their compatibility releases would strand users. Publish the migration build through their existing GitHub paths before relying on R2. Keep independently numbered compatibility releases so old clients cannot reuse a signing archive cached under a rolling tag.
 
 ## When GitHub refuses the release list
 
-Poki Setup, the checkout installer and the iPhone app read the release list from `api.github.com`
-without signing in. GitHub limits these anonymous requests per network address, and everyone
+When using the GitHub fallback, Poki Setup, the checkout installer and the iPhone app read `api.github.com` without signing in. GitHub limits these anonymous requests per network address, and everyone
 behind the same address shares that limit. Over it, GitHub answers 403 or 429, and the error reads
 `Could not read Poki's releases from GitHub` with the status. The error does not say whether it was
-the limit or another refusal, but a 403 or 429 here is usually the limit. The phone shows Not Found
-as the newest version on its channel instead.
+the limit or another refusal, but a 403 or 429 here is usually the limit. The phone shows an update-check error.
 
 Retrying at once does not help, because each attempt is another request against the same limit. Switch to
 another network or proxy node and try again, or wait an hour. In Poki Setup, Install from an IPA
