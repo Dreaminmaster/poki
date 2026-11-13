@@ -1,6 +1,6 @@
 # Install Poki for your client
 
-To install the Poki app on the user's iPhone (the standalone app with Poki Setup), follow the skill [skills/install-poki/SKILL.md](skills/install-poki/SKILL.md) instead. This file installs Poki MCP for an MCP client.
+To install or update the Poki app on the user's iPhone (the standalone app with Poki Setup), follow the skill [skills/install-poki/SKILL.md](skills/install-poki/SKILL.md) instead. That skill has separate first-install and update branches, including checks for preserving the existing signing identity and data. This file installs Poki MCP for an MCP client.
 
 Choose the installation path first:
 
@@ -39,7 +39,9 @@ Follow these steps for the selected path. At each **STOP**, tell the user what t
 
 ## Update
 
-When the user asks to update Poki, run `./bin/poki update` from this installation. A source checkout must be on `main` with no local changes, including untracked files. The command runs `git fetch`, then `git merge --ff-only --no-overwrite-ignore @{upstream}`, then `./bin/setup`. If incoming files conflict with local ignored files, the merge stops and preserves them. If it stops, report the reason and preserve the user's changes. Do not reset, stash, or switch branches on their behalf. For a prebuilt package, follow the download steps printed by the command.
+For the iPhone app, use [install-poki](skills/install-poki/SKILL.md#update-an-installed-poki). The command below updates the computer installation.
+
+When the user asks to update Poki MCP or Poki Agent, run `./bin/poki update` from this installation. A source checkout must be on `main` with no local changes, including untracked files. The command runs `git fetch`, then `git merge --ff-only --no-overwrite-ignore @{upstream}`, then `./bin/setup`. If incoming files conflict with local ignored files, the merge stops and preserves them. If it stops, report the reason and preserve the user's changes. Do not reset, stash, or switch branches on their behalf. For a prebuilt package, follow the download steps printed by the command.
 
 After a successful source update, reinstall Poki Agent dependencies with `npm ci --prefix agent` if the user uses Poki Agent. Tell the user to stop their existing service and restart it with `npm start`, using the same `POKI_MCP_STATE_DIR`. Updating does not restart the service. After restart, call `poki_mcp_status` and, for Poki Agent users, run `poki status`. Report the installed version and any remaining update notice.
 
