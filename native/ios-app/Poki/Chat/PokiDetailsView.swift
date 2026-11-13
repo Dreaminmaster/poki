@@ -4,13 +4,12 @@ import SwiftUI
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
 // conversations and from the status card on Poki's picture. It replaced ESP-174's details screen and its
 // "More Settings" layer. It now has the hierarchy of the redesign proposed in pull request 250,
-// drawn with Poki's own rows: the card, then one row each for Connection, Models, Agents, Memory,
-// Appearance and Language, and every other setting on a page under one of them (signing, approvals
-// and the advanced pages under Connection, voice under Models). The rows and the card are
-// PokiSettingsKit's.
+// drawn with Poki's own rows: the card, then one row each for Connection, Models, Agents, Memory and
+// Appearance, Language, and every other setting on a page under one of them (signing, approvals and the advanced
+// pages under Connection, voice under Models). The rows and the card are PokiSettingsKit's.
 
 /// Settings: Poki's card with what it is doing and Pause, Voice and Activity; any problem that keeps it
-/// from working; then the parts of Poki and its look and language, each a row into its own page.
+/// from working; then the main settings, each a row into its own page.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -74,9 +73,9 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("details.appearance")
                     NavigationLink(value: DetailsRoute.language) {
-                        SettingsRow(title: "Language", symbol: "globe", value: LanguageView.name(AppLocalization.shared.preference))
+                        SettingsRow(title: "Language", symbol: "globe", value: LanguageSettingsView.selectionTitle)
                     }
-                    .accessibilityIdentifier("general.language")
+                    .accessibilityIdentifier("details.language")
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         .monospacedDigit()
@@ -122,7 +121,7 @@ struct PokiDetailsView: View {
                 case .appearance:
                     AppearanceView()
                 case .language:
-                    LanguageView()
+                    LanguageSettingsView()
                 } }
                 .settingsPage()
             }
@@ -559,34 +558,34 @@ struct AppearanceView: View {
     }
 }
 
-// MARK: Language
+/// Settings › Language: the effective iOS app language or one of Poki’s bundled translations.
+private struct LanguageSettingsView: View {
+    @Bindable private var localization = AppLocalization.shared
 
-/// Settings › Language: Follow System, or one of the languages Poki carries, each under its own name.
-/// The choice changes Poki's own screens at once (`AppLocalization`).
-struct LanguageView: View {
-    /// A language under its own name ("繁體中文"), or Follow System in the language now shown.
-    static func name(_ preference: String) -> String {
-        if preference == AppLocalization.system { return AppLocalization.text("Follow System") }
-        return Locale(identifier: preference).localizedString(forIdentifier: preference) ?? preference
+    static var selectionTitle: String { title(for: AppLocalization.shared.preference) }
+
+    private static func title(for language: String) -> String {
+        if language == AppLocalization.system { return AppLocalization.text("Follow System") }
+        return Locale(identifier: language).localizedString(forIdentifier: language) ?? language
     }
 
     var body: some View {
-        let chosen = AppLocalization.shared.preference
         List {
             Section {
-                ForEach([AppLocalization.system] + AppLocalization.languages, id: \.self) { option in
-                    Button { AppLocalization.shared.preference = option } label: {
+                ForEach([AppLocalization.system] + AppLocalization.languages, id: \.self) { language in
+                    let selected = localization.preference == language
+                    Button { localization.preference = language } label: {
                         HStack {
-                            Text(verbatim: Self.name(option)).foregroundStyle(Color(.label))
+                            Text(verbatim: Self.title(for: language)).foregroundStyle(Color(.label))
                             Spacer()
-                            if option == chosen {
+                            if selected {
                                 Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
                             }
                         }
                         .contentShape(.rect)
                     }
-                    .accessibilityAddTraits(option == chosen ? .isSelected : [])
-                    .accessibilityIdentifier("language.\(option)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("language.\(language)")
                 }
             }
         }
