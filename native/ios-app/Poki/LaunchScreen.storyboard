@@ -18,7 +18,7 @@
                                 <rect key="frame" x="128.5" y="358" width="136" height="136"/>
                             </imageView>
                         </subviews>
-                        <color key="backgroundColor" name="LaunchBackground"/>
+                        <color key="backgroundColor" name="AccentColor"/>
                         <constraints>
                             <constraint firstItem="bear" firstAttribute="centerX" secondItem="root" secondAttribute="centerX" id="cx"/>
                             <constraint firstItem="bear" firstAttribute="centerY" secondItem="root" secondAttribute="centerY" id="cy"/>
@@ -33,8 +33,8 @@
     </scenes>
     <resources>
         <image name="ActivityBear-ready" width="136" height="136"/>
-        <namedColor name="LaunchBackground">
-            <color red="0.9607843137254902" green="0.9725490196078431" blue="0.9882352941176471" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        <namedColor name="AccentColor">
+            <color red="0.12549019607843137" green="0.5176470588235295" blue="0.9921568627450981" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </namedColor>
     </resources>
 </document>

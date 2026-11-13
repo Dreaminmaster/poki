@@ -30,13 +30,13 @@ final class LaunchScreenTests: XCTestCase {
         }
     }
 
-    func testLaunchBackgroundFollowsLightAndDarkChatColours() throws {
-        let background = try XCTUnwrap(UIColor(named: "LaunchBackground"))
+    func testLaunchBackgroundIsBrandBlueInBothAppearances() throws {
+        let controller = try XCTUnwrap(UIStoryboard(name: "LaunchScreen", bundle: .main).instantiateInitialViewController())
+        let background = try XCTUnwrap(controller.view.backgroundColor)
         let light = background.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
         let dark = background.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
-        XCTAssertNotEqual(light, dark)
         // UIColor 的色彩空间不同也可能表示相同颜色，比较解析后的 RGB 通道。
-        for (colour, expected) in [(light, [245.0, 248.0, 252.0]), (dark, [5.0, 7.0, 13.0])] {
+        for (colour, expected) in [(light, [32.0, 132.0, 253.0]), (dark, [32.0, 132.0, 253.0])] {
             var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
             XCTAssertTrue(colour.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
             for (actual, channel) in zip([red, green, blue], expected) {
