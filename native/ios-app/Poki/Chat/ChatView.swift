@@ -429,21 +429,22 @@ struct SetupIssueHint: Equatable {
 extension SetupIssueHint {
     /// The home page's line. In the last two days of signing it says Poki stops opening (main's home
     /// warning, ESP-222): after what keeps the current task from running, ahead of open setup steps.
-    @MainActor static func homeLine(model: AppModel) -> SetupIssueHint? {
+    /// `looks` as in `first`.
+    @MainActor static func homeLine(model: AppModel, looks: Bool = false) -> SetupIssueHint? {
         if let now = runnerIssue(model: model) ?? localSessionIssue(model: model) { return now }
         if let warning = ExpiryWarning(expiry: model.signer.expiry) {
             return SetupIssueHint(message: String(localized: "Poki’s signing ends soon") + "\n" + warning.message,
                                   link: String(localized: "Open Updates ›"), target: .updates)
         }
-        return first(model: model) ?? relayIssue(model: model)
+        return first(model: model, looks: looks) ?? relayIssue(model: model)
     }
 
-    /// Home's one line (ESP-321): what main's two tab dots said, one problem at a time. A runner or
-    /// pairing failure, then an open setup step (Setup's dot), then no chat account, then the relay
-    /// offline (the Agents dot). The chat doesn't show the relay: it needs no relay to reply.
+    /// The conversations drawer's reminder row (ESP-321): what main's two tab dots said, one problem at
+    /// a time, in the home line's order. A runner or pairing failure, then the last two days of signing,
+    /// then an open setup step (Setup's dot), then no chat account, then the relay offline (the Agents
+    /// dot). The chat doesn't show the relay: it needs no relay to reply.
     @MainActor static func home(model: AppModel) -> SetupIssueHint? {
-        if let hint = first(model: model, looks: true) { return hint }
-        return relayIssue(model: model)
+        homeLine(model: model, looks: true)
     }
 
     /// The relay is offline, so agents can't reach this iPhone (main's Agents dot and its "Relay

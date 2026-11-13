@@ -83,11 +83,31 @@ struct RootView: View {
         detailsOpen = true
     }
 
-    private var sessions: some View {
+    private func sessions(split: Bool) -> some View {
         SessionsView(
             openChat: { show(.chat) },
-            openSession: { show(.session($0)) }
+            openSession: { show(.session($0)) },
+            openFix: { fix($0, split: split) }
         )
+    }
+
+    /// Opens where a setup hint's problem is fixed. A setup step pushes over the chat on iPhone (the
+    /// drawer closes to show it); beside the list (iPad) the chat has no stack of its own to push on,
+    /// so the step opens in the profile. Everything else opens in the profile.
+    private func fix(_ target: SetupIssueHint.Target, split: Bool) {
+        switch target {
+        case .step(let step):
+            if split {
+                openDetails([DetailsRoute.hands, DetailsRoute.setup, step])
+            } else {
+                if threadsOpen { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = false } }
+                home.append(step)
+            }
+        case .setup: openDetails([DetailsRoute.hands, DetailsRoute.setup])
+        case .model: openDetails([DetailsRoute.model])
+        case .agents: openDetails([DetailsRoute.settings])
+        case .updates: openDetails([DetailsRoute.updates])
+        }
     }
 
     private func chatPage(split: Bool) -> some View {
@@ -97,15 +117,12 @@ struct RootView: View {
                 statusOpen = true
             },
             openVoice: openLiveVoice,
-            openSetup: { openDetails([DetailsRoute.hands, DetailsRoute.setup]) },
-            // Beside the list (iPad) the chat has no stack of its own to push on: the step opens in the profile.
-            openSetupStep: { step in
-                if split { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home.append(step) }
-            },
-            openModel: { openDetails([DetailsRoute.model]) },
+            openSetup: { fix(.setup, split: split) },
+            openSetupStep: { fix(.step($0), split: split) },
+            openModel: { fix(.model, split: split) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
-            openAgents: { openDetails([DetailsRoute.settings]) },
-            openUpdates: { openDetails([DetailsRoute.updates]) }
+            openAgents: { fix(.agents, split: split) },
+            openUpdates: { fix(.updates, split: split) }
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat. Poki's card opens beside the picture and leaves it in sight.
@@ -141,7 +158,7 @@ struct RootView: View {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
-                NavigationStack { sessions }
+                NavigationStack { sessions(split: true) }
                     .frame(width: 375)
                 Divider().ignoresSafeArea()
                 NavigationStack {
@@ -155,7 +172,7 @@ struct RootView: View {
                     .navigationDestination(for: HomeRoute.self) { destination($0, split: false) }
                     .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
             }
-            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions }
+            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions(split: false) }
         }
     }
 
