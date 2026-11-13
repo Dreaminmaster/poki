@@ -390,7 +390,7 @@ var DeviceRelay = class extends DurableObject {
     this.lastEnd = 0;
   }
   phone() {
-    return this.ctx.getWebSockets("phone").find((ws) => ws.deserializeAttachment()?.ready);
+    return this.ctx.getWebSockets("phone").find((ws) => ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.ready);
   }
   async fetch(request) {
     const url = new URL(request.url);
