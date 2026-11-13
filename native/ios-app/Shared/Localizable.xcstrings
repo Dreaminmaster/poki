@@ -20541,22 +20541,6 @@
         }
       }
     },
-    "A tap puts this in the message field. Begin it with an app’s name to use that app." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "轻点快捷方式会把这句话填入输入框。以应用名称开头，就会使用该应用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "輕點快捷方式會把這句話填入輸入框。以 App 名稱開頭，就會使用該 App。"
-          }
-        }
-      }
-    },
     "App" : {
       "localizations" : {
         "zh-Hans" : {
@@ -20569,22 +20553,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "App"
-          }
-        }
-      }
-    },
-    "With no app, the shortcut shows Poki’s icon." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不选应用时，快捷方式显示 Poki 的图标。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不選 App 時，快捷方式顯示 Poki 的圖示。"
           }
         }
       }
