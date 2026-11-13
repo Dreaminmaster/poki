@@ -42,7 +42,7 @@ enum Harness {
         // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
         // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
         // step more; the save rides in the same reply instead of a turn before it.
-        parts.append("Start the task with a do in your first reply: do {run: name} with the routine below that covers it, else do {launch: bundle id} with the app it needs. Send report_plan together with that first do. Finish in one reply: finish_task, which also brings the phone back to this chat, and with it routines {action: \"save\", name, description} when the task worked and was not a routine yet, named the way the owner would ask for it.")
+        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
@@ -71,7 +71,7 @@ enum Harness {
 
     static let reportPlan = ToolSpec(
         name: "report_plan",
-        description: "Publish a plan before phone actions. Update currentStep (1-based) on each step. title names the task in two to four words, as a heading in the user's language (\"Text Mom\", \"Order the usual\"), not the user's sentence; send it with the first plan. When the task sends a message to someone, to is that person as the user named them (\"Mom\"); leave it out otherwise.",
+        description: "Publish a plan before actions. Update currentStep (1-based) on each step. title names the task in two to four words, as a heading in the user's language (\"Text Mom\", \"Order the usual\"), not the user's sentence; send it with the first plan. When the task sends a message to someone, to is that person as the user named them (\"Mom\"); leave it out otherwise.",
         schema: object(["steps": ["type": "array", "items": string, "minItems": 1, "maxItems": 8], "currentStep": ["type": "integer", "minimum": 1, "maximum": 8], "title": string, "to": string], ["steps", "currentStep"]))
 
     static let finishTask = ToolSpec(

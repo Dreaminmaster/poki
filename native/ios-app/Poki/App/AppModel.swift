@@ -1518,6 +1518,7 @@ final class AppModel {
     }
 
     func runTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
+        if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments) }
         if probeDriven { return await core.callTool(name, arguments: arguments) }
         if !sessionOn { startSession() }
         guard sessionOn else {
