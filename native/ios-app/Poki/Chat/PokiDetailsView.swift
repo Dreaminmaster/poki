@@ -2,7 +2,7 @@ import PokiCore
 import SwiftUI
 
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
-// conversations. It replaced ESP-174's details screen and its "More Settings" layer. Every part of Poki a
+// conversations. It replaced the earlier details screen and its "More Settings" layer. Every part of Poki a
 // person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute,
 // Approvals, Agents, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance), and
 // what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
