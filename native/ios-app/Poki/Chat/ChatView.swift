@@ -132,8 +132,7 @@ struct ChatView: View {
         }
         .opacity(bare ? 0 : 1)
         // The conversation passes under the top bar's floating controls through the system's soft
-        // edge, with no line under them (ESP-468).
-        .softTopEdge()
+        // scroll edge (`topBar`), with no line under them.
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
@@ -270,17 +269,22 @@ extension View {
         }
     }
 
-    /// The chat's own top bar: a safe-area bar on iOS 26, so the conversation fades under it as under
-    /// the system's bars; an inset before it.
+    /// A page's own top bar (the chat's, the conversations'): a safe-area bar on iOS 26, so what
+    /// scrolls passes under it through the system's soft scroll edge, as under the system's bars; an
+    /// inset before it. The bar draws no ground of its own: a ground would cover the edge effect and
+    /// leave a hard line where it ends.
     @ViewBuilder func topBar<Bar: View>(@ViewBuilder _ bar: () -> Bar) -> some View {
         if #available(iOS 26.0, *) {
-            safeAreaBar(edge: .top, spacing: 0) { bar() }
+            safeAreaBar(edge: .top, spacing: 0) { bar() }.softTopEdge()
         } else {
             safeAreaInset(edge: .top, spacing: 0) { bar() }
         }
     }
 
-    /// The system's soft scroll edge at the top on iOS 26 and later; nothing before.
+    /// The one place the top scroll edge's style is set, for every scroll view under this view: the
+    /// system's soft edge, a blur that thins out from the bar down, on iOS 26 and later. `automatic`
+    /// leaves the style to the system, which may draw the hard edge, a nearly opaque band with a
+    /// straight line under it (Apple's `ScrollEdgeEffectStyle`). Nothing before iOS 26.
     @ViewBuilder func softTopEdge() -> some View {
         if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .top) } else { self }
     }
@@ -564,8 +568,6 @@ struct ChatTranscript<Footer: View>: View {
 
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
-    /// Where the bars over the conversation end: the top bar's controls, or the status bar.
-    @State private var topEdge: CGFloat = 0
 
     /// Your newest message: when it changes you have just sent one.
     private var lastSent: UUID? {
@@ -620,10 +622,9 @@ struct ChatTranscript<Footer: View>: View {
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
         }
-        // Messages fade out before they reach the top bar's picture, name and buttons, which have no
-        // ground of their own: under them the page shows, not a bubble cut in two.
-        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentInsets.top }) { _, top in topEdge = top }
-        .unless(.chatNoFade) { $0.mask { TopFade(edge: topEdge).ignoresSafeArea() } }
+        // Under the bars the system's soft scroll edge takes the messages (`softTopEdge`). No mask of
+        // our own here: one made the messages vanish in a short straight ramp above the bar, which
+        // read as a hard edge, and left the system's effect nothing to blur.
         .overlay(alignment: .bottom) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }
@@ -804,20 +805,6 @@ enum ChatFollow: Equatable {
         case .reading: return (.reading, false)
         case .reaching: return (.reaching, resized)
         case .newest: return resized ? (.reaching, true) : (.reading, false)
-        }
-    }
-}
-
-/// The conversation's mask: nothing above the bars' end but the last stretch, where it fades in, and
-/// all of it below.
-private struct TopFade: View {
-    var edge: CGFloat
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Color.clear.frame(height: max(0, edge - 26))
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 34)
-            Color.black
         }
     }
 }

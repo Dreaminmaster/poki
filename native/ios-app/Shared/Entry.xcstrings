@@ -65,22 +65,6 @@
         }
       }
     },
-    "Poki is on it. It tells you when it’s done." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 开始做了，做完后会告诉你。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 開始做了，做完後會告訴你。"
-          }
-        }
-      }
-    },
     "Poki is still busy, so this task didn’t start. Here is what Poki is doing." : {
       "localizations" : {
         "zh-Hans" : {
