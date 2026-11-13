@@ -23,7 +23,7 @@ function run(command, args) {
 
 try {
   if (!existsSync(join(root, '.git'))) {
-    console.log('Prebuilt Poki package. Download the latest macOS arm64 archive:\nhttps://github.com/JosssphZhou/poki/releases/latest\nExtract it into a new directory, then run npm ci --no-audit --no-fund there.\nIf you use Poki Agent, also run npm ci --prefix agent.\nStop your existing service, start npm start from the new directory, and update your MCP client path and shell PATH to that directory.\nKeep your existing POKI_MCP_STATE_DIR. The current installation was not changed.');
+    console.log('Prebuilt Poki package. Download poki-vX.Y.Z-macos-arm64.tar.gz from the newest Poki MCP release, tagged vX.Y.Z (app- and ios- releases do not carry it):\nhttps://github.com/JosssphZhou/poki/releases\nExtract it into a new directory, then run npm ci --no-audit --no-fund there.\nIf you use Poki Agent, also run npm ci --prefix agent.\nStop your existing service, start npm start from the new directory, and update your MCP client path and shell PATH to that directory.\nKeep your existing POKI_MCP_STATE_DIR. The current installation was not changed.');
   } else {
     if (realpathSync(git('rev-parse', '--show-toplevel')) !== realpathSync(root)) throw new Error('Poki must be at the root of its own Git checkout.');
     if (git('branch', '--show-current') !== 'main') throw new Error('Update stopped: this checkout is not on main. Switch to main yourself before updating.');
