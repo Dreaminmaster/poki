@@ -4,7 +4,9 @@
 //   is the owner's to unlock and a password prompt is handed to them, and a purchase is a plain tap;
 //   and, for ESP-465, the Return sentence names the type answer's read-back as the check before
 //   Return, an action's check lines (the send check after Return) count as evidence, and finish_task
-//   comes in the reply right after the observation that verifies the result;
+//   comes in the reply right after the observation that verifies the result; and a last paragraph on
+//   when a reply uses a Markdown table, which the chat draws as a table (the terminal and message
+//   channels the Mac agent answers in do not);
 // - the instructions put PokiCore's own MCP instructions first, as task-runner.mjs puts the MCP server's
 //   instructions first;
 // - look, do and status are PokiCore's tools with their MCP descriptions;
