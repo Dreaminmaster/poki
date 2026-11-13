@@ -3756,13 +3756,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下午好。"
+            "value" : "下午好，"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "午安。"
+            "value" : "午安，"
           }
         }
       }
@@ -3772,13 +3772,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "晚上好。"
+            "value" : "晚上好，"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "晚上好。"
+            "value" : "晚上好，"
           }
         }
       }
@@ -3788,13 +3788,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "早上好。"
+            "value" : "早上好，"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "早安。"
+            "value" : "早安，"
           }
         }
       }
@@ -12766,13 +12766,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜深了。"
+            "value" : "夜深了，"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜深了。"
+            "value" : "夜深了，"
           }
         }
       }

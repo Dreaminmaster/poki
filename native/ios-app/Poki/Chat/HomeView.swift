@@ -8,10 +8,11 @@ import SwiftUI
 
 // MARK: Timing
 
-/// The change from the home page to the conversation, counted from Send: the greeting fades in
-/// 160 ms, the pills fade and sink 14 points in 180 ms, the light takes from 60 to 510 ms to sink to
-/// the bottom edge, the new-conversation button turns up on 300 to 480 ms, and your words rise out of
-/// the message field on their own spring (response 0.45, damping 0.85). Every piece is driven by the
+/// The change from the home page to the conversation, counted from Send: Poki's picture rises into
+/// the top bar and the greeting rises under it, fading, both on one animation (`flight`, 0.35 s); the
+/// pills fade and sink 14 points in 180 ms, the light takes from 60 to 510 ms to sink to the bottom
+/// edge, the new-conversation button turns up on 300 to 480 ms, and your words rise out of the message
+/// field on their own spring (response 0.45, damping 0.85). Every piece is driven by the
 /// one fact "the conversation has begun", so the change can be turned round at any moment. With
 /// Reduce Motion the page cross-fades in 200 ms.
 enum HomeMotion {
@@ -30,11 +31,14 @@ enum HomeMotion {
     /// Every animation of the change goes through here, delays included.
     static func paced(_ animation: Animation) -> Animation { slow > 1 ? animation.speed(1 / slow) : animation }
 
+    /// Poki's picture and the greeting under it go together, on one animation: up into the top bar
+    /// as the conversation begins, the greeting fading as it rises, and back down for a new one.
+    static func flight(_ reduce: Bool) -> Animation { paced(reduce ? fade : .smooth(duration: 0.35)) }
+    /// The message field taking the home page up, or letting it down: the greeting and Poki's picture
+    /// over it move on this one animation.
+    static let lift = Animation.snappy(duration: 0.3)
+
     static func ground(_ reduce: Bool) -> Animation { paced(reduce ? fade : .easeInOut(duration: 0.45).delay(0.06)) }
-    /// Leaving, the words go first; coming back, they wait a beat.
-    static func words(_ home: Bool, _ reduce: Bool) -> Animation {
-        paced(reduce ? fade : home ? .easeOut(duration: 0.25).delay(0.3) : .easeOut(duration: 0.16))
-    }
     static func pills(_ home: Bool, _ reduce: Bool) -> Animation {
         paced(reduce ? fade : home ? .easeOut(duration: 0.25).delay(0.3) : .easeIn(duration: 0.18))
     }
@@ -116,17 +120,23 @@ extension View {
 }
 
 /// The one picture of Poki, over the greeting on the home page at 80 points and at the top of the
-/// chat at 56. Sending the first message moves it up and makes it smaller in 0.3 s, and a new
-/// conversation brings it back; with Reduce Motion it is just there. A tap says hi and opens Poki's
+/// chat at 56. Sending the first message moves it up and makes it smaller, with the greeting rising
+/// under it on the same animation (`HomeMotion.flight`), and a new conversation brings both back;
+/// with Reduce Motion it is just there. While the message field takes the home page up, the picture
+/// moves with the greeting on the page's own animation. It is one view all the way, and the bear in it
+/// is drawn at one size, so nothing is made again on the way. A tap says hi and opens Poki's
 /// card. In the chat VoiceOver reads the top bar's Poki instead, which is the same button.
 struct PokiFlight: View {
     var status: PokiStatus
     var home: Bool
+    var writing = false
     var places: [PicturePlace: CGRect]
     var pokes: Int
     var tap: () -> Void
     /// The bottom of the picture over the greeting, in global points, for Poki's card to open under it.
     var landed: (CGFloat) -> Void = { _ in }
+    /// How far the picture rises from over the greeting to the top bar, for the greeting to rise with it.
+    var travel: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -143,8 +153,17 @@ struct PokiFlight: View {
                 if let bottom = $0 { landed(bottom) }
             }
             .position(x: place.midX, y: place.midY)
-            .animation(reduceMotion ? nil : HomeMotion.paced(.smooth(duration: 0.3)), value: place)
+            // The greeting's own animations, so the two move as one. A place that moves for any other
+            // reason (the keyboard) moves in that change's animation, as the greeting does.
+            .animation(reduceMotion ? nil : HomeMotion.lift, value: writing)
+            .animation(reduceMotion ? nil : HomeMotion.flight(false), value: home)
+            .onChange(of: rise, initial: true) { if home, let rise { travel(rise) } }
         }
+    }
+
+    private var rise: CGFloat? {
+        guard let from = places[.home], let to = places[.top] else { return nil }
+        return from.midY - to.midY
     }
 }
 
@@ -327,6 +346,12 @@ enum HomeIdea {
 /// The home page's greeting (ESP-474): a hello for the time of day, as a chat app greets you (morning
 /// from 5, afternoon from 11, evening from 18, late from 23), and what Poki should do under it.
 enum HomeGreeting {
+    /// The two lines as VoiceOver reads them: the hello and the question, as one sentence.
+    static func spoken(at date: Date = .now) -> String {
+        let first = hello(at: date)
+        return first + (first.hasSuffix("，") ? "" : " ") + ask
+    }
+
     static func hello(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
         case 5..<11: String(localized: "Good morning.")
@@ -361,7 +386,9 @@ struct HomeGreetingView: View {
         .font(.system(size: size, weight: .semibold))
         .tracking(-0.6 * size / 28)
         .multilineTextAlignment(.center)
-        .accessibilityElement(children: .combine)
+        // Read as one sentence: in Chinese the hello's comma runs on into the question.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: HomeGreeting.spoken(at: date)))
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -374,6 +401,8 @@ struct HomePage<Footer: View>: View {
     var home: Bool
     /// Suggestions yield their space while the message field has focus.
     var writing = false
+    /// How far Poki's picture rises into the top bar as the conversation begins: the greeting rises with it.
+    var rise: CGFloat = 0
     var pick: (String) -> Void
     @ViewBuilder var footer: () -> Footer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -404,7 +433,8 @@ struct HomePage<Footer: View>: View {
                     // bar, whose middle keeps the chat's picture and name in height, that is 112 points.
                     .padding(.top, writing ? 24 : max(24, min(112, geometry.size.height * 0.29 - 72)))
                     .opacity(home ? 1 : 0)
-                    .animation(HomeMotion.words(home, reduceMotion), value: home)
+                    .offset(y: home || reduceMotion ? 0 : -rise)
+                    .animation(HomeMotion.flight(reduceMotion), value: home)
                     .onChange(of: home) { _, shown in if shown { greetedAt = .now } }
 
                     Spacer(minLength: 24)
@@ -430,7 +460,7 @@ struct HomePage<Footer: View>: View {
             .scrollBounceBehavior(.basedOnSize)
             .scrollDismissesKeyboard(.interactively)
         }
-        .animation(.snappy(duration: 0.3), value: writing)
+        .animation(HomeMotion.lift, value: writing)
         .task(id: SessionStore.shared.sessions.count) {
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }

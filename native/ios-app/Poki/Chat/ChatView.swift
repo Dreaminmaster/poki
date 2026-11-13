@@ -30,6 +30,8 @@ struct ChatView: View {
     @State private var pokes = 0
     /// Where Poki's picture over the greeting ends, for the card to open under it.
     @State private var homeBottom: CGFloat?
+    /// How far Poki's picture rises from the home page into the top bar.
+    @State private var flightRise: CGFloat = 0
 
     /// A tap on Poki, on the home page or in the chat: the bear says hi and Poki's card opens.
     private func tapPoki() {
@@ -114,7 +116,7 @@ struct ChatView: View {
             }
             // The home page stays in the tree while the conversation is in front, neither seen nor
             // touched, so a new conversation brings it back on the same animation.
-            HomePage(home: home, writing: writing, pick: { draft = $0; writing = true }) {
+            HomePage(home: home, writing: writing, rise: flightRise, pick: { draft = $0; writing = true }) {
                 if home, let update { UpdatePill(version: update, open: openUpdates) }
                 if home, let hint = homeHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel,
@@ -151,8 +153,8 @@ struct ChatView: View {
         .overlayPreferenceValue(PicturePlaceKey.self) { anchors in
             GeometryReader { proxy in
                 if !bare {
-                    PokiFlight(status: status, home: home, places: anchors.mapValues { proxy[$0] }, pokes: pokes, tap: tapPoki,
-                               landed: { homeBottom = $0 })
+                    PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
+                               tap: tapPoki, landed: { homeBottom = $0 }, travel: { flightRise = $0 })
                 }
             }
         }

@@ -17,6 +17,18 @@ final class HomeGreetingTests: XCTestCase {
         XCTAssertEqual(HomeGreeting.hello(at: at(2)), "Up late.")
     }
 
+    /// In Chinese the hello runs on into the question with a comma, not a full stop: 「下午好，需要 Poki 做什么？」.
+    func testTheChineseHelloEndsWithAComma() throws {
+        for language in ["zh-Hans", "zh-Hant"] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: language, ofType: "lproj"), language)
+            let bundle = try XCTUnwrap(Bundle(path: path))
+            for hour in [8, 15, 20, 2] {
+                let hello = bundle.localizedString(forKey: HomeGreeting.hello(at: at(hour)), value: nil, table: nil)
+                XCTAssertTrue(hello.hasSuffix("，"), "\(language) at \(hour): \(hello)")
+            }
+        }
+    }
+
     /// Drawn as the home page draws it, in light and in dark: two lines of type with a gap between,
     /// the first in ink and the second in the grey.
     func testTheGreetingIsTwoLinesTheSecondInGrey() throws {
