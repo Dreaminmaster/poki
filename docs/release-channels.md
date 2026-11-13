@@ -15,10 +15,12 @@ A channel includes the channels above it: Beta installs the newest Stable or Bet
 the newest Stable, Beta or Alpha, and Pre-alpha the newest release of any kind. Poki Setup's own
 updates (`desktop-v*`, `desktop-alpha-*` and `desktop-prealpha-*` tags) follow the same channel.
 If no installable release exists in a channel or any more stable channel it includes, Poki Setup
-tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. Stable and Beta
-therefore fall back to Alpha while neither offers a release of its own. This is `pick` in
-`desktop/core/src/release.rs`, not a change to the saved channel. The checkout installer finds
-Poki Setup the same way (`latestSetup` in `src/install/setup-app.mjs`).
+tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. This is `pick` in
+`desktop/core/src/release.rs`, not a change to the saved channel.
+
+**When Stable and Beta have no release of their own, they fall back to Alpha.** A person on Stable
+or Beta then installs and renews with the newest Alpha build until a Beta or Stable release is
+published, and keeps the channel they chose.
 
 The checkout installer defaults to Alpha (`bin/install-iphone.mjs`); Poki Setup without a saved
 choice defaults to Stable. Read current release metadata on each run, and do not silently switch
