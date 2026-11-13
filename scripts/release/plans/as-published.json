@@ -1,0 +1,22 @@
+{
+  "title": "The releases as they are on GitHub now",
+  "repo": "JosssphZhou/poki",
+  "base": "releases-2026-11-13.json",
+  "firstPublishAt": "2026-11-14T00:00:00Z",
+  "installed": {
+    "version": "0.3.1",
+    "build": "752",
+    "setup": "0.2.2-661"
+  },
+  "requiredChannels": [
+    "stable",
+    "beta",
+    "alpha"
+  ],
+  "publishedEntitlements": "c38bcbe3e3e0915c27edc11f8ab59a4fcf7b995b0b78f6ed0195d439a0b5de93",
+  "candidate": {
+    "version": "0.4.0",
+    "build": "{N}"
+  },
+  "steps": []
+}
