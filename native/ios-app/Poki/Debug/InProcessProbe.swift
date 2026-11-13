@@ -54,6 +54,7 @@ final class InProcessProbe: ObservableObject {
             case "tools": await toolsCycle(model: model, app: defaults.string(forKey: "pokiProbeApp") ?? "local.pokimcp.fixture")
             case "gym": await gymScorecard(model: model)
             case "chat": await chatCycle(model: model)
+            case "web": await WebDemo.run()
             case "bench": await benchmark(model: model, rounds: defaults.integer(forKey: "pokiBenchRounds") > 0 ? defaults.integer(forKey: "pokiBenchRounds") : 5)
             default: await prepareOnly()
             }

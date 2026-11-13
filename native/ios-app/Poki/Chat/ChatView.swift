@@ -125,6 +125,7 @@ struct ChatView: View {
         .bottomBar {
             if !bare { VStack(spacing: 8) {
                 asks
+                BrowserPanel()
                 ComposerInputView(input: $draft, focused: $writing, running: busy, progress: progress,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice)
             }
@@ -137,6 +138,7 @@ struct ChatView: View {
         .animation(.snappy, value: model.approvals.first?.id)
         .animation(.snappy, value: model.handoffText)
         .animation(.snappy, value: chat.demoAsk?.id)
+        .animation(.snappy, value: PokiBrowser.shared.isOpen)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: chat.running) { was, now in
             if was, !now, endedWell { DoneLinger.shared.celebrate() }
