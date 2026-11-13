@@ -78,6 +78,14 @@ enum ShortcutApp {
         return app
     }
 
+    /// An edited sentence once another app is picked for it: the name it begins with swapped for the
+    /// picked app's, or dropped for none, so its words, its icon and what a tap fills agree.
+    static func sentence(_ sentence: String, for app: String?) -> String {
+        guard let lead = leading(sentence), lead.id != app else { return sentence }
+        guard let picked = named(app) else { return lead.action }
+        return CapsuleText.prefill(app: picked.name, sentence: lead.action)
+    }
+
     private static let openings = ["please ", "can you ", "could you ", "help me ", "请帮我", "帮我", "麻烦", "请"]
     private static let verbs = ["open ", "go to ", "in ", "打开", "去", "在", "用"]
     private static let joints = ["and ", "then ", "to ", "里", "上", "中", "然后"]
@@ -102,8 +110,10 @@ enum HomeShortcuts {
     static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], forgotten: Set<String>,
                      edits: [Edit] = [], now: Date) -> [HomeShortcut] {
         var out: [HomeShortcut] = []
+        // A request the owner already has as an edit (once they send its sentence) is not a second pill.
         func taken(_ key: String) -> Bool {
             key.isEmpty || forgotten.contains { similar($0, key) } || out.contains { similar($0.key, key) }
+                || edits.contains { similar(normalize($0.sentence), key) && !similar($0.replaces, key) }
         }
 
         let remembered = routines.filter { !isPrivate($0.text) }

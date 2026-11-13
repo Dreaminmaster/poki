@@ -3,6 +3,7 @@ import SwiftUI
 /// A home page pill's Edit page (long press, Edit): its sentence and its app, in the form the model
 /// key page uses (`KeyEntry`). Beginning the sentence with an app's name picks that app; taking the
 /// app's name out of a sentence that began with it leaves no app, and the pill shows Poki's icon.
+/// Picking another app puts its name at the start of the sentence in place of the old one's.
 struct ShortcutEditor: View {
     var shortcut: HomeShortcut
     var save: (_ sentence: String, _ app: String?) -> Void
@@ -20,7 +21,7 @@ struct ShortcutEditor: View {
 
     /// Every app Poki knows by name, by its name on this iPhone.
     private static var apps: [(id: String, name: String)] {
-        KnownApps.all.map { ($0.id, $0.name(in: .current)) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        KnownApps.all.map { app -> (id: String, name: String) in (app.id, app.name(in: .current)) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     var body: some View {
@@ -59,6 +60,9 @@ struct ShortcutEditor: View {
             }
             .onChange(of: sentence) { old, new in
                 app = ShortcutApp.following(new, was: old, app: app.isEmpty ? nil : app) ?? ""
+            }
+            .onChange(of: app) { _, picked in
+                sentence = ShortcutApp.sentence(sentence, for: picked.isEmpty ? nil : picked)
             }
         }
     }

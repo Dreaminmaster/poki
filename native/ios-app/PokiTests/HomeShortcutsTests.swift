@@ -124,12 +124,22 @@ final class HomeShortcutsTests: XCTestCase {
         let without = pills(edits: [edit])
         XCTAssertEqual(without.count, 6)
         XCTAssertEqual(without.last?.prompt, "打开备忘录记一条待办")
+
+        // Sent twice since, its sentence is a repeated request of its own: still one pill.
+        let used = history + [.init(text: "打开备忘录记一条待办", at: ago(0.2)), .init(text: "打开备忘录记一条待办", at: ago(0.1))]
+        XCTAssertEqual(pills(requests: used, edits: [edit]).filter { $0.text == "记一条待办" }.count, 1)
     }
 
     /// The Edit page: a sentence that begins with another app takes that app's icon; one that loses the
-    /// app it began with has none; a routine's words that never named its app keep it.
+    /// app it began with has none; a routine's words that never named its app keep it. Picking another
+    /// app puts its name in the sentence, so the pill never shows one app's icon over another's name.
     func testAnEditedSentenceTakesItsAppAlong() {
         let settings = "com.apple.Preferences"
+        let picked = ShortcutApp.sentence("Slack Tell the team I’m late", for: "com.apple.mobilenotes")
+        XCTAssertEqual(picked, "Notes Tell the team I’m late")
+        let pill = HomeShortcuts.pill(.init(replaces: "x", sentence: picked, app: "com.apple.mobilenotes"))
+        XCTAssertEqual(pill.text, "Tell the team I’m late")
+        XCTAssertEqual(ShortcutApp.sentence("Slack Tell the team I’m late", for: nil), "Tell the team I’m late")
         XCTAssertEqual(ShortcutApp.following("打开淘宝看看物流", was: "打开设置看看电池", app: settings), "com.taobao.taobao4iphone")
         XCTAssertNil(ShortcutApp.following("看看电池", was: "打开设置看看电池", app: settings))
         XCTAssertEqual(ShortcutApp.following("Order oat milk twice", was: "Order oat milk again", app: "com.starbucks.mystarbucks"),
