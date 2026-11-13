@@ -93,7 +93,7 @@ struct BearClips {
     func length(_ move: BearMove) -> TimeInterval {
         switch move {
         case .idle: .infinity
-        case .blink: blink.upperBound - blink.lowerBound
+        case .blink: BearBlink.length
         case .hi: 2 * (hello - wave.lowerBound) / BearMove.hiPace
         }
     }
@@ -110,16 +110,53 @@ struct BearClips {
             #endif
             return idle.lowerBound
         case .blink:
-            // Whole frames only: the eyes are swapped between frames (the open pupils, the line, the
-            // smile), and between two of them neither shows, which left the eye pads blank and white.
-            // The time is a frame's number over the rate, as the modeller's renderer has it: an eye
-            // shape is there at its frame exactly, and a sum of frame lengths may fall a hair short.
-            let x = min(max(elapsed, 0), length(.blink))
-            return ((blink.lowerBound * fps).rounded() + (x * fps + 1e-6).rounded(.down)) / fps
+            // The model's blink frames at `BearBlink`'s pace. The time is a frame's number over the rate,
+            // as the modeller's renderer has it: an eye shape is there at its frame exactly.
+            return ((blink.lowerBound * fps).rounded() + BearBlink.at(elapsed).frame) / fps
         case .hi:
             let rise = hello - wave.lowerBound, x = min(max(elapsed * BearMove.hiPace, 0), 2 * rise)
             return wave.lowerBound + (x <= rise ? x : 2 * rise - x)
         }
+    }
+}
+
+/// The blink: one kind only, at one pace, never two in a row. The model's own seven frames took a
+/// quarter of a second and the closed eye's arc came in whole the frame after a thick half-shut pupil.
+/// Here the lids come down over 0.14 s to a thin line, stay shut for 0.06 s as a low arc no taller than
+/// that line, and go up over 0.2 s: 0.4 s in all, easing in and out each way. The model's frames still
+/// give the shapes (open to half shut, its first two steps; the closed eye, its middle two; half open
+/// to open, its last two), and between the pupil and the arc the eyes are swapped at a whole frame
+/// only, since between two of them neither shows and the eye pads were blank and white. Only the
+/// heights are set on top: the pupils' as they shut and open, the arcs' while shut.
+enum BearBlink {
+    static let closing: TimeInterval = 0.14, shut: TimeInterval = 0.06, opening: TimeInterval = 0.2
+    static var length: TimeInterval { closing + shut + opening }
+    /// How tall the pupils are when the arcs take their place, against open.
+    static let thin: Float = 0.12
+    /// How tall the arcs are while the eyes are shut, against the smile's: a line, not a smile.
+    static let flat: Float = 0.3
+    /// Seconds from the end of one blink to the start of the next: drawn at random in this range.
+    static let gap: ClosedRange<TimeInterval> = 4...7
+
+    /// A frame on the model's blink, from 0 (open) to 7 (open again), whole while the arcs show; and
+    /// the height the pupils, or the arcs, are drawn at, against their own.
+    struct Moment: Equatable {
+        var frame: Double
+        var pupils: Float?
+        var arcs: Float?
+    }
+
+    static func at(_ elapsed: TimeInterval) -> Moment {
+        let x = min(max(elapsed, 0), length)
+        if x < closing {
+            let down = BearIdle.ease(Float(x / closing))
+            return Moment(frame: 2 * Double(down), pupils: 1 - (1 - thin) * down, arcs: nil)
+        }
+        if x < closing + shut {
+            return Moment(frame: (x - closing) / shut < 0.5 ? 3 : 4, pupils: nil, arcs: flat)
+        }
+        let up = BearIdle.ease(Float((x - closing - shut) / opening))
+        return Moment(frame: 5 + 2 * Double(up), pupils: thin + (1 - thin) * up, arcs: nil)
     }
 }
 
@@ -131,7 +168,8 @@ enum BearMove {
 }
 
 /// What the bear is doing and since when: a move plays once, then the next one queued, then idle,
-/// which holds. Every few seconds of idle it blinks, now and then twice (as `BlinkingFace` does).
+/// which holds. Every 4 to 7 seconds of idle it blinks once, the only thing that makes it blink: not
+/// while its head is turning, but as soon as it holds still.
 struct BearPlayback {
     private(set) var move: BearMove = .idle
     private var since: TimeInterval = 0
@@ -141,6 +179,9 @@ struct BearPlayback {
     /// Nothing but idle and blinks: a tap may start a move.
     var free: Bool { move != .hi }
 
+    /// Where the blink is at `now`, while it blinks.
+    func blink(at now: TimeInterval) -> BearBlink.Moment? { move == .blink ? BearBlink.at(now - since) : nil }
+
     mutating func play(_ moves: [BearMove], at now: TimeInterval) {
         queued = Array(moves.dropFirst())
         move = moves.first ?? .idle
@@ -148,152 +189,124 @@ struct BearPlayback {
         if move == .idle { scheduleBlink(after: now) }
     }
 
-    /// The time on the model's timeline to show at `now`.
-    mutating func time(at now: TimeInterval, clips: BearClips) -> TimeInterval {
+    /// A tap's hi: after the blink, if the bear is blinking, so that its eyes do not jump open.
+    mutating func greet(at now: TimeInterval) {
+        if move == .blink { queued = [.hi] } else { play([.hi], at: now) }
+    }
+
+    /// The time on the model's timeline to show at `now`. `steady` is false while the head is turning:
+    /// a blink due then waits for it to stop.
+    mutating func time(at now: TimeInterval, clips: BearClips, steady: Bool = true) -> TimeInterval {
         while move != .idle, now - since > clips.length(move) {
             since += clips.length(move)
             move = queued.isEmpty ? .idle : queued.removeFirst()
             if move == .idle { scheduleBlink(after: since) }
         }
-        if move == .idle, now >= nextBlink {
-            play(Int.random(in: 0..<4) == 0 ? [.blink, .blink] : [.blink], at: now)
+        if move == .idle, now >= nextBlink, steady {
+            play([.blink], at: now)
         }
         return clips.time(move, after: now - since)
     }
 
     private mutating func scheduleBlink(after now: TimeInterval) {
-        nextBlink = now + .random(in: 2.5...5.5)
+        nextBlink = now + .random(in: BearBlink.gap)
     }
 }
 
 /// The white pads behind the bear's eyes, shut with the eyes. In the model they are fixed to the head,
 /// so a blink drew its line, and the smile its arc, on two whole white discs: the white-painted eyes
-/// the flat bear was faulted for. Here each pad is drawn apart from the bear and follows its eye's
-/// joint, which squeezes it with the pupil; as soon as the eye starts to shut the pad narrows to about
-/// the pupil's width and fades to a faint trace. The model's own pads are no longer drawn but still
-/// hide what is behind them, as they always did: a shutting pupil sinks behind them at the top, and
-/// that flat upper edge is the lid coming down. The highlight goes while the eye is not open. The model
-/// is unchanged. A bear without parts named `EyePad_…`, `Pupil_…` and `Catchlight_…` and joints ending
-/// in `Eye_L` and `Eye_R` keeps its eyes as they are.
+/// the flat bear was faulted for. Here each pad is moved over, in the model's own mesh, from the head's
+/// joint to its eye's, so it goes wherever the eye goes and shuts with it: the eye's height squeezes the
+/// pad with the pupil, and while the eye is not open the pads fade to a faint trace and the highlight
+/// goes. Drawn as the face is drawn, in the same pass, the pads cannot fall out of step with it.
+///
+/// They were drawn as two models of their own, placed each frame where the eyes were: the face is
+/// drawn a pass behind the pose and the two were apart while the head turned, a pad moved only when its
+/// look changed, and the pupils' shift to look somewhere was taken back off them even after the bear
+/// stopped looking. A white came off its eye, sank under the face on one side and showed through the
+/// cheek beside it, until the app started again. A bear without parts named `EyePad_…` and
+/// `Catchlight_…` and joints ending in `Eye_L` and `Eye_R` keeps its eyes as they are.
 @MainActor
 private struct EyePads {
     /// How much of a pad shows once its eye has started to shut.
     static let shut: Float = 0.2
-    /// How wide a pad is then, against its width open: about the pupil's.
-    static let narrow: Float = 0.65
     /// The eye's joint scale under which the eye counts as shutting; the blink's first step is 0.7.
     static let shutting: Float = 0.75
-    /// How far a pad sits in front of the model's own, so the two never fight over the same depth.
-    static let lift: Float = 0.0025
 
-    private let pads: [(entity: ModelEntity, joint: Int)]
     private let bear: ModelEntity
-    private let parents: [Int?]
-    private let inverseBind: [simd_float4x4]
-    private let material: PhysicallyBasedMaterial
-    private let highlight: Int
+    private let eyes: [Int]
+    private let pad: Int, highlight: Int
+    private let white: PhysicallyBasedMaterial
     private let shown: PhysicallyBasedMaterial
     private let hidden: PhysicallyBasedMaterial
-    /// How open each pad was last drawn: its material is made again only when that changes.
-    private var drawnOpen: [Float] = []
+    /// How open the pads were last drawn: their material is made again only when that changes.
+    private var drawnOpen: Float = 1
 
     init?(bear: ModelEntity) {
         guard var model = bear.model, let skeleton = model.mesh.contents.skeletons.first else { return nil }
-        let contents = model.mesh.contents
+        var contents = model.mesh.contents
         let names = skeleton.joints.map(\.name)
         func materialIndex(_ prefix: String) -> Int? {
             let indices = Set(contents.models.filter { $0.id.hasPrefix(prefix) }.flatMap { $0.parts.map(\.materialIndex) })
             return indices.count == 1 ? indices.first : nil
         }
-        guard let padIndex = materialIndex("EyePad_"), let pupil = materialIndex("Pupil_"), let highlight = materialIndex("Catchlight_"),
-              let white = model.materials[padIndex] as? PhysicallyBasedMaterial,
-              var pupilMaterial = model.materials[pupil] as? PhysicallyBasedMaterial,
-              var highlightMaterial = model.materials[highlight] as? PhysicallyBasedMaterial else { return nil }
-        var pads: [(entity: ModelEntity, joint: Int)] = []
-        for side in ["L", "R"] {
-            let models = contents.models.filter { $0.id.hasPrefix("EyePad_\(side)") }
-            guard !models.isEmpty, let joint = names.firstIndex(where: { $0.hasSuffix("Eye_\(side)") }) else { return nil }
-            var pad = MeshResource.Contents()
-            pad.models = MeshModelCollection(models.map { model in
-                var model = model
-                model.parts = MeshPartCollection(model.parts.map { part in
-                    var part = part
-                    part.skeletonID = nil
-                    part.jointInfluences = nil
-                    part.materialIndex = 0
-                    return part
-                })
-                return model
-            })
-            pad.instances = MeshInstanceCollection(contents.instances.filter { instance in models.contains { $0.id == instance.model } })
-            guard let mesh = try? MeshResource.generate(from: pad) else { return nil }
-            pads.append((ModelEntity(mesh: mesh, materials: [white]), joint))
+        guard let pad = materialIndex("EyePad_"), let highlight = materialIndex("Catchlight_"),
+              let white = model.materials[pad] as? PhysicallyBasedMaterial,
+              let highlightMaterial = model.materials[highlight] as? PhysicallyBasedMaterial else { return nil }
+        var eyes: [Int] = []
+        var models: [MeshResource.Model] = []
+        for var part in contents.models {
+            if part.id.hasPrefix("EyePad_") {
+                let side = part.id.dropFirst("EyePad_".count).prefix(1)
+                guard let eye = names.firstIndex(where: { $0 == "Eye_\(side)" || $0.hasSuffix("/Eye_\(side)") }) else { return nil }
+                eyes.append(eye)
+                var parts: [MeshResource.Part] = []
+                for var piece in part.parts {
+                    guard let old = piece.jointInfluences, piece.positions.count > 0 else { return nil }
+                    // Each vertex's influences, in the same places, all on the eye.
+                    let influences = old.influences.map { MeshJointInfluence(jointIndex: eye, weight: $0.weight) }
+                    piece.jointInfluences = MeshResource.JointInfluences(influences: MeshBuffer(influences),
+                                                                         influencesPerVertex: max(old.influences.count / piece.positions.count, 1))
+                    parts.append(piece)
+                }
+                part.parts = MeshPartCollection(parts)
+            }
+            models.append(part)
         }
-        // The drawn pads hide nothing; the model's own hide without being seen.
-        var drawn = white
-        drawn.writesDepth = false
-        material = drawn
-        var unseen = white
-        unseen.blending = .transparent(opacity: .init(scale: 0.001))
-        unseen.writesDepth = true
-        model.materials[padIndex] = unseen
-        // The pupil and its highlight are drawn with the pads, after them, so that the pads can hide them.
-        pupilMaterial.blending = .transparent(opacity: .init(scale: 1))
-        pupilMaterial.writesDepth = true
-        model.materials[pupil] = pupilMaterial
-        highlightMaterial.blending = .transparent(opacity: .init(scale: 1))
-        highlightMaterial.writesDepth = true
-        model.materials[highlight] = highlightMaterial
-        shown = highlightMaterial
-        highlightMaterial.blending = .transparent(opacity: .init(scale: 0))
-        highlightMaterial.writesDepth = false
-        hidden = highlightMaterial
-        self.highlight = highlight
+        guard eyes.count == 2 else { return nil }
+        contents.models = MeshModelCollection(models)
+        guard let mesh = try? MeshResource.generate(from: contents) else { return nil }
+        model.mesh = mesh
         bear.model = model
-        pads.forEach { bear.addChild($0.entity) }
-        self.pads = pads
         self.bear = bear
-        parents = skeleton.joints.map(\.parentIndex)
-        inverseBind = skeleton.joints.map(\.inverseBindPoseMatrix)
+        self.eyes = eyes
+        self.pad = pad
+        self.highlight = highlight
+        self.white = white
+        shown = highlightMaterial
+        var hidden = highlightMaterial
+        hidden.blending = .transparent(opacity: .init(scale: 0))
+        hidden.writesDepth = false
+        self.hidden = hidden
     }
 
-    /// Puts each pad where its eye's joint has it at the pose just updated, and shuts it with the eye.
-    /// `gaze` is how far the pupils were moved to look somewhere: the pads stay where the eyes are.
-    mutating func follow(gaze: SIMD3<Float> = .zero) {
-        var transforms = bear.jointTransforms
-        for (_, joint) in pads where joint < transforms.count { transforms[joint].translation -= gaze }
-        let local = transforms.map(\.matrix)
-        guard local.count == parents.count else { return }
-        func placed(_ joint: Int) -> simd_float4x4 { parents[joint].map { placed($0) * local[joint] } ?? local[joint] }
-        var allOpen = true
-        if drawnOpen.count != pads.count { drawnOpen = Array(repeating: -1, count: pads.count) }
-        for (index, (entity, joint)) in pads.enumerated() {
-            let x = min(max((transforms[joint].scale.y - Self.shutting) / (1 - Self.shutting), 0), 1)
-            let open = x * x * (3 - 2 * x)
-            allOpen = allOpen && open == 1
-            let eye = placed(joint)
-            let width = 1 - (1 - Self.narrow) * (1 - open)
-            var squeeze = matrix_identity_float4x4
-            squeeze.columns.0.x = width
-            squeeze.columns.3 = SIMD4(eye.columns.3.x * (1 - width), 0, 0, 1)
-            // Lifted along the eye's own forward, which turns with the head.
-            var lift = matrix_identity_float4x4
-            lift.columns.3.z = Self.lift
-            entity.transform = Transform(matrix: squeeze * eye * lift * inverseBind[joint])
-            guard open != drawnOpen[index] else { continue }
-            drawnOpen[index] = open
-            var material = material
-            if case .transparent(let opacity) = material.blending {
-                material.blending = .transparent(opacity: .init(scale: opacity.scale * (Self.shut + (1 - Self.shut) * open), texture: opacity.texture))
-            }
-            entity.model?.materials = [material]
+    /// Fades the pads, and hides the highlight, while the eyes are not open, at the pose just updated.
+    mutating func follow() {
+        let transforms = bear.jointTransforms
+        var open: Float = 1
+        for eye in eyes where eye < transforms.count {
+            let x = min(max((transforms[eye].scale.y - Self.shutting) / (1 - Self.shutting), 0), 1)
+            open = min(open, x * x * (3 - 2 * x))
         }
-        guard var model = bear.model, let now = model.materials[highlight] as? PhysicallyBasedMaterial else { return }
-        let showing: Bool = if case .transparent(let opacity) = now.blending { opacity.scale > 0 } else { true }
-        if showing != allOpen {
-            model.materials[highlight] = allOpen ? shown : hidden
-            bear.model = model
+        guard open != drawnOpen, var model = bear.model else { return }
+        drawnOpen = open
+        var pads = white
+        if case .transparent(let opacity) = white.blending {
+            pads.blending = .transparent(opacity: .init(scale: opacity.scale * (Self.shut + (1 - Self.shut) * open), texture: opacity.texture))
         }
+        model.materials[pad] = pads
+        model.materials[highlight] = open == 1 ? shown : hidden
+        bear.model = model
     }
 }
 
@@ -422,8 +435,8 @@ private final class BearCanvas: UIView {
     private var idle = BearIdle(now: CACurrentMediaTime())
     /// The skin `BearIdle` moves, and its joints.
     private var idleSkin: (index: Int, joints: BearIdleJoints)?
-    /// How far the pupils were last moved to look somewhere.
-    private var gaze = SIMD3<Float>.zero
+    /// The skin with the eyes, which the blink shuts.
+    private var faceSkin: (index: Int, joints: BearIdleJoints)?
     private var rate = 30
     private var pads: EyePads?
     private var playback = BearPlayback()
@@ -472,8 +485,7 @@ private final class BearCanvas: UIView {
         guard let renderer else { return }
 
         let entity = loaded.entity.clone(recursive: true)
-        // The eye pads go in before the bear goes to the renderer: an entity added after it is drawn,
-        // but where it was added, whatever it is moved to.
+        // The eye pads are moved onto the eyes before the bear goes to the renderer.
         func skin(_ e: Entity) -> ModelEntity? {
             if let model = e as? ModelEntity, !model.jointNames.isEmpty { return model }
             return e.children.lazy.compactMap(skin).first
@@ -519,10 +531,9 @@ private final class BearCanvas: UIView {
             poses[frame] = skins.map(\.jointTransforms)
         }
         controllers.forEach { $0.stop() }
+        faceSkin = skins.indices.lazy.compactMap { i in BearIdleJoints(names: self.skins[i].jointNames).map { (i, $0) } }.first
         // `-pokiBearFrame` holds a frame to look at: the bear does not move about over it.
-        if held == clips.idle.lowerBound {
-            idleSkin = skins.indices.lazy.compactMap { i in BearIdleJoints(names: self.skins[i].jointNames).map { (i, $0) } }.first
-        }
+        if held == clips.idle.lowerBound { idleSkin = faceSkin }
     }
 
     /// The bear moves about by itself: it has the joints for it, and the phone is not running hot. Hot,
@@ -533,6 +544,8 @@ private final class BearCanvas: UIView {
 
     /// The model's pose at a frame of its timeline, between two frames a mix of the two.
     private func pose(at frame: Double) -> [[Transform]]? {
+        // A whole frame a hair off by rounding is that frame: between two, the eyes may not show.
+        let frame = abs(frame - frame.rounded()) < 1e-6 ? frame.rounded() : frame
         let below = Int(frame.rounded(.down)), x = Float(frame - Double(below))
         guard let a = poses[below] ?? poses.min(by: { abs(Double($0.key) - frame) < abs(Double($1.key) - frame) })?.value else { return nil }
         guard x > 1e-4, let b = poses[below + 1] else { return a }
@@ -554,7 +567,7 @@ private final class BearCanvas: UIView {
     fileprivate func sayHi() -> Bool {
         guard live, presented, playback.free else { return false }
         idle.attend(at: CACurrentMediaTime())
-        playback.play([.hi], at: CACurrentMediaTime())
+        playback.greet(at: CACurrentMediaTime())
         resume()
         return true
     }
@@ -571,19 +584,31 @@ private final class BearCanvas: UIView {
         link?.isPaused = false
     }
 
+    /// How long before a blink the bear is drawn at the full rate.
+    private static let lead: TimeInterval = 0.2
+
     fileprivate func tick() {
         guard live, !rendering, let renderer, let layer = layer as? CAMetalLayer else { return }
         let now = CACurrentMediaTime()
-        let time = playback.time(at: now, clips: clips)
+        let time = playback.time(at: now, clips: clips, steady: !moving || !idle.busy(at: now))
         guard var standing = pose(at: time * clips.fps) else { return }
+        if let blink = playback.blink(at: now), let (index, joints) = faceSkin, index < standing.count {
+            joints.shut(blink, in: &standing[index])
+        }
         if moving, let (index, joints) = idleSkin, index < standing.count {
-            let move = idle.pose(at: now)
+            var move = idle.pose(at: now, blinking: playback.move == .blink)
+            #if DEBUG
+            // `-pokiBearLook <-1…1>` holds the head turned that far toward one side, as far as a look
+            // to the side goes (1), to look at the eyes there.
+            if let side = UserDefaults.standard.string(forKey: "pokiBearLook").flatMap(Float.init) { move = BearIdle.farthest(side) }
+            #endif
             joints.apply(move, to: &standing[index])
-            gaze = BearIdleJoints.shift(move.gaze)
         }
         for (skin, joints) in zip(skins, standing) { skin.jointTransforms = joints }
         // Breathing and swaying alone are slow: a third of the rate is enough, and a third of the work.
-        let wanted = playback.move == .idle && !idle.busy(at: now) ? 10 : 30
+        // A blink is drawn at the full rate from its first frame: the rate goes up a moment before it,
+        // as a blink that began on a slow frame lost its first steps and looked quicker than the next.
+        let wanted = playback.move == .idle && !idle.busy(at: now) && playback.nextBlink - now > Self.lead ? 10 : 30
         if wanted != rate {
             rate = wanted
             link?.preferredFrameRateRange = CAFrameRateRange(minimum: Float(wanted), maximum: Float(wanted), preferred: Float(wanted))
@@ -607,7 +632,7 @@ private final class BearCanvas: UIView {
                 settling = 3
             }
             guard let drawable = layer.nextDrawable() else { return }
-            pads?.follow(gaze: gaze)
+            pads?.follow()
             BearLog.note(now, playback.move, time * clips.fps)
             lastPose = pose
             rendering = true
@@ -680,7 +705,7 @@ private final class BearCanvas: UIView {
     /// The pose holds: nothing to draw until the next blink.
     private func sleepUntilBlink() {
         link?.isPaused = true
-        let delay = max(0, playback.nextBlink - CACurrentMediaTime())
+        let delay = max(0, playback.nextBlink - Self.lead - CACurrentMediaTime())
         wake = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self, self.live else { return }
