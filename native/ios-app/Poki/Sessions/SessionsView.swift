@@ -60,8 +60,10 @@ struct SessionsView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            // The home page's own picture of Poki, small: the bear's face for its state.
-            PokiPortrait(mood: PokiStatus.current(model: model, chat: chat).mood, side: 32)
+            // The app's icon, small, rounded in the system's proportion for app icons.
+            Image("PokiIcon").resizable().scaledToFit().frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 32 * 0.225, style: .continuous))
+                .accessibilityHidden(true)
             Text(verbatim: "Poki").font(Prominent.font(size: 28, relativeTo: .title, .bold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Spacer()
