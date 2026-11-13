@@ -563,19 +563,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请重新连接代理 App 或 LocalDevVPN，再到“配置 › 配对”重新配对。10.7.0.1 已连通，但远程配对服务未响应。"
+            "value" : "请重新连接 LocalDevVPN 或代理 App，再到“配置 › 配对”重新配对。10.7.0.1 已连通，但远程配对服务未响应。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請重新連線代理 App 或 LocalDevVPN，再到「設定精靈 › 配對」重新配對。10.7.0.1 已連通，但遠端配對服務未回應。"
+            "value" : "請重新連線 LocalDevVPN 或代理 App，再到「設定精靈 › 配對」重新配對。10.7.0.1 已連通，但遠端配對服務未回應。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Reconnect your proxy app or LocalDevVPN, then pair again in Setup › Pairing. 10.7.0.1 accepts connections, but remote pairing isn’t answering through it."
+            "value" : "Reconnect LocalDevVPN or your proxy app, then pair again in Setup › Pairing. 10.7.0.1 accepts connections, but remote pairing isn’t answering through it."
           }
         }
       }
@@ -1391,19 +1391,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允许 Poki 通过代理 App 连接此 iPhone 的开发者服务。"
+            "value" : "允许 Poki 通过免费的 LocalDevVPN 或代理 App 连接此 iPhone 的开发者服务。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允許 Poki 透過代理 App 連線此 iPhone 的開發者服務。"
+            "value" : "允許 Poki 透過免費的 LocalDevVPN 或代理 App 連線此 iPhone 的開發者服務。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Allows Poki to reach this iPhone’s developer services through your proxy app."
+            "value" : "Allows Poki to reach this iPhone’s developer services through the free LocalDevVPN or your proxy app."
           }
         }
       }
@@ -4210,19 +4210,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中开启，或连接 LocalDevVPN。"
+            "value" : "连接 LocalDevVPN，或在代理 App 中开启。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Turn on in your proxy app, or connect LocalDevVPN."
+            "value" : "Connect LocalDevVPN, or turn it on in your proxy app."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中開啟，或連線 LocalDevVPN。"
+            "value" : "連線 LocalDevVPN，或在代理 App 中開啟。"
           }
         }
       }
@@ -4232,19 +4232,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中开启或连接 LocalDevVPN，然后返回 Poki。"
+            "value" : "连接 LocalDevVPN 或在代理 App 中开启，然后返回 Poki。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Turn on in your proxy app or connect LocalDevVPN, then return to Poki."
+            "value" : "Connect LocalDevVPN or turn it on in your proxy app, then return to Poki."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中開啟或連線 LocalDevVPN，然後返回 Poki。"
+            "value" : "連線 LocalDevVPN 或在代理 App 中開啟，然後返回 Poki。"
           }
         }
       }
@@ -7802,19 +7802,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请依次检查：“配置 › 回环”（代理或 LocalDevVPN 已连接且配好 10.7.0.1）、“配置 › 配对”（开启回环后重配）、“设置 › 隐私与安全性”中的开发者模式。Poki 无法连接此 iPhone。"
+            "value" : "请依次检查：“配置 › 回环”（LocalDevVPN 或代理已连接且配好 10.7.0.1）、“配置 › 配对”（开启回环后重配）、“设置 › 隐私与安全性”中的开发者模式。Poki 无法连接此 iPhone。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請依序檢查：「設定精靈 › 迴環」（代理或 LocalDevVPN 已連線且配好 10.7.0.1）、「設定精靈 › 配對」（開啟迴環後重配）、「設定 › 隱私權與安全性」中的開發者模式。Poki 無法連接此 iPhone。"
+            "value" : "請依序檢查：「設定精靈 › 迴環」（LocalDevVPN 或代理已連線且配好 10.7.0.1）、「設定精靈 › 配對」（開啟迴環後重配）、「設定 › 隱私權與安全性」中的開發者模式。Poki 無法連接此 iPhone。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Check Setup › Loopback (proxy or LocalDevVPN connected with 10.7.0.1), then pair again in Setup › Pairing, then check Developer Mode in Settings › Privacy & Security. Poki can’t reach this iPhone."
+            "value" : "Check Setup › Loopback (LocalDevVPN or proxy connected with 10.7.0.1), then pair again in Setup › Pairing, then check Developer Mode in Settings › Privacy & Security. Poki can’t reach this iPhone."
           }
         }
       }
@@ -12514,16 +12514,22 @@
     },
     "Turn on your proxy app with the Poki module, or connect LocalDevVPN." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect LocalDevVPN, or turn on your proxy app with the Poki module."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中启用 Poki 模块，或连接 LocalDevVPN。"
+            "value" : "连接 LocalDevVPN，或在代理 App 中启用 Poki 模块。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在代理 App 中啟用 Poki 模組，或連線 LocalDevVPN。"
+            "value" : "連線 LocalDevVPN，或在代理 App 中啟用 Poki 模組。"
           }
         }
       }
@@ -12948,16 +12954,22 @@
     },
     "Use Poki's local connection, or a compatible VPN app you already have." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use the free LocalDevVPN, a proxy app you already have, or Poki's local connection."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 Poki 的本机连接，或你已有的兼容 VPN App。"
+            "value" : "使用免费的 LocalDevVPN、你已有的代理 App，或 Poki 的本机连接。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 Poki 的本機連線，或你已有的相容 VPN App。"
+            "value" : "使用免費的 LocalDevVPN、你已有的代理 App，或 Poki 的本機連線。"
           }
         }
       }
