@@ -209,6 +209,14 @@ final class VoiceModel {
     /// The live conversation's row in the session list, and the lines that belong to it.
     private var transcript: (id: String, started: Date, from: Int)?
     private(set) var calls: [VoiceCall] = []
+    /// The person spoke over Poki's answer, or stopped it: the talk's screens say so for `interruptedShows`.
+    private(set) var interrupted = false
+    private var interruptedLapse: Task<Void, Never>?
+    static let interruptedShows: Duration = .milliseconds(1400)
+    #if DEBUG && targetEnvironment(simulator)
+    /// A screenshot's state, held whatever the session does next (`-pokiTalkHold`).
+    var staged: TalkState?
+    #endif
     /// Model audio off: for silent test runs. Speech is still transcribed into `lines`.
     var muted = false { didSet { link?.setRemoteVolume(muted ? 0 : 1) } }
     /// The last measured turn: from the end of speech to the first audio of the answer that carries a tool result.
@@ -333,6 +341,37 @@ final class VoiceModel {
         #else
         false
         #endif
+    }
+
+    /// What the talk is doing, for its screens: nil while no talk is on and none has just failed.
+    var talkState: TalkState? {
+        #if DEBUG && targetEnvironment(simulator)
+        if let staged { return staged }
+        #endif
+        switch phase {
+        case .off: return nil
+        case .lost(let why): return .failed(why)
+        case .connecting: return .connecting
+        case .listening: return interrupted ? .interrupted : .listening
+        case .hearing: return interrupted ? .interrupted : .hearing
+        case .thinking: return calls.contains { $0.state == .running } ? .acting : .thinking
+        case .speaking: return .speaking
+        }
+    }
+
+    /// Puts away why the last talk ended, once it has been read.
+    func dismissProblem() {
+        if case .lost = phase { phase = .off }
+    }
+
+    private func markInterrupted() {
+        interrupted = true
+        interruptedLapse?.cancel()
+        interruptedLapse = Task { [weak self] in
+            await self?.time.sleep(Self.interruptedShows)
+            guard !Task.isCancelled else { return }
+            self?.interrupted = false
+        }
     }
 
     /// A live Realtime conversation is on (not the hold-to-dictate fallback).
@@ -487,6 +526,8 @@ final class VoiceModel {
     /// the conversation are kept for one opened soon after, before the chat takes them.
     private func endSession() {
         keepOpen()
+        interruptedLapse?.cancel()
+        interrupted = false
         stallWatch?.cancel()
         stallWatch = nil
         if ready, let from = transcript?.from {
@@ -537,7 +578,7 @@ final class VoiceModel {
                 if left > .zero { wait = left; continue }
                 if waitingOnServer {
                     log.add("voice", "the server said nothing for \(inBackground ? Self.backgroundStall : Self.stall) while Poki waited on it: conversation ended")
-                    lines.append(VoiceLine(role: .note, text: "Poki stopped waiting: the server did not answer."))
+                    lines.append(VoiceLine(role: .note, text: String(localized: "The server did not answer. The talk ended.")))
                     stop()
                     return
                 }
@@ -650,6 +691,7 @@ final class VoiceModel {
     func stopTalking() {
         if let dictation { dictation.stopSpeaking(); if phase == .speaking { phase = .listening }; return }
         guard let link else { return }
+        if phase == .speaking { markInterrupted() }
         if activeResponse != nil { link.send(["type": "response.cancel"]) }
         link.send(["type": "output_audio_buffer.clear"])
         // Without this the next answer (say, when a running step finishes) picks the cut-off reply back up.
@@ -679,8 +721,8 @@ final class VoiceModel {
     private func closed(_ reason: String, session number: Int) {
         guard number == session, link != nil else { return }
         endSession()
-        phase = .lost("Connection lost")
-        lines.append(VoiceLine(role: .note, text: "Connection lost (\(reason)). Nothing is sent again; reconnect to hear how running steps ended."))
+        phase = .lost(TalkState.connectionLost)
+        lines.append(VoiceLine(role: .note, text: String(localized: "Connection lost. Nothing is sent again. Talk again to hear how running steps ended.")))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
     }
@@ -702,6 +744,8 @@ final class VoiceModel {
         case "input_audio_buffer.speech_started":
             keepOpen()
             if phase != .hearing { log.add("voice", "speech started") }
+            // Spoken over Poki's answer: the server drops the answer's audio, and the talk says so.
+            if phase == .speaking { markInterrupted() }
             phase = .hearing
         case "input_audio_buffer.speech_stopped":
             phase = .thinking
@@ -928,14 +972,14 @@ final class VoiceModel {
 
     private static func describe(_ call: VoiceCall) -> String {
         switch call.name {
-        case "get_ios_version": "Reading the iOS version"
-        case "open_settings": "Opening Settings"
-        case "read_screen": "Reading the screen"
-        case "open_app": "Opening an app"
-        case "tap_text": "Tapping"
-        case "go_home": "Going Home"
-        case "look": "Looking at the screen"
-        case "do": "Using the phone"
+        case "get_ios_version": String(localized: "Reading the iOS version")
+        case "open_settings": String(localized: "Opening Settings")
+        case "read_screen": String(localized: "Reading the screen")
+        case "open_app": String(localized: "Opening an app")
+        case "tap_text": String(localized: "Tapping")
+        case "go_home": String(localized: "Going Home")
+        case "look": String(localized: "Looking at the screen")
+        case "do": String(localized: "Using the phone")
         default: call.name
         }
     }

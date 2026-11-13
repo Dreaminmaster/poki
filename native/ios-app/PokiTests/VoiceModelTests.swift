@@ -19,6 +19,8 @@ final class BridgeStub: URLProtocol {
 /// The Realtime connection: the test plays the server's events in and sees what was sent and whether it was closed.
 final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onEvent: (@MainActor ([String: Any]) -> Void)?
+    /// The connection dropping, with the reason.
+    var onClosed: (@MainActor (String) -> Void)?
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
     func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
@@ -97,7 +99,7 @@ final class VoiceModelTests: XCTestCase {
             var made: (() -> FakeConnection)!
             var held: ((Bool) -> Void)!
             voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: phoneTool, holdMicrophone: { held($0) },
-                               connection: { onEvent, _ in let link = made(); link.onEvent = onEvent; return link }, time: time.clock)
+                               connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link }, time: time.clock)
             made = { [unowned self] in let link = FakeConnection(); self.links.append(link); return link }
             held = { [unowned self] in self.microphone.append($0) }
             _ = voice.setBridge(BridgeStub.address)
@@ -519,5 +521,41 @@ extension VoiceModelTests {
         XCTAssertEqual(activity.state.approval, approval)
         XCTAssertNil(activity.state.voice)
         withExtendedLifetime(watcher) {}
+    }
+}
+
+/// What the talk's screens say: one state, read by the message field's bar, the light along the bottom
+/// edge and Poki's picture.
+extension VoiceModelTests {
+    /// A step that has Poki on the phone is not thinking, speech over an answer is not plain listening,
+    /// and a dropped connection is still a state, with its reason, until it is put away.
+    func testATalkSaysWhenPokiIsOnThePhoneIsSpokenOverOrIsCutOff() async {
+        let (step, stepDone) = AsyncStream<Void>.makeStream()
+        let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false) })
+        XCTAssertNil(h.voice.talkState)
+        await h.talk()
+        XCTAssertEqual(h.voice.talkState, .listening)
+
+        h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"])
+        XCTAssertEqual(h.voice.talkState, .thinking)
+        h.link.play(["type": "response.created", "response": ["id": "r1"]],
+                    ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]],
+                    ["type": "response.done", "response": ["id": "r1"]])
+        XCTAssertEqual(h.voice.talkState, .acting)
+        stepDone.finish()
+        await h.time.settle()
+        XCTAssertEqual(h.voice.talkState, .thinking)
+
+        h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"])
+        XCTAssertEqual(h.voice.talkState, .speaking)
+        h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "output_audio_buffer.cleared"])
+        XCTAssertEqual(h.voice.talkState, .interrupted)
+        await h.time.advance(1.4)
+        XCTAssertEqual(h.voice.talkState, .hearing)
+
+        h.link.onClosed?("gone")
+        XCTAssertEqual(h.voice.talkState, .failed(TalkState.connectionLost))
+        h.voice.dismissProblem()
+        XCTAssertNil(h.voice.talkState)
     }
 }

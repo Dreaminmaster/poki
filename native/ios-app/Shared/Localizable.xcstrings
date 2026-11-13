@@ -1843,6 +1843,22 @@
         }
       }
     },
+    "Check the network, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请检查网络后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請檢查網路後再試。"
+          }
+        }
+      }
+    },
     "CHECKS" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2416,6 +2432,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在連線此 iPhone…"
+          }
+        }
+      }
+    },
+    "Connection lost. Nothing is sent again. Talk again to hear how running steps ended." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接中断。已发出的内容不会重发，重新对话可以了解步骤的结果。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線中斷。已送出的內容不會重送，重新對話可以了解步驟的結果。"
           }
         }
       }
@@ -4087,6 +4119,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "做到第 2 步時跟手機斷開了，我沒再碰別的，先停下了。"
+          }
+        }
+      }
+    },
+    "Interrupt" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打斷"
+          }
+        }
+      }
+    },
+    "Interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打斷"
           }
         }
       }
@@ -10779,6 +10843,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 正在用的页面。连按两下接手。"
+          }
+        }
+      }
+    },
+    "The server did not answer. The talk ended." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器没有响应，对话已结束。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器沒有回應，對話已結束。"
           }
         }
       }
