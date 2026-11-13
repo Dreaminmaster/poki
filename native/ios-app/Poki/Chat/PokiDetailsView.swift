@@ -355,10 +355,19 @@ struct ConnectionView: View {
                 }
                 .accessibilityIdentifier("hands.on")
             } footer: {
-                // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
-                Text(on ? "Poki can tap, type, and scroll on this iPhone."
-                     : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
-                     : "Poki is off. Agents can’t reach this iPhone.")
+                VStack(alignment: .leading, spacing: 6) {
+                    // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
+                    Text(model.sessionStarting ? "Poki is turning on."
+                         : on ? "Poki can tap, type, and scroll on this iPhone."
+                         : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
+                         : "Poki is off. Agents can’t reach this iPhone.")
+                    // Why turning on failed, under the switch that was turned on (not only on Poki's
+                    // page). Poki's own sentences are localized; PokiCore's stay as they came.
+                    if !on, !model.sessionStarting, let problem = model.problem {
+                        Text(verbatim: Bundle.main.localizedString(forKey: problem, value: problem, table: nil))
+                            .foregroundStyle(.red)
+                    }
+                }
             }
 
             Section {

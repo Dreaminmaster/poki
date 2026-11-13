@@ -603,6 +603,10 @@ struct ChatTranscript<Footer: View>: View {
         // Opens at the newest message; a short chat starts under the top bar, as the boards draw it
         // (ESP-376). A frame fixed to the screen's height here cut off everything above it.
         .scrollPosition($position)
+        // No vertical scroll bar: dragging the drawer open and back moves the whole chat, and the bar
+        // the drag's vertical part showed could stay on the screen as a grey line over the messages.
+        // The newest button below brings you back down.
+        .scrollIndicators(.hidden, axes: .vertical)
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.top, for: .alignment)
         // At the newest message, every reply, step, card and keyboard keeps it in view; read back and
