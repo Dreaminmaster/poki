@@ -24,25 +24,82 @@
 </p>
 <!-- badges:end -->
 
-## Quick start
+Poki is an agent that operates an iPhone the way a person does. It reads the screen, taps, types and scrolls in real apps, and asks you before anything sensitive. It comes in two forms:
 
-### Poki on your iPhone
+- **The Poki app** runs on the iPhone itself. You give it a task in a chat, and it works in your other apps. After setup it needs no Mac.
+- **Poki MCP** lets an agent on your Mac, such as Claude Code or Codex, drive an iPhone or the iOS Simulator. Poki Agent, a terminal agent with iMessage and Telegram channels, runs on it. Poki MCP stays available as it is but is no longer updated. New work goes into the Poki app.
 
-Tell your agent:
+## What's new in 0.4.0
+
+Poki 0.4.0 is the current Beta. It replaces the iPhone app's whole interface.
+
+- **A new home page.** Poki's three-dimensional bear greets you by the time of day, with rows of everyday apps to start a task from. Press and hold a home quick action to edit or forget it.
+- **Approvals in one sentence.** A sensitive step asks a short question, such as "Allow deletion?", on the in-app card, in the Dynamic Island and on the Lock Screen. Payments and deletions always ask.
+- **The Dynamic Island and Live Activity** show the app Poki is working in and each step, with failed steps in red.
+- **Talk with Poki.** The round button in the message field starts a spoken conversation that stays in the chat and keeps going when Poki is in the background. Talk to Poki and Send Task to Poki work from Shortcuts, Siri and the Action Button, so you can press and hold the Action Button to call Poki. Talking needs a voice model key.
+- **Conversations.** A drawer lists your conversations with each one's app icon and marks the ones that failed or stopped. Archive the ones you are done with. The plus menu attaches photos, a camera shot or files.
+- **Answers read cleanly.** Headings, lists, tables, quotes and code render as you would expect, also while the answer streams in.
+- **Dark mode** under Settings > Appearance, and a new app icon with dark and tinted versions.
+- **An easier start.** Welcome pages on first launch, a Test Connection button on the model key page, setup problems shown at the top of the conversation list, and Settings grouped into Connection, Models, Agents, Memory and Appearance.
+- **Lookups in Poki's own browser.** Web lookups run in a browser inside Poki, which you can take over, hand back or stop.
+
+Upgrading from 0.3.1 keeps your conversations. Earlier conversations move to the archive once, after the update. The full list of changes is in the release notes of each [release](https://github.com/JosssphZhou/poki/releases).
+
+## Install Poki on your iPhone
+
+### With your agent (recommended)
+
+Tell your agent, such as Claude Code or Codex:
 
 ```text
 Install Poki on my iPhone from https://github.com/JosssphZhou/poki
 ```
 
-The agent follows the [install-poki skill](skills/install-poki/SKILL.md) and runs `bin/install-iphone.mjs`, which does every step it can by itself. You only do what iOS asks of you: type your Apple Account into a Poki Setup window on the Mac, tap Trust and turn on Developer Mode on the iPhone, trust the developer, and open Poki. When Poki first opens it asks for Automation Mode: tap Continue and enter the iPhone passcode. If you cancel, turn Poki on again to be asked again. The agent tells you each one in a sentence when it comes up. A free Apple Account works.
+The agent follows the [install-poki skill](skills/install-poki/SKILL.md) and runs `bin/install-iphone.mjs`, which does every step it can by itself. You only do what iOS asks of you: type your Apple Account into a Poki Setup window on the Mac, tap Trust and turn on Developer Mode on the iPhone, trust the developer, and open Poki. When Poki first opens it asks for Automation Mode: tap Continue and enter the iPhone passcode. If you cancel, turn Poki on again to be asked again. The agent tells you each step in a sentence when it comes up. A free Apple Account works.
 
-Requires macOS 14+, Node.js 24+, iOS 18+, a USB data cable, an Apple Account, and a VPN app on the iPhone that routes 10.7.0.1 back to it. The free LocalDevVPN from the App Store works, and so do Karing and Shadowrocket set up through Poki's Setup instructions. On iOS 27 and later Poki controls the iPhone through its native services by default. On iOS 18 to 26 it uses the XCTest session instead, as Alpha 0.2.9 did; this release was not tested on a physical iPhone below iOS 27. Xcode is not required. Free Apple Account signing lasts 7 days and needs renewal. Enable UI Automation in the iPhone's Developer settings. Poki also needs your own model account. Signing in with a ChatGPT Plus or Pro plan is the easiest start; you can also paste an API key from Anthropic, OpenAI, Gemini, DeepSeek or OpenRouter, or use your own OpenAI-compatible server. A Claude subscription cannot sign in, so use an Anthropic API key instead. With an older Poki Setup and no Xcode, the agent asks you to finish model-key and connection setup manually and reports those checks as unverified until you confirm them.
+The installer uses the Alpha channel unless you ask your agent for another one, such as Beta. Alpha gets each build first and Beta gets the same build after more testing.
 
 No Node.js 24, or on Windows? The same prompt works once Poki Setup is installed: the agent then uses the command line tool inside Poki Setup. Poki Setup's own menu also copies a prompt for your agent (Poki > Copy Prompt for Your Agent on a Mac, Settings > Use an agent on Windows).
 
-Prefer clicking through it yourself? Download Poki Setup for macOS or Windows (contributed by [@ZhehanZhang](https://github.com/ZhehanZhang)) from the [Alpha release](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) and follow its window.
+If GitHub answers 403 or 429 while the installer reads Poki's releases, it is usually GitHub's hourly limit on anonymous requests, which everyone on your network shares. Switch to another network or proxy node and run it again, or wait an hour.
 
-### Poki MCP for your agent
+### With Poki Setup
+
+Prefer clicking through it yourself? Download Poki Setup for macOS or Windows (contributed by [@ZhehanZhang](https://github.com/ZhehanZhang)) from the [Alpha release](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) and follow its window. The Beta release carries the same Poki Setup files. Until you pick a channel in its Settings, Poki Setup installs the newest Stable release, or the Beta while there is no Stable release yet.
+
+### What you need
+
+| | Requirement |
+| --- | --- |
+| iPhone | iOS 18 or later, so iPhone XS, XR, SE (2nd generation) or newer. Poki has been tested on physical iPhones with iOS 27. |
+| Mac | macOS 14 or later, with Node.js 24 or later for the agent install. Poki Setup also runs on Windows. Xcode is not needed. |
+| Cable and account | A USB data cable and an Apple Account. With a free account the signature lasts 7 days, and Poki Setup can renew it for you. |
+| Connection | A VPN app on the iPhone that routes 10.7.0.1 back to the iPhone. The free LocalDevVPN from the App Store works, and so do Karing and Shadowrocket set up through Poki's instructions. |
+| Model account | Your own. Signing in with a ChatGPT Plus or Pro plan is the easiest start. You can also paste an API key from Anthropic, OpenAI, Gemini, DeepSeek or OpenRouter, or use your own OpenAI-compatible server. A Claude subscription cannot sign in, so use an Anthropic API key instead. |
+
+On iOS 27 and later Poki controls the iPhone through its native services. On iOS 18 to 26 it uses an XCTest session instead, which needs UI Automation turned on in the iPhone's Developer settings. The app also installs on iPad with iPadOS 18 or later.
+
+## Update Poki
+
+- **On the iPhone.** Open Poki's signing and updates page: Settings > Connection > Signing & Updates in 0.4.0, or the Signing page in Settings in 0.3.1. When a newer build is out, the page offers to download and install it. If it asks you to sign in first, Poki was installed from the Mac and the iPhone does not have your Apple Account yet. Sign in with the account you installed with, or update from the Mac instead.
+- **From the Mac.** Renew in Poki Setup installs the newest build on its channel over the installed app. You can also tell your agent "Update Poki on my iPhone"; the install-poki skill has a separate update path that checks the installed version and signing identity first.
+- If an update stops at "Finishing the update", swipe Poki away in the app switcher and open it again, then check the version in Settings. If the version did not change, update from Poki Setup on the Mac. Do not delete Poki to fix an update: deleting it deletes its conversations.
+
+The release channels and how a build moves from Alpha to Beta are in [Release channels](docs/release-channels.md).
+
+## Known issues
+
+- Poki operates your real iPhone. If you ask it to send messages or make payments, it will. Screen contents are sent to the model service you set up.
+- Physical iPhone support has been verified only on iPhones using the Chinese interface, in portrait orientation. Landscape is not supported.
+- This release has not been tested on a physical iPhone below iOS 27, or on an iPad. On older and smaller iPhones, the three-dimensional bear and the home page animations may run warmer or slower. Low Power Mode and Reduce Motion show a still picture of the bear instead.
+- With a free Apple Account the signature lasts 7 days. Keep Poki Setup on the Mac able to reach the iPhone, or renew by hand before it expires.
+- Reading Poki's releases from GitHub can fail with 403 or 429, usually because many people share one network. Switch network or proxy node and try again, or wait an hour.
+
+More limits, with test results, are in [Verification and known limits](docs/verification.md).
+
+## Poki MCP for your agent
+
+Poki MCP is no longer updated. It stays here as it is for people who already use it or want to build on it. For a maintained way to run Poki, install the Poki app above.
 
 **Let your agent install it.** Copy this to your agent:
 
@@ -61,7 +118,7 @@ cd poki
 npm start
 ```
 
-Requires macOS 15 or later, full Xcode, Rust, Node.js 24+, and ffmpeg. `./bin/setup` checks for missing dependencies. The initial build takes a few minutes.
+Poki MCP builds from source, so it has its own requirements: macOS 15 or later, full Xcode, Rust, Node.js 24+, Python 3, and ffmpeg. The Poki app above does not need Xcode. `./bin/setup` checks for missing dependencies. The initial build takes a few minutes.
 
 Poki targets macOS. For Linux, see the community port [poki-for-linux](https://github.com/carrotciallo/poki-for-linux) ([#16](https://github.com/JosssphZhou/poki/issues/16)), maintained outside this repo.
 
@@ -69,7 +126,7 @@ Poki MCP on Windows: community port at [scy7796/poki-for-windows](https://github
 
 ### Prebuilt macOS arm64 package
 
-Download `poki-v0.1.1-macos-arm64.tar.gz` from the release and run:
+Download `poki-v0.1.1-macos-arm64.tar.gz` from the [Poki MCP v0.1.1 release](https://github.com/JosssphZhou/poki/releases/tag/v0.1.1) and run:
 
 ```sh
 tar -xzf poki-v0.1.1-macos-arm64.tar.gz
@@ -78,7 +135,7 @@ npm ci --no-audit --no-fund
 npm start
 ```
 
-The package includes the native bridge and idevice tools. You do not need Rust or `./bin/setup`. You still need macOS on Apple Silicon, full Xcode, Node.js 24+, Python 3, and ffmpeg. Register your MCP client and install the optional Agent as described below.
+Poki MCP releases are tagged `vX.Y.Z`. The iPhone app's `app-` releases do not carry this package. The package includes the native bridge and idevice tools. You do not need Rust or `./bin/setup`. You still need macOS on Apple Silicon, full Xcode, Node.js 24+, Python 3, and ffmpeg. Register your MCP client and install the optional Agent as described below.
 
 In another terminal, from the same directory, register the MCP server:
 
@@ -100,7 +157,7 @@ Poki Agent uses GPT-6.1 Terra (`gpt-6.1-terra`) with low reasoning by default. W
 
 For a physical iPhone, pair it with your Mac over USB first. See [Physical iPhone setup](docs/physical-iphone.md).
 
-Update with `./bin/poki update`. Set `POKI_NO_UPDATE_CHECK=1` to disable the daily anonymous GitHub release check. See [Update](AGENTS.md#update) for the request URL, restart steps, and prebuilt packages.
+`./bin/poki update` still pulls the newest `main` and rebuilds. See [Update](AGENTS.md#update) for the restart steps and the optional update check.
 
 ## Try a task
 
@@ -119,26 +176,47 @@ Gets faster with use: Poki Agent remembers past tasks and runs them faster on re
 
 **MCP clients:** Claude Code, Codex, and any client supporting `mcpServers` JSON.
 
-Physical iPhone support has been verified only on iPhones using the Chinese interface. Physical devices support portrait orientation only. App container export and direct links to Settings subpages are unavailable. See [verification and known limits](docs/verification.md).
+On physical devices, app container export and direct links to Settings subpages are unavailable. See [verification and known limits](docs/verification.md).
+
+## Roadmap
+
+This lists directions, not dates.
+
+**Done, up to the 0.4.0 Beta**
+
+- The Poki app on the iPhone, which works without a Mac after setup, with approvals on the Lock Screen and in the Dynamic Island.
+- One-step install by your agent or Poki Setup, with no Xcode and a free Apple Account.
+- Native control on iOS 27 and later, and Poki's own keyboard that types without the clipboard.
+- Poki MCP, Poki Agent, iMessage and Telegram channels, and routes Poki learns and replays. Poki MCP is now kept as it is, without updates.
+- Remote connections over LAN and Tailscale.
+- The 0.4.0 interface: the home page with the three-dimensional bear, talking with Poki, the Action Button, archive and dark mode.
+
+**Next**
+
+- Updates come from Poki's own download source, with GitHub kept as a backup.
+- One update channel in place of several.
+- Voice only listens, speaks and looks. Actions on the phone go to the same text models that run tasks today.
+- The interface in more languages.
+
+**Later**
+
+- More iPhones, iOS versions and screen languages verified on real devices.
+- More model providers.
 
 ## Docs
 
 | Topic | Read |
 | --- | --- |
-| Installation, other MCP clients, and troubleshooting | [Install guide](docs/install.md) |
+| Installing the iPhone app with an agent | [install-poki skill](skills/install-poki/SKILL.md) |
+| Release channels and how builds are promoted | [Release channels](docs/release-channels.md) |
+| Poki MCP installation, other MCP clients, and troubleshooting | [Install guide](docs/install.md) |
 | Poki Agent, models, iMessage, and Telegram | [Run Poki Agent](agent/README.md) |
 | MCP tool reference | [Tool behavior](docs/tools.md) |
 | Environment variables and sessions | [Configuration](docs/configuration.md) |
 | USB pairing, Developer Mode, and Wi-Fi | [Physical iPhone setup](docs/physical-iphone.md) |
 | Test results, known limits, and disclaimers | [Verification](docs/verification.md) |
 | Bridge architecture | [Native bridge](native/NATIVE.md) and [simulator adapter](native/simulator.md) |
-| Roadmap | [poki.bot](https://poki.bot) |
-
-## Roadmap
-
-<p align="center">
-  <img src="docs/images/roadmap.png" width="860" alt="Poki roadmap. Shipped: Poki MCP, Poki Agent, iMessage, Telegram, and Terminal integrations, self-learning routes, remote connections. In Progress: persistent connection performance improvements, native text input (clipboard-free), simplified tool interface. Planned: Poki App, which runs locally on iPhone and is available while your Mac is powered off. Future: iPhone Duo support, physical device support (no Xcode required), additional model providers.">
-</p>
+| Roadmap | [Roadmap](#roadmap) |
 
 ## Star History
 
