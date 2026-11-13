@@ -351,6 +351,22 @@
         }
       }
     },
+    "%lld Connected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接 %lld 个"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已連線 %lld 個"
+          }
+        }
+      }
+    },
     "%lld lines" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1148,6 +1164,22 @@
         }
       }
     },
+    "Agents ›" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体 ›"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智慧體 ›"
+          }
+        }
+      }
+    },
     "All Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1560,6 +1592,22 @@
         }
       }
     },
+    "Appearance" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外观"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外觀"
+          }
+        }
+      }
+    },
     "Apple Account" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1731,6 +1779,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "先問我"
+          }
+        }
+      }
+    },
+    "Automatic follows the iPhone’s appearance setting." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动跟随 iPhone 的外观设置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動跟隨 iPhone 的外觀設定。"
           }
         }
       }
@@ -2718,6 +2782,22 @@
         }
       }
     },
+    "Dark" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深色"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深色"
+          }
+        }
+      }
+    },
     "Debugging" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3363,6 +3443,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輸密碼以啟動 Runner"
+          }
+        }
+      }
+    },
+    "Enter your relay’s address first in Settings › Agents › Address. Poki has no default relay." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先在“设置 › 智能体 › 服务地址”中填写中转地址。Poki 没有默认中转。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先在「設定 › 智慧體 › 服務位址」中填寫中轉位址。Poki 沒有預設中轉。"
           }
         }
       }
@@ -4795,6 +4891,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lets the agent perform the pending step."
+          }
+        }
+      }
+    },
+    "Light" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浅色"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "淺色"
           }
         }
       }
@@ -7184,6 +7296,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "瀏覽中"
+          }
+        }
+      }
+    },
+    "Poki uses Apple’s developer tools on this iPhone. Keep all of these on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 通过 Apple 的开发者工具操作此 iPhone，以上各项需保持开启。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 透過 Apple 的開發者工具操作此 iPhone，以上各項需保持開啟。"
           }
         }
       }
@@ -9592,6 +9720,22 @@
         }
       }
     },
+    "Set Up Again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新配置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新設定"
+          }
+        }
+      }
+    },
     "Set Up Poki" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9982,6 +10126,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "簽名"
+          }
+        }
+      }
+    },
+    "Signing & Updates" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "签名与更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "簽署與更新"
           }
         }
       }

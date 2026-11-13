@@ -66,6 +66,7 @@ struct RootView: View {
     /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
     @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
+    @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
     @Namespace private var profile
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
@@ -97,15 +98,15 @@ struct RootView: View {
                 statusOpen = true
             },
             openVoice: openLiveVoice,
-            openSetup: { openDetails([DetailsRoute.hands, DetailsRoute.setup]) },
+            openSetup: { openDetails([DetailsRoute.connection]) },
             // Beside the list (iPad) the chat has no stack of its own to push on: the step opens in the profile.
             openSetupStep: { step in
-                if split { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home.append(step) }
+                if split { openDetails([DetailsRoute.connection, step]) } else { home.append(step) }
             },
             openModel: { openDetails([DetailsRoute.model]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
-            openAgents: { openDetails([DetailsRoute.settings]) },
-            openUpdates: { openDetails([DetailsRoute.updates]) }
+            openAgents: { openDetails([DetailsRoute.agents]) },
+            openUpdates: { openDetails([DetailsRoute.connection, DetailsRoute.updates]) }
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat. Poki's card opens beside the picture and leaves it in sight.
@@ -185,8 +186,7 @@ struct RootView: View {
             },
             openSetup: {
                 var next = NavigationPath()
-                next.append(DetailsRoute.hands)
-                next.append(DetailsRoute.setup)
+                next.append(DetailsRoute.connection)
                 detailsPath = next
             },
             openSession: { id in
@@ -234,6 +234,13 @@ struct RootView: View {
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` opens the voice page.
         .onOpenURL { url in open(link: url) }
+        // On the window, not the view: sheets and full-screen covers take it too, and Automatic hands back to iOS.
+        .onChange(of: appearance, initial: true) { _, value in
+            let style = (Appearance(rawValue: value) ?? .automatic).style
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { window.overrideUserInterfaceStyle = style }
+            }
+        }
         .onAppear(perform: openLaunchScreen)
         .task {
             #if DEBUG
@@ -255,9 +262,9 @@ struct RootView: View {
         if let step = model.open(link: url) {
             detailsOpen = false
             threadsOpen = false
-            if width == .regular { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home = NavigationPath([step]) }
+            if width == .regular { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
-            openDetails([DetailsRoute.hands, DetailsRoute.setup])
+            openDetails([DetailsRoute.connection])
         } else if url.host() == "log" {
             openDetails([DetailsRoute.history])
         } else if url.host() == "voice" {
@@ -312,9 +319,9 @@ struct RootView: View {
             let step = defaults.integer(forKey: "pokiSetupStep")
             if step > 0 {
                 let target = SetupStep.shown[min(step, SetupStep.shown.count) - 1]
-                openDetails([DetailsRoute.hands, DetailsRoute.setup, target])
+                openDetails([DetailsRoute.connection, target])
             } else {
-                openDetails([DetailsRoute.hands, DetailsRoute.setup])
+                openDetails([DetailsRoute.connection])
             }
         case "moreSettings", "details", "status":
             // More Settings is gone: its rows are on Poki's profile, by what they are about.
@@ -322,26 +329,30 @@ struct RootView: View {
         case "statusCard":
             cardUnder = nil
             statusOpen = true
-        case "hands":
-            openDetails([DetailsRoute.hands])
+        case "hands", "connection":
+            openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.approvals])
-        case "health":
-            openDetails([DetailsRoute.health])
-        case "connect", "settings":
-            openDetails([DetailsRoute.settings])
+            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+        case "health", "advanced":
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+        case "connect", "settings", "agents":
+            openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.health, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.health, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
-                openDetails([DetailsRoute.settings, SettingsRoute.connector(first)])
+                openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
             } else {
-                openDetails([DetailsRoute.settings])
+                openDetails([DetailsRoute.agents])
             }
         case "model":
             openDetails([DetailsRoute.model])
+        case "memory":
+            openDetails([SettingsRoute.memory])
+        case "appearance":
+            openDetails([DetailsRoute.appearance])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break

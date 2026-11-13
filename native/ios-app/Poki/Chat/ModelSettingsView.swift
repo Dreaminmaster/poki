@@ -27,6 +27,17 @@ struct ModelSettingsView: View {
                 Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
             }
 
+            Section {
+                NavigationLink(value: DetailsRoute.voice) {
+                    LabeledContent {
+                        Text(VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? "Live Voice" : "Dictation Only")
+                    } label: {
+                        SettingsLabel("Voice", systemImage: "waveform")
+                    }
+                }
+                .accessibilityIdentifier("details.voice")
+            }
+
             // With no account yet the card above has Add Account, and an empty group would only be a heading.
             if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
             Section {
