@@ -66,7 +66,7 @@ final class AppNamePresentationTests: XCTestCase {
         for (app, expected) in [("com.tencent.xin", Optional(weChat)), ("org.example.unlisted", nil), ("My Reader", "My Reader")] {
             var state = PokiState(phase: .working, headline: "Thinking", thumbnailVersion: 0)
             state.app = app
-            XCTAssertEqual(state.face.place, expected)
+            XCTAssertEqual(state.face.kicker, expected)
             state.event = .init(kind: .app, text: app)
             XCTAssertEqual(state.face.event, expected)
             state.phase = .done
