@@ -57,9 +57,7 @@ targets:
         # home page's suggestion rows move once a frame.
         CADisableMinimumFrameDurationOnPhone: true
         UIViewControllerBasedStatusBarAppearance: false
-        UILaunchScreen:
-          UIColorName: AccentColor
-          UIImageName: Bear
+        UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIApplicationSceneManifest:

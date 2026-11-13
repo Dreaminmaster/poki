@@ -26,6 +26,9 @@ echo '{"images":[{"filename":"icon-1024.png","idiom":"universal","platform":"ios
 mkdir -p "$APP/AccentColor.colorset"
 echo '{"colors":[{"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0x20","green":"0x84","blue":"0xFD","alpha":"1.000"}}}],"info":{"version":1,"author":"poki"}}' > "$APP/AccentColor.colorset/Contents.json"
 bear "$APP"
+# 启动画面沿用聊天页浅色/深色背景，并直接使用已有透明熊图，避免显示方形 App 图标底色。
+mkdir -p "$APP/LaunchBackground.colorset"
+echo '{"colors":[{"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0xF5","green":"0xF8","blue":"0xFC","alpha":"1.000"}}},{"idiom":"universal","appearances":[{"appearance":"luminosity","value":"dark"}],"color":{"color-space":"srgb","components":{"red":"0x05","green":"0x07","blue":"0x0D","alpha":"1.000"}}}],"info":{"version":1,"author":"poki"}}' > "$APP/LaunchBackground.colorset/Contents.json"
 # The app icon as a picture for the app's own pages (the conversations' header), small: 64 points at 3x.
 mkdir -p "$APP/PokiIcon.imageset"
 sips -Z 192 "$ICON" --out "$APP/PokiIcon.imageset/icon@3x.png" >/dev/null
