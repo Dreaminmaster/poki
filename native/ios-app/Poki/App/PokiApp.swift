@@ -318,9 +318,11 @@ struct RootView: View {
     }
 
     /// The Action Button, Control Center, Shortcuts or Spotlight (PokiEntry), once Poki is in front. A task
-    /// under way is shown, not interrupted: Talk goes on only when Poki is free. Pairing stays on its step.
+    /// under way is shown, not interrupted: Talk goes on only when Poki is free. Pairing stays on its step,
+    /// and the first run stays up: its record is asked, not `welcoming`, because at a cold launch the
+    /// request can be here before the cover is.
     private func takeEntry() {
-        guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay else { return }
+        guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay, !FirstRun.isDue() else { return }
         detailsOpen = false
         statusOpen = false
         if let handoff = AskPoki.liveSessionID { show(.session(handoff)); return }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › Voice: where to put Poki on the Action Button, in Control Center and on the Lock Screen.
+/// Settings › Models › Voice: where to put Poki on the Action Button, in Control Center and on the Lock Screen.
 struct ActionButtonSection: View {
     var body: some View {
         Section {
