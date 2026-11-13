@@ -44,7 +44,7 @@ struct SessionsView: View {
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.immediately)
-        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .topBar { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { controls }
         .background(Tint.sidebar.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
@@ -69,7 +69,12 @@ struct SessionsView: View {
             Spacer()
         }
         .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 12)
-        .background(Tint.sidebar)
+        // No ground of its own on iOS 26 and later: the list passes under it through the system's soft
+        // scroll edge, as the chat does under its top bar, instead of being cut off at a straight line.
+        // Before, with no edge effect, the sidebar's colour keeps the rows from showing through the name.
+        .background {
+            if #available(iOS 26.0, *) { Color.clear } else { Tint.sidebar }
+        }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
