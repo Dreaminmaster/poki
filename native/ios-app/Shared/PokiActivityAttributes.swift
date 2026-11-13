@@ -114,41 +114,22 @@ struct PendingApproval: Codable, Hashable {
     var reason: String
     var expires: Date
 
-    /// The approval as a short question, from PokiCore's reason and the app: "Send in Messages?".
-    /// The summary ("Tap “Send”") says how, which the thumbnail shows better.
+    /// The approval as one short question, the same on every card, the island, the Lock Screen and
+    /// the notification. It comes from the kind the rules saw in PokiCore's reason, never from the
+    /// agent's words ("Allow payment?").
     var question: String {
-        // PokiCore names the app, or says "unknown", or describes the home screen at length.
-        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
-        if reason.hasPrefix("sending") { return place.map { String(activity: "Send in \($0)?") } ?? String(activity: "Send a message?") }
-        if reason.hasPrefix("a payment") { return place.map { String(activity: "Pay in \($0)?") } ?? String(activity: "Make a payment?") }
-        if reason.hasPrefix("deleting") { return place.map { String(activity: "Delete in \($0)?") } ?? String(activity: "Delete this?") }
-        if reason.hasPrefix("typing into a password") { return String(activity: "Type a password?") }
-        if reason.hasPrefix("input in"), let place { return String(activity: "Use \(place)?") }
+        // Several sensitive actions in one batch: the first one's kind, as PokiCore asks from it.
+        var reason = self.reason
+        if let first = reason.range(of: #"^multiple sensitive actions: action \d+: "#, options: .regularExpression) {
+            reason = String(reason[first.upperBound...])
+        }
+        if reason.hasPrefix("a payment") { return String(activity: "Allow payment?") }
+        if reason.hasPrefix("deleting") { return String(activity: "Allow deletion?") }
+        if reason.hasPrefix("sending") { return String(activity: "Allow sending a message?") }
+        if reason.hasPrefix("a call") { return String(activity: "Allow a call?") }
+        if reason.hasPrefix("typing into a password") { return String(activity: "Allow typing a password?") }
+        if reason.hasPrefix("input in") { return String(activity: "Allow a step in a protected app?") }
         return String(activity: "Allow this step?")
-    }
-
-    /// The reason as a line under the summary: "Sending a message in Messages".
-    var reasonLine: String {
-        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
-        if reason.hasPrefix("sending") {
-            return place.map { String(activity: "Sending a message in \($0)") } ?? String(activity: "Sending a message")
-        }
-        if reason.hasPrefix("a payment") {
-            return place.map { String(activity: "Making a payment in \($0)") } ?? String(activity: "Making a payment")
-        }
-        if reason.hasPrefix("deleting") {
-            return place.map { String(activity: "Deleting in \($0)") } ?? String(activity: "Deleting")
-        }
-        if reason.hasPrefix("typing into a password") {
-            return place.map { String(activity: "Typing a password in \($0)") } ?? String(activity: "Typing a password")
-        }
-        var text = reason
-        if let quote = text.range(of: " (\"") { text = String(text[..<quote.lowerBound]) }
-        text = text.prefix(1).uppercased() + text.dropFirst()
-        if let place, !text.contains(" in ") {
-            return "\(text) in \(place)"
-        }
-        return text
     }
 }
 

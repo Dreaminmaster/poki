@@ -173,19 +173,15 @@ struct ChatView: View {
     /// The step waiting for your answer, or the hand-over, above the message field.
     @ViewBuilder private var asks: some View {
         if sampleScene == "approval" {
-            let sample = ChatModel.Sample.approval, words = ChatModel.Sample.approvalWords
-            ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: sample.expires, answer: { _ in })
+            let sample = ChatModel.Sample.approval
+            ApprovalAskCard(title: sample.question, expires: sample.expires, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
         } else if let ask = chat.demoAsk {
-            let words = ChatModel.Sample.demoWords
-            ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: ask.expires, answer: chat.answerDemo)
+            ApprovalAskCard(title: ChatModel.Sample.demoApproval.question, expires: ask.expires, answer: chat.answerDemo)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let approval = model.approvals.first {
-            // A message of this chat's own task: who it goes to and the words. Any other step: the step.
-            let words = chat.askWords[approval.id]
-            ApprovalAskCard(title: words?.title ?? approval.question, detail: words?.detail ?? approval.reasonLine,
-                            quote: words?.quote ?? ActivityWords.label(approval.summary), expires: approval.expires,
+            ApprovalAskCard(title: approval.question, expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let text = model.handoffText {

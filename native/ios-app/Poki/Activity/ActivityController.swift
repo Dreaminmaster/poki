@@ -243,7 +243,7 @@ final class ActivityController {
         }
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
-            alert = critical(StatusWord.needsApproval.text, approval.question)
+            alert = critical(approval.question, "")
             remindHalfway(approval)
         }
         if state.approval == nil, let was = old.approval {
@@ -292,7 +292,7 @@ final class ActivityController {
             try? await Task.sleep(for: .seconds(half))
             guard !Task.isCancelled, let self, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
             AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
-            self.send(alert: self.critical(StatusWord.needsApproval.text, approval.question), critical: true)
+            self.send(alert: self.critical(approval.question, ""), critical: true)
         }
     }
 

@@ -377,10 +377,9 @@ private struct TaskStepRow: View {
 /// A step waiting for your answer, above the message field: what is asked, where, the words or the
 /// button it is about, how long it waits, and the two answers. Allow takes a hold, so a stray tap
 /// never lets a step through.
+/// An approval, as one question from the rules' kind ("Allow payment?"), its countdown and the answers.
 struct ApprovalAskCard: View {
     var title: String
-    var detail: String
-    var quote: String
     var expires: Date?
     var answer: (Bool) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -392,11 +391,8 @@ struct ApprovalAskCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
                 PokiAvatar(size: 48, mood: .needsYou)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
-                    Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if let expires, expires > Date() {
                     // The countdown keeps its own width, so the title does not jump each second.
                     Text(timerInterval: Date()...expires, countsDown: true)
@@ -407,12 +403,6 @@ struct ApprovalAskCard: View {
                         .background(Tint.amberSoft, in: .capsule)
                         .accessibilityLabel(Text("Time left"))
                 }
-            }
-            if !quote.isEmpty {
-                Text(verbatim: quote).font(.callout).foregroundStyle(Color(.label))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 12).padding(.horizontal, 14)
-                    .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 16, style: .continuous))
             }
             answers {
                 Button { answer(false) } label: {
