@@ -333,6 +333,8 @@ struct ModelBear<Flat: View>: View {
     var live = true
     /// Counts the touches on the bear.
     var pokes = 0
+    /// A task is done: the bear waves once as it turns true, without the tap's feel.
+    var cheer = false
     @ViewBuilder var flat: () -> Flat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -375,6 +377,9 @@ struct ModelBear<Flat: View>: View {
             // With Reduce Motion the picture stays still: only the feel of the tap answers.
             if reduceMotion { return }
             if showsModel { if handle.sayHi() { hops += 1 } } else if -hopped.timeIntervalSinceNow > 0.55 { hopped = .now; hops += 1 }
+        }
+        .onChange(of: cheer) { _, now in
+            if now, showsModel, !reduceMotion, handle.sayHi() { hops += 1 }
         }
         .task {
             store.load()
