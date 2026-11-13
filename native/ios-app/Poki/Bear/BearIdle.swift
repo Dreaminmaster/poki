@@ -2,11 +2,13 @@ import RealityKit
 import simd
 
 /// What the bear does by itself while it stands there, so that it is alive without a tap: it breathes
-/// (a breath every 3 to 4 seconds, each a little different), sways slowly, and every few seconds
-/// looks to one side, tilts its head or looks up, then comes back. The waits, the sides and the sizes
-/// are drawn at random, so it never runs as a loop. It moves the bear's own joints on top of the
-/// model's standing pose: the body, the head, the shoulders and the pupils, never the whole model.
-/// Angles are in radians and lengths in the model's metres.
+/// (a breath every 3 to 4 seconds, each a little different), sways slowly, and every few seconds does
+/// one small thing, a different one each time, taking turns: it looks somewhere (to one side, its head
+/// tilted, or up), stretches with its arms up and its eyes smiling, gives two little bounces, or rocks
+/// its head from side to side as if humming. The waits, the order, the sides and the sizes are drawn
+/// at random, so it never runs as a loop. It moves the bear's own joints on top of the model's standing
+/// pose: the body, the head, the shoulders, the arms and the eyes, never the whole model. Angles are in
+/// radians and lengths in the model's metres.
 struct BearIdle {
     struct Pose {
         var bodyLift: Float = 0, bodyRoll: Float = 0, bodyYaw: Float = 0
@@ -14,26 +16,45 @@ struct BearIdle {
         var shoulders: Float = 0
         /// Where the pupils look, sideways and up.
         var gaze = SIMD2<Float>(0, 0)
+        /// How far both arms are up and out, from 0 (down) to 1 (a stretch).
+        var arms: Float = 0
+        /// How far the eyes have gone to the smile's arcs, from 0 (open) to 1 (smiling).
+        var smile: Float = 0
     }
 
-    /// One look somewhere: it turns there, holds, and turns back.
+    /// The small things it does, which take turns.
+    enum Gesture: CaseIterable { case look, stretch, bounce, hum }
+
+    /// One small thing: it goes into it, holds, and comes back. A look or a stretch has a pose it holds;
+    /// a bounce or a hum moves all along.
     private struct Glance {
+        var gesture: Gesture
         var start: TimeInterval, rise: TimeInterval, hold: TimeInterval, fall: TimeInterval
         var pose: Pose
-        var end: TimeInterval { start + rise + hold + fall }
+        /// How far a hum rocks the head, and to which side first.
+        var size: Float = 0
+        /// When a hi cut it short: from then it goes back in 0.3 s.
+        var stop: TimeInterval?
+        var end: TimeInterval { min(start + rise + hold + fall, stop.map { $0 + 0.3 } ?? .infinity) }
 
         func weight(at t: TimeInterval) -> Float {
             let x = t - start
-            if x <= 0 || x >= rise + hold + fall { return 0 }
-            if x < rise { return BearIdle.ease(Float(x / rise)) }
-            if x < rise + hold { return 1 }
-            return 1 - BearIdle.ease(Float((x - rise - hold) / fall))
+            if x <= 0 || t >= end { return 0 }
+            let cut = stop.map { 1 - BearIdle.ease(Float((t - $0) / 0.3)) } ?? 1
+            if x < rise { return BearIdle.ease(Float(x / rise)) * cut }
+            if x < rise + hold { return cut }
+            return (1 - BearIdle.ease(Float((x - rise - hold) / fall))) * cut
         }
 
-        /// Turning, not holding still.
+        /// How far through it is, from 0 to 1.
+        func progress(at t: TimeInterval) -> Double { min(max((t - start) / (rise + hold + fall), 0), 1) }
+
+        /// Moving, not holding still: only a look holds still at its far end.
         func turning(at t: TimeInterval) -> Bool {
+            guard t > start, t < end else { return false }
+            if gesture != .look { return true }
             let x = t - start
-            return (0..<rise).contains(x) || (rise + hold..<rise + hold + fall).contains(x)
+            return x < rise || x >= rise + hold
         }
     }
 
@@ -41,6 +62,9 @@ struct BearIdle {
     private var nextGlance: TimeInterval
     private var breath: Double = 0, breathAt: TimeInterval, breathLength: TimeInterval = 3.4
     private var lastSide: Float = Bool.random() ? 1 : -1
+    /// The gestures still to come in this turn, each once; then a new turn in a new order.
+    private var turn: [Gesture] = []
+    private var lastGesture: Gesture?
 
     init(now: TimeInterval) {
         nextGlance = now + .random(in: 1.5...3.5)
@@ -52,12 +76,10 @@ struct BearIdle {
     /// Turning its head somewhere, so worth drawing at the full rate; breathing and swaying alone are slow enough for a third of it.
     func busy(at t: TimeInterval) -> Bool { glance?.turning(at: t) ?? false }
 
-    /// A hi is coming: whatever it is looking at, it turns back now, quickly.
+    /// A hi is coming: whatever it is doing, it comes back now, quickly.
     mutating func attend(at t: TimeInterval) {
         guard var g = glance, t < g.end else { return }
-        let w = g.weight(at: t)
-        g.pose = Self.scaled(g.pose, w)
-        g.start = t - 0.0001; g.rise = 0.0001; g.hold = 0; g.fall = 0.3
+        if g.stop == nil { g.stop = t }
         glance = g
         nextGlance = max(nextGlance, t + 3)
     }
@@ -88,8 +110,37 @@ struct BearIdle {
             p.headRoll += g.pose.headRoll * w
             p.bodyYaw += g.pose.bodyYaw * w
             p.gaze += g.pose.gaze * w
+            p.arms += g.pose.arms * w
+            // The eyes smile once the arms are most of the way up, and open before they come down.
+            p.smile += g.pose.smile * Self.ease((w - 0.35) / 0.5)
+            let x = g.progress(at: t)
+            switch g.gesture {
+            case .bounce:
+                // Two little bounces, the second smaller.
+                let hop = Float(abs(sin(2 * .pi * x))) * (x < 0.5 ? 1 : 0.7)
+                p.bodyLift += 0.03 * hop * w
+                p.shoulders += 0.12 * hop * w
+            case .hum:
+                // The head rocks side to side twice, the body a little after it.
+                let swell = Float(sin(.pi * x))
+                p.headRoll += g.size * Float(sin(4 * .pi * x)) * swell * w
+                p.bodyRoll += 0.03 * Float(sin(4 * .pi * x - 0.6)) * swell * w
+            case .look, .stretch:
+                break
+            }
         }
         return p
+    }
+
+    /// The next gesture: each once a turn, in a new order every turn, never the same twice in a row.
+    mutating func nextGesture() -> Gesture {
+        if turn.isEmpty {
+            turn = Gesture.allCases.shuffled()
+            if turn.first == lastGesture { turn.swapAt(0, turn.count - 1) }
+        }
+        let next = turn.removeFirst()
+        lastGesture = next
+        return next
     }
 
     private mutating func makeGlance(at t: TimeInterval) -> Glance {
@@ -97,6 +148,19 @@ struct BearIdle {
         let side: Float = Int.random(in: 0..<4) == 0 ? lastSide : -lastSide
         lastSide = side
         var pose = Pose()
+        switch nextGesture() {
+        case .stretch:
+            pose.arms = 1
+            pose.smile = 1
+            pose.headPitch = -0.14
+            return Glance(gesture: .stretch, start: t, rise: .random(in: 0.6...0.8), hold: .random(in: 0.8...1.2), fall: .random(in: 0.6...0.8), pose: pose)
+        case .bounce:
+            return Glance(gesture: .bounce, start: t, rise: 0, hold: .random(in: 0.8...1.0), fall: 0, pose: pose)
+        case .hum:
+            return Glance(gesture: .hum, start: t, rise: 0, hold: .random(in: 2.0...2.6), fall: 0, pose: pose, size: side * .random(in: 0.08...0.11))
+        case .look:
+            break
+        }
         switch Int.random(in: 0..<10) {
         case 0..<5: // a look to the side
             pose.headYaw = side * .random(in: 0.18...0.30)
@@ -112,7 +176,7 @@ struct BearIdle {
             pose.headYaw = side * 0.08
             pose.gaze = SIMD2(side * 0.005, 0.008)
         }
-        return Glance(start: t, rise: .random(in: 0.35...0.55), hold: .random(in: 0.8...2.0), fall: .random(in: 0.45...0.7), pose: pose)
+        return Glance(gesture: .look, start: t, rise: .random(in: 0.35...0.55), hold: .random(in: 0.8...2.0), fall: .random(in: 0.45...0.7), pose: pose)
     }
 
     /// The farthest a look to the side goes, `side` of the way toward one side (-1 to 1), with the
@@ -125,12 +189,6 @@ struct BearIdle {
         return p
     }
 
-    private static func scaled(_ p: Pose, _ w: Float) -> Pose {
-        var q = Pose()
-        q.headYaw = p.headYaw * w; q.headPitch = p.headPitch * w; q.headRoll = p.headRoll * w
-        q.bodyYaw = p.bodyYaw * w; q.gaze = p.gaze * w
-        return q
-    }
 }
 
 /// The joints `BearIdle` moves, found by name in the model's skeleton. A model without them stands still.
@@ -140,6 +198,8 @@ struct BearIdleJoints {
     /// The pupils and the smile's arcs, which look with them.
     let eyes: [Int]
     let pupils: [Int], arcs: [Int]
+    /// The upper arms and forearms, right and left.
+    let arms: (upper: (right: Int, left: Int), fore: (right: Int, left: Int))?
 
     init?(names: [String]) {
         func joint(_ name: String) -> Int? { names.firstIndex { $0 == name || $0.hasSuffix("/" + name) } }
@@ -150,7 +210,17 @@ struct BearIdleJoints {
         pupils = ["Eye_R", "Eye_L"].compactMap(joint)
         arcs = ["SmileEye_R", "SmileEye_L"].compactMap(joint)
         eyes = pupils + arcs
+        if let ur = joint("UpperArm_R"), let ul = joint("UpperArm_L"), let fr = joint("Forearm_R"), let fl = joint("Forearm_L") {
+            arms = ((ur, ul), (fr, fl))
+        } else {
+            arms = nil
+        }
     }
+
+    /// How far back the model's own blink puts the pupils, and forward the arcs, to swap them.
+    static let swap: Float = 0.22
+    /// How far the arms turn up and out at a full stretch, and the forearms in.
+    static let stretch: (upper: Float, fore: Float) = (1.2, 0.5)
 
     /// How far a pupil moves for `gaze`: across and up the face, and forward as much as across, so
     /// that it stays in front of the face's curve and its white.
@@ -175,5 +245,27 @@ struct BearIdleJoints {
         }
         let shift = Self.shift(pose.gaze)
         for eye in eyes where eye < joints.count { joints[eye].translation += shift }
+        if let (upper, fore) = arms, pose.arms > 0, joints.count > max(upper.right, upper.left, fore.right, fore.left) {
+            joints[upper.left].rotation *= simd_quatf(angle: Self.stretch.upper * pose.arms, axis: [0, 0, 1])
+            joints[upper.right].rotation *= simd_quatf(angle: -Self.stretch.upper * pose.arms, axis: [0, 0, 1])
+            joints[fore.left].rotation *= simd_quatf(angle: -Self.stretch.fore * pose.arms, axis: [0, 0, 1])
+            joints[fore.right].rotation *= simd_quatf(angle: Self.stretch.fore * pose.arms, axis: [0, 0, 1])
+        }
+        if pose.smile > 0 { smile(pose.smile, in: &joints) }
+    }
+
+    /// The eyes going to the smile's arcs and back as a blink does: the pupils flatten to a line, are
+    /// swapped for the arcs at that line, and the arcs curve up out of it.
+    private func smile(_ amount: Float, in joints: inout [Transform]) {
+        let thin = BearBlink.thin
+        if amount < 0.5 {
+            for joint in pupils where joint < joints.count { joints[joint].scale.y = 1 - (1 - thin) * BearIdle.ease(amount / 0.5) }
+            return
+        }
+        for joint in pupils where joint < joints.count { joints[joint].translation.z -= Self.swap; joints[joint].scale.y = thin }
+        for joint in arcs where joint < joints.count {
+            joints[joint].translation.z += Self.swap
+            joints[joint].scale.y = BearBlink.flat + (1 - BearBlink.flat) * BearIdle.ease((amount - 0.5) / 0.5)
+        }
     }
 }
