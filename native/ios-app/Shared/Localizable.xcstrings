@@ -4123,6 +4123,28 @@
         }
       }
     },
+    "In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud, also while you are in another app. It ends by itself 8 seconds after an answer if nobody speaks. Tap End to stop sooner. The microphone in the message field only dictates." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In chat, tap the waveform button to start Live Voice. Poki listens, acts, and replies aloud, also while you are in another app. It ends automatically if nobody speaks for 8 seconds after an answer. Tap End to stop early. The message field mic is for dictation only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在对话中轻点波形按钮即可开启实时语音，Poki 会边听边操作并朗读回答，切到其他应用后对话继续。回答后 8 秒内无人说话会自动结束；轻点“结束”可提前停止。输入框麦克风仅用于听写。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在對話中輕點波形按鈕即可開啟即時語音，Poki 會邊聽邊操作並朗讀回答，切到其他 App 後對話繼續。回答後 8 秒內無人說話會自動結束；輕點「結束」可提前停止。輸入框麥克風僅用於聽寫。"
+          }
+        }
+      }
+    },
     "Interrupt" : {
       "localizations" : {
         "zh-Hans" : {

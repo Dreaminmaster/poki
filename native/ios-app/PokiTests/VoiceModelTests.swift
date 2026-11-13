@@ -223,69 +223,43 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertFalse(h.voice.isOn)
     }
 
-    /// Talk to Poki, then Home before it has connected: it never opens the microphone in the background.
-    func testGoingToTheBackgroundWhileConnectingEndsTheConversation() async {
+    /// You switch to another app during a talk and it goes on (the owner, 2026-11-13): Poki still listens,
+    /// the microphone stays with it and the Live Activity says so, also when it was still connecting. It
+    /// ends there as it does in front: 8 s after an answer if nobody speaks.
+    func testATalkGoesOnWhenPokiGoesToTheBackground() async {
         let h = Harness()
-        let opening = Task { await h.connect() }
-        for _ in 0..<1000 where h.voice.phase != .connecting { await Task.yield() }
-        XCTAssertEqual(h.voice.phase, .connecting)
-        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        await opening.value
-        XCTAssertFalse(h.voice.isOn)
-        XCTAssertTrue(h.links.isEmpty)
-        XCTAssertEqual(h.microphone, [])
-        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
-    }
-
-    /// Poki in the background stops listening at once, except while a step it was asked for runs (that
-    /// step itself brings another app to the front): then it ends as soon as the step's result is said,
-    /// with no 8 s to go on.
-    func testInTheBackgroundPokiStopsListeningUnlessAStepIsRunning() async {
-        let (step, stepDone) = AsyncStream<Void>.makeStream()
-        let busy = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false) })
-        await busy.talk()
-        busy.link.play(["type": "response.created", "response": ["id": "r1"]],
-                       ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]],
-                       ["type": "response.done", "response": ["id": "r1"]])
-        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        XCTAssertTrue(busy.voice.isOn)
-        stepDone.finish()
-        await busy.time.settle()
-        XCTAssertEqual(busy.voice.calls.first?.delivered, true)
-        busy.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
-                       ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
-        XCTAssertFalse(busy.voice.isOn)
-        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
-
-        let idle = Harness()
-        await idle.talk()
-        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        XCTAssertFalse(idle.voice.isOn)
-        XCTAssertTrue(idle.link.closed)
-        XCTAssertEqual(idle.microphone, [true, false])
-    }
-
-    /// A step's result is handed to the model and Poki goes to the background before the answer has
-    /// started: the answer still gets said, then the conversation ends.
-    func testAStepsResultHandedOverJustBeforeTheBackgroundIsStillSaid() async {
-        let h = Harness(phoneTool: { _, _ in ("Settings is open", false) })
         await h.talk()
-        h.link.play(["type": "response.created", "response": ["id": "r1"]],
-                    ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
-                    ["type": "response.done", "response": ["id": "r1"]])
-        await h.time.settle()
-        XCTAssertEqual(h.voice.calls.first?.delivered, true)
         NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         XCTAssertTrue(h.voice.isOn)
-        h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
-                    ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
+        XCTAssertFalse(h.link.closed)
+        XCTAssertEqual(h.microphone, [true])
+        XCTAssertEqual(h.voice.talkState, .listening)
+        XCTAssertEqual(TalkActivity.state(of: h.voice), .listening)
+        h.turn("Open Settings.", "Settings is open.", id: "r1")
+        XCTAssertTrue(h.voice.isOn, "an answer said in the background does not end the talk")
+        await h.time.advance(7)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
+        XCTAssertEqual(h.microphone, [true, false])
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+        let connecting = Harness()
+        let opening = Task { await connecting.connect() }
+        for _ in 0..<1000 where connecting.voice.phase != .connecting { await Task.yield() }
+        XCTAssertEqual(connecting.voice.phase, .connecting)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await opening.value
+        XCTAssertTrue(connecting.voice.isOn)
+        XCTAssertEqual(connecting.links.count, 1)
+        XCTAssertEqual(connecting.microphone, [true])
         NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
     }
 
-    /// In the background, an error that is not about the request for the step's answer (a stale cancel,
-    /// say) does not end the conversation before that answer is said. The error that is about it does.
-    func testInTheBackgroundOnlyAnErrorForTheAnswerRequestEndsTheConversation() async {
+    /// An error that is not about the request for the step's answer (a stale cancel, say) leaves that
+    /// answer expected: the talk waits for it. The error that is about it means no answer is coming, and
+    /// the talk ends after the 8 s it gives the person to go on.
+    func testOnlyAnErrorForTheAnswerRequestGivesUpOnTheAnswer() async {
         for ownError in [false, true] {
             let (step, stepDone) = AsyncStream<Void>.makeStream()
             let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false) })
@@ -293,7 +267,6 @@ final class VoiceModelTests: XCTestCase {
             h.link.play(["type": "response.created", "response": ["id": "r1"]],
                         ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
                         ["type": "response.done", "response": ["id": "r1"]])
-            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
             stepDone.finish()
             await h.time.settle()
             let request = h.link.sent.last { $0["type"] as? String == "response.create" }
@@ -302,13 +275,8 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertNotNil(id, "the request for the answer carries an id its error can name")
 
             h.link.play(["type": "error", "error": ["message": "x", "event_id": ownError ? id ?? "" : "event_other"]])
+            await h.time.advance(8)
             XCTAssertEqual(h.voice.isOn, !ownError, ownError ? "the answer request failed, nothing is coming" : "an unrelated error ended it before the answer")
-            if !ownError {
-                h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
-                            ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
-                XCTAssertFalse(h.voice.isOn)
-            }
-            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
         }
     }
 
@@ -399,7 +367,7 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertTrue(h.voice.isOn, "the wait for the answer starts when the result is handed over")
         h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
                     ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
-        XCTAssertFalse(h.voice.isOn)
+        XCTAssertTrue(h.voice.isOn, "the result said, the talk waits for the person to go on")
         NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
     }
 }
