@@ -1435,18 +1435,14 @@ final class FieldDictation {
     /// Earlier versions always showed the microphone, and the setting defaults to hidden, so a person
     /// updating from one would lose it. The first launch with the setting turns it on for someone who
     /// used the app before; a fresh install keeps the default (hidden). "Used before" is any trace an earlier
-    /// version left, none of which this version writes before it runs: a saved conversation, or a setting
-    /// an earlier version stored (pairing and setup progress, relay, model choice, approvals). Once only,
-    /// so a person who turns it off later keeps it off, and one who installed fresh and used the app for a
-    /// while is not mistaken for an upgrade. Call it before anything reads the setting.
+    /// version left (`EarlierVersion`). Once only, so a person who turns it off later keeps it off, and one
+    /// who installed fresh and used the app for a while is not mistaken for an upgrade. Call it before
+    /// anything reads the setting.
     nonisolated static func keepButtonForUpgrade(defaults: UserDefaults = .standard, sessionsFolder: URL = SessionStore.defaultFolder) {
         guard !defaults.bool(forKey: buttonSettledKey) else { return }
         defer { defaults.set(true, forKey: buttonSettledKey) }
         guard defaults.object(forKey: buttonKey) == nil else { return }
-        let earlierSettings = ["setup", "relayAddress", "relayEnabled", "chat.provider", "chat.installationID", "approvals.ask", "wantsOn", "voice.model"]
-        let savedConversations = (try? FileManager.default.contentsOfDirectory(at: sessionsFolder, includingPropertiesForKeys: nil))?
-            .contains { $0.pathExtension == "json" } ?? false
-        if savedConversations || earlierSettings.contains(where: { defaults.object(forKey: $0) != nil }) {
+        if EarlierVersion.leftTraces(defaults: defaults, sessionsFolder: sessionsFolder) {
             defaults.set(true, forKey: buttonKey)
         }
     }

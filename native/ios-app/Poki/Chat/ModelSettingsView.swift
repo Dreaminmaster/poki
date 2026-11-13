@@ -298,7 +298,7 @@ private struct LiveVoiceFeature: View {
 
 /// Add Account: the account types, each with how it connects; choosing one opens its key, address or
 /// sign-in.
-private struct AddAccount: View {
+struct AddAccount: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: ModelProvider?
     @State private var signingIn = false
@@ -342,7 +342,7 @@ private struct AddAccount: View {
 
 /// Entering, replacing or removing one provider's key. The field is secure and the key is never shown
 /// again after it is saved.
-private struct KeyEntry: View {
+struct KeyEntry: View {
     @Environment(\.dismiss) private var dismiss
     var provider: ModelProvider
     @State private var key = ""

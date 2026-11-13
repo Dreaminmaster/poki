@@ -658,6 +658,7 @@ struct SetupLayer2View: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var path: NavigationPath
     @State private var guiding = false
+    @State private var welcoming = false
 
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiSetupSample") }
     private var steps: [SetupStep] { SetupStep.shown }
@@ -774,6 +775,19 @@ struct SetupLayer2View: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+                // The first run's pages again: this iPhone, a model and the microphone, each can wait.
+                Button { welcoming = true } label: {
+                    Text("Show Welcome Pages Again")
+                        .font(.system(size: 17))
+                        .foregroundStyle(Tint.blueText)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("setup.firstRun")
+                .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
         }
@@ -784,6 +798,7 @@ struct SetupLayer2View: View {
         .sheet(isPresented: $guiding) {
             SetupGuide(start: SetupStep.shown.first { !model.isDone($0) })
         }
+        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: .constant(nil), done: { welcoming = false }) }
     }
 
     private var signedUntilText: String {
