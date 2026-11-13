@@ -2,7 +2,7 @@
 // What a Poki that is already installed does with a set of GitHub releases, before anything is
 // published. Poki 0.3.1 (build 752) and Poki Setup 0.2.2 (build 661) share one release picker and
 // cannot be changed any more, so a release has to be laid out for them. This reads a plan (the
-// releases as they are today, then one step per publish), and after each step prints, per client
+// releases as they are today, then one step per publish or withdrawal), and after each step prints, per client
 // and channel: the release it picks, whether it can install it, and whether it would pair the
 // build with a Poki-signing.zip it cached earlier.
 //
@@ -167,7 +167,12 @@ function phoneSeesNewer(offered, installed) {
 function selfCheck() {
   const gh = (tag_name, prerelease, published_at, ...names) => ({ tag_name, prerelease, draft: false, published_at, assets: names.map(name => ({ name })) });
   const failures = [];
-  const same = (label, got, want) => { if (got !== want) failures.push(`${label}: got ${got}, the old picker gives ${want}`); };
+  // got is a function, so a pick that finds nothing is reported like any other difference.
+  const same = (label, got, want) => {
+    let value;
+    try { value = typeof got === 'function' ? got() : got; } catch { value = 'nothing'; }
+    if (value !== want) failures.push(`${label}: got ${value}, the old picker gives ${want}`);
+  };
   const order = ['0.2.9-630', '0.3.0-beta.1', '0.3.0-beta.2', '0.3.0-rc.1', '0.3.0', '0.3.0-700', '0.3.1-beta.1'];
   order.slice(1).forEach((v, i) => same(`${order[i]} < ${v}`, compareVersionKeys(versionKey(order[i]), versionKey(v)) < 0, true));
   same('beta.10 > beta.9', compareVersionKeys(versionKey('0.3.0-beta.10'), versionKey('0.3.0-beta.9')) > 0, true);
@@ -183,15 +188,15 @@ function selfCheck() {
     gh('ios-prealpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.9-540.ipa'),
     gh('ios-alpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.9-530.ipa'),
   ];
-  same('rolling pre-alpha', pick(rolling, 'pre-alpha').build, '540');
-  same('rolling alpha', pick(rolling, 'alpha').build, '530');
-  same('rolling beta', pick(rolling, 'beta').tag, 'ios-beta-0.2.9-520');
+  same('rolling pre-alpha', () => pick(rolling, 'pre-alpha').build, '540');
+  same('rolling alpha', () => pick(rolling, 'alpha').build, '530');
+  same('rolling beta', () => pick(rolling, 'beta').tag, 'ios-beta-0.2.9-520');
   const tie = [
     gh('ios-alpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.8-501.ipa'),
     gh('ios-prealpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.8-501.ipa'),
   ];
-  same('tie on pre-alpha', pick(tie, 'pre-alpha').tag, 'ios-prealpha-latest');
-  same('tie on alpha', pick(tie, 'alpha').tag, 'ios-alpha-latest');
+  same('tie on pre-alpha', () => pick(tie, 'pre-alpha').tag, 'ios-prealpha-latest');
+  same('tie on alpha', () => pick(tie, 'alpha').tag, 'ios-alpha-latest');
   const both = [
     gh('app-0.3.0', false, '2026-11-14T05:00:00Z', 'Poki-external-0.3.0.ipa'),
     gh('app-0.3.0-beta.1', true, '2026-11-12T05:00:00Z', 'Poki-external-0.3.0-beta.1.ipa'),
@@ -200,23 +205,22 @@ function selfCheck() {
     gh('ios-alpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.9-650.ipa'),
     gh('ios-prealpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.9-660.ipa'),
   ];
-  const stable = pick(both, 'stable');
-  same('stable pick', `${stable.tag} ${stable.version} (${stable.build})`, 'app-0.3.0 0.3.0 ()');
-  same('beta pick', pick(both.slice(1), 'beta').tag, 'app-0.3.0-beta.1');
-  same('alpha pick', pick(both.slice(2), 'alpha').build, '650');
-  same('pre-alpha pick', pick(both.slice(2), 'pre-alpha').build, '660');
-  same('old scheme alone', pick(both.slice(4), 'pre-alpha').tag, 'ios-prealpha-latest');
+  same('stable pick', () => { const stable = pick(both, 'stable'); return `${stable.tag} ${stable.version} (${stable.build})`; }, 'app-0.3.0 0.3.0 ()');
+  same('beta pick', () => pick(both.slice(1), 'beta').tag, 'app-0.3.0-beta.1');
+  same('alpha pick', () => pick(both.slice(2), 'alpha').build, '650');
+  same('pre-alpha pick', () => pick(both.slice(2), 'pre-alpha').build, '660');
+  same('old scheme alone', () => pick(both.slice(4), 'pre-alpha').tag, 'ios-prealpha-latest');
   const stepping = [
     gh('ios-prealpha-0.2.8-260', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.8-260.ipa'),
     gh('ios-v0.2.7', true, '2026-11-07T05:00:00Z', 'Poki-external-0.2.7-12.ipa'),
     gh('v0.1.1', false, '2026-11-08T06:00:00Z'),
   ];
-  same('stable steps down to beta', pick(stepping, 'stable').tag, 'ios-v0.2.7');
-  same('stable steps down to pre-alpha', pick([stepping[0], stepping[2]], 'stable').tag, 'ios-prealpha-0.2.8-260');
+  same('stable steps down to beta', () => pick(stepping, 'stable').tag, 'ios-v0.2.7');
+  same('stable steps down to pre-alpha', () => pick([stepping[0], stepping[2]], 'stable').tag, 'ios-prealpha-0.2.8-260');
   same('nothing installable', pick([stepping[2]], 'stable'), null);
   const setup = [gh('app-alpha-latest', true, '2026-11-09T06:00:00Z', 'PokiSetup-0.2.2-640-macos.dmg')];
-  same('setup on an app release', pickSetup(setup, 'alpha').version, '0.2.2-640');
-  same('setup steps down', pickSetup(setup, 'stable').version, '0.2.2-640');
+  same('setup on an app release', () => pickSetup(setup, 'alpha').version, '0.2.2-640');
+  same('setup steps down', () => pickSetup(setup, 'stable').version, '0.2.2-640');
   if (failures.length) {
     console.error(`This port no longer matches the old picker:\n  ${failures.join('\n  ')}`);
     process.exit(2);
@@ -255,8 +259,9 @@ function loadPlan(file, { build, entitlements, live }) {
 }
 
 function applyStep(releases, step, candidate, clock) {
-  let next = releases.map(r => ({ ...r, assets: [...r.assets] }));
-  for (const put of step.releases) {
+  // A release taken back to a draft, or deleted: no client is shown it any more (release.rs:198).
+  let next = releases.filter(r => !(step.withdraw ?? []).includes(r.tag_name)).map(r => ({ ...r, assets: [...r.assets] }));
+  for (const put of step.releases ?? []) {
     const content = put.content === 'candidate' ? candidate : { entitlements: candidate.entitlements, ...put.content };
     const existing = next.find(r => r.tag_name === put.tag);
     if (existing) {

@@ -98,16 +98,36 @@ same Pre-alpha files:
 | The Beta, under its build number | `ios-beta-X.Y.Z-N` | public just before the Beta is approved | Stable and Beta users, in place of `app-X.Y.Z-beta.K` (a build number sorts above `beta.K`) |
 
 Both carry `Poki-external-X.Y.Z-N.ipa`, `Poki-signing.zip`, `poki-relay-worker.js` and `SHA256SUMS`.
-`scripts/release/publish-compat.sh` checks the files and makes the draft; publishing it is the
-owner's call, like any release upload. Releases of a later version sort above both. A Stable's
-`Poki-external-X.Y.Z.ipa` is offered with an empty build and will need the same second release; the
-script does not make that one yet.
+`scripts/release/publish-compat.sh` makes them in three steps:
+
+1. `check` (the default) downloads the Pre-alpha run's files and verifies them. Run it before
+   Promote to Alpha too: it prints the digest of the entitlements in `Poki-signing.zip`, and a
+   changed digest has to be known before a rolling tag hands the new build to clients that cached
+   the old zip.
+2. `draft` uploads a draft release, which no client can see.
+3. `public --confirm <tag>` checks the draft again, file by file, against the same Pre-alpha files,
+   and only then makes it public. A draft with a file missing, a file from another build or another
+   title stays a draft: delete it and run `draft` again. Without `--confirm` it prints the tag and
+   the files and publishes nothing.
+
+`draft` and `public` are not behind an environment approval. Only the repository owner runs them, or
+someone the owner has told to for that build; agents do not, and a draft that exists is not that
+permission. Releases of a later version sort above both. A Stable's `Poki-external-X.Y.Z.ipa` is
+offered with an empty build and will need the same second release; the script does not make that
+one yet.
+
+To take a Beta back, return `app-X.Y.Z-beta.K` to a draft first and `ios-beta-X.Y.Z-N` second. In
+the other order Stable and Beta users are offered the beta-named file alone and stay on an update
+they cannot install. Afterwards all three channels fall back to the Alpha, which is the same build:
+taking releases back does not take a build away from people, and a Poki that installed it does not
+go back. A bad build is replaced by publishing a newer one.
 
 Before publishing, `node scripts/release/first-hop-check.mjs <plan> --build N` prints what Poki 0.3.1
 and Poki Setup 0.2.2 (661) pick on each channel after every step of a plan in
 `scripts/release/plans/`, and fails when a channel ends on another build or on an update it cannot
 install. `--live` reads today's releases from GitHub in place of the saved copy; with
 `plans/as-published.json` it shows where a release stands after each real publish.
+`plans/withdraw-beta.json` replays taking a Beta back.
 `scripts/release/oracle.sh` runs the picker cut from the `app-0.3.1-alpha.752` source over the same
 releases and fails when the script's port of it answers differently.
 
