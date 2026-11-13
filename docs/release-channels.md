@@ -163,9 +163,9 @@ the 5 macOS runners: Poki Setup's core tests, the Rust lockfiles, and the workfl
 It starts with cold caches (about 20 minutes) and will be
 removed once the pipeline above has shipped a few builds.
 
-The Mac server's update notice (`src/update-check.mjs`) reads `releases/latest` and only understands
-Poki MCP's `vX.Y.Z` tags, so app releases are never marked Latest: Latest stays on Poki MCP's newest
-release.
+App releases can be marked Latest, for example a Beta published as a full release. The Mac
+server's update notice (`src/update-check.mjs`) only understands Poki MCP's `vX.Y.Z` tags, and links
+to Poki MCP's prebuilt package name its `vX.Y.Z` release instead of `releases/latest`.
 
 ## Approval coverage
 
