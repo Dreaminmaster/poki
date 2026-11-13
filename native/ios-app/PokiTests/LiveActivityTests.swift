@@ -29,6 +29,17 @@ final class LiveActivityTests: XCTestCase {
     }
 
     /// A step of the plan under which an action did not go through shows red; a new plan starts clean.
+    func testANewRunDoesNotKeepTheLastRunsApp() {
+        let controller = ActivityController()
+        controller.update { $0.phase = .working; $0.headline = "Open Notes" }
+        controller.update { $0.app = "Notes" }
+        controller.update { $0.phase = .done }
+        controller.update { $0.phase = .working; $0.headline = "Open WeChat" }
+        XCTAssertNil(controller.state.app)
+        controller.update { $0.app = "WeChat" }
+        XCTAssertEqual(controller.state.app, "WeChat")
+    }
+
     func testAFailedActionMarksItsPlanStepRed() {
         let controller = ActivityController()
         controller.update { $0.plan = .init(steps: ["Open Notes", "Write the list", "Check it"], current: 1); $0.phase = .working }

@@ -217,6 +217,8 @@ final class ActivityController {
         let runPhases = Self.runPhases
         if state.phase == .working, !runPhases.contains(old.phase) {
             state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.previous = nil
+            // The app belongs to its run: a run that never reads the screen must not finish in the last run's app.
+            if state.app == old.app { state.app = nil }
             tally = Tally()
             if planFinished { state.plan = nil; planFinished = false }
             AppLog.shared.add("activity", "run started from \(old.phase.rawValue)\(activity == nil ? " with no Live Activity" : "")")
