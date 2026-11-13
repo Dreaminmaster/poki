@@ -394,6 +394,14 @@ final class VoiceModel {
         return true
     }
 
+    /// Takes the Mac voice bridge's address off this iPhone. A talk that runs through it ends first: its
+    /// next step would go to the bridge.
+    func removeBridge() {
+        if isLive || isConnecting, VoiceDirect.apiKey == nil { stop() }
+        bridge = nil
+        VoiceBridge.saved = nil
+    }
+
     /// `poki://voice` can come from any web page, message or app, so it only shows the Voice tab. A link
     /// never changes the voice bridge and never turns on the microphone: the person enters the address
     /// and taps Talk to Poki in the app.

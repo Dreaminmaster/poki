@@ -11,6 +11,7 @@ struct VoiceView: View {
     @State private var bridgeText = ""
     @State private var editingBridge = false
     @State private var bridgeRejected = false
+    @State private var removingBridge = false
     @State private var micDenied = false
     @AppStorage(FieldDictation.buttonKey) private var dictationButton = false
 
@@ -59,6 +60,20 @@ struct VoiceView: View {
         if let bridge = voice.bridge, !editingBridge {
             LabeledContent("Mac Voice Bridge") { Text(bridge.display).font(.footnote.monospaced()) }
             Button("Change Address") { bridgeText = bridge.base.absoluteString; bridgeRejected = false; editingBridge = true }
+            // The address carries the bridge's secret and is kept through a reinstall (SettingsVault):
+            // removing it here is the only way to take it off the iPhone.
+            Button("Remove Address", role: .destructive) { removingBridge = true }
+                .accessibilityIdentifier("voice.bridge.remove")
+                .confirmationDialog("Remove the Mac voice bridge address?", isPresented: $removingBridge, titleVisibility: .visible) {
+                    Button("Remove Address", role: .destructive) {
+                        voice.removeBridge()
+                        bridgeText = ""
+                        // Now, not a second later: Poki closed in between would get the address back at its next launch.
+                        SettingsVault.save()
+                    }
+                } message: {
+                    Text("Talk with Poki then needs an OpenAI API key, or the address entered again.")
+                }
         } else {
             TextField("Mac voice bridge address", text: $bridgeText)
                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()

@@ -8864,6 +8864,38 @@
         }
       }
     },
+    "Remove Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除地址"
+          }
+        }
+      }
+    },
+    "Remove the Mac voice bridge address?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除 Mac 语音桥接地址吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除 Mac 語音橋接地址嗎？"
+          }
+        }
+      }
+    },
     "RUNNER" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10753,6 +10785,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "和 Poki 對話需要 OpenAI API 金鑰，請在設定裡新增。聽寫不需要金鑰。"
+          }
+        }
+      }
+    },
+    "Talk with Poki then needs an OpenAI API key, or the address entered again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除后，和 Poki 对话需要 OpenAI API 密钥，或者重新输入这个地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除後，和 Poki 對話需要 OpenAI API 金鑰，或者重新輸入這個地址。"
           }
         }
       }

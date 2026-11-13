@@ -527,6 +527,21 @@ extension VoiceModelTests {
 /// What the talk's screens say: one state, read by the message field's bar, the light along the bottom
 /// edge and Poki's picture.
 extension VoiceModelTests {
+    /// Remove Address in Settings takes the Mac voice bridge's address, which carries the bridge's secret,
+    /// off this iPhone: the talk running through it ends, nothing stays saved for the next launch, and
+    /// with no OpenAI key Talk with Poki needs a key again.
+    func testRemovingTheVoiceBridgeAddressEndsItsTalkAndLeavesNothingSaved() async {
+        let h = Harness()
+        await h.talk()
+        XCTAssertTrue(h.voice.isOn)
+        h.voice.removeBridge()
+        XCTAssertFalse(h.voice.isOn)
+        XCTAssertNil(h.voice.talkState)
+        XCTAssertNil(h.voice.bridge)
+        XCTAssertNil(UserDefaults.standard.string(forKey: "voiceBridge"))
+        XCTAssertFalse(h.voice.canTalkLive)
+    }
+
     /// A step that has Poki on the phone is not thinking, speech over an answer is not plain listening,
     /// and a dropped connection is still a state, with its reason, until it is put away.
     func testATalkSaysWhenPokiIsOnThePhoneIsSpokenOverOrIsCutOff() async {
