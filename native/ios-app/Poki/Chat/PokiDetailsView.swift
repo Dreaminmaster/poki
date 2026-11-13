@@ -98,6 +98,8 @@ struct PokiDetailsView: View {
                 Group { switch route {
                 case .model:
                     ModelSettingsView()
+                case .voiceKey:
+                    ModelSettingsView(opensVoiceKey: true)
                 case .history:
                     ActionLogView(openSession: { id in openSession(id, nil) })
                 case .conversations:
@@ -170,6 +172,9 @@ struct PokiDetailsView: View {
 enum DetailsRoute: Hashable {
     case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance
     case sessionPreview(String)
+    /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
+    /// where Talk with Poki without a key leads.
+    case voiceKey
 }
 
 /// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring

@@ -1995,6 +1995,22 @@
         }
       }
     },
+    "Check the network, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请检查网络后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請檢查網路後再試。"
+          }
+        }
+      }
+    },
     "CHECKS" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2568,6 +2584,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在連線此 iPhone…"
+          }
+        }
+      }
+    },
+    "Connection lost. Nothing is sent again. Talk again to hear how running steps ended." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接中断。已发出的内容不会重发，重新对话可以了解步骤的结果。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線中斷。已送出的內容不會重送，重新對話可以了解步驟的結果。"
           }
         }
       }
@@ -3427,6 +3459,22 @@
       }
     },
     "End conversation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束對話"
+          }
+        }
+      }
+    },
+    "End Talk" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -4369,6 +4417,60 @@
         }
       }
     },
+    "In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud, also while you are in another app. It ends by itself 8 seconds after an answer if nobody speaks. Tap End to stop sooner. The microphone in the message field only dictates." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In chat, tap the waveform button to start Live Voice. Poki listens, acts, and replies aloud, also while you are in another app. It ends automatically if nobody speaks for 8 seconds after an answer. Tap End to stop early. The message field mic is for dictation only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在对话中轻点波形按钮即可开启实时语音，Poki 会边听边操作并朗读回答，切到其他应用后对话继续。回答后 8 秒内无人说话会自动结束；轻点“结束”可提前停止。输入框麦克风仅用于听写。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在對話中輕點波形按鈕即可開啟即時語音，Poki 會邊聽邊操作並朗讀回答，切到其他 App 後對話繼續。回答後 8 秒內無人說話會自動結束；輕點「結束」可提前停止。輸入框麥克風僅用於聽寫。"
+          }
+        }
+      }
+    },
+    "Interrupt" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打斷"
+          }
+        }
+      }
+    },
+    "Interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打斷"
+          }
+        }
+      }
+    },
     "IPv6 present, %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4943,6 +5045,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "金鑰僅儲存在本機鑰匙串中，且僅傳送給對應服務商。"
+          }
+        }
+      }
+    },
+    "Live Voice Is Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音已关闭"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "實時語音已關閉"
           }
         }
       }
@@ -6212,6 +6330,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有代理 App？請安裝專為此設計的免費迴環 App LocalDevVPN。"
+          }
+        }
+      }
+    },
+    "No Voice Key Set Up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有配置语音密钥"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有設定語音金鑰"
           }
         }
       }
@@ -9238,6 +9372,38 @@
         }
       }
     },
+    "Remove Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除地址"
+          }
+        }
+      }
+    },
+    "Remove the Mac voice bridge address?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除 Mac 语音桥接地址吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要移除 Mac 語音橋接地址嗎？"
+          }
+        }
+      }
+    },
     "RUNNER" : {
       "localizations" : {
         "zh-Hans" : {
@@ -9774,6 +9940,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "簽名（可選）"
+          }
+        }
+      }
+    },
+    "Speak" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說話"
+          }
+        }
+      }
+    },
+    "Speak live; Poki answers and acts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音对话，Poki 回答并操作"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時語音對話，Poki 回答並操作"
           }
         }
       }
@@ -11165,6 +11363,70 @@
         }
       }
     },
+    "Talk with Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話"
+          }
+        }
+      }
+    },
+    "Talk with Poki needs an OpenAI API key. Add one in Settings. Dictate works without it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话需要 OpenAI API 密钥，请在设置里添加。听写不需要密钥。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話需要 OpenAI API 金鑰，請在設定裡新增。聽寫不需要金鑰。"
+          }
+        }
+      }
+    },
+    "Talk with Poki then needs an OpenAI API key, or the address entered again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除后，和 Poki 对话需要 OpenAI API 密钥，或者重新输入这个地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除後，和 Poki 對話需要 OpenAI API 金鑰，或者重新輸入這個地址。"
+          }
+        }
+      }
+    },
+    "Talk with Poki uses Live Voice on your OpenAI account. Turn it on in Settings. Dictate works without it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话用的是 OpenAI 账户的实时语音，请在设置里打开。听写不需要它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話用的是 OpenAI 帳戶的實時語音，請在設定裡開啟。聽寫不需要它。"
+          }
+        }
+      }
+    },
     "Talk Instead of Typing" : {
       "localizations" : {
         "en" : {
@@ -11389,6 +11651,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 正在用的页面。连按两下接手。"
+          }
+        }
+      }
+    },
+    "The server did not answer. The talk ended." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器没有响应，对话已结束。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器沒有回應，對話已結束。"
           }
         }
       }
@@ -13576,6 +13854,22 @@
         }
       }
     },
+    "Unmute Poki’s Voice" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消 Poki 的语音静音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消 Poki 的語音靜音"
+          }
+        }
+      }
+    },
     "USE YOUR PROXY APP" : {
       "localizations" : {
         "zh-Hans" : {
@@ -14717,6 +15011,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請求失敗。"
+          }
+        }
+      }
+    },
+    "Your words appear in the message field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说的话写进输入框"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說的話寫進輸入框"
           }
         }
       }
@@ -21359,6 +21669,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "忘記"
+          }
+        }
+      }
+    },
+    "Edit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改"
+          }
+        }
+      }
+    },
+    "Edit Shortcut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改快捷方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "修改快捷方式"
+          }
+        }
+      }
+    },
+    "What Poki should do" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Poki 做什么"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 Poki 做什麼"
+          }
+        }
+      }
+    },
+    "App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App"
           }
         }
       }

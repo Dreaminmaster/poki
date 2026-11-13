@@ -111,6 +111,8 @@ struct ActivityPreview: View {
         case "code": String(localized: "Pairing Code")
         case "setup": String(localized: "Setup")
         case "voice": String(localized: "Voice")
+        case "voiceworking": "\(String(localized: "Voice")) › \(String(localized: "Working"))"
+        case "voiceapproval": "\(String(localized: "Voice")) › \(String(localized: "Approval"))"
         default: name.capitalized
         }
     }
@@ -198,10 +200,17 @@ struct ActivityPreview: View {
 
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
+        // A step of the talk has Poki in another app: Stop for the step, End for the talk.
+        var voiceWorking = working
+        voiceWorking.voice = .thinking
+        // An approval during a talk keeps the card and the island to itself.
+        var voiceApproval = approval
+        voiceApproval.voice = .listening
 
         let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
-                   ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
+                   ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice),
+                   ("voiceworking", voiceWorking), ("voiceapproval", voiceApproval)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
         guard let caller = UserDefaults.standard.string(forKey: "pokiActivityCaller") else { return all }
         return all.map { name, state in var state = state; state.caller = caller; return (name, state) }
