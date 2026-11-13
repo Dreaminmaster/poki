@@ -54,6 +54,18 @@ alter speech recognition, model prompts, provider routing, credentials or approv
    in the root; a new RTL translation still needs layout review before shipping. Device-controlled
    surfaces should also be checked through iOS's per-app language setting.
 
+## Resolution cache
+
+Supported bundle languages are discovered once. Language, formatting locale and resource bundle
+share a lock-protected snapshot, rebuilt when the selected preference changes or the system emits
+its current-locale change notification. App reads still observe the language preference so SwiftUI
+updates remain live. Extensions re-read the shared `effectiveUILanguage` key before using the cache;
+this detects preference changes without depending on cross-process defaults notifications.
+
+`LocalizationCacheTests` checks reuse across repeated lookups, preference changes, and system
+language/region changes. This removes repeated resolution work; it does not establish a measured
+frame-time improvement.
+
 ## Focused verification
 
 Generate the intended signing variant with XcodeGen, then run the `Poki` scheme on an **existing**
