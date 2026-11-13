@@ -656,7 +656,7 @@ final class FaultTests: XCTestCase {
         wda.source([("Button", "Photo"), ("Button", "Delete")], app: "Photos")
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": 1], ["tap": 2]]])
-        XCTAssertFalse(result.isError, "something was sent and the screen was read: not an error answer")
+        XCTAssertTrue(result.isError, "the requested batch stopped before the approval-gated action")
         XCTAssertTrue(result.text.contains("tap \"Photo\" (sent"), result.text)
         XCTAssertTrue(result.text.contains("not_sent from action 2: approval_required"), result.text)
         XCTAssertTrue(result.text.contains("Actions 1 to 1 were sent"), result.text)
