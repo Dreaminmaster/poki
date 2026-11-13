@@ -16,6 +16,21 @@ final class BridgeStub: URLProtocol {
     override func stopLoading() {}
 }
 
+/// A voice bridge in trouble: one host no longer knows the address, the other never answers in time.
+final class BridgeTroubleStub: URLProtocol {
+    static let gone = "http://voice-bridge-gone.test/voice/0123456789abcdef"
+    static let slow = "http://voice-bridge-slow.test/voice/0123456789abcdef"
+    override class func canInit(with request: URLRequest) -> Bool { ["voice-bridge-gone.test", "voice-bridge-slow.test"].contains(request.url?.host()) }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard request.url?.host() == "voice-bridge-gone.test" else { client?.urlProtocol(self, didFailWithError: URLError(.timedOut)); return }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error":"unknown token"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 /// The Realtime connection: the test plays the server's events in and sees what was sent and whether it was closed.
 final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onEvent: (@MainActor ([String: Any]) -> Void)?
@@ -581,6 +596,39 @@ extension VoiceModelTests {
             XCTAssertEqual(h.voice.talkState?.reason, words.reason, words.language)
             XCTAssertEqual(said.last?.text, words.lost, words.language)
             h.voice.dismissProblem()
+        }
+    }
+
+    /// When a talk cannot start, the reason under the talk bar is in Poki's chosen language, whatever
+    /// the iPhone's: no model and no bridge, a bridge that no longer knows the address, a bridge that
+    /// does not answer in time.
+    func testWhyATalkCouldNotStartFollowsTheLanguageChosenInPoki() async {
+        let saved = AppLocalization.shared.preference
+        URLProtocol.registerClass(BridgeTroubleStub.self)
+        defer { AppLocalization.shared.preference = saved; URLProtocol.unregisterClass(BridgeTroubleStub.self) }
+        let expected: [(language: String, noModel: String, gone: String, slow: String)] = [
+            ("en", "Set up Poki's model first (an OpenAI key talks fastest), or enter a voice bridge address from your Mac.",
+             "Copy the voice bridge address again from your Mac. This address wasn’t recognized.",
+             "The voice connection took too long. Check the network, then try again."),
+            ("zh-Hans", "请先设置 Poki 的模型（用 OpenAI 密钥对话最快），或输入 Mac 上的语音桥接地址。",
+             "请从 Mac 重新拷贝语音桥接地址。当前地址无法识别。", "语音连接超时。请检查网络后重试。"),
+            ("zh-Hant", "請先設定 Poki 的模型（用 OpenAI 金鑰對話最快），或輸入 Mac 上的語音橋接地址。",
+             "請從 Mac 重新複製語音橋接位址。目前位址無法識別。", "語音連線逾時。請檢查網路後再試。"),
+        ]
+        for words in expected {
+            AppLocalization.shared.preference = words.language
+            let h = Harness()
+            h.voice.removeBridge()
+            await h.voice.start(microphone: false)
+            XCTAssertEqual(h.voice.talkState?.reason, words.noModel, words.language)
+            h.voice.dismissProblem()
+
+            for (address, reason) in [(BridgeTroubleStub.gone, words.gone), (BridgeTroubleStub.slow, words.slow)] {
+                XCTAssertTrue(h.voice.setBridge(address))
+                await h.connect()
+                XCTAssertEqual(h.voice.talkState?.reason, reason, "\(words.language) \(address)")
+                h.voice.dismissProblem()
+            }
         }
     }
 }
