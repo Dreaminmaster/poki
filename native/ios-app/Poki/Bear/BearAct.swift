@@ -2,36 +2,193 @@ import RealityKit
 import simd
 
 /// What the three-dimensional bear plays for Poki's state, with its own joints and the faces the model
-/// has (the closed eyes' arcs, the open mouth, the sparkles), on top of what it does by itself
-/// (`BearIdle`). The model and its look are unchanged; each state means what its flat picture means.
+/// has (the closed eyes' arcs, the open mouth, the sparkles, the raised paw of its wave), on top of what
+/// it does by itself (`BearIdle`). The model and its look are unchanged; each state means what its flat
+/// picture means.
 enum BearAct: Equatable {
-    /// Standing by itself: ready, and for now thinking and at work, as before.
+    /// Standing by itself, looking about and doing its small things.
     case ready
+    /// A paw up at its chin, its head tilted, looking up.
+    case thinking
+    /// Its head down over its paws, which tap away.
+    case working
+    /// A paw up, asking for an Allow.
+    case asking
+    /// The phone is yours for a step: it turns its head away and shuts its eyes, not looking.
+    case waiting
     /// A task is done: it is pleased for a moment, then stands by itself again.
     case done
     /// A task went wrong: it is sad for a moment, then stands by itself again.
     case failed
+    /// Off: asleep, its head on one side, its eyes shut.
+    case paused
+    /// Poki cannot reach the phone: a paw up at the side of its head, rubbing it, looking up, puzzled.
+    case lost
+    /// A paw at its ear, its head tilted, nodding now and then.
+    case listening
+    /// Its mouth moving as it talks.
+    case speaking
+    /// Set-up: it waves, its mouth open, the sparkles out.
+    case hello
 }
 
 extension PokiMood {
-    /// The bear's act for this state; nil for the faces the model does not play yet, which stay flat.
+    /// The bear's act for this state.
     var act: BearAct? {
         switch self {
-        case .ready, .thinking, .onYourPhone, .checking: .ready
+        case .ready: .ready
+        case .thinking: .thinking
+        case .onYourPhone, .checking: .working
+        case .needsYou: .asking
+        case .yourTurn: .waiting
         case .done: .done
         case .tripped: .failed
-        case .needsYou, .yourTurn, .paused, .cantReach, .listening, .speaking, .hello: nil
+        case .paused: .paused
+        case .cantReach: .lost
+        case .listening: .listening
+        case .speaking: .speaking
+        case .hello: .hello
         }
     }
 
-    /// The faces the three-dimensional bear plays. The others stay flat.
+    /// The faces the three-dimensional bear plays: all of them.
     var modelled: Bool { act != nil }
+}
+
+/// How the bear stands for an act, and what moves while it holds it, laid on top of the standing pose.
+enum BearStance {
+    /// The pose it holds. Done and gone wrong react once (`BearReaction`) and then stand as when ready.
+    static func pose(_ act: BearAct) -> BearIdle.Pose {
+        var p = BearIdle.Pose()
+        switch act {
+        case .ready, .done, .failed:
+            break
+        case .thinking:
+            p.headPitch = -0.08; p.headRoll = 0.1
+            p.gaze = [0.005, 0.007]
+            p.raise = 0.6; p.bend = 1; p.reach = 1
+        case .working:
+            p.headPitch = 0.14
+            p.gaze = [0, -0.006]
+            p.work = 1
+        case .asking:
+            p.headRoll = 0.08
+            p.gaze = [0.003, 0.004]
+            p.raise = 0.9
+        case .waiting:
+            p.headYaw = 0.35; p.headPitch = 0.1
+            p.shut = 1
+        case .paused:
+            p.headPitch = 0.18; p.headRoll = 0.22
+            p.shoulders = -0.1
+            p.shut = 1
+        case .lost:
+            p.headPitch = -0.1; p.headRoll = -0.1
+            p.gaze = [-0.004, 0.008]
+            p.raise = 0.95; p.bend = 0.7
+        case .listening:
+            p.headRoll = -0.12
+            p.gaze = [-0.004, 0.002]
+            p.raise = 0.85; p.bend = 0.35
+        case .speaking:
+            p.headPitch = -0.05
+            p.mouth = 1
+        case .hello:
+            p.raise = 1
+            p.mouth = 1
+            p.sparkles = 1
+        }
+        return p
+    }
+
+    /// What moves while it holds the act, `t` seconds into it.
+    static func motion(_ act: BearAct, at t: TimeInterval) -> BearIdle.Pose {
+        var p = BearIdle.Pose()
+        switch act {
+        case .ready, .done, .failed, .waiting:
+            break
+        case .thinking:
+            // A slow tilt of the head, one way and the other.
+            p.headRoll = 0.04 * Float(sin(t * 1.9))
+        case .working:
+            // The paws tap, and the head nods a little with them.
+            p.tap = Float(sin(t * 2 * .pi * 2.5))
+            p.headPitch = 0.02 * Float(sin(t * 2 * .pi * 1.25))
+        case .asking:
+            // The raised paw waves a little.
+            p.raise = 0.1 * Float(sin(t * 2 * .pi * 1.2))
+        case .paused:
+            // Asleep: a slow nod with each long breath.
+            p.headPitch = 0.03 * Float(sin(t * 2 * .pi / 4))
+        case .lost:
+            // The paw rubs the head, twice a second.
+            p.bend = 0.12 * Float(sin(t * 2 * .pi * 2))
+        case .listening:
+            // A small nod every few seconds.
+            let x = t.truncatingRemainder(dividingBy: 3.5)
+            p.headPitch = x < 0.6 ? 0.06 * Float(sin(x / 0.6 * .pi)) : 0
+        case .speaking:
+            p.mouth = BearTalk.open(at: t) - 1
+            p.headPitch = 0.02 * Float(sin(t * 7))
+        case .hello:
+            p.raise = 0.15 * Float(sin(t * 2 * .pi * 1.5)) - 0.15
+        }
+        return p
+    }
+}
+
+/// The way from one act's stance to the next: about half a second, easing in and out, from wherever
+/// the bear was, so a state that changes again on the way does not jump.
+struct BearStanceChange {
+    static let length: TimeInterval = 0.45
+    private(set) var act: BearAct
+    private var previous: BearAct
+    private var since: TimeInterval
+    /// The stance the change set out from: where the last change had got to when this one began.
+    private var from = BearIdle.Pose()
+
+    init(_ act: BearAct, at now: TimeInterval) {
+        self.act = act
+        previous = act
+        since = now - Self.length
+    }
+
+    mutating func go(to next: BearAct, at now: TimeInterval) {
+        guard next != act else { return }
+        from = pose(at: now)
+        previous = act
+        act = next
+        since = now
+    }
+
+    /// How far the change is, from 0 (where it set out) to 1 (the new stance).
+    func progress(at now: TimeInterval) -> Float { BearIdle.ease(Float((now - since) / Self.length)) }
+
+    func changing(at now: TimeInterval) -> Bool { now - since < Self.length }
+
+    /// The stance at `now`, with what moves in it.
+    func pose(at now: TimeInterval) -> BearIdle.Pose {
+        let w = progress(at: now)
+        let target = BearStance.pose(act) + BearStance.motion(act, at: now - since)
+        if w >= 1 { return target }
+        return from * (1 - w) + target * w
+    }
+}
+
+/// How far the mouth is open as the bear talks, against open: syllables of uneven length and size, from
+/// two slow waves that never line up.
+enum BearTalk {
+    static func open(at t: TimeInterval) -> Float {
+        let a = abs(sin(t * 9.3)), b = 0.5 + 0.5 * sin(t * 2.3 + 0.7)
+        return Float(0.3 + 0.7 * a * (0.55 + 0.45 * b))
+    }
 }
 
 /// A reaction played once when the state changes, from wherever the bear is, and back to standing:
 /// pleased when a task is done (its arms go up, its eyes smile as in a blink, its mouth opens, the
 /// sparkles come out and it gives two little bounces), sad when one went wrong (as its flat picture: a
-/// paw up at the side of its head, rubbing it, the head tilted and lowered, the eyes looking down). It comes in over a third of a second and goes over half a second, so a change of state is
+/// paw up at the side of its head, rubbing it, the head tilted and lowered, the eyes drooping and looking
+/// down). It comes in over a third of a second and goes over half a second, so a change of state is
 /// never a jump.
 struct BearReaction: Equatable {
     enum Kind: Equatable { case joy, sorrow }
@@ -47,7 +204,7 @@ struct BearReaction: Equatable {
         switch act {
         case .done: kind = .joy
         case .failed: kind = .sorrow
-        case .ready: return nil
+        default: return nil
         }
         start = now
     }
@@ -76,6 +233,8 @@ struct BearReaction: Equatable {
             let hop = held < 0.8 ? Float(abs(sin(2.5 * .pi * held))) : 0
             p.bodyLift = 0.03 * hop * w
             p.shoulders = 0.12 * hop * w
+            p.mouth = w
+            p.sparkles = w
         case .sorrow:
             p.headPitch = 0.12 * w
             p.headRoll = 0.1 * w
@@ -86,12 +245,5 @@ struct BearReaction: Equatable {
             p.rub = held < hold ? Float(sin(2 * .pi * 3 * held)) : 0
         }
         return p
-    }
-
-    /// How far the mouth is open and the sparkles are out, from 0 to 1.
-    func face(at t: TimeInterval) -> (mouth: Float, sparkles: Float) {
-        guard kind == .joy else { return (0, 0) }
-        let w = weight(at: t)
-        return (w, w)
     }
 }

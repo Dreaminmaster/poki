@@ -10,7 +10,7 @@ import simd
 /// pose: the body, the head, the shoulders, the arms and the eyes, never the whole model. Angles are in
 /// radians and lengths in the model's metres.
 struct BearIdle {
-    struct Pose {
+    struct Pose: Equatable {
         var bodyLift: Float = 0, bodyRoll: Float = 0, bodyYaw: Float = 0
         var headYaw: Float = 0, headPitch: Float = 0, headRoll: Float = 0
         var shoulders: Float = 0
@@ -22,6 +22,41 @@ struct BearIdle {
         var smile: Float = 0
         /// How far the right paw is up at the side of the head, from 0 to 1, and how it rubs there (-1 to 1).
         var scratch: Float = 0, rub: Float = 0
+        /// The raised left paw bent in toward the head, and brought forward, from 0 to 1: with `raise`,
+        /// at the chin, the ear or the top of the head.
+        var bend: Float = 0, reach: Float = 0
+        /// Both paws forward, working, from 0 to 1, and their tapping (-1 to 1).
+        var work: Float = 0, tap: Float = 0
+        /// How far the left paw is up, as at the top of the model's wave.
+        var raise: Float = 0
+        /// How far the eyes are shut, as a line, from 0 (open) to 1.
+        var shut: Float = 0
+        /// How far the mouth is open (from a quarter on), and the sparkles out, from 0 to 1.
+        var mouth: Float = 0, sparkles: Float = 0
+
+        static func + (a: Pose, b: Pose) -> Pose {
+            var p = Pose()
+            p.bodyLift = a.bodyLift + b.bodyLift; p.bodyRoll = a.bodyRoll + b.bodyRoll; p.bodyYaw = a.bodyYaw + b.bodyYaw
+            p.headYaw = a.headYaw + b.headYaw; p.headPitch = a.headPitch + b.headPitch; p.headRoll = a.headRoll + b.headRoll
+            p.shoulders = a.shoulders + b.shoulders; p.gaze = a.gaze + b.gaze
+            p.arms = a.arms + b.arms; p.smile = a.smile + b.smile
+            p.scratch = a.scratch + b.scratch; p.rub = a.rub + b.rub
+            p.bend = a.bend + b.bend; p.reach = a.reach + b.reach; p.work = a.work + b.work; p.tap = a.tap + b.tap
+            p.raise = a.raise + b.raise; p.shut = a.shut + b.shut; p.mouth = a.mouth + b.mouth; p.sparkles = a.sparkles + b.sparkles
+            return p
+        }
+
+        static func * (a: Pose, w: Float) -> Pose {
+            var p = Pose()
+            p.bodyLift = a.bodyLift * w; p.bodyRoll = a.bodyRoll * w; p.bodyYaw = a.bodyYaw * w
+            p.headYaw = a.headYaw * w; p.headPitch = a.headPitch * w; p.headRoll = a.headRoll * w
+            p.shoulders = a.shoulders * w; p.gaze = a.gaze * w
+            p.arms = a.arms * w; p.smile = a.smile * w
+            p.scratch = a.scratch * w; p.rub = a.rub * w
+            p.bend = a.bend * w; p.reach = a.reach * w; p.work = a.work * w; p.tap = a.tap * w
+            p.raise = a.raise * w; p.shut = a.shut * w; p.mouth = a.mouth * w; p.sparkles = a.sparkles * w
+            return p
+        }
     }
 
     /// The small things it does, which take turns.
@@ -61,6 +96,8 @@ struct BearIdle {
     }
 
     private var glance: Glance?
+    /// While the bear plays a state other than ready, it starts none of its small things.
+    var calm = false
     private var nextGlance: TimeInterval
     private var breath: Double = 0, breathAt: TimeInterval, breathLength: TimeInterval = 3.4
     private var lastSide: Float = Bool.random() ? 1 : -1
@@ -105,7 +142,8 @@ struct BearIdle {
         p.bodyRoll = 0.020 * Float(sin(t * 0.83) * 0.6 + sin(t * 0.37 + 1.3) * 0.4)
         p.bodyYaw = 0.025 * Float(sin(t * 0.29 + 0.4))
         p.headYaw = 0.03 * Float(sin(t * 0.41 + 2.1))
-        if !blinking, t >= nextGlance, glance.map({ t >= $0.end }) ?? true {
+        if calm, glance.map({ t >= $0.end }) ?? true { nextGlance = max(nextGlance, t + .random(in: 1.0...2.0)) }
+        if !blinking, !calm, t >= nextGlance, glance.map({ t >= $0.end }) ?? true {
             let g = makeGlance(at: t)
             glance = g
             nextGlance = g.end + .random(in: 1.2...4.5)
@@ -237,15 +275,23 @@ struct BearIdleJoints {
     /// that it stays in front of the face's curve and its white.
     static func shift(_ gaze: SIMD2<Float>) -> SIMD3<Float> { SIMD3(gaze.x, gaze.y, abs(gaze.x)) }
 
-    /// The open mouth and the sparkles, as the model has them at the top of its wave (`hello`): the
-    /// sparkles come out part of the way; the mouth is open from half way.
-    func show(_ face: (mouth: Float, sparkles: Float), from hello: [Transform], in joints: inout [Transform]) {
-        for joint in sparkles where joint < joints.count && joint < hello.count && face.sparkles > 0 {
-            let a = joints[joint], b = hello[joint], w = face.sparkles
+    /// The raised paw, the open mouth and the sparkles, as the model has them at the top of its wave
+    /// (`hello`): the paw and the sparkles part of the way; the mouth open from a quarter, as far as
+    /// `pose.mouth` says. Laid before `apply`, which turns the joints from where these leave them.
+    func show(_ pose: BearIdle.Pose, from hello: [Transform], in joints: inout [Transform]) {
+        func toward(_ joint: Int, _ w: Float) {
+            guard joint < joints.count, joint < hello.count, w > 0 else { return }
+            let a = joints[joint], b = hello[joint], w = min(w, 1)
             joints[joint] = Transform(scale: simd_mix(a.scale, b.scale, SIMD3(repeating: w)), rotation: simd_slerp(a.rotation, b.rotation, w),
                                       translation: simd_mix(a.translation, b.translation, SIMD3(repeating: w)))
         }
-        if face.mouth >= 0.5 { for joint in mouths where joint < joints.count && joint < hello.count { joints[joint] = hello[joint] } }
+        for joint in sparkles { toward(joint, pose.sparkles) }
+        if let left = shoulders?.left { toward(left, pose.raise) }
+        if let (upper, fore) = arms { toward(upper.left, pose.raise); toward(fore.left, pose.raise) }
+        if pose.mouth >= 0.25 {
+            for joint in mouths where joint < joints.count && joint < hello.count { joints[joint] = hello[joint] }
+            if let open = mouths.last, open < joints.count { joints[open].scale.y *= min(pose.mouth, 1) }
+        }
     }
 
     /// The pupils' or the arcs' height where the blink is.
@@ -277,12 +323,25 @@ struct BearIdleJoints {
             joints[upper.right].rotation *= simd_quatf(angle: -1.4 * pose.scratch, axis: [1, 0, 0]) * simd_quatf(angle: -0.8 * pose.scratch, axis: [0, 0, 1])
             joints[fore.right].rotation *= simd_quatf(angle: -1.4 * pose.scratch + 0.25 * pose.rub, axis: [0, 0, 1])
         }
-        if pose.smile > 0 { smile(pose.smile, in: &joints) }
+        if let (upper, fore) = arms, joints.count > max(upper.right, upper.left, fore.right, fore.left) {
+            if pose.bend != 0 || pose.reach != 0 {
+                joints[upper.left].rotation *= simd_quatf(angle: -0.6 * pose.reach, axis: [1, 0, 0])
+                joints[fore.left].rotation *= simd_quatf(angle: -1.4 * pose.bend, axis: [0, 0, 1])
+            }
+            if pose.work > 0 {
+                joints[upper.right].rotation *= simd_quatf(angle: -0.8 * pose.work, axis: [1, 0, 0])
+                joints[upper.left].rotation *= simd_quatf(angle: -0.8 * pose.work, axis: [1, 0, 0])
+                joints[fore.right].rotation *= simd_quatf(angle: (-0.6 - 0.12 * pose.tap) * pose.work, axis: [1, 0, 0])
+                joints[fore.left].rotation *= simd_quatf(angle: (-0.6 + 0.12 * pose.tap) * pose.work, axis: [1, 0, 0])
+            }
+        }
+        if pose.smile > 0 { smile(pose.smile, in: &joints) } else if pose.shut > 0 { smile(pose.shut, top: 0.2, in: &joints) }
     }
 
     /// The eyes going to the smile's arcs and back as a blink does: the pupils flatten to a line, are
     /// swapped for the arcs at that line, and the arcs curve up out of it.
-    private func smile(_ amount: Float, in joints: inout [Transform]) {
+    /// `top`: how tall the arcs grow, against the smile's; low, the eyes are shut as a line.
+    private func smile(_ amount: Float, top: Float = 1, in joints: inout [Transform]) {
         let thin = BearBlink.thin
         if amount < 0.5 {
             for joint in pupils where joint < joints.count { joints[joint].scale.y = 1 - (1 - thin) * BearIdle.ease(amount / 0.5) }
@@ -291,7 +350,7 @@ struct BearIdleJoints {
         for joint in pupils where joint < joints.count { joints[joint].translation.z -= Self.swap; joints[joint].scale.y = thin }
         for joint in arcs where joint < joints.count {
             joints[joint].translation.z += Self.swap
-            joints[joint].scale.y = BearBlink.flat + (1 - BearBlink.flat) * BearIdle.ease((amount - 0.5) / 0.5)
+            joints[joint].scale.y = min(top, BearBlink.flat) + max(top - BearBlink.flat, 0) * BearIdle.ease((amount - 0.5) / 0.5)
         }
     }
 }

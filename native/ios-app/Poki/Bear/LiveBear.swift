@@ -445,6 +445,10 @@ private final class BearCanvas: UIView {
     private var rate = 30
     /// A reaction to the state playing now, once.
     private var reaction: BearReaction?
+    /// The stance for the state, and the way to it from the last one.
+    private var stance = BearStanceChange(.ready, at: CACurrentMediaTime())
+    /// While it says hi in a state with a stance of its own: the stance steps aside for the wave.
+    private var aside: (from: TimeInterval, to: TimeInterval)?
     /// The model's pose at the top of its wave: the open mouth and the sparkles are taken from it.
     private var helloPose: [[Transform]]?
 
@@ -453,6 +457,9 @@ private final class BearCanvas: UIView {
         didSet {
             guard act != oldValue else { return }
             let now = CACurrentMediaTime()
+            stance.go(to: act, at: now)
+            idle.calm = ![.ready, .done, .failed].contains(act)
+            if live { resume() }
             guard let next = BearReaction(act, at: now) else { return }
             reaction = next
             idle.attend(at: now)
@@ -462,6 +469,18 @@ private final class BearCanvas: UIView {
     }
 
     private func reacting(at now: TimeInterval) -> Bool { reaction.map { now < $0.end } ?? false }
+
+    /// The eyes are shut or smiling for the state: no blink then.
+    private var eyesBusy = false
+
+    /// How much of the stance shows: all of it, but for a hi, when it steps aside for the wave and back.
+    private func stepAside(at now: TimeInterval) -> Float {
+        guard let (from, to) = aside else { return 1 }
+        if now >= to + 0.3 { aside = nil; return 1 }
+        if now < from + 0.2 { return 1 - BearIdle.ease(Float((now - from) / 0.2)) }
+        if now < to { return 0 }
+        return BearIdle.ease(Float((now - to) / 0.3))
+    }
     private var pads: EyePads?
     private var playback = BearPlayback()
     private var link: CADisplayLink?
@@ -591,8 +610,10 @@ private final class BearCanvas: UIView {
 
     fileprivate func sayHi() -> Bool {
         guard live, presented, playback.free, !reacting(at: CACurrentMediaTime()) else { return false }
-        idle.attend(at: CACurrentMediaTime())
-        playback.greet(at: CACurrentMediaTime())
+        let now = CACurrentMediaTime()
+        idle.attend(at: now)
+        playback.greet(at: now)
+        aside = (now, now + clips.length(.hi) + 0.2)
         resume()
         return true
     }
@@ -615,7 +636,7 @@ private final class BearCanvas: UIView {
     fileprivate func tick() {
         guard live, !rendering, let renderer, let layer = layer as? CAMetalLayer else { return }
         let now = CACurrentMediaTime()
-        let time = playback.time(at: now, clips: clips, steady: !moving || !(idle.busy(at: now) || reacting(at: now)))
+        let time = playback.time(at: now, clips: clips, steady: !moving || !(idle.busy(at: now) || reacting(at: now) || stance.changing(at: now) || eyesBusy))
         guard var standing = pose(at: time * clips.fps) else { return }
         if let blink = playback.blink(at: now), let (index, joints) = faceSkin, index < standing.count {
             joints.shut(blink, in: &standing[index])
@@ -627,18 +648,21 @@ private final class BearCanvas: UIView {
             // to the side goes (1), to look at the eyes there.
             if let side = UserDefaults.standard.string(forKey: "pokiBearLook").flatMap(Float.init) { move = BearIdle.farthest(side) }
             #endif
+            move = move + stance.pose(at: now) * stepAside(at: now)
+            if let reaction, reacting(at: now) { move = move + reaction.pose(at: now) }
+            if let hello = helloPose, index < hello.count { joints.show(move, from: hello[index], in: &standing[index]) }
             joints.apply(move, to: &standing[index])
-            if let reaction, reacting(at: now) {
-                joints.apply(reaction.pose(at: now), to: &standing[index])
-                if let hello = helloPose, index < hello.count { joints.show(reaction.face(at: now), from: hello[index], in: &standing[index]) }
-            }
+            eyesBusy = move.shut > 0.05 || move.smile > 0.05
         }
         if let reaction, !reacting(at: now) { self.reaction = nil }
         for (skin, joints) in zip(skins, standing) { skin.jointTransforms = joints }
         // Breathing and swaying alone are slow: a third of the rate is enough, and a third of the work.
         // A blink is drawn at the full rate from its first frame: the rate goes up a moment before it,
         // as a blink that began on a slow frame lost its first steps and looked quicker than the next.
-        let wanted = playback.move == .idle && !idle.busy(at: now) && reaction == nil && playback.nextBlink - now > Self.lead ? 10 : 30
+        // A state with something moving in it (at work, talking, waving) is drawn at the full rate too.
+        let still: Set<BearAct> = [.ready, .done, .failed, .waiting, .paused, .thinking]
+        let wanted = playback.move == .idle && !idle.busy(at: now) && reaction == nil && !stance.changing(at: now) && still.contains(stance.act)
+            && playback.nextBlink - now > Self.lead ? 10 : 30
         if wanted != rate {
             rate = wanted
             link?.preferredFrameRateRange = CAFrameRateRange(minimum: Float(wanted), maximum: Float(wanted), preferred: Float(wanted))

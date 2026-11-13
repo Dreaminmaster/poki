@@ -50,11 +50,11 @@ enum HomeMotion {
 
 // MARK: Poki's picture
 
-/// Poki's round picture: the bear for its state, on a pale blue ground. For the states it plays
-/// (`PokiMood.act`: ready, at work, done, gone wrong) it is the three-dimensional bear, which blinks,
-/// reacts when a task is done or goes wrong, and says hi to a tap (`ModelBear`); the faces it does not
-/// play yet are the flat ones, which blink and hop when the state changes (`BlinkingFace`). The two
-/// fade into each other.
+/// Poki's round picture: the bear for its state, on a pale blue ground. Every state is played by the
+/// three-dimensional bear (`PokiMood.act`), which takes up each state's stance from where it is, reacts
+/// when a task is done or goes wrong, and says hi to a tap (`ModelBear`). The flat faces, which blink and
+/// hop when the state changes (`BlinkingFace`), stand in only until the model is drawn, or where it
+/// cannot be.
 struct PokiPortrait: View {
     var mood: PokiMood
     var side: CGFloat = HomeMotion.avatar
