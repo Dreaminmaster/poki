@@ -219,6 +219,17 @@ final class LookDoTests: XCTestCase {
         XCTAssertTrue(full.text.contains(long), "full keeps whole labels")
     }
 
+    func testFullLookKeepsSnapshotTextBeyond512Characters() async {
+        let (core, wda, _) = makeCore()
+        let value = (1...40).map { String(format: "L%03dabcdefghijklmnopqrstuvwxyz", $0) }.joined(separator: "\n")
+        wda.tree([Node("TextView", value, [16, 100, 358, 400])])
+
+        let lean = await core.call("look", [:])
+        XCTAssertTrue(lean.text.contains("… (+1089 characters)"), lean.text)
+        let full = await core.call("look", ["full": true])
+        XCTAssertTrue(full.text.contains(value), full.text)
+    }
+
     func testACollapsedCellGetsTheTextReadFromThePictureOnAFullRead() async {
         let (core, wda, host) = makeCore()
         wda.tree([Node("Cell", "Ada Lovelace @ada 2h This is the post's text, long enough to be a whole cell. 13 replies 7 likes", [0, 100, 390, 200])])
