@@ -26,11 +26,13 @@ pub struct Failure {
     /// A short code the app acts on instead of the fix's words (for example `ddi_bad`: delete the
     /// image and download it again; `pairing`: the phone refused the pairing).
     pub code: Option<&'static str>,
+    /// The remote pairing step that failed. None when the whole open timed out, or for lockdown.
+    pub remote_stage: Option<remote::Stage>,
 }
 
 impl Failure {
     pub fn new(detail: impl Into<String>) -> Self {
-        Self { detail: detail.into(), fix: None, code: None }
+        Self { detail: detail.into(), fix: None, code: None, remote_stage: None }
     }
     pub fn code(mut self, code: &'static str) -> Self {
         self.code = Some(code);
@@ -49,6 +51,9 @@ impl<E: std::error::Error> From<E> for Failure {
 }
 
 pub const LOOPBACK_FIX: &str = "Turn on the loopback in your proxy app: the Poki module in Surge or Loon, loopback_address in sing-box, or Shadowrocket's Settings → Other → \"Include route 10.7.0.1/32\". Then connect to Wi-Fi.";
+/// 10.7.0.1 refused the remote pairing port: the loopback is on, and the phone's remote pairing
+/// service listens on another port (or not at all). The app finds the port in Bonjour.
+pub const PAIRING_PORT_FIX: &str = "The loopback is on. iOS moved its pairing service to another port, and Poki finds it through the local network. Keep Wi-Fi on and allow Local Network for Poki in Settings → Privacy & Security. If this stays, restart the iPhone.";
 pub const NETWORK_FIX: &str = "Poki needs the internet once after each restart of the phone to get Apple's signature for the developer disk image. Check Wi-Fi or cellular; Poki tries again by itself.";
 pub const DDI_TIMEOUT_FIX: &str = "Mounting the developer disk image timed out. Poki needs the internet once after each restart to get Apple's signature; check Wi-Fi or cellular. Poki tries again by itself.";
 pub const DDI_REFUSED_FIX: &str = "This iOS version needs a newer developer disk image. Open Poki's setup to download the latest image, or update Poki.";
@@ -111,11 +116,12 @@ impl Pairing {
 pub(crate) fn remote_failure(error: remote::RemoteError) -> Failure {
     let (fix, code) = match error.stage {
         remote::Stage::Connect => (LOOPBACK_FIX, "loopback"),
+        remote::Stage::NotListening => (PAIRING_PORT_FIX, "pairing_port"),
         remote::Stage::Handshake => (HANDSHAKE_FIX, "handshake"),
         remote::Stage::PairVerify => (PAIRING_FIX, "pairing"),
         remote::Stage::Listener | remote::Stage::Tunnel | remote::Stage::Rsd => (UNREACHABLE_FIX, "unreachable"),
     };
-    Failure::new(error.to_string()).fix(fix).code(code)
+    Failure { remote_stage: Some(error.stage), ..Failure::new(error.to_string()).fix(fix).code(code) }
 }
 
 /// An open tunnel. Dropping it closes everything that runs through it, the runner's session included.

@@ -4,9 +4,18 @@
 // THIRD_PARTY_NOTICES.md.
 import SwiftUI
 
+/// Poki's brand colours, used by the app's screens.
+enum Brand {
+    static let blue = Color(red: 0x20 / 255, green: 0x84 / 255, blue: 0xFD / 255)
+}
+
 /// The website's colours (poki-site, ESP-139's token table and its final boards 01 to 05): the one
 /// table the app's screens and the Live Activity both draw with.
 enum Site {
+    /// Exact design board tokens for the Live Activity (ESP-139 board 02 and ESP-171).
+    static let boardBlue = Color(hex: 0x0077FD)
+    static let boardInk = Color(hex: 0x0060D8)
+
     #if POKI_APP
     /// The system's blue in the app's screens.
     static let blue = Color(.systemBlue)
@@ -64,11 +73,13 @@ enum Site {
 /// What a piece of the Live Activity is coloured by. Each face picks one; the surface's palette says
 /// what it is, so the blue card and the black island can colour the same word differently.
 enum ActivityTone: Hashable {
-    /// Secondary: the app's name while working, the meta values.
+    /// Secondary: the app's name while working, the meta values, most subtitles.
     case quiet
     /// The text colour itself.
     case plain
     case accent, approval, done, problem
+    /// The approval's reason line: white on the card, dimmed on the island.
+    case reason
 }
 
 /// The Lock Screen card is the website's blue with glass on it; the Dynamic Island is always black.
@@ -81,16 +92,20 @@ struct ActivityPalette {
     var approval: Color
     var done: Color
     var problem: Color
-    /// Secondary buttons (Stop, Deny).
-    var buttonFill = Color(.tertiarySystemFill)
-    /// The setup steps already done, and those still to do.
+    var reason: Color
+    /// Secondary buttons (Don't Allow, Open Poki) and the answer on its way.
+    var buttonFill: Color
+    /// The steps gone through (the one under way included), and those still to come.
     var segmentDone: Color
+    /// A step with a failed action.
+    var segmentFailed: Color
     var track: Color
-    /// The step line of a finished run.
-    var finished: Color
-    /// The one main button (Allow, Open Poki): a white capsule with blue text.
-    var primaryFill = Color.blue
-    var primaryText = Color.white
+    /// The one main button (Allow, Done): Poki's blue with white words on the black island, a white
+    /// capsule with blue words on the blue card.
+    var primaryFill: Color
+    var primaryText: Color
+    /// The fade along the bottom edge that the bear rises out of.
+    var rim: Color
 
     func color(_ tone: ActivityTone) -> Color {
         switch tone {
@@ -100,41 +115,84 @@ struct ActivityPalette {
         case .approval: approval
         case .done: done
         case .problem: problem
+        case .reason: reason
         }
     }
 }
 
-/// Every colour, font and size the Live Activity draws with. Restrained: the system's label colours
-/// and one colour per kind of state (blue when Poki needs you or is busy, green when done, red for a
-/// problem), the same on the Lock Screen and in the island. The Lock Screen uses the system's own
-/// background, light or dark; the island is always dark, so the same semantic colours read on both.
+/// Every colour, font and size the Live Activity draws with: the website's design language (ESP-139
+/// final board 02 and ESP-171 final Dynamic Island / Lock Screen boards).
 struct ActivityTheme {
-    private static let palette = ActivityPalette(
-        text: .primary, quiet: .secondary, accent: .blue, approval: .blue, done: .green,
-        problem: .red, segmentDone: .green, track: Color(.tertiarySystemFill), finished: .green)
-    var lock = ActivityTheme.palette
-    var island = ActivityTheme.palette
-    /// nil: the system's own background.
-    var lockBackground: Color? = nil
-    var glassEdge = Color(.separator)
-    /// The island's outline while the person is needed.
-    var approvalOutline = Color.blue
-    var primaryIcon = Color.white
+    /// ESP-344's one rule: black, white and the system's grey, and one accent, Poki's blue. Red is
+    /// only the square in Stop, a failed step's segment and the mark of a problem. Green and yellow are gone.
+    /// On the blue card everything is white.
+    var lock = ActivityPalette(
+        quiet: .white.opacity(0.72), accent: .white, approval: .white, done: .white,
+        problem: .white, reason: .white.opacity(0.72), buttonFill: .white.opacity(0.20),
+        segmentDone: .white, segmentFailed: Self.red, track: .white.opacity(0.28),
+        primaryFill: .white, primaryText: Site.boardInk, rim: Site.boardInk.opacity(0.55))
+    var island = ActivityPalette(
+        quiet: Self.secondary, accent: Site.sky, approval: Site.sky, done: Site.sky,
+        problem: Self.red, reason: Self.secondary, buttonFill: .white.opacity(0.22),
+        segmentDone: Site.sky, segmentFailed: Self.red, track: .white.opacity(0.20),
+        primaryFill: Site.boardBlue, primaryText: .white, rim: .black.opacity(0.70))
+    /// The system's secondary label on black, and its red in dark.
+    static let secondary = Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6)
+    static let red = Color(hex: 0xFF453A)
+    /// The flat blue the card had before its gradient: what the app's previews lay under the card.
+    var lockBackground: Color? = Site.boardBlue
+    /// The card's palette on its gradient: the fade the bear rises out of takes the gradient's colour.
+    func lock(on skin: CardSkin) -> ActivityPalette {
+        var palette = lock
+        palette.rim = Color(hex: skin.rim).opacity(0.55)
+        return palette
+    }
+    /// The edge of the screenshot on the blue card.
+    var glassEdge = Color.white.opacity(0.28)
+    /// The island's outline, always: the system draws it only over a dark background.
+    var outline = Site.boardBlue
 
-    // Text styles, medium weight or heavier (HIG): the content line large, everything else one size.
-    // Geist (Prominent) for the status word and the content line, as in the app's titles.
-    var status = Prominent.font(.subheadline, .semibold)
-    var meta = Font.system(.subheadline, weight: .medium).monospacedDigit()
-    var button = Font.system(.subheadline, weight: .semibold)
-    var compact = Font.system(.subheadline, weight: .semibold).monospacedDigit()
-    var compactCode = Font.system(.subheadline, weight: .bold).monospacedDigit()
-    var countdown = Font.system(.subheadline, weight: .semibold).monospacedDigit()
-    var content = Prominent.font(.title3, .semibold)
-    var contentTracking: CGFloat = 0
+    /// Geist for English, as on the board; the system font for Chinese. Geist has no Chinese
+    /// characters, and with it the Lock Screen and the island laid Chinese lines out narrower than
+    /// they drew them, cutting off their ends (seen on the iPhone 17 Pro simulator).
+    static var usesGeist: Bool {
+        let lang = Locale.preferredLanguages.first ?? Bundle.main.preferredLocalizations.first ?? "en"
+        return !lang.hasPrefix("zh")
+    }
+    private static func font(_ name: String, _ weight: Font.Weight, _ size: CGFloat) -> Font {
+        usesGeist ? .custom(name, size: size) : .system(size: size, weight: weight)
+    }
+    /// Which step this is, over the title ("Step 2 of 5"), and the app beside it.
+    var kicker: Font { Self.font("Geist-SemiBold", .semibold, 13) }
+    var place: Font { Self.font("Geist-Medium", .medium, 13) }
+    /// A question or a thing to do: 20 points, bold.
+    var title: Font { Self.font("Geist-Bold", .bold, 20) }
+    /// What the step under way does, and a finished run's title: 19 points, semibold.
+    var step: Font { Self.font("Geist-SemiBold", .semibold, 19) }
+    /// What Poki is up to on a short Lock Screen card ("Poki's asleep", "Poki's done"): the card's main
+    /// line, large enough to read at a glance on the Lock Screen (ESP-467).
+    var status: Font { Self.font("Geist-Bold", .bold, 24) }
+    var titleTracking: CGFloat { Self.usesGeist ? -0.2 : 0 }
+    var subtitle: Font { Self.font("Geist-Medium", .medium, 13) }
+    var button: Font { Self.font("Geist-SemiBold", .semibold, 15) }
+    /// The compact island's top line (what the task is doing), or its count when nothing is said.
+    var compact: Font { Self.font("Geist-SemiBold", .semibold, 13) }
+    /// Under it: the count ("2/5", "Step 7").
+    var compactCount: Font { Self.font("Geist-Medium", .medium, 11).monospacedDigit() }
+    /// The pairing code in the compact island, with tabular digits.
+    /// Short of room: the count and the countdown inside the 28-point circle.
+    var narrowCount: Font { Self.font("Geist-SemiBold", .semibold, 12).monospacedDigit() }
+    var narrowTimer: Font { Self.font("Geist-SemiBold", .semibold, 11).monospacedDigit() }
+    var compactCode: Font { Self.font("Geist-Bold", .bold, 13).monospacedDigit() }
+    /// Times and countdowns: the text face with tabular digits, as the system writes its timers.
+    var value: Font { Self.font("Geist-SemiBold", .semibold, 15).monospacedDigit() }
+    /// The pairing code, large.
+    var code: Font { Self.font("Geist-Black", .black, 46).monospacedDigit() }
+    var codeTracking: CGFloat = -0.92
 
     func palette(_ surface: ActivitySurface) -> ActivityPalette { surface == .lockScreen ? lock : island }
 
-    static let current = ActivityTheme()
+    static var current: ActivityTheme { ActivityTheme() }
 }
 
 extension Color {
@@ -147,6 +205,11 @@ enum ActivityMotion {
     /// A phase change (working, needs you, done): a soft spring that finishes well inside the 2 s iOS
     /// gives Live Activity updates.
     static let phase = Animation.spring(duration: 0.6, bounce: 0.3)
+    /// A new step within the same phase: its words blend into the old ones where they stand. No bounce.
+    static let step = Animation.easeOut(duration: 0.35)
+    /// A new pose: the bear stays where it stands and the new pose fades in over the old one (ESP-467).
+    /// No movement and no bounce, which on the phone read as the bear dropping and pressing.
+    static let pose = Animation.easeInOut(duration: 0.35)
 }
 
 extension AnyTransition {

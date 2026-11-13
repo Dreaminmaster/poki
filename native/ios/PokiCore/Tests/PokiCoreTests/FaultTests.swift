@@ -4,6 +4,28 @@ import XCTest
 /// The runner misbehaving in the ways a phone does, and text entry. Every call must answer in time
 /// and say what was sent and what is on screen.
 final class FaultTests: XCTestCase {
+    func testAnUnreadableScreenDoesNotReportThePreviousApp() async {
+        let (core, wda, _) = makeCore()
+        wda.source([("Button", "New note")], app: "Notes")
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobilenotes", "name": "Notes"]]) }
+        let events = LockedBox<[CoreEvent]>([])
+        let observer = Task { for await event in core.events { events.update { $0.append(event) } } }
+        defer { observer.cancel() }
+        _ = await core.call("look", [:])
+        let first = await eventually { events.value.contains { if case .toolFinished(_, _, let facts) = $0 { return facts.app == "Notes" }; return false } }
+        XCTAssertTrue(first, "The first task read Notes")
+        events.value = []
+        for route in ["GET /source", "GET /screenshot", "GET /wda/activeAppInfo"] {
+            wda.set(route) { _ in (500, ["value": ["error": "unknown error", "message": "read failed"]]) }
+        }
+        let answer = await core.call("look", [:])
+        XCTAssertTrue(answer.isError, answer.text)
+        let finished = await eventually { events.value.contains { if case .toolFinished = $0 { return true }; return false } }
+        XCTAssertTrue(finished)
+        guard case .toolFinished(_, _, let facts)? = events.value.last else { return XCTFail("Missing completion event") }
+        XCTAssertNil(facts.app, "A failed read must not attribute the new task to Notes")
+    }
+
     /// A focused field that keeps what /wda/keys and the paste menu put in it.
     final class Field: @unchecked Sendable {
         let value = LockedBox("")
@@ -550,6 +572,32 @@ final class FaultTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "the second tap was not queued")
     }
 
+    /// Stop part way through a do (the app's chat cancels the call): the actions after the one under
+    /// way are never sent, and settle answers only once the runner is through with that one.
+    func testACancelledDoSendsNothingMoreAndSettleWaitsForTheActionUnderWay() async throws {
+        let (core, wda, _) = makeCore { $0.actionCap = 10 }
+        _ = await core.call("look", [:])
+        // The tap runs on until it is released, whatever this side does, and every request queued
+        // behind it on the runner waits for it (the fake has no queue of its own).
+        let held = LockedBox(true)
+        wda.hold("POST /wda/tap", while: held)
+        let call = Task { await core.call("do", ["actions": [["tap": [100, 120]], ["tap": [100, 160]], ["tap": [100, 200]]]]) }
+        let sent = await eventually(3) { !wda.bodies("POST /wda/tap").isEmpty }
+        XCTAssertTrue(sent)
+        for route in ["POST /session", "GET /source", "GET /wda/activeAppInfo", "GET /wda/locked", "GET /wda/screen"] { wda.hold(route, while: held) }
+        // Settle may be asked before the cancelled request has noted that the runner is busy with it.
+        call.cancel()
+        let settled = LockedBox<Bool?>(nil)
+        let settling = Task { settled.value = await core.settle(timeout: 5) }
+        _ = await call.value
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertNil(settled.value, "settled while the tap was still running")
+        held.value = false
+        await settling.value
+        XCTAssertEqual(settled.value, true)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "the taps after the stop were sent: \(wda.sent)")
+    }
+
     /// WDA's XML tree lists the same elements as its JSON one, without the custom actions it fetches
     /// for every JSON element.
     func testTheXMLTreeReadsLikeTheJSONOne() async {
@@ -748,7 +796,7 @@ final class MailTestTests: XCTestCase {
             wda.set(key) { _ in try await Task.sleep(nanoseconds: 400_000_000); return (200, ["value": .null]) }
         }
         _ = await core.call("look", [:])
-        let result = await core.call("do", ["actions": [["button": "home"], ["tap": [100, 300]], ["drag": [0, 400, 200, 400]]]])
+        let result = await core.call("do", ["actions": [["button": "home"], ["tap": [100, 300]], ["drag": ["from": 1, "to": 2]]]])
         XCTAssertFalse(result.isError, result.text)
         XCTAssertEqual(result.text.components(separatedBy: "(sent, ").count - 1, 3, result.text)
     }

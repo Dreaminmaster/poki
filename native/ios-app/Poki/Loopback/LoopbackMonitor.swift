@@ -3,7 +3,7 @@ import Network
 
 /// Live loopback status: every few seconds while Poki is in front (and on demand), a TCP connect to
 /// developer services at 10.7.0.1, which only answer when Poki or an external VPN reflects
-/// 10.7.0.1 back to this phone. Also whether Wi-Fi is up, which the phone's developer services need.
+/// 10.7.0.1 back to this phone. Network type is context, not proof of service availability.
 @MainActor
 @Observable
 final class LoopbackMonitor {
@@ -17,9 +17,7 @@ final class LoopbackMonitor {
     }
     private(set) var state = State.checking
     private(set) var onWiFi = false
-    /// The phone's only way out is cellular. iOS refuses the developer services' loopback on cellular
-    /// (remotepairingdeviced: "prohibited types: cellular loopback"), so a session cannot start from
-    /// here; one that is already up keeps running when the phone moves to cellular.
+    /// The physical interface monitors report cellular without a usable Wi-Fi path.
     private(set) var cellularOnly = false
     /// The interfaces the system path lists, for Diagnostics: a proxy app's tunnel can change what the path reports.
     private(set) var pathSummary = ""
@@ -45,7 +43,7 @@ final class LoopbackMonitor {
             Task { @MainActor in
                 guard let self else { return }
                 self.pathSummary = summary
-                if self.onWiFi != wifi { self.onWiFi = wifi; self.check() }
+                if self.onWiFi != wifi { self.onWiFi = wifi; self.resetPortSearch(); self.check() }
             }
         }
         wifiPath.pathUpdateHandler = { [weak self] path in
@@ -65,7 +63,7 @@ final class LoopbackMonitor {
     private func interfaceChanged(_ update: (LoopbackMonitor) -> Void) {
         update(self)
         let only = Self.forcedCellular || (cellularUp && !wifiUp)
-        if only != cellularOnly { cellularOnly = only; check() }
+        if only != cellularOnly { cellularOnly = only; resetPortSearch(); check() }
     }
 
     /// `-pokiLoopback cellular`, `working` or `noanswer`: a simulator has no cellular and no 10.7.0.x, so a screenshot sets the state by hand.
@@ -87,8 +85,7 @@ final class LoopbackMonitor {
 
     var isWorking: Bool { state.isWorking }
 
-    /// The tunnel is on and refuses, and the phone has only cellular: the one case where the fix is
-    /// "start from Wi-Fi", not "turn the proxy app on".
+    /// No developer port answered while only cellular was available. This does not locate the failure.
     var cellularRefused: Bool { state == .noAnswer && cellularOnly }
 
     /// Checks every `interval` seconds until `pause` (3 s in front; the app uses a slower one in the
@@ -102,13 +99,81 @@ final class LoopbackMonitor {
 
     func pause() { timer?.invalidate(); timer = nil }
 
+    /// Called when the remote pairing service was found on another port and that port is in use:
+    /// whatever waits on a refused connection can try again now.
+    var onPairingPort: ((UInt16) -> Void)?
+    /// Called when the looks for a moved port ended without one: a refused connection is handled as
+    /// before again (on a mounted disk image, Poki's own session), so whatever waits can try now.
+    var onPairingPortSearchEnded: (() -> Void)?
+    private var portLooks = 0
+    private var portSearchedAt = Date.distantPast
+    private var portSearchSaid = ""
+
+    /// The remote pairing port does not answer although 10.7.0.1 reaches this iPhone: looks the
+    /// port up in Bonjour (three times at most, never on cellular alone; `lookDue`) and, when one
+    /// answers, uses it from here on.
+    private func movedPairingPort(from port: UInt16) async -> ProbeResult? {
+        guard RemotePairingPort.lookDue(cellularOnly: cellularOnly, looks: portLooks, lastAt: portSearchedAt, now: Date()) else { return nil }
+        portLooks += 1
+        portSearchedAt = Date()
+        RemotePairingPort.setSearching(true)
+        var answer: ProbeResult?
+        let search = await RemotePairingPort.search(besides: port, browse: { await RemotePairingBrowser.ports() }) { candidate in
+            let result = await probe(label: "loopback", host: "10.7.0.1", port: candidate, timeout: 1.5)
+            if result.outcome == "connected" { answer = result }
+            return result.outcome == "connected"
+        }
+        // The same finding every 10 s is said once.
+        let said = search.said(besides: port)
+        if said != portSearchSaid { portSearchSaid = said; AppLog.shared.add("loopback", said) }
+        guard let found = search.found, let answer else {
+            if portLooks >= RemotePairingPort.lookDelays.count {
+                AppLog.shared.add("loopback", "no moved remote pairing port after \(portLooks) looks: a refused connection is handled as before until the network changes")
+                endPortSearch()
+            }
+            return nil
+        }
+        RemotePairingPort.use(found)
+        RemotePairingPort.setSearching(false)
+        portLooks = 0
+        onPairingPort?(found)
+        return answer
+    }
+
+    /// The launcher stops waiting for a moved port: a refusal takes its earlier path again.
+    private func endPortSearch() {
+        guard RemotePairingPort.searching else { return }
+        RemotePairingPort.setSearching(false)
+        onPairingPortSearchEnded?()
+    }
+
+    /// The network changed, or the port answers: a later refusal is looked up from the start.
+    private func resetPortSearch() {
+        portLooks = 0
+        portSearchedAt = .distantPast
+        endPortSearch()
+    }
+
     func check() {
         guard !running else { return }
         running = true
         Task {
-            var result = await probe(label: "loopback", host: "10.7.0.1", port: 49152, timeout: 1.5)
-            if result.outcome != "connected" {
-                result = await probe(label: "loopback", host: "10.7.0.1", port: 62078, timeout: 1.5)
+            let port = RemotePairingPort.current
+            var result = await probe(label: "loopback", host: "10.7.0.1", port: port, timeout: 1.5)
+            if result.outcome == "connected" {
+                if portLooks > 0 { resetPortSearch() }
+            } else {
+                let lockdown = await probe(label: "loopback", host: "10.7.0.1", port: 62078, timeout: 1.5)
+                // 10.7.0.1 reaches this iPhone (lockdown answers, or the phone refused the port), and
+                // the remote pairing service is not on the port Poki uses: iOS may have moved it.
+                // Without this the page says Working while every connection is refused.
+                if lockdown.outcome == "connected" || result.outcome == "refused" {
+                    result = await movedPairingPort(from: port) ?? lockdown
+                } else {
+                    // 10.7.0.1 does not reach this iPhone at all: not a moved port.
+                    endPortSearch()
+                    result = lockdown
+                }
             }
             running = false
             let probed: State = result.outcome == "connected" ? .working(ms: result.milliseconds) : loopbackInterface() == nil ? .off : .noAnswer
@@ -138,7 +203,9 @@ final class LoopbackMonitor {
     }
     #endif
 
-    static var cellularHint: String { String(localized: "Connect to Wi-Fi and open Poki first. Once it is on, you can switch to cellular and keep using it.") }
+    static var cellularHint: String { String(localized: "This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi.") }
+    /// Renewing, updating and the first mount of the disk image go through the loopback (ESP-448).
+    static var needsWiFi: String { String(localized: "This step needs Wi-Fi. Connect and try again.") }
 
     var text: String {
         switch state {
@@ -152,7 +219,7 @@ final class LoopbackMonitor {
     var detail: String {
         switch state {
         case .checking: String(localized: "Looking for this iPhone at 10.7.0.1.")
-        case .working(let ms): String(localized: "This iPhone answers at 10.7.0.1 (\(ms) ms).") + (onWiFi || cellularOnly ? "" : " " + String(localized: "Connect to Wi-Fi: the developer services need it."))
+        case .working(let ms): String(localized: "This iPhone answers at 10.7.0.1 (\(ms) ms).")
         case .noAnswer where cellularOnly: Self.cellularHint
         case .noAnswer: String(localized: "The local interface is present, but this iPhone does not answer at 10.7.0.1. Reconnect the local connection and check Wi-Fi. If it still does not answer, pair again in Setup › Pairing, then check Developer Mode.")
         case .off: String(localized: "This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup.")

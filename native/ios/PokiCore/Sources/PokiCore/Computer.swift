@@ -63,6 +63,8 @@ final class Computer: @unchecked Sendable {
     /// The element the last type went to and its text, so the read after it can say which number the
     /// field has now when the app replaced it (Settings' search field is a new element in search mode).
     var typedInto: (ref: Int, text: String)?
+    /// The text this task last typed (not a password), for the send check after Return in a chat app.
+    var typedText: String?
     /// How much of the picture changed in the latest read while the elements did not (nil when the
     /// elements changed too, or nothing did): a whole new picture over an unchanged tree is the old
     /// app's tree under the new app's screen (gym: Photos launched from Safari).
@@ -140,6 +142,7 @@ final class Computer: @unchecked Sendable {
         let treeRead = !reading.elements.isEmpty || reading.notes.isEmpty
         let sameApp = reading.foreground?.bundleID == nil || reading.foreground?.bundleID == lastForeground?.bundleID
         lastForeground = reading.foreground ?? lastForeground
+        if config.isPoki(reading.foreground) { return pokiInFront(reading, did: did, error: error, extra: extra) }
         if reading.png != nil { lastPNGAt = now() }
         lastPNG = reading.png ?? lastPNG
 
@@ -367,6 +370,26 @@ final class Computer: @unchecked Sendable {
         return ToolResult(text: text + (jpeg == nil ? "" : "\nscreenshot: the screen now (nothing was sent)"), jpeg: jpeg, isError: jpeg == nil && isErrorWithoutPicture)
     }
 
+    /// The answer when Poki is in front, as when a task asked in Poki's chat begins (ESP-465: the first
+    /// look of 3 of 5 tasks read the owner's chat with Poki, and the task card showed it). The chat is
+    /// the owner's, not a screen of the task: the answer lists none of it, carries no picture, and keeps
+    /// none for the task card or the Live Activity; it says how a task starts instead.
+    func pokiInFront(_ reading: Reading, did: [String], error: String?, extra: [String]) -> ToolResult {
+        refs = [:]
+        listed = []
+        lastAll = []
+        lastTree = nil
+        lastPicture = nil
+        lastPNG = nil
+        lastPNGAt = nil
+        var lines = ["app: \(reading.foreground?.describe ?? "Poki")   read: \(ISO8601DateFormatter().string(from: Date())) (\(reading.ms) ms)"]
+        lines += did.map { "did: \($0)" }
+        if let error { lines.append("error: \(error)") }
+        lines += extra
+        lines.append("poki: Poki is in front, showing the owner's chat with you, so no screen of the task is read yet. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved routine.")
+        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil && did.isEmpty)
+    }
+
     /// The `handoff:` line: a step handed to the owner that is waiting, or just done (reported once).
     func handoffLine(clear: Bool) -> String? {
         guard let h = handoff.value else { return nil }
@@ -398,7 +421,7 @@ final class Computer: @unchecked Sendable {
         let until = now() + config.toolDeadline
         if let blocked = await waitForRunner(until: until) { return blocked }
         let begins = beginsTask()
-        if begins { beginRecording() }
+        if begins { beginRecording(); typedText = nil }
         async let locked = isLocked()
         var result = restartNote(await readAndReply(until: until, full: full))
         if begins, let app = lastForeground { origin = (app, session, now()) } else { origin?.lastCall = now() }
@@ -495,6 +518,7 @@ final class Computer: @unchecked Sendable {
         // The app the owner is in before anything is sent: the read before may be another task's.
         if beginsTask() {
             beginRecording()
+            typedText = nil
             if let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), let bundle = front["bundleId"]?.string {
                 origin = (Foreground(bundleID: bundle, name: front["name"]?.string), session, now())
             }
@@ -520,21 +544,21 @@ final class Computer: @unchecked Sendable {
             return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true)
         }
 
+        // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.
+        if landsInPoki(actions) {
+            return ToolResult(text: "not_sent: \(CoreConfig.ownAppRefusal). Nothing was sent. Leave Poki first ({button: \"home\"} or {launch: \"bundle id\"}).", jpeg: nil, isError: true)
+        }
+
         // A number that is not in the latest read is refused before anything is sent.
         let stale = Set(actions.flatMap(Self.refs(in:))).filter { refs[$0] == nil }.sorted()
         if !stale.isEmpty {
             return await readAndReply(until: until, full: true, error: "element \(stale.map(String.init).joined(separator: ", ")) is not in the latest read; nothing was sent. The current elements are below.")
         }
 
-        // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.
-        if landsInPoki(actions) {
-            return ToolResult(text: "not_sent: \(CoreConfig.ownAppRefusal). Nothing was sent. Leave Poki first ({button: \"home\"} or {launch: \"bundle id\"}).", jpeg: nil, isError: true)
-        }
-
         if config.sensitive.enabled {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
-                if scan.moved, let point = action["tap"] ?? action["long_press"], point.array != nil || point["x"] != nil {
+                if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
                     var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy)
                     result.text += "\nnot_sent from action \(at + 1): the screen may have changed. Choose the remaining actions from the fresh screen above and send them in a new do call. Do not repeat the actions already sent."
                     return result
@@ -562,7 +586,10 @@ final class Computer: @unchecked Sendable {
         var error: String?
         var lastKind: String?
         var toRun = actions
+        // What the screen said before these actions, for the send check: a message that was already there does not count as sent.
+        let textsBefore = lastAll.filter { !$0.fromPicture && !Self.fieldTypes.contains($0.type) }.map(\.text)
         var approvedNote: String?
+        let steps = sensitiveSteps(actions)
         let sensitive = firstSensitive(actions)
         // Any other actions withdraw a pending request: nothing the automation does can approve it.
         if let pending = approvals.pending, pending.fingerprint != sensitive.map({ JSON.array(Array(actions[$0.at...])).serialized() }) {
@@ -622,7 +649,9 @@ final class Computer: @unchecked Sendable {
         }
 
         let actionsStarted = now()
-        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count)
+        let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
+        let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
+        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -690,6 +719,7 @@ final class Computer: @unchecked Sendable {
             lastPicture = seenPicture
             result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["\(app) answered no element tree (no accessibility server in its process: kAXErrorServerNotFound); \(how), so its earlier page is gone"])
         }
+        if let line = sendCheck(toRun, error: error, textsBefore: textsBefore) { result.text += "\n" + line }
         // A call that took far longer than its parts says where the time went (gym: a wait_until
         // whose parts said 5 s answered after 29.8 s).
         let total = now() - callStarted
@@ -710,6 +740,55 @@ final class Computer: @unchecked Sendable {
             result.text = lines.joined(separator: "\n")
         }
         return result
+    }
+
+    /// Chat apps, where Return sends what the message field holds. The approval rules' own list may be
+    /// emptied (Approvals off); this one stays.
+    static let chatApps = Set(SensitivityRules().messagingApps)
+
+    /// A Return key, or typed text that ends in a new line.
+    static func isReturn(_ action: JSON) -> Bool {
+        if let key = action["key"]?.text?.lowercased() { return key == "return" || key == "enter" }
+        return action["type"]?.text?.hasSuffix("\n") == true
+    }
+
+    /// After Return in a chat app: what the read just made shows of the text this task typed, so the
+    /// model knows what to check (it had spent one to three turns after Return working that out).
+    /// The message field is the lowest text field; the last message is the lowest element with text
+    /// above it. The answer is never "sent": a message that failed or is still sending reads the same
+    /// in the field and the last message, and no app's element tree has been checked for the marks
+    /// that tell them apart, so the model reads the screen again.
+    func sendCheck(_ actions: [JSON], error: String?, textsBefore: [String]) -> String? {
+        guard actions.contains(where: Self.isReturn), error == nil, let app = lastForeground?.bundleID, Self.chatApps.contains(app),
+              let text = typedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        let keyboard = lastAll.first { $0.type == "Keyboard" }
+        let read = lastAll.filter { !$0.fromPicture && !(keyboard?.contains($0) ?? false) && $0.frame.width > 0 && $0.frame.height > 0 }
+        let quoted = "\"\(text.count > 60 ? String(text.prefix(59)) + "…" : text)\""
+        func notConfirmed(_ why: String) -> String {
+            "send check: not confirmed: \(why). Read the screen to verify the send before finish_task."
+        }
+        guard let field = read.filter({ Self.fieldTypes.contains($0.type) }).max(by: { $0.frame.y < $1.frame.y }) else {
+            return notConfirmed("no message field was read")
+        }
+        if (field.value ?? "").contains(text) { return notConfirmed("the message field still holds the text") }
+        let frames: Set<String> = ["Keyboard", "NavigationBar", "Toolbar", "TabBar", "Application", "Window", "StatusBar"]
+        let messages = read.filter { e in
+            !Self.fieldTypes.contains(e.type) && !frames.contains(e.type) && !e.text.isEmpty && e.frame.y + e.frame.height <= field.frame.y + 1
+        }
+        guard let last = messages.max(by: { a, b in
+            let (ab, bb) = (a.frame.y + a.frame.height, b.frame.y + b.frame.height)
+            return ab != bb ? ab < bb : a.frame.width * a.frame.height > b.frame.width * b.frame.height
+        }) else { return notConfirmed("no message was read above the message field") }
+        func reads(_ s: String?) -> Bool { s?.trimmingCharacters(in: .whitespacesAndNewlines) == text }
+        guard reads(last.label) || reads(last.value) else {
+            return notConfirmed("the message field is empty, and the last message on screen reads \"\(last.text.prefix(60))\"")
+        }
+        let shown = { (texts: [String]) in texts.filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) == text }.count }
+        guard shown(messages.map(\.text)) > shown(textsBefore) else {
+            return notConfirmed("the last message reads the same text, but it was on screen before Return")
+        }
+        typedText = nil
+        return "send check: not confirmed: the message field is empty and the last message on screen now reads \(quoted), but a message that failed or is still sending reads the same here. Look again before finish_task: a failure or sending mark beside that message (a red exclamation mark, a retry button, a spinner) means it has not gone."
     }
 
     /// A call with no task open, or after `taskGap` without one, begins a task.
@@ -785,14 +864,25 @@ final class Computer: @unchecked Sendable {
     /// The actions, in order, each within its own action time (`actionCap` from when it starts; a
     /// launch gets 9 s, the time XCTest's launch handshake takes on the phone) and the call's
     /// deadline. Stops at the first that fails.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0) async -> (did: [String], error: String?, lastKind: String?) {
+    /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
+    /// approved an action, by its number in the do.
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:]) async -> (did: [String], error: String?, lastKind: String?) {
         var did: [String] = []
         var error: String?
         var logError: String?
         var lastKind: String?
+        var moved = moved
+        // The last action that may have changed the screen, and when it was through.
+        var changed: (kind: String, at: Double)?
         defer { if let line = logError ?? error { failureLog.value = line } }
         for (i, action) in actions.enumerated() {
             let index = offset + i
+            defer { if let kind = ActionKind(action), kind.changesScreen(action) { moved = true; changed = (kind.rawValue, now()) } }
+            if moved, let held = await pressNow(action, after: changed, approved: approved[index], until: until - config.readTimeout - 0.5) {
+                did.append("\(action.serialized()) (not_sent)")
+                error = "action \(index + 1) was not sent: \(held)\(i + 1 < actions.count ? "; the actions after it were not sent" : "")"
+                break
+            }
             let cap = actionCap(action)
             let actionsUntil = min(until - config.readTimeout - 0.5, now() + cap)
             let left = actionsUntil - now()
@@ -852,6 +942,53 @@ final class Computer: @unchecked Sendable {
             }
         }
         return (did, error, lastKind)
+    }
+
+    /// Why an action that presses the screen is held back on the screen as it is now, after an action
+    /// before it in the same do may have changed it: what lies where it will touch is read again and
+    /// judged as the latest read was, so a Delete that came where Back was is not tapped. A press the
+    /// owner approved goes on while it is still the step they approved (`approved`, its reason).
+    /// The read comes no sooner after the action that changed the screen (`after`) than the pause the
+    /// final read waits after it: a short wait between them does not take it away. It is the first of
+    /// two reads in a row that agree (as `wait_until: settled`), within `settleWindow`, so a page still
+    /// sliding in is not read as the one it covers; a screen that never holds still is judged on the
+    /// latest read.
+    func pressNow(_ action: JSON, after changed: (kind: String, at: Double)?, approved: String?, until: Double) async -> String? {
+        let rules = config.rules
+        guard rules.enabled, let kind = ActionKind(action), kind.presses(action) else { return nil }
+        if let changed {
+            let pause = min((Self.settle[changed.kind] ?? 0.4) - (now() - changed.at), until - now() - 0.3)
+            if pause > 0.01 { await sleep(seconds: pause) }
+        }
+        guard let screen = size, let elements = await settledRead(until: min(until, now() + Self.settleWindow)) else {
+            return "the action before it may have changed the screen, and it could not be read again to check this one. Choose the remaining actions from the fresh screen below and send them in a new do"
+        }
+        let scan = SensitiveScan(front: elements.foreground, secureOnScreen: false, elements: listable(elements.all, screen))
+        for press in presses(kind, action, scan, unread: false) {
+            guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false), reason != approved else { continue }
+            return "the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do"
+        }
+        return nil
+    }
+
+    /// How long `pressNow` reads for two reads in a row that agree.
+    static let settleWindow = 2.0
+
+    /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when
+    /// nothing could be read.
+    func settledRead(until: Double) async -> (all: [Element], foreground: Foreground)? {
+        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        var latest: (all: [Element], foreground: Foreground)?
+        var last: String?
+        while until - now() > 0.3 {
+            guard let tree = try? await runner.tree(timeout: min(config.readTimeout, until - now()), format: config.treeFormat) else { break }
+            let sig = signature(tree.elements)
+            latest = (tree.elements, tree.foreground)
+            if sig == last { break }
+            last = sig
+            await sleep(seconds: min(0.15, max(0, until - now() - 0.3)))
+        }
+        return latest
     }
 
     /// After a type that failed or timed out: what the focused field holds says what happened, so the
@@ -993,56 +1130,110 @@ final class Computer: @unchecked Sendable {
         var elements: [Element]?
     }
 
-    /// The first action that needs the owner's approval, and why.
-    func firstSensitive(_ actions: [JSON]) -> (at: Int, reason: String)? {
-        guard config.sensitive.enabled else { return nil }
+    /// Each action of a batch that needs the owner's approval, and why, judged on the latest read.
+    func sensitiveSteps(_ actions: [JSON]) -> [(at: Int, reason: String)] {
+        guard config.sensitive.enabled else { return [] }
         var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
+        var matches: [(at: Int, reason: String)] = []
         for (at, action) in actions.enumerated() {
-            if let reason = sensitive(action, &scan) { return (at, reason) }
+            if let reason = sensitive(action, &scan) { matches.append((at, reason)) }
         }
-        return nil
+        return matches
+    }
+
+    /// Where approval begins, with every reason the remaining batch must wait.
+    func firstSensitive(_ actions: [JSON]) -> (at: Int, reason: String)? {
+        let matches = sensitiveSteps(actions)
+        guard let first = matches.first else { return nil }
+        guard matches.count > 1 else { return first }
+        let reasons = matches.map { "action \($0.at + 1): \($0.reason)" }.joined(separator: "; ")
+        return (first.at, "multiple sensitive actions: " + reasons)
+    }
+
+    /// How a press is judged. `tap`: as a tap is, also by where it lands on a screen not read yet or at
+    /// a point on a screen that may have changed. `button`: by the element and the app it is in (back
+    /// taps the top-left button of the latest read). `stroke`: by the element's own words
+    /// alone, since a swipe in Phone or Wallet scrolls rather than calls or pays.
+    enum Press { case tap, button, stroke }
+
+    /// Where an action puts a finger down and lifts it on one element, which a control takes as a press
+    /// whatever the action is called. A swipe or scroll_to presses what holds both ends of its first
+    /// stroke on a screen that was read (a stroke inside one tall button, or across a wide one). A
+    /// key's tap lands on the keyboard's own return key (Go, Search, Send: `returnKeyLabels`), judged
+    /// with the key.
+    func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+        // On a screen read after the numbers were given, a number is judged by what lies where it is touched.
+        func under(_ p: (x: Double, y: Double)?) -> Element? { p.flatMap { element(at: $0, in: scan.elements) } }
+        func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, judged: Press)? {
+            guard let spec else { return nil }
+            let atPoint = spec.array != nil || spec["x"] != nil
+            let e = unread ? nil : scan.elements == nil || atPoint ? target(spec, in: scan.elements) : under(try? point(spec))
+            return (e, atPoint, .tap)
+        }
+        func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+            guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
+                  let down = element(at: (path.0, path.1), in: scan.elements), down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
+            return [(down, false, .stroke)]
+        }
+        let spec = action[kind.rawValue]
+        switch kind {
+        case .tap, .longPress, .pinch: return [at(spec)].compactMap { $0 }
+        // The field is tapped before the text goes.
+        case .type: return [at(action["ref"])].compactMap { $0 }
+        case .drag:
+            if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
+            return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
+        case .back:
+            guard let button = Self.backButton(in: lastAll) else { return [] }
+            return [(scan.elements == nil ? button : under(button.frame.centre), false, .button)]
+        case .swipe: return stroke(in: spec?["in"] ?? action["in"], spec?.string ?? spec?["direction"]?.string ?? "", spec?["distance"]?.string ?? "long")
+        case .scrollTo: return stroke(in: spec?["in"], ["down": "up", "up": "down", "right": "left", "left": "right"][spec?["direction"]?.string ?? "down"] ?? "up", "scroll")
+        case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: return []
+        }
     }
 
     /// Why this action needs the owner's approval, or nil; `scan` moves on past it. `do` checks its
     /// actions with it before sending any, and a routine run each step before it sends it.
     func sensitive(_ action: JSON, _ scan: inout SensitiveScan) -> String? {
-        let rules = config.sensitive
-        guard rules.enabled else { return nil }
-        defer { if ["tap", "long_press", "type", "key", "swipe", "drag", "pinch", "scroll_to", "back"].contains(where: { action[$0] != nil }) { scan.moved = true } }
+        let rules = config.rules
+        guard rules.enabled, let kind = ActionKind(action) else { return nil }
+        defer { if kind.movesScreen { scan.moved = true } }
         let messaging = scan.front?.bundleID.map(rules.messagingApps.contains) ?? false
         // In a messaging app, after an action that may have opened another screen, that screen is not
         // read yet: the composer's Send sits where the list had nothing, and the search field's number
         // from the list no longer says where typed text goes.
         let unread = !scan.read || (scan.moved && messaging)
-        if let spec = action["launch"] {
-            scan.front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil)
-            scan.read = false; scan.typingTarget = nil
-        } else if action["button"]?.text?.lowercased() == "home" {
-            scan.front = nil
-            scan.read = false; scan.typingTarget = nil
-        } else if let spec = action["run"] {
-            // A routine sends its own taps and keys: in a guarded app, in front or the routine's own
-            // (launched first), running it is input there.
-            let name = spec.string ?? spec["name"]?.string ?? ""
-            let app = memory?.routine(named: name)?.app
-            for bundle in [scan.front?.bundleID, app].compactMap({ $0 }) where rules.guardedApps.contains(bundle) {
-                return "input in \(bundle == scan.front?.bundleID ? scan.front?.describe ?? bundle : bundle) (routine \"\(name)\")"
-            }
-            if let app { scan.front = Foreground(bundleID: app, name: nil) }
-            scan.read = false; scan.typingTarget = nil
-        } else if let spec = action["tap"] ?? action["long_press"] {
-            let e = unread ? nil : target(spec, in: scan.elements)
-            if action["tap"] != nil { scan.typingTarget = e }
-            if let r = rules.reason(touching: e, typing: false, app: scan.front, secureOnScreen: scan.secureOnScreen) { return r }
-            let app = scan.front?.describe ?? "unknown"
+        let app = scan.front?.describe ?? "unknown"
+        let spec = action[kind.rawValue] ?? .null
+        if kind == .tap { scan.typingTarget = unread ? nil : target(spec, in: scan.elements) }
+        for press in presses(kind, action, scan, unread: unread) {
+            if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen) { return r }
+            guard press.judged == .tap else { continue }
             if unread, messaging { return "sending a message (a tap in \(app) on a screen not read yet)" }
             // After a launch or a run nothing of the app's screen was read: a Delete there reads as nothing.
             // The home screen after Home opens apps, which ask for themselves.
             if !scan.read, scan.front != nil { return "a tap on a screen not read yet (in \(app))" }
-            if scan.moved, spec.array != nil || spec["x"] != nil {
-                return "a tap at a point on a screen that may have changed since it was read (in \(app))"
+            if scan.moved, press.atPoint { return "a tap at a point on a screen that may have changed since it was read (in \(app))" }
+        }
+        switch kind {
+        case .launch:
+            scan.front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil)
+            scan.read = false; scan.typingTarget = nil
+        case .button where spec.text?.lowercased() == "home":
+            scan.front = nil
+            scan.read = false; scan.typingTarget = nil
+        case .run:
+            // A routine sends its own taps and keys: in a guarded app, in front or the routine's own
+            // (launched first), running it is input there.
+            let name = spec.string ?? spec["name"]?.string ?? ""
+            let routineApp = memory?.routine(named: name)?.app
+            for bundle in [scan.front?.bundleID, routineApp].compactMap({ $0 }) where rules.guardedApps.contains(bundle) {
+                return "input in \(bundle == scan.front?.bundleID ? scan.front?.describe ?? bundle : bundle) (routine \"\(name)\")"
             }
-        } else if let text = action["type"]?.text {
+            if let routineApp { scan.front = Foreground(bundleID: routineApp, name: nil) }
+            scan.read = false; scan.typingTarget = nil
+        case .type:
+            guard let text = spec.text else { return nil }
             let e = if let ref = action["ref"] {
                 unread ? nil : (scan.elements == nil ? refs[ref.int ?? -1] : nil) ?? scan.typingTarget
             } else {
@@ -1050,15 +1241,20 @@ final class Computer: @unchecked Sendable {
             }
             scan.typingTarget = e
             if let r = rules.reason(touching: e, typing: true, app: scan.front, secureOnScreen: scan.read && scan.secureOnScreen && e == nil) { return r }
-            if messaging, text.contains(where: \.isNewline), !Self.isSearch(e) { return "sending a message (a return typed in \(scan.front?.describe ?? "unknown"))" }
-        } else if action["key"]?.string?.lowercased() == "return", let field = scan.typingTarget, rules.reason(touching: field, typing: true, app: scan.front, secureOnScreen: false) != nil {
-            return "submitting a password field"
-        } else if messaging, let key = action["key"]?.text, (Self.keyText[key.lowercased()] ?? key).contains(where: \.isNewline), !Self.isSearch(scan.typingTarget) {
+            if messaging, text.contains(where: \.isNewline), !Self.isSearch(e) { return "sending a message (a return typed in \(app))" }
+        case .key:
+            let key = spec.text ?? ""
+            if key.lowercased() == "return", let field = scan.typingTarget, rules.reason(touching: field, typing: true, app: scan.front, secureOnScreen: false) != nil {
+                return "submitting a password field"
+            }
             // Return is the send key in WeChat, WhatsApp and Telegram: typed text goes out on it.
-            return "sending a message (return in \(scan.front?.describe ?? "unknown"))"
-        } else if action["key"] != nil || action["drag"] != nil, let bundle = scan.front?.bundleID, rules.guardedApps.contains(bundle) {
+            if messaging, (Self.keyText[key.lowercased()] ?? key).contains(where: \.isNewline), !Self.isSearch(scan.typingTarget) {
+                return "sending a message (return in \(app))"
+            }
             // Waiting, handing the screen over, swipes, Home and launches are not input in a guarded app.
-            return "input in \(scan.front?.describe ?? bundle)"
+            if let bundle = scan.front?.bundleID, rules.guardedApps.contains(bundle) { return "input in \(app)" }
+        case .button, .tap, .back, .handoff, .swipe, .scrollTo, .longPress, .drag, .pinch, .waitUntil, .wait:
+            break
         }
         return nil
     }

@@ -47,6 +47,10 @@ testers on Alpha run the file that was tried on Pre-alpha, and Beta runs the fil
    scorecard has more failures than the last beta's. Merging waits for approval in `beta`, then publishes `app-X.Y.Z-beta.K`
    (`publish-promotion.yml`) with the scorecards attached, and creates `release/X.Y` on a version's
    first beta.
+
+   Promotions only move the patch version. To start a new minor version (0.3.x to 0.4.0), the
+   repository owner merges a PR that sets `native/ios-app/VERSION` to it; the pre-alpha built from
+   that merge is the first build of the new version, and later promotions bump its patch as above.
 4. **Stable, by PR.** Propose promotion > stable, with a beta tag or empty for the newest beta. The
    gate passes once that beta has been out for `soak_days` (3, in `.github/channels.json`) and no
    issue labelled `blocker` is open. To ship sooner, add the `soak-override` label to the PR, or give

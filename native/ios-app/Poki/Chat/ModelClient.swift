@@ -45,7 +45,7 @@ func postJSON(_ url: URL, headers: [String: String], body: [String: Any], key: S
     do {
         (data, response) = try await URLSession.shared.data(for: request)
     } catch {
-        throw ModelFailure(errorDescription: String(localized: "Poki could not reach \(provider): \(error.localizedDescription)"))
+        throw ModelFailure(errorDescription: String(localized: "Poki could not reach \(provider). \(error.localizedDescription)"))
     }
     let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     return ((response as? HTTPURLResponse)?.statusCode ?? 0, json, data)
@@ -126,11 +126,11 @@ final class AnthropicClient: ModelClient {
         guard (200..<300).contains(status), let json else {
             let text = apiErrorText(json, data, key: key)
             let words: String = switch status {
-            case 401: String(localized: "Anthropic did not accept the key. Check it in Poki › Model.")
+            case 401: String(localized: "Anthropic did not accept the key. Check it in Settings › Models.")
             case 403: String(localized: "This Anthropic key can’t use \(ModelKeys.selectedModelName).")
             case 429: String(localized: "Anthropic says the key has hit its rate limit. Try again in a minute.")
             case 529: String(localized: "Anthropic is overloaded right now. Try again in a minute.")
-            default: String(localized: "Anthropic answered \(status): \(text)")
+            default: String(localized: "Anthropic answered \(status), \(text)")
             }
             throw ModelFailure(errorDescription: words)
         }

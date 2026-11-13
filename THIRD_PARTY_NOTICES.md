@@ -1,6 +1,6 @@
 # Open-source notices
 
-The root AGPL-3.0-only license covers original Poki MCP contributions. Third-party code retains its respective copyright notices and license terms.
+The root AGPL-3.0-only license covers original Poki code. Poki's brand assets, including the Poki bear, are not covered; see [BRAND.md](BRAND.md). Third-party code retains its respective copyright notices and license terms.
 
 ## idevice
 
@@ -74,14 +74,35 @@ The app and the Live Activity draw their Latin text in [Geist](https://github.co
 
 ## iPhone app chat
 
-The iPhone app's chat, Poki details and model pages ([native/ios-app/Poki/Chat](native/ios-app/Poki/Chat)) port code from four projects. Each file names its source in its header.
+The iPhone app's sessions list, chat, Poki details and model pages ([native/ios-app/Poki/Sessions](native/ios-app/Poki/Sessions), [native/ios-app/Poki/Chat](native/ios-app/Poki/Chat)) port code from five projects. Each file names its source in its header.
 
-- [GetStream/swiftui-iMessage-clone](https://github.com/GetStream/swiftui-iMessage-clone/tree/df114b4) at commit `df114b4`, by Stefan Blos: the header with the picture and name that opens the details (`MessageListHeader.swift`, `MessageListHeaderModifier.swift`) and the message field with its send button (`ComposerInputView.swift`). The repository has no license file.
+- [GetStream/swiftui-iMessage-clone](https://github.com/GetStream/swiftui-iMessage-clone/tree/df114b4) at commit `df114b4`, by Stefan Blos: the pinned conversation row and session row (`PinnedChannelsView.swift`, `iMessageChannelListItemView.swift`), the header with the picture and name that opens the details (`MessageListHeader.swift`, `MessageListHeaderModifier.swift`) and the message field with its send button (`ComposerInputView.swift`). The repository has no license file.
 - [Mackarous/ConversationUI](https://github.com/Mackarous/ConversationUI/tree/e77c69e) at commit `e77c69e`, copyright 2024 Andrew Mackarous, under the [MIT license](third_party/LICENSE.conversationui): the message bubble (`Sources/ConversationUI/MessageBubble.swift`).
 - [exyte/Chat](https://github.com/exyte/Chat/tree/f382a14) at commit `f382a14`, copyright 2019 exyte, under the [MIT license](third_party/LICENSE.exyte-chat): the plus button in front of the field (`Sources/ExyteChat/Views/InputView/InputView.swift`) and the waveform bars (`Sources/ExyteChat/Views/Recording/RecordWaveform.swift`).
+- [gonzalezreal/swift-markdown-ui](https://github.com/gonzalezreal/swift-markdown-ui/tree/8371aeb) at commit `8371aeb`, copyright 2020 Guillermo Gonzalez, under the [MIT license](third_party/LICENSE.swift-markdown-ui): the table in Poki's answers, with its column layout, borders and row backgrounds ([native/ios-app/Poki/Chat/AnswerTable](native/ios-app/Poki/Chat/AnswerTable), from `Sources/MarkdownUI/Views/Blocks/Table*.swift`, `Theme/BlockStyle/Table*Style.swift` and `Views/Environment/Environment+Table.swift`), and the GitHub theme's table values (`Theme/Theme+GitHub.swift`).
 - [lhuanyu/OllamaMessage](https://github.com/lhuanyu/OllamaMessage/tree/c857a02) at commit `c857a02`, copyright 2023 Huanyu Luo, under the [MIT license](third_party/LICENSE.ollamamessage): the model row and the provider list (`DialogueSettingsView.swift`, `OllamaModelSelectionView.swift`).
 
 The plan bubble's motion (`PlanMotion.swift`) uses the spring, duration and order parameters of four [Motion+](https://motion.dev/plus) examples for React (notifications-list, copy-button, todo-list, typewriter-change-content), rewritten in SwiftUI. The typing pace is Poki's own. No Motion+ file is included.
+
+## iPhone app conversations drawer
+
+The conversations drawer in [native/ios-app/Poki/Sessions/ThreadsDrawer.swift](native/ios-app/Poki/Sessions/ThreadsDrawer.swift) follows `apps/mobile/src/features/servers/components/app-drawer-shell.tsx` in [nightly-labs/openbot](https://github.com/nightly-labs/openbot/tree/a74951cd3890f1793150ce40b9e0221c63e48f99) at commit `a74951c`, under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Required Notice: Copyright 2026 Synthetify Labs spółka z ograniczoną odpowiedzialnością. Taken from it, rewritten from React Native in SwiftUI: the drawer under the page and the page that slides away to uncover it, one progress value from closed to open that the finger moves directly, the release that adds a sixth of a second of the finger's speed and opens past 0.45 or closes past 0.55, the spring that starts at the finger's speed, the page's corners that round within the first 15 % of the way, and the drawer that comes in from 24 points aside and from 55 % opacity. The page as a card with a hairline edge and a shadow follows `Sources/DrawerSideBar/SideBarNavigationView.swift` in [shubhamKachhiya/DrawerSideBar](https://github.com/shubhamKachhiya/DrawerSideBar) at commit `93370a0`, Copyright (c) 2026 shubhamKachhiya, under the MIT License. The width of the uncovered strip, the bounce and the stretch past open are Poki's own. The file names its sources in its header.
+
+## iPhone app capsule field
+
+The message field's app capsules ([native/ios-app/Poki/Capsule](native/ios-app/Poki/Capsule), ESP-377) adapt three files from [element-hq/element-x-ios](https://github.com/element-hq/element-x-ios/tree/21758530da454c65969c6ef159b9ca47b9394a7a) at commit `2175853`, copyright 2025 Element Creations Ltd. and 2023-2025 New Vector Ltd., under the GNU Affero General Public License v3.0 only, the license Poki itself uses: `ElementX/Sources/Other/Pills/PillTextAttachment.swift`, `PillTextAttachmentData.swift` and `PillView.swift`. Poki removed their room context and WysiwygComposer dependency, made the pill an app's icon and name, and draws it into the attachment's image. Each file names its source in its header. The app icons in `native/ios-app/Poki/AppIcons`, about 80 apps from Apple, the China store and the US store, are each app's App Store artwork, fetched through the iTunes Lookup API in November 2026, and are their makers' trademarks, used only to name each app. `native/ios-app/Poki/AppIcons/AppIcons.md` lists them with their dates and stores.
+
+## iPhone app settings rows
+
+The settings rows in [native/ios-app/Poki/Settings/PokiSettingsKit.swift](native/ios-app/Poki/Settings/PokiSettingsKit.swift) (ESP-469) adapt [element-hq/compound-ios](https://github.com/element-hq/compound-ios/tree/a1db8e1b) at commit `a1db8e1b`, copyright 2023-2024 New Vector Ltd., under the GNU Affero General Public License v3.0 only: the icon on its own subtle ground beside the title and description, the 30 pt scaled icon that does not size the row, and the trailing value and chevron of `Sources/Compound/List/ListRowLabel.swift`, `ListRowDetails.swift` and `ListRowAccessory.swift`. The settings home's order, the profile on top and then groups of rows, follows `ElementX/Sources/Screens/Settings/SettingsScreen/View/SettingsScreen.swift` in [element-hq/element-x-ios](https://github.com/element-hq/element-x-ios) at commit `4447399a`, same licence. Poki draws the icons on a round ground in its own colours and keeps the rows in the system list. The file names its sources in its header.
+
+## iPhone app suggestion rows
+
+[native/ios-app/Poki/Chat/Marquee.swift](native/ios-app/Poki/Chat/Marquee.swift) takes two things from `MarqueeView.swift` in [nainamaharjan/MarqueeSwiftUI](https://github.com/nainamaharjan/MarqueeSwiftUI) (commit 0b877e64), MIT License, Copyright (c) 2024 nainamaharjan: the speed that eases toward its target by the time that passed since the last frame, and the content laid out several times with the position wrapping by one content's width. The drawing and the touch handling are a `UIScrollView` of our own.
+
+## iPhone app home light
+
+`PointMotion` in [native/ios-app/Poki/Chat/HomeBackdrop.swift](native/ios-app/Poki/Chat/HomeBackdrop.swift) is adapted from `PointAnimation` in `Sources/MeshingKit/AnimationPattern.swift` of [rryam/MeshingKit](https://github.com/rryam/MeshingKit/tree/1c519ac7369d055eef0c23fb5d4944b9ef910a3e) (commit 1c519ac7), MIT License, Copyright (c) 2024 Rudrank Riyam: a cosine offset per mesh point and axis, each at its own frequency, several of which add up on one point. Poki added a starting phase and scales the offset by how far the light drifts. The mesh, its colours and the timing are Poki's own.
 
 ## iPhone app model loop
 

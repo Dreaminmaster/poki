@@ -128,6 +128,9 @@ public final class Runner: @unchecked Sendable {
     /// How many actions this side has given up on (sent, and not answered in time). A call compares
     /// it before and after an action to tell a timeout that reached the runner from one that did not.
     let actionsGivenUp = LockedBox(0)
+    /// Queued requests this side is still waiting on. A cancelled one is counted until it has marked
+    /// the stall, so `settle` never looks before that.
+    private let waitingOn = LockedBox(0)
     /// What the runner is still finishing, if anything: "GET /source from 7 s ago (restarted on its
     /// own if it is not through in 15 s)".
     public var busyWith: String? { stall.value.map { "\($0.path) from \(Int((now() - $0.since).rounded())) s ago (the runner is restarted on its own if it is not through in \(Int(wedgedAfter)) s)" } }
@@ -137,6 +140,9 @@ public final class Runner: @unchecked Sendable {
     /// WDA's own status answered, so the health probe saw nothing wrong). Nothing sent to it would
     /// run, so it is restarted (`onUnhealthy`), and the next call says why.
     var wedgedAfter: Double = 15
+    /// A runner busy with one request longer than this is wedged all the same (testmanagerd waits 60 s
+    /// for one request's work to complete).
+    var busyLimit: Double = 60
     /// Why the runner was last restarted by this side, for the next call to report (once).
     let lastRestart = LockedBox<String?>(nil)
     /// The host's own way to a screenshot (apart from the runner), used when the runner gives none.
@@ -203,6 +209,8 @@ public final class Runner: @unchecked Sendable {
         let target = URL(string: url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)!
         let queued = !Self.standalone.contains("\(method) \(Self.short(path))")
         let busyBefore = queued ? busyWith : nil
+        if queued { waitingOn.update { $0 += 1 } }
+        defer { if queued { waitingOn.update { $0 -= 1 } } }
         func busyNote() -> String { busyBefore.map { "; the runner is still finishing an earlier \($0)" } ?? "" }
         let result: (status: Int, body: Data)
         do {
@@ -232,9 +240,11 @@ public final class Runner: @unchecked Sendable {
             throw RunnerError(message: "the runner did not answer \(method) \(Self.short(path)): \(error)", delivery: .unknown, silent: true)
         }
         state.update { $0.misses = 0 }
-        if queued { stall.value = nil }
         let parsed = (try? JSON.parse(result.body)) ?? (result.body.isEmpty ? .object([:]) : ["value": .string(String(decoding: result.body, as: UTF8.self))])
         let value = parsed["value"] ?? parsed
+        // An answer is the runner through with what it was finishing, unless Poki's own process still
+        // holds that request (it answers others beside it).
+        if queued, (transport as? LocalRunner)?.holdsARequest != true { stall.value = nil }
         if let code = value["error"]?.string {
             let message = (value["message"]?.string ?? code).split(separator: "\n").first.map(String.init) ?? code
             throw RunnerError(message: "the runner refused \(method) \(Self.short(path)): \(message)", delivery: .notSent, status: result.status, code: code)
@@ -278,7 +288,19 @@ public final class Runner: @unchecked Sendable {
             guard let wedgedAfter = self?.wedgedAfter else { return }
             try? await Task.sleep(nanoseconds: UInt64(max(0, wedgedAfter) * 1_000_000_000))
             guard let self, let s = self.stall.value, s.since == stalled.since else { return }
-            if (try? await self.raw("GET", "/wda/activeAppInfo", timeout: 3, countsAsMiss: false)) != nil { return }
+            // Poki's own process says in its status what its queue is serving (WDA's status does not):
+            // a request within the time testmanagerd itself gives one is busy, not wedged, and a
+            // restart would bring nothing back (ESP-464: a chat app that did not answer for 38 s). It
+            // is watched again. A status that says nothing of it (WDA's) leads to the probe of the queue
+            // as before; one that does not answer at all is a runner gone or hung whole, restarted with
+            // no second wait, so a dead runner is restarted no later than before.
+            let status = try? await self.raw("GET", "/status", timeout: 3, countsAsMiss: false)
+            if let busy = status?["busy"]?["seconds"]?.double, busy < self.busyLimit {
+                if self.stall.value?.since == stalled.since { self.watch(stalled) }
+                return
+            }
+            guard self.stall.value?.since == stalled.since else { return }
+            if status != nil, (try? await self.raw("GET", "/wda/activeAppInfo", timeout: 3, countsAsMiss: false)) != nil { return }
             guard let still = self.stall.value, still.since == stalled.since else { return }
             let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
             self.lastRestart.value = "the runner wedged on \(still.path) (unanswered for \(Int((now() - still.since).rounded())) s), so it was restarted at \(f.string(from: Date()))"
@@ -320,6 +342,14 @@ public final class Runner: @unchecked Sendable {
             _ = try? await session(timeout: t)
         }
         return busyWith == nil
+    }
+
+    /// After a cancelled call: true once the runner is through with what that call had sent (its
+    /// request has given up and the queue has drained past it), false if not within `timeout`.
+    func settle(timeout: Double) async -> Bool {
+        let until = now() + timeout
+        while waitingOn.value > 0, now() < until { await sleep(seconds: 0.05) }
+        return await waitUntilFree(timeout: until - now())
     }
 
     private let opening = LockedBox<Task<String, Error>?>(nil)

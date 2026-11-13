@@ -31,6 +31,9 @@ enum RelayStatus: Sendable, Equatable {
         case .offline(let why): "Offline: \(why)"
         }
     }
+    var isOffline: Bool {
+        if case .offline = self { true } else { false }
+    }
 }
 
 protocol CoreSession: AnyObject {
@@ -62,6 +65,8 @@ struct RunnerStatus: Sendable, Equatable, Decodable {
         case "mounting_ddi": "Preparing"
         case "launching": "Starting"
         case "running": "Running"
+        // The loopback works here: the phone refused the remote pairing port, and Poki looks it up.
+        case "waiting_network" where code == "pairing_port": "Finding the pairing port"
         case "waiting_network": "Needs loopback"
         case "failed": "Stopped"
         default: state
@@ -84,6 +89,9 @@ struct LauncherConfig: Encodable {
     var wda_port = 8100
     /// Mount the disk image only: Poki automates the phone itself (AutomationPath.inProcess).
     var in_process = false
+    /// A file the mounted disk image puts on the phone: in-process, when the loopback refuses the
+    /// connection and this file is there, the launcher hands over to Poki's own session (ESP-448).
+    var ddi_marker: String? = nil
 }
 
 /// On-device wireless pairing (iOS 27, Settings > Privacy & Security > Developer Mode > Pair).

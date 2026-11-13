@@ -262,9 +262,11 @@ Poki is provided "as is", without warranty, as set out in the AGPL-3.0 license.
 
 ## License
 
-Poki is open source under the [AGPL-3.0-only license](LICENSE).
+Poki's code is open source under the [AGPL-3.0-only license](LICENSE).
 
-Copyright (c) 2026 Joseph Zhou and contributors. Open-source dependencies retain their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The Poki bear, the app icon and Poki's other artwork are not covered by that license. You can use screenshots to write about Poki; a fork needs its own name and artwork. See [BRAND.md](BRAND.md).
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Open-source dependencies and third-party assets retain their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Acknowledgments
 

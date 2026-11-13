@@ -1,127 +1,53 @@
+//
+//  SessionsView.swift
+//  Poki
+//
+//  The conversations list began as GetStream/swiftui-iMessage-clone's channel list (commit df114b4,
+//  iMessageClone/ChannelList, by Stefan Blos; the repository has no licence file). For ESP-326 it is a
+//  system List: the rows, their swipe actions and their separators are the system's own.
+//
+
 import SwiftUI
 import UIKit
 
-/// Poki's home: every conversation, like the Messages list. The owner's chats with Poki, the sessions of
-/// outside agents (Claude, Codex, any MCP client) and the tasks they handed to Poki, live first. On top,
-/// a strip with one half for each way of using Poki: the address agents connect to, and Poki's own model.
+/// The conversations, in the drawer under the chat (iPhone) and beside it (iPad): Poki's name on
+/// top, then one line per conversation, the newest first, and floating over the list the button for a
+/// new conversation and the way into Settings.
 struct SessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     var openChat: () -> Void
     var openSession: (String) -> Void
-    var openModel: () -> Void
-    var openConnectors: () -> Void
-    var openDetails: () -> Void
-    var openVoice: () -> Void
-    var openSetup: () -> Void
-    @State private var copied = false
-    @State private var query = ""
     @State private var renaming: SavedSession?
     @State private var newName = ""
+    @Environment(\.inThreadsDrawer) private var inDrawer
+    @Environment(\.drawerSliding) private var sliding
 
     private var store: SessionStore { SessionStore.shared }
+    private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
 
     var body: some View {
+        let groups = grouped
         List {
-            // What matters before any conversation: whether Poki is on, whether agents can reach it,
-            // and what setup still needs.
-            // One warning while Poki can't work fully, naming where to fix it (the tab bar dots match).
-            if setupLeft > 0 || agentsIssue != nil {
-                Section {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Poki can’t work fully yet").font(Prominent.font(.headline, .semibold))
-                            Text("Fix the items below. Each one has a dot on its tab.")
-                                .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                        }
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    }
-                    if setupLeft > 0 {
-                        Button(action: openSetup) {
-                            LabeledContent {
-                                Text(setupLeft == 1 ? String(localized: "1 item") : String(localized: "\(setupLeft) items"))
-                            } label: {
-                                Label("Setup", systemImage: "checklist")
-                            }
-                        }
-                        .foregroundStyle(Color(.label))
-                    }
-                    if let issue = agentsIssue {
-                        Button(action: ModelKeys.hasUsableKey ? openConnectors : openModel) {
-                            LabeledContent {
-                                Text(issue)
-                            } label: {
-                                Label("Agents", systemImage: "point.3.connected.trianglepath.dotted")
-                            }
-                        }
-                        .foregroundStyle(Color(.label))
-                    }
+            ForEach(groups, id: \.day) { group in
+                if groups.count > 1 { heading(group.day) }
+                ForEach(group.sessions) { session in
+                    row(session)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
             }
-            if let warning = ExpiryWarning(expiry: model.signer.expiry) {
-                ExpiryWarningSection(warning: warning)
-            }
-            if store.ordered.isEmpty {
-                // In the list, under the controls (an overlay would sit on top of them).
-                Section {
-                    ContentUnavailableView {
-                        Label("No Sessions Yet", systemImage: "bubble.left.and.bubble.right")
-                    } description: {
-                        Text("Start a chat with Poki, or connect an agent such as Claude or Codex in Agents. Every session shows up here.")
-                    }
-                    .listRowBackground(Color.clear)
-                }
-            }
-            Section {
-                ForEach(shown) { session in
-                    Button { open(session) } label: { SessionRow(session: session) }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            if !session.live {
-                                Button(role: .destructive) { store.delete(session.id) } label: { Label("Delete", systemImage: "trash") }
-                            }
-                            Button { startRename(session) } label: { Label("Rename", systemImage: "pencil") }
-                                .tint(.blue)
-                        }
-                        .contextMenu {
-                            Button { startRename(session) } label: { Label("Rename", systemImage: "pencil") }
-                            if !session.live {
-                                Button(role: .destructive) { store.delete(session.id) } label: { Label("Delete", systemImage: "trash") }
-                            }
-                        }
-                }
-            }
-            if !query.isEmpty, shown.isEmpty {
-                ContentUnavailableView.search(text: query).listRowBackground(Color.clear)
-            }
+            if groups.isEmpty { empty }
         }
-        .listStyle(.insetGrouped)
-        // Home's own header: a soft translucent blue that fades into the list, the bear and "Poki" in
-        // Geist at the top left. The other pages keep the system's plain bars.
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
-        .background {
-            ZStack(alignment: .top) {
-                Color(.systemGroupedBackground)
-                LinearGradient(colors: [Color.blue.opacity(0.30), Color.blue.opacity(0.10), Color.blue.opacity(0)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 320)
-            }
-            .ignoresSafeArea()
-        }
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search Sessions"))
-        .navigationTitle(Text(verbatim: "Poki"))
-        .navigationBarTitleDisplayMode(.inline)
-        // The system title gives way to HomeBrand; "Poki" stays the back button's title.
-        .toolbar(removing: .title)
-        .toolbar {
-            HomeBrand()
-            ToolbarItem(placement: .topBarTrailing) {
-                PowerButton(state: !model.setupLooksComplete ? .paused : model.sessionOn ? .ready : .stopped,
-                            turnOn: { model.startSession() }, turnOff: { chat.stop(); model.stopSession() }, openSetup: openSetup)
-            }
-        }
+        .scrollDismissesKeyboard(.immediately)
+        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .safeAreaInset(edge: .bottom, spacing: 0) { controls }
+        .background(Tint.sidebar.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) { renaming = nil }
@@ -130,61 +56,257 @@ struct SessionsView: View {
                 renaming = nil
             }
         }
-        // A new chat with Poki's own agent, at the bottom right. On iOS 26 it is the round button on
-        // the tab bar's line instead (RootView's New Chat tab).
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            if #unavailable(iOS 26.0) { newChatButton }
-        }
     }
 
-    private var newChatButton: some View {
-            Button { chat.newConversation(); openChat() } label: {
-                Image(systemName: "square.and.pencil").font(.title3.weight(.semibold))
-                    .frame(width: 28, height: 28)
+    private var header: some View {
+        HStack(spacing: 10) {
+            // The app's icon, small, rounded in the system's proportion for app icons.
+            Image("PokiIcon").resizable().scaledToFit().frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 32 * 0.225, style: .continuous))
+                .accessibilityHidden(true)
+            Text(verbatim: "Poki").font(Prominent.font(size: 28, relativeTo: .title, .bold)).foregroundStyle(Color(.label))
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+        }
+        .padding(.horizontal, 32).padding(.top, 8).padding(.bottom, 12)
+        .background(Tint.sidebar)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+    }
+
+    /// Floating over the list's foot: a new conversation, in the leading corner, and Settings in the trailing one.
+    private var controls: some View {
+        HStack(alignment: .center) {
+            Button {
+                guard !sliding else { return }
+                if !chat.running { chat.newConversation() }
+                openChat()
+            } label: {
+                Label("New Conversation", systemImage: "square.and.pencil")
+                    .labelStyle(PillLabelStyle())
+                    .font(.body.weight(.semibold)).foregroundStyle(.white)
+                    // One line: "New Conversation" in English is the longest, and in a narrow drawer it
+                    // shrinks a little rather than wrapping.
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 18).frame(minHeight: 48)
+                    .contentShape(.capsule)
             }
-            .newChatStyle()
-            .controlSize(.large)
-            .fixedSize()
+            .buttonStyle(.plain)
+            // Poki's blue, the send button's own.
+            .glassSurface(in: Capsule(), tint: Tint.blue, interactive: true)
+            .opacity(chat.running ? 0.5 : 1)
             .disabled(chat.running)
-            .padding(.trailing, 16).padding(.bottom, 8)
-            .accessibilityLabel(Text("New Chat with Poki"))
+            .accessibilityIdentifier("threads.newChat")
+            Spacer(minLength: 12)
+            SettingsEntryButton()
+        }
+        .glassGroup(spacing: 8)
+        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
-    /// "Working in Messages", "Ready", "Off".
-    private var runLine: String {
-        if chat.running { return model.currentApp.map { String(localized: "Working in \($0)") } ?? String(localized: "Working") }
-        if !model.sessionOn { return String(localized: "Off. Agents and chats can’t use this iPhone.") }
-        if model.runnerPaused { return String(localized: "Paused") }
-        return String(localized: "On, ready for a task")
+    private func heading(_ day: Day) -> some View {
+        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Tint.sidebarHeading)
+            .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .accessibilityAddTraits(.isHeader)
     }
 
-    private var agentsLine: String {
-        let live = SessionStore.shared.liveAgentCount
-        switch model.relayStatus {
-        case .ready: return live > 0 ? String(localized: "Online · \(live) live") : String(localized: "Online")
-        case .connecting: return String(localized: "Connecting")
-        case .offline: return String(localized: "Offline")
-        case .off: return model.identity.secrets.isEmpty ? String(localized: "None yet") : String(localized: "Off")
+    /// The conversation on screen in the chat, marked as the selected row.
+    private func current(_ session: SavedSession) -> Bool {
+        session.kind == .poki && session.id == chat.sessionID && sampleHome == nil
+    }
+
+    /// The row's own ground, the drawer's colour (the selected row's soft blue over it): a long press
+    /// lifts a clean card, not the row's words over a grey shadow.
+    private func ground(_ session: SavedSession) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebar)
+            .overlay { if current(session) { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected) } }
+    }
+
+    /// The app it worked in: for the chat's own task under way, the app it is in now.
+    private func app(_ session: SavedSession) -> String? {
+        if session.live, session.id == chat.sessionID, let now = chat.taskApp, !now.isEmpty { return now }
+        return session.app
+    }
+
+
+    /// What its last run ended in, when that was not well: failed or stopped. Nothing for a conversation
+    /// still running, one that finished, or one that has not run.
+    private func lastRunProblem(_ session: SavedSession) -> SavedSession.Outcome? {
+        guard !session.live, let outcome = session.outcome, outcome != .done else { return nil }
+        return outcome
+    }
+
+    /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for
+    /// you, or else a quiet mark when its last run failed or was stopped. Your turn comes first: it is the
+    /// one thing in the list to act on.
+    private func row(_ session: SavedSession) -> some View {
+        let needs = needsYou(session)
+        let trouble = needs ? nil : lastRunProblem(session)
+        let app = app(session)
+        return Button { open(session) } label: {
+            HStack(spacing: 12) {
+                ConversationTitle(session: session, app: app)
+                Spacer(minLength: 8)
+                if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
+                else if let trouble {
+                    Image(systemName: trouble == .failed ? "exclamationmark.circle.fill" : "pause.circle.fill")
+                        .font(.system(size: 14)).foregroundStyle(trouble == .failed ? Tint.red : Color.secondary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 48)
+            .background(ground(session))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        // A long press lifts the row's own rounded shape, not the list's whole width, so the lifted row
+        // and its menu stay inside the drawer rather than over the chat beside it.
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .combine)
+        // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
+        .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil,
+                                                         trouble.map { $0 == .failed ? String(localized: "Failed") : String(localized: "Stopped") }]
+            .compactMap { $0 }.joined(separator: ", ")))
+        // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if !inDrawer {
+                if !session.live, sampleHome == nil {
+                    Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+                }
+                if !session.live, sampleHome == nil {
+                    Button("Archive", systemImage: "archivebox") { store.archive(session.id) }.tint(Tint.blue)
+                }
+                Button("Rename", systemImage: "pencil") { startRename(session) }
+            }
+        }
+        .contextMenu {
+            Button("Rename", systemImage: "pencil") { startRename(session) }
+            if !session.live, sampleHome == nil {
+                Button("Archive", systemImage: "archivebox") { store.archive(session.id) }
+                Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+            }
         }
     }
 
-    private var needsSetup: Bool { model.pairingPath == nil || model.setupStepsLeft }
-
-    private var setupLeft: Int { model.setupLooksComplete ? 0 : SetupStep.shown.filter { !model.looksDone($0) }.count }
-
-    /// What the Agents tab needs, if anything (the same test as its tab bar dot).
-    private var agentsIssue: String? {
-        if !ModelKeys.hasUsableKey { return String(localized: "No chat account") }
-        if case .offline = model.relayStatus { return String(localized: "Relay offline") }
-        return nil
+    private var empty: some View {
+        ContentUnavailableView("No Conversations Yet", systemImage: "bubble.left.and.bubble.right")
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 
-    /// The sessions matching the search field: name, first message or last line.
     private var shown: [SavedSession] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return store.ordered }
-        return store.ordered.filter { [$0.name, $0.title, $0.lastLine, $0.client ?? ""].contains { $0.localizedCaseInsensitiveContains(q) } }
+        if sampleHome == "paused" { return [] }
+        return sampleHome == "sessions" ? Self.sampleSessions : store.listed
     }
+
+    /// When a conversation last moved, for the faint headings between the days.
+    enum Day: CaseIterable {
+        case today, yesterday, earlier
+
+        var title: String {
+            switch self {
+            case .today: String(localized: "Today")
+            case .yesterday: String(localized: "Yesterday")
+            case .earlier: String(localized: "Earlier")
+            }
+        }
+
+        static func of(_ session: SavedSession) -> Day {
+            let calendar = Calendar.current
+            if session.live || calendar.isDateInToday(session.updated) { return .today }
+            return calendar.isDateInYesterday(session.updated) ? .yesterday : .earlier
+        }
+    }
+
+    /// The conversations by day, each day keeping the store's order.
+    private var grouped: [(day: Day, sessions: [SavedSession])] {
+        let all = shown
+        return Day.allCases.compactMap { day in
+            let sessions = all.filter { Day.of($0) == day }
+            return sessions.isEmpty ? nil : (day, sessions)
+        }
+    }
+
+    /// Held by a step that waits for the owner: its own last plan says so, or it is the conversation
+    /// the waiting approval or hand-over belongs to.
+    private func needsYou(_ session: SavedSession) -> Bool {
+        if session.needsYou { return true }
+        guard session.live, session.id == chat.sessionID || session.id == store.activeSessionID else { return false }
+        return !model.approvals.isEmpty || model.handoffText != nil
+    }
+    private static var sampleSessions: [SavedSession] {
+        let now = Date()
+        let yesterday = now.addingTimeInterval(-86400)
+        return [
+            SavedSession(
+                id: "sample-1",
+                kind: .handoff,
+                client: "Claude Code",
+                title: "Claude → Poki",
+                started: now,
+                updated: now,
+                live: true,
+                outcome: nil,
+                entries: [ChatEntry(.poki(String(localized: "Needs your OK: send “On my way” to Mom"))), ChatEntry(.note(.waiting))],
+                calls: [],
+                customName: "Claude → Poki"
+            ),
+            SavedSession(
+                id: "sample-2",
+                kind: .poki,
+                client: nil,
+                title: String(localized: "What iOS version is this?"),
+                started: now,
+                updated: now,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "It’s iOS 27.3. Want me to check for an update?")))],
+                calls: []
+            ),
+            SavedSession(
+                id: "sample-3",
+                kind: .agent,
+                client: "Codex",
+                title: "Codex",
+                started: now,
+                updated: now,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "Opened Photos and tapped “Albums”. Done in 3 steps.")))],
+                calls: [],
+                customName: "Codex"
+            ),
+            SavedSession(
+                id: "sample-4",
+                kind: .poki,
+                client: nil,
+                title: String(localized: "Order oat milk again"),
+                started: yesterday,
+                updated: yesterday,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "Ran your routine: same order as last week, $4.99.")))],
+                calls: []
+            ),
+            SavedSession(
+                id: "sample-5",
+                kind: .agent,
+                client: "Claude Code",
+                title: "Claude Code",
+                started: yesterday,
+                updated: yesterday,
+                live: false,
+                outcome: .done,
+                entries: [ChatEntry(.poki(String(localized: "Your turn, enter your Apple Account password")))],
+                calls: [],
+                customName: "Claude Code"
+            ),
+        ]
+    }
+
 
     private func startRename(_ session: SavedSession) {
         newName = session.name
@@ -192,14 +314,38 @@ struct SessionsView: View {
     }
 
     private func open(_ session: SavedSession) {
+        guard !sliding else { return }
         if session.kind == .poki {
-            if session.id != chat.sessionID { chat.restore(session) }
+            if session.id != chat.sessionID, sampleHome == nil { chat.restore(session) }
             openChat()
         } else {
             openSession(session.id)
         }
     }
+}
 
+/// A label in a pill: the icon and the title side by side, a little apart.
+private struct PillLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 8) { configuration.icon; configuration.title }
+    }
+}
+
+extension SavedSession {
+    /// Live, and its task is held by a step that waits for the owner's answer.
+    var needsYou: Bool {
+        guard live else { return false }
+        for entry in entries.reversed() {
+            switch entry.kind {
+            case .plan(let steps): return steps.contains { $0.state == .waiting }
+            case .note(.waiting): return true
+            case .note(.approval(let note)): return note.state == .asking && !note.byModel
+            case .you, .request: return false
+            default: continue
+            }
+        }
+        return false
+    }
 }
 
 extension View {
@@ -209,201 +355,102 @@ extension View {
     }
 }
 
-private extension View {
-    /// The state pill: a fixed-width capsule filled with the state's colour (iOS 26's prominent toolbar
-    /// button, which takes the place of the bar's glass rather than sitting on it; a prominent capsule
-    /// before iOS 26).
-    @ViewBuilder func powerStyle(tint: Color) -> some View {
-        if #available(iOS 26.0, *) { buttonStyle(.glassProminent).buttonBorderShape(.capsule).tint(tint) }
-        else { buttonStyle(.borderedProminent).buttonBorderShape(.capsule).tint(tint) }
-    }
-
-    /// Blue-tinted Liquid Glass on iOS 26 and later; a blue prominent capsule before it.
-    @ViewBuilder func newChatStyle() -> some View {
-        if #available(iOS 26.0, *) { buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(.blue) }
-        else { buttonStyle(.borderedProminent).buttonBorderShape(.circle).tint(.blue) }
-    }
-}
-
-/// The home page's title: the bear and "Poki" in Geist, at the top left in place of the system title,
-/// without the toolbar's glass behind it on iOS 26.
-struct HomeBrand: ToolbarContent {
-    var body: some ToolbarContent {
-        if #available(iOS 26.0, *) {
-            ToolbarItem(placement: .topBarLeading) { label }
-                .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarLeading) { label }
-        }
-    }
-
-    private var label: some View {
-        HStack(spacing: 10) {
-            Image("Bear").resizable().scaledToFill()
-                .frame(width: 34, height: 34)
-                .clipShape(.rect(cornerRadius: 9, style: .continuous))
-                .shadow(color: .blue.opacity(0.35), radius: 6, y: 2)
-            Text(verbatim: "Poki")
-                .font(Prominent.font(.title, .bold))
-                .foregroundStyle(.primary)
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: "Poki"))
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// Poki's state as a fixed-width pill at the top right: Ready (blue, on; a tap turns it off), Stopped
-/// (red, off; a tap turns it on), Paused (orange, a setup item is open; a tap opens Setup). Words as
-/// well as colours, so the state reads without colour. A haptic for each turn.
-struct PowerButton: View {
-    enum Status { case ready, stopped, paused }
-    var state: Status
-    var turnOn: () -> Void
-    var turnOff: () -> Void
-    var openSetup: () -> Void
-
-    var body: some View {
-        Button {
-            switch state {
-            case .ready:
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                turnOff()
-            case .stopped:
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                turnOn()
-            case .paused:
-                // A setup item is open: the fix is there, not in turning on.
-                openSetup()
-            }
-        } label: {
-            // The state's symbol before its word, a touch taller than the text, in a pill of fixed width.
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.body.weight(.semibold))
-                    .imageScale(.medium)
-                    .contentTransition(.symbolEffect(.replace))
-                Text(word)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .contentTransition(.interpolate)
-            }
-            .frame(width: 96)
-        }
-        .powerStyle(tint: tint)
-        .animation(.snappy, value: state)
-        .accessibilityLabel(Text("Poki"))
-        .accessibilityValue(Text(word))
-        .accessibilityHint(Text(state == .ready ? "Turns Poki off" : state == .stopped ? "Turns Poki on" : "Opens Setup"))
-    }
-
-    private var word: LocalizedStringKey {
-        switch state {
-        case .ready: "Ready"
-        case .stopped: "Stopped"
-        case .paused: "Paused"
-        }
-    }
-
-    private var symbol: String {
-        switch state {
-        case .ready: "checkmark.circle.fill"
-        case .stopped: "power"
-        case .paused: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch state {
-        case .ready: .blue
-        case .stopped: .red
-        case .paused: .orange
-        }
-    }
-}
-
-/// One row: who, when, the last thing that happened, and how it ended.
-struct SessionRow: View {
+/// A conversation as the lists show it (the drawer, Settings > Conversations): the small icon of the app
+/// it worked in, only once the icon is at hand so a row without one starts where the others' names do,
+/// then its name, a step larger than the body, as a list of names only reads well.
+struct ConversationTitle: View {
     var session: SavedSession
+    /// The app it worked in, when the row knows better than what is saved (a task under way).
+    var app: String? = nil
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SessionAvatar(session: session, size: 44)
-                .overlay(alignment: .topTrailing) {
-                    if session.live {
-                        Circle().fill(ChatColor.green).frame(width: 12, height: 12)
-                            .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2))
-                            .offset(x: 2, y: -2)
-                            .accessibilityLabel(Text("Live"))
-                    }
-                }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(verbatim: session.name).font(Prominent.font(.body, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(session.live ? String(localized: "now") : ChatTime.row(session.updated)).font(.system(size: 15)).foregroundStyle(ChatColor.secondary)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(.tertiaryLabel))
-                }
-                HStack(spacing: 4) {
-                    outcomeMark
-                    Text(verbatim: subtitle).font(.system(size: 15)).foregroundStyle(ChatColor.secondary).lineLimit(2)
-                }
-            }
+        let app = app ?? session.app
+        HStack(spacing: 12) {
+            if let app, AppIconStore.shared.icon(app, dark: scheme == .dark) != nil { AppIconView(app: app, size: 22) }
+            Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
+                .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
         }
-        .padding(.vertical, 4)
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var subtitle: String {
-        let line = session.lastLine
-        if session.kind != .poki, line.isEmpty { return session.title }
-        return line
-    }
-
-    @ViewBuilder private var outcomeMark: some View {
-        switch session.outcome {
-        case .failed?: Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13)).foregroundStyle(Color(.systemOrange))
-        case .stopped?: Image(systemName: "pause.circle.fill").font(.system(size: 13)).foregroundStyle(ChatColor.secondary)
-        default: EmptyView()
-        }
+        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
     }
 }
 
-/// Poki's bear for its own chats; the agent's initial on its colour for an outside agent; both for a
-/// hand-off.
+/// What a row shows on its leading side: the icon of the app the conversation worked in, with the
+/// outside agent's badge on its corner for an agent's session or hand-off. Without an app icon, an
+/// agent's badge, or for a chat with Poki the one placeholder tile.
 struct SessionAvatar: View {
     var session: SavedSession
+    /// The app it worked in, when the row knows better than what is saved (a task under way).
+    var app: String? = nil
     var size: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        switch session.kind {
-        case .poki: PokiAvatar(size: size)
-        case .voice:
-            ZStack(alignment: .bottomTrailing) {
-                PokiAvatar(size: size)
-                Image(systemName: "waveform.circle.fill").font(.system(size: size * 0.42)).symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, Color.blue).background(Circle().fill(Color(.systemBackground)).padding(-1.5))
-                    .offset(x: 3, y: 3).accessibilityHidden(true)
-            }
-        case .agent: AgentBadge(name: session.client ?? "", size: size)
-        case .handoff:
-            ZStack(alignment: .bottomTrailing) {
+        let app = app ?? session.app
+        let agent = session.kind == .agent || session.kind == .handoff
+        // An agent's session shows the app only once its icon is at hand; a chat with Poki shows the
+        // placeholder while the icon is fetched.
+        let icon = app.flatMap { name in agent ? (AppIconStore.shared.icon(name, dark: scheme == .dark) != nil ? name : nil) : name }
+        ZStack(alignment: .bottomTrailing) {
+            if let icon {
+                AppIconView(app: icon, size: size)
+            } else if agent {
                 AgentBadge(name: session.client ?? "", size: size)
-                PokiAvatar(size: size * 0.5).overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2))
-                    .offset(x: 3, y: 3)
+            } else {
+                tile(session.kind == .voice ? "waveform" : "bubble.left")
+            }
+            if agent, icon != nil {
+                // Whose session it is, on the app's corner.
+                AgentBadge(name: session.client ?? "", size: size * 0.46, edge: true).offset(x: 4, y: 4)
+            } else if session.kind == .handoff {
+                PokiAvatar(size: size * 0.46)
+                    .overlay(RoundedRectangle(cornerRadius: size * 0.13, style: .continuous).strokeBorder(Color(.systemBackground), lineWidth: 1.5))
+                    .offset(x: 4, y: 4)
             }
         }
+        .frame(width: size, height: size)
+        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
+        .accessibilityHidden(true)
+    }
+
+    /// The placeholder: the same icon shape as an app's, on the system's quiet fill.
+    private func tile(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: size * 0.42, weight: .medium)).foregroundStyle(Color(.secondaryLabel))
+            .frame(width: size, height: size)
+            .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: size * 0.225, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
-/// An outside agent's badge: its provider's logo, or its initials (see `CallerBadge`).
+/// An outside agent's badge: its provider's logo, or its initials (see `CallerBadge`). In dark mode a
+/// dark badge (OpenAI's is black) turns light, so it never is a black disc on a dark panel.
 struct AgentBadge: View {
     var name: String
     var size: CGFloat
-    var body: some View { CallerBadge(name: name, size: size).accessibilityHidden(true) }
+    /// On another icon's corner: a ring in the page's colour sets it apart from the icon.
+    var edge = false
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        CallerBadge(name: name, size: size, lifted: scheme == .dark)
+            .overlay(Circle().strokeBorder(edge ? Color(.systemBackground) : Tint.ring, lineWidth: edge ? 1.5 : 1))
+            .accessibilityHidden(true)
+    }
+}
+
+/// The boards' guest thread (02b) for the screenshots (`-pokiHome sessions`, the first row): an
+/// outside agent borrowing Poki's hands, at step 2 of 3. Nothing runs.
+private enum GuestSample {
+    static var isOn: Bool { UserDefaults.standard.string(forKey: "pokiHome") != nil }
+    static let plan = [String(localized: "Open TestFlight"), String(localized: "Find Poki"), String(localized: "Tap Update")]
+    static let entries: [ChatEntry] = {
+        var steps = ChatEntry(.plan([PlanStep(plan[0], state: .done), PlanStep(plan[1])]))
+        steps.at = Date().addingTimeInterval(-42)
+        steps.title = String(localized: "Install the newest build")
+        return [ChatEntry(.request(String(localized: "Open TestFlight and install the newest Poki build."), from: "Claude Code")), steps]
+    }()
 }
 
 /// An outside agent's session or hand-off as a conversation: the agent's own steps as grey lines, its
@@ -415,24 +462,47 @@ struct SessionView: View {
 
     @State private var renaming = false
     @State private var newName = ""
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let session = SessionStore.shared.session(id)
-        ChatTranscript(entries: (AskPoki.live(id)?.entries ?? session?.entries) ?? [], typing: AskPoki.live(id)?.awaitingModel ?? false, canRetry: false, retry: {}) {
-            if session?.live == true, let approval = model.approvals.first {
-                ApprovalCard(approval: approval) { approved in model.resolve(approval, approved: approved) }
+        let running = AskPoki.live(id)
+        let sample = GuestSample.isOn && id == "sample-1"
+        let live = sample || (running?.running ?? (session?.live ?? false))
+        // The live task's card shows what Poki last saw of the screen, as in the chat.
+        let shot: Image? = sample ? SampleShot.image(dark: scheme == .dark) : live ? model.lastShot.map { Image(uiImage: $0) } : nil
+        ChatTranscript(entries: sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? [],
+                       typing: running?.awaitingModel ?? false, canRetry: false, retry: {}, session: id,
+                       live: live, waiting: live && !model.approvals.isEmpty, handedOver: live && model.handoffText != nil,
+                       plan: sample ? GuestSample.plan : running?.planSteps, app: sample ? "TestFlight" : running.map(\.taskApp) ?? model.currentApp, shot: shot) { EmptyView() }
+        // The step that waits for you and Stop sit on the bottom edge, so the conversation scrolls under
+        // them and the bars keep their scroll-edge behaviour (as in the chat).
+        .bottomBar {
+            let asking = session?.live == true && (!model.approvals.isEmpty || model.handoffText != nil)
+            if asking || running != nil || sample {
+                VStack(spacing: 8) {
+                    if session?.live == true, let approval = model.approvals.first {
+                        ApprovalAskCard(title: approval.question, expires: approval.expires,
+                                        answer: { approved in model.resolve(approval, approved: approved) })
+                    } else if session?.live == true, let text = model.handoffText {
+                        TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
+                    }
+                    if running != nil || sample {
+                        // Said where Stop is, and only there: the words promise what the button does.
+                        Text("A guest is borrowing Poki’s hands. You can tap Stop anytime.")
+                            .font(.footnote).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
+                        Button("Stop Poki", systemImage: "stop.fill") { AskPoki.live(id)?.stop() }
+                            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(Tint.red)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: 720)
             }
         }
-        // Stop sits on the bottom edge as an inset, so the bubbles scroll under it and the bars keep
-        // their scroll-edge behaviour (as in the chat).
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if AskPoki.live(id) != nil {
-                Button("Stop Poki") { AskPoki.live(id)?.stop() }.buttonStyle(.bordered).tint(Color(.systemRed)).padding(.vertical, 10)
-            }
-        }
-        .background(Color(.systemBackground))
+        // The chat's own page colour, so Poki's white bubbles stand on it as they do there.
+        .background(Tint.page.ignoresSafeArea())
         // The session's name is the title; its menu renames it (the system title menu).
-        .navigationTitle(Text(verbatim: session?.name ?? ""))
+        .navigationTitle(Text(verbatim: session?.name ?? (sample ? "Claude Code" : "")))
         .navigationBarTitleDisplayMode(.inline)
         .sessionSubtitle(caption(session))
         .toolbarTitleMenu {
@@ -448,31 +518,10 @@ struct SessionView: View {
     private func caption(_ session: SavedSession?) -> String {
         guard let session else { return "" }
         switch session.kind {
-        case .agent: return String(localized: "Over MCP · \(ChatTime.row(session.started))")
-        case .handoff: return String(localized: "Handed to Poki · \(ChatTime.row(session.started))")
-        case .voice: return String(localized: "Voice · \(ChatTime.row(session.started))")
+        case .agent: return String(localized: "Over MCP, \(ChatTime.row(session.started))")
+        case .handoff: return String(localized: "Handed to Poki, \(ChatTime.row(session.started))")
+        case .voice: return String(localized: "Voice, \(ChatTime.row(session.started))")
         case .poki: return ""
         }
-    }
-}
-
-/// An approval waiting for the owner, in the chat and in the session that asked for it (also in the
-/// Dynamic Island, which iOS hides while Poki is in front).
-struct ApprovalCard: View {
-    var approval: PendingApproval
-    var answer: (Bool) -> Void
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Allow this step?").font(.system(size: 15, weight: .semibold))
-            Text(verbatim: approval.summary).font(.system(size: 15)).foregroundStyle(Color(.label))
-            HStack {
-                Button("Don’t Allow") { answer(false) }.buttonStyle(.bordered)
-                Button("Allow") { answer(true) }.buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16, style: .continuous))
-        .padding(.top, 8)
     }
 }

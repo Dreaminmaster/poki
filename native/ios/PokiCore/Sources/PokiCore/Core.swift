@@ -3,6 +3,11 @@ import Foundation
 public struct CoreConfig: Sendable {
     public var runnerURL: URL
     public var sensitive: SensitivityRules
+    /// The owner's way of asking (the app's Approvals page), which `sensitive` is narrowed by
+    /// (`SensitivityRules.asked`). Read at each step, so a change counts from the next one.
+    public var approvalMode: @Sendable () -> ApprovalMode = { .confirm }
+    /// The rules a step is judged by now: `sensitive` as the way of asking narrows it.
+    var rules: SensitivityRules { sensitive.asked(approvalMode()) }
     /// How long `do` holds for an approval before answering approval_required. Owners took 42 to 47 s
     /// to approve on the phone, so this is as long as a request lives (`Approvals.lifetime`, 120 s)
     /// less a margin; a relay that gives up sooner shortens it for the call (`RelayRequest.answerBy`).
@@ -365,7 +370,7 @@ public final class PokiCore: @unchecked Sendable {
         let element = Element(type: "Other", label: text, value: nil, identifier: nil, frame: Rect(x: 0, y: 0, width: 0, height: 0), depth: 0)
         // No readable text: the rules cannot tell what it does, so the owner is asked.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.sensitive.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
+        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
         let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, fingerprint: "tap:\(UUID().uuidString)")
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:
@@ -494,7 +499,7 @@ public final class PokiCore: @unchecked Sendable {
 
     // MARK: Tools
 
-    static let instructions = "look reads the iPhone's screen; do runs actions and then reads it. Both return the app in front, numbered elements and a screenshot whose pixels are screen points. Use the numbers from the latest answer; an element that stays on screen keeps its number, and do lists only what changed. Decide what happened from the elements, the screen_changed line and the picture. To reach something further down a list, use scroll_to with its text before trying swipes. Some actions (payments, deleting, sending messages, calls, passwords) need the owner's approval on the phone; do says so instead of sending them. Only the owner approves, by hand: do takes no input inside the Poki app. When the tree is late the elements come from the picture and a tap on a point of the picture always works: there is always a way on. A step that is the owner's to do (a password, a verification, a checkout you will not make) is handed to them with {handoff: {kind, text}}; keep polling look while they do it, then go on. When the owner's task is done, put finish: true on the last do (its actions may be empty): the phone then goes back to the app the owner asked from, where they read your reply. Saved routines repeat a whole path in one call: do {run: \"name\"} (routines {action: \"list\"} names them, and the first look of a task names those for the app in front); after a task that worked, routines {action: \"save\"} keeps its steps for next time, and remember keeps a fact about the owner."
+    static let instructions = "look reads the iPhone's screen; do runs actions and then reads it. Both return the app in front, numbered elements and a screenshot whose pixels are screen points. Use the numbers from the latest answer; an element that stays on screen keeps its number, and do lists only what changed. Decide what happened from the elements, the screen_changed line and the picture. To reach something further down a list, use scroll_to with its text before trying swipes. Some actions (payments, deleting, sending messages, calls, passwords) need the owner's approval on the phone; do says so instead of sending them. Only the owner approves, by hand: do takes no input inside the Poki app. When the tree is late the elements come from the picture and a tap on a point of the picture always works: there is always a way on. A step that is the owner's to do (a password, a verification, a checkout you will not make) is handed to them with {handoff: {kind, text}}; keep polling look while they do it, then go on. When the owner's task is done, put finish: true on the last do (its actions may be empty): the phone then goes back to the app the owner asked from, where they read your reply. Saved routines repeat a whole path in one call: do {run: \"name\"} (routines {action: \"list\"} names them); after a task that worked, routines {action: \"save\"} keeps its steps for next time, and remember keeps a fact about the owner."
 
     static let tools: [JSON] = [
         ["name": "look", "description": "Read the screen now: the app in front, the numbered elements (role, \"label = value\", [x,y,w,h] in screen points; + marks elements new since the last read, ~ moved ones) and a screenshot that is one pixel per screen point, so a point on the picture is a point to tap. Repeated text, scroll bars and empty containers are left out and long labels are cut; full=true lists every element as the tree has it and adds the text read from the picture inside [collapsed] elements (an app showed a whole cell, buttons and all, as one element). Numbers stay the same while an element stays on screen.",
@@ -529,6 +534,12 @@ public final class PokiCore: @unchecked Sendable {
     /// instructions MCP clients get, for a model loop inside the app.
     public static var toolCatalogJSON: String { JSON.array(tools).serialized() }
     public static var toolInstructions: String { instructions }
+
+    /// A cancelled call answers at once, while the action it had sent may still be running on the
+    /// phone. True once the runner is through with it, false if it is not within `timeout`.
+    public func settle(timeout: Double) async -> Bool {
+        await computer.runner.settle(timeout: timeout)
+    }
 
     func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
         if name == "status" { return status() }

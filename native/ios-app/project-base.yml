@@ -53,6 +53,9 @@ targets:
         CFBundleLocalizations: [en, zh-Hans, zh-Hant]
         # Every page is the website's blue (or the night blue): white status bar text throughout.
         UIStatusBarStyle: UIStatusBarStyleLightContent
+        # Display links may run at the display's full rate (120 a second on ProMotion iPhones): the
+        # home page's suggestion rows move once a frame.
+        CADisableMinimumFrameDurationOnPhone: true
         UIViewControllerBasedStatusBarAppearance: false
         UILaunchScreen:
           UIColorName: AccentColor
@@ -81,13 +84,14 @@ targets:
           - CFBundleURLName: nz.zheha.poki
             CFBundleURLSchemes: [poki]
         NSLocalNetworkUsageDescription: Poki connects to this iPhone's own developer services to pair with it and to run the automation, and to the voice bridge on your Mac.
-        NSCameraUsageDescription: Poki uses the camera only to scan the pairing code Poki Setup shows on your computer.
+        NSCameraUsageDescription: Poki uses the camera to take photos you send in a message, and to scan the pairing code Poki Setup shows on your computer.
         NSMicrophoneUsageDescription: Poki listens while you talk to it in Voice, and sends that audio to OpenAI to understand what you ask.
         NSSpeechRecognitionUsageDescription: Without an OpenAI key, Poki turns what you say in Voice into text on this iPhone and sends the text to your chosen model.
         # The voice bridge runs on the person's Mac on the local network, over plain HTTP.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing-manual-pairing._tcp]
+        # _remotepairing._tcp: Poki reads this iPhone's own remote pairing port from it (iOS moves the port).
+        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing-manual-pairing._tcp, _remotepairing._tcp]
         LSApplicationQueriesSchemes: [karing, surge, loon, shadowrocket, sing-box, stash, quantumult-x, clashmi]
         # A pairing file sent by AirDrop, Files or Poki Setup opens in Poki (Setup > Pair This iPhone).
         CFBundleDocumentTypes:

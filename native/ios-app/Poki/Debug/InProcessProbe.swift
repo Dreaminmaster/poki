@@ -54,6 +54,7 @@ final class InProcessProbe: ObservableObject {
             case "tools": await toolsCycle(model: model, app: defaults.string(forKey: "pokiProbeApp") ?? "local.pokimcp.fixture")
             case "gym": await gymScorecard(model: model)
             case "chat": await chatCycle(model: model)
+            case "web": await WebDemo.run()
             case "bench": await benchmark(model: model, rounds: defaults.integer(forKey: "pokiBenchRounds") > 0 ? defaults.integer(forKey: "pokiBenchRounds") : 5)
             default: await prepareOnly()
             }
@@ -394,8 +395,8 @@ final class InProcessProbe: ObservableObject {
     }
 }
 
-/// Settings > Diagnostics: the automation path switch and the probes (kept in this branch, where
-/// DiagnosticsView hosts it; ESP-152 removed it on a line where it had no caller).
+/// General › Testing Options: the automation path switch and the probes (752 had them in Settings ›
+/// Diagnostics; ESP-152 removed them on a line where they had no caller).
 struct InProcessSection: View {
     @ObservedObject var probe = InProcessProbe.shared
     @Environment(AppModel.self) private var model

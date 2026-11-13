@@ -239,9 +239,11 @@ Poki 按「原样」提供，不附带任何担保，具体以 AGPL-3.0 许可�
 
 ## 开源许可
 
-Poki 基于 [AGPL-3.0-only 许可证](LICENSE)开源。
+Poki 的代码基于 [AGPL-3.0-only 许可证](LICENSE)开源。
 
-Copyright (c) 2026 Joseph Zhou and contributors。开源依赖项保留各自的许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。如需参与贡献，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+Poki 小熊、应用图标和 Poki 的其他美术作品不在这一许可证范围内。你可以用截图介绍 Poki；分叉版本需要使用自己的名称和美术。详见 [BRAND.md](BRAND.md)。
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors。开源依赖项和第三方素材保留各自的许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。如需参与贡献，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 致谢
 

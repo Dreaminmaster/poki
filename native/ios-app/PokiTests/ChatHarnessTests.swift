@@ -1,6 +1,8 @@
 import Foundation
 import Network
 import PokiCore
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Poki
 
@@ -84,6 +86,99 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.answer?.kind, .field)
         XCTAssertEqual(result.answer?.items?.map(\.ref), ["7"])
         XCTAssertEqual(result.details, [TaskResult.Detail(label: "Battery", value: "81%")])
+    }
+
+    /// The model's name for the task comes with its plan and is kept on the task's plan entry, where
+    /// the task card reads its title ("Book a class", not the whole sentence that was asked). A
+    /// sentence sent as the title is not taken. When the task ends, its entry also keeps how it ended.
+    func testThePlansTitleNamesTheTask() async throws {
+        let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the gym app", "Book the class"], "currentStep": 1, "title": "Book a class"]),
+            done, FakeCompletions.text("Booked."),
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1, "title": "Open the Settings app and read out what the battery page says first"]),
+            done, FakeCompletions.text("81%."),
+        ])
+        let chat = chat(on: server)
+
+        _ = await chat.runDelegated("Book a class at my gym for tomorrow morning, the early one")
+        _ = await chat.runDelegated("What is the battery level?")
+
+        let plans = chat.entries.filter { if case .plan = $0.kind { true } else { false } }
+        XCTAssertEqual(plans.map(\.title), ["Book a class", nil])
+        // How each task ended stays with it, for the folded card: when, and out of how many planned steps.
+        XCTAssertEqual(plans.map(\.total), [2, 1])
+        XCTAssertTrue(plans.allSatisfy { $0.ended != nil })
+    }
+
+    /// Each task's browser card sits where that task began browsing: above the answer it led to, in
+    /// every task of the conversation, and in the conversation as it is saved and opened again.
+    func testEachBrowserCardSitsAboveTheAnswerItsTaskGave() async throws {
+        // A closed port: the page fails at once, and the browser has been opened for the task.
+        let open = FakeCompletions.tool("web_open", ["url": "http://127.0.0.1:9/prices"])
+        let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
+        let server = try FakeCompletions(replies: [open, done, FakeCompletions.text("First answer."),
+                                                   open, done, FakeCompletions.text("Second answer.")])
+        let chat = chat(on: server)
+        defer { PokiBrowser.shared.close() }
+
+        _ = await chat.runDelegated("Look up the prices")
+        _ = await chat.runDelegated("Look up the show times")
+
+        func order(_ entries: [ChatEntry]) -> [String] {
+            entries.compactMap { entry in
+                switch entry.kind {
+                case .request(let text, _): return text
+                case .poki(let text) where text.hasSuffix("answer."): return text
+                default: return String(describing: entry.kind).hasPrefix("browser") ? "browser card" : nil
+                }
+            }
+        }
+        let expected = ["Look up the prices", "browser card", "First answer.", "Look up the show times", "browser card", "Second answer."]
+        XCTAssertEqual(order(chat.entries), expected)
+        let saved = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(chat.entries))
+        XCTAssertEqual(order(saved), expected, "the conversation opened again keeps the order")
+        if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "browser-card-order") }
+    }
+
+    /// The conversation as the chat page draws it, saved as a picture in Documents/MarkdownEvidence.
+    private func capture(_ chat: ChatModel, _ name: String) async throws {
+        let app = try XCTUnwrap(self.app)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(app).environment(chat))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .seconds(2))
+        let data = await Task.detached { var code: NSString?; return PKInProcess.shared().screenshot(&code) }.value
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("MarkdownEvidence", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try XCTUnwrap(UIImage(data: try XCTUnwrap(data))?.pngData()).write(to: folder.appendingPathComponent("\(name).png"))
+    }
+
+    /// Stop ends the phone step under way at its next action, instead of letting the rest of a long
+    /// `do` run on the phone (seen on the owner's phone: 16 to 22 s of typing after Stop), and the chat
+    /// says Stopping until that step has ended.
+    func testStopEndsTheStepUnderWayAtItsNextAction() async throws {
+        let waits = Array(repeating: ["wait": 1000], count: 15)
+        let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["actions": waits]), FakeCompletions.text("Done.")])
+        let chat = chat(on: server)
+        func said() -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
+
+        chat.send("Wait on the phone")
+        while chat.awaitingModel { try await Task.sleep(for: .milliseconds(50)) }
+        let stopped = ContinuousClock.now
+        chat.stop()
+        XCTAssertEqual(said().last, "Stopping…")
+        while chat.savedCalls.isEmpty, ContinuousClock.now - stopped < .seconds(20) { try await Task.sleep(for: .milliseconds(100)) }
+        let after = ContinuousClock.now - stopped
+        XCTAssertLessThan(after, .seconds(3), "the do call ended \(after) after Stop")
+        while said().last != "Stopped.", ContinuousClock.now - stopped < .seconds(10) { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(said().last, "Stopped.")
+        XCTAssertFalse(said().contains("Stopping…"))
     }
 
     /// The system prompt names no tool the model does not have (the app has no unlock_device or
