@@ -7268,6 +7268,28 @@
         }
       }
     },
+    "Open https://github.com/JosssphZhou/poki in the built-in browser and star it" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open https://github.com/JosssphZhou/poki in the built-in browser and star it"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在内置浏览器打开 https://github.com/JosssphZhou/poki，给 Poki 点个 Star"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在內建瀏覽器打開 https://github.com/JosssphZhou/poki，給 Poki 點個 Star"
+          }
+        }
+      }
+    },
     "Open it and tap Connect, then return to Poki. It may disconnect another VPN app." : {
       "localizations" : {
         "zh-Hans" : {
@@ -9950,6 +9972,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "即時語音對話，Poki 回答並操作"
+          }
+        }
+      }
+    },
+    "Star Poki on GitHub" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Star Poki on GitHub"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给 Poki 点个 Star"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "給 Poki 點個 Star"
           }
         }
       }
@@ -23995,22 +24039,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已執行的操作"
-          }
-        }
-      }
-    },
-    "Star Poki on GitHub" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 GitHub 上为 Poki 加星标"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 GitHub 上為 Poki 加星標"
           }
         }
       }

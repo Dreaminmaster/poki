@@ -335,6 +335,16 @@ enum HomeIdea {
 
     static var examples: [HomeShortcut] { examples(for: .current) }
 
+    /// Starring Poki on GitHub, second on the home page from the first open, for a new owner and one
+    /// who updates alike: the list is worked out again at each launch, so nothing is stored for it.
+    /// It has no app (Poki's icon, as an edited pill without one), because the task runs in Poki's own
+    /// browser, which hands the page over when GitHub asks to sign in. Its key does not change with the
+    /// language, so Forget holds after the iPhone's language changes.
+    static var star: HomeShortcut {
+        HomeShortcut(key: "starpokiongithub", app: "", appName: "", text: String(localized: "Star Poki on GitHub"),
+                     prompt: String(localized: "Open https://github.com/JosssphZhou/poki in the built-in browser and star it"))
+    }
+
     static func examples(for language: AppLanguage) -> [HomeShortcut] {
         language == .simplifiedChinese ? simplifiedChinese : english
     }
