@@ -52,8 +52,7 @@ extension PowerTile {
 /// answers, which opens in place to the chat models of every account that is set up (07b), or Add
 /// Model with none; and the approval method, which opens in place the same way to the three methods,
 /// the one in use ticked, and the line on what always asks you. The method is `AppModel.approvalMode`,
-/// the one setting Settings › Approvals reads and the settings card also changes. Each acts at once; one
-/// row is open at a time.
+/// the one setting Settings › Approvals reads. Each acts at once; one row is open at a time.
 struct PokiStatusCard: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat

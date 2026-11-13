@@ -3,13 +3,13 @@ import SwiftUI
 
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
 // conversations. It replaced ESP-174's details screen and its "More Settings" layer. Every part of Poki a
-// person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute, Agents,
-// Memory, Archived Conversations, Signing & Updates, Notifications, Appearance), and what only a few need
-// is on one page, Advanced, by where it came from. Approvals opens from Poki's card, where the method is
-// chosen. Nothing has two ways in. The rows and the card are PokiSettingsKit's.
+// person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute,
+// Approvals, Agents, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance), and
+// what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
+// approval method is changed on Poki's card in the chat only. The rows and the card are PokiSettingsKit's.
 
-/// Settings: Poki's card with what it is doing, how it asks before a sensitive step and what it has done;
-/// any problem that keeps it from working; then the parts of Poki in three groups, each a row into its own page.
+/// Settings: Poki's card with where it stands and what it has done; any problem that keeps it from
+/// working; then the parts of Poki in three groups, each a row into its own page.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -29,8 +29,7 @@ struct PokiDetailsView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
-                    PokiSettingsCard(status: status, openApprovals: { path.append(DetailsRoute.approvals) },
-                                     openActivity: { path.append(DetailsRoute.history) })
+                    PokiSettingsCard(status: status, openActivity: { path.append(DetailsRoute.history) })
                 }
 
                 if !isSample {
@@ -61,6 +60,12 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Dictation & Mute", symbol: "mic")
                     }
                     .accessibilityIdentifier("details.voice")
+                    // What always asks, what each method does and the sensitivity. The method in use shows
+                    // here; it is changed on Poki's card in the chat.
+                    NavigationLink(value: DetailsRoute.approvals) {
+                        SettingsRow(title: "Approvals", symbol: "checkmark.shield", value: model.approvalMode.title)
+                    }
+                    .accessibilityIdentifier("moreSettings.approvals")
                 }
 
                 // Who else uses it, and what it keeps.
@@ -97,6 +102,7 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: String(localized: appearance.title))
                     }
                     .accessibilityIdentifier("details.appearance")
+                    // The Language row goes here, under Appearance, when the interface language gets its page.
                     NavigationLink(value: DetailsRoute.advanced) {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
@@ -271,24 +277,20 @@ private struct ConversationsSettingsView: View {
 // MARK: The card
 
 /// Poki on the settings home (ESP-469 board "01 设置首页"): the bear's face, the name and where Poki
-/// stands, then what is only here: how Poki asks before a sensitive step, chosen in place, with the way
-/// into Approvals under the choices (Settings has no other row for it), and the Activity Log. Voice is
-/// started from the chat, and Pause is not on it: it ended the task, which the message field's Stop does,
-/// and left iOS's automation banner up (Connection has the Automation switch).
+/// stands, then what is only here: the Activity Log. The approval method is changed on Poki's card in the
+/// chat and nowhere else (the owner, 2026-11-13), Voice is started from the chat, and Pause is not on it:
+/// it ended the task, which the message field's Stop does, and left iOS's automation banner up
+/// (Connection has the Automation switch).
 private struct PokiSettingsCard: View {
-    @Environment(AppModel.self) private var model
     var status: PokiStatus
-    var openApprovals: () -> Void
     var openActivity: () -> Void
     @ScaledMetric(relativeTo: .title2) private var face = 64.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { pills }
-                VStack(spacing: 8) { pills }
-            }
+            SettingsPill(title: "Activity", symbol: "clock", chevron: true, action: openActivity)
+                .accessibilityIdentifier("details.activity")
         }
         .padding(.vertical, 10)
         .animation(.easeInOut(duration: 0.3), value: status.mood)
@@ -318,32 +320,6 @@ private struct PokiSettingsCard: View {
             }
         }
         .accessibilityIdentifier("details.status")
-    }
-
-    @ViewBuilder private var pills: some View {
-        @Bindable var model = model
-        // The method in use is the pill's own words; the menu changes it at once, as the card on Poki's
-        // picture does (`AppModel.approvalMode`, the one setting).
-        Menu {
-            Section {
-                Picker("Approval Method", selection: $model.approvalMode) {
-                    ForEach(ApprovalClassifier.Mode.allCases) { Text(verbatim: $0.title).tag($0) }
-                }
-            } header: {
-                Text("Payments, deletions and actions in Wallet always need your confirmation.")
-            }
-            // The Approvals page: what each method does, and how much the chat model approves by itself
-            // (its sensitivity).
-            Button("Approvals", systemImage: "slider.horizontal.3", action: openApprovals)
-                .accessibilityIdentifier("moreSettings.approvals")
-        } label: {
-            SettingsPillLabel(title: Text(verbatim: model.approvalMode.title), symbol: "checkmark.shield", trailing: "chevron.up.chevron.down")
-        }
-        .accessibilityLabel(Text("Approval Method"))
-        .accessibilityValue(Text(verbatim: model.approvalMode.title))
-        .accessibilityIdentifier("details.approvalMethod")
-        SettingsPill(title: "Activity", symbol: "clock", action: openActivity)
-            .accessibilityIdentifier("details.activity")
     }
 }
 
@@ -564,8 +540,8 @@ struct AppearanceView: View {
 }
 
 /// Approvals (ESP-469 board "03 审批"): what always needs you, how Poki asks before a sensitive step, and
-/// how much your chat model may approve by itself. The way of asking is chosen on Poki's cards (under its
-/// picture in the chat, and on top of Settings); this page says which is in use and what it does. The sensitivity's
+/// how much your chat model may approve by itself. The way of asking is chosen on Poki's card only (the
+/// owner: one setting in one place); this page says which is in use and what it does. The sensitivity's
 /// four levels are segments in their own order, least asking first.
 struct ApprovalsSettingsView: View {
     @Environment(AppModel.self) private var model

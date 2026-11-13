@@ -171,48 +171,35 @@ struct SettingsHeader: View {
     var body: some View { Text(title).textCase(nil) }
 }
 
-/// A capsule button: black for the action you reach for most, outlined for the rest.
+/// A capsule button: black for the action you reach for most (Pause), outlined for the rest.
 struct SettingsPill: View {
     var title: LocalizedStringKey
     var symbol: String? = nil
     var prominent = false
     var chevron = false
     var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            SettingsPillLabel(title: Text(title), symbol: symbol, prominent: prominent, trailing: chevron ? "chevron.right" : nil)
-        }
-        .buttonStyle(PressedDimStyle())
-    }
-}
-
-/// The pill as it looks, for a button's label or a menu's (the approval method on Poki's card, which
-/// ends in the arrows of a choice).
-struct SettingsPillLabel: View {
-    var title: Text
-    var symbol: String? = nil
-    var prominent = false
-    var trailing: String? = nil
     @ScaledMetric(relativeTo: .subheadline) private var height = 44.0
 
     var body: some View {
-        HStack(spacing: 6) {
-            if let symbol {
-                Image(systemName: symbol).font(.footnote.weight(.bold))
-                    .foregroundStyle(prominent ? Tint.onSolid : Tint.blueText)
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let symbol {
+                    Image(systemName: symbol).font(.footnote.weight(.bold))
+                        .foregroundStyle(prominent ? Tint.onSolid : Tint.blueText)
+                }
+                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                if chevron {
+                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+                }
             }
-            title.font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
-            if let trailing {
-                Image(systemName: trailing).font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
-            }
+            .foregroundStyle(prominent ? Tint.onSolid : Color(.label))
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: height)
+            .background(prominent ? Tint.solid : Color(.secondarySystemGroupedBackground), in: .capsule)
+            .overlay { if !prominent { Capsule().strokeBorder(Color(.separator).opacity(0.6), lineWidth: 1) } }
+            .contentShape(.capsule)
         }
-        .foregroundStyle(prominent ? Tint.onSolid : Color(.label))
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: height)
-        .background(prominent ? Tint.solid : Color(.secondarySystemGroupedBackground), in: .capsule)
-        .overlay { if !prominent { Capsule().strokeBorder(Color(.separator).opacity(0.6), lineWidth: 1) } }
-        .contentShape(.capsule)
+        .buttonStyle(PressedDimStyle())
     }
 }
 

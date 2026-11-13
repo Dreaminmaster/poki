@@ -358,7 +358,6 @@ struct RootView: View {
         case "hands", "connection":
             openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            // Approvals opens from the approval method on Poki's card; here it opens directly.
             openDetails([DetailsRoute.approvals])
         case "health", "advanced":
             openDetails([DetailsRoute.advanced])
