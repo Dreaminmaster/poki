@@ -57,6 +57,19 @@ struct MemoryView: View {
                 Text(message ?? String(localized: "One file with every routine and note. Importing merges it in; the newer copy of a routine wins. Poki Setup on your computer can back it up and put it back."))
             }
 
+            // Conversations are the other thing Poki keeps. The link resolves in Settings' stack (PokiDetailsView).
+            Section {
+                NavigationLink(value: DetailsRoute.conversations) {
+                    LabeledContent("Archived Conversations") {
+                        let count = SessionStore.shared.archivedSessions.count
+                        if count > 0 { Text(verbatim: "\(count)") }
+                    }
+                }
+                .accessibilityIdentifier("details.searchConversations")
+            } header: {
+                Text("Conversations")
+            }
+
             Section {
                 DisclosureGroup("Advanced", isExpanded: $advanced) {
                     if let bundleURL { ShareLink("Share Run Log for Maintainers", item: bundleURL) }

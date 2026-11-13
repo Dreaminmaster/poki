@@ -19,6 +19,9 @@ struct PokiApp: App {
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
         FieldDictation.keepButtonForUpgrade()
+        // Whether this phone gets the first run: not when an earlier version was used here. Read before
+        // anything this version writes, like the line above.
+        FirstRun.decide()
         // Page titles in Geist, the website's typeface (prominent text only).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
@@ -66,6 +69,11 @@ struct RootView: View {
     /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
     @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
+    /// The first run is up, over everything (`FirstRunGuide`).
+    @State private var welcoming = false
+    /// A setup step a link opened while the first run is up: it opens there.
+    @State private var welcomeLink: SetupStep?
+    @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
     @Namespace private var profile
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
@@ -83,11 +91,31 @@ struct RootView: View {
         detailsOpen = true
     }
 
-    private var sessions: some View {
+    private func sessions(split: Bool) -> some View {
         SessionsView(
             openChat: { show(.chat) },
-            openSession: { show(.session($0)) }
+            openSession: { show(.session($0)) },
+            openFix: { fix($0, split: split) }
         )
+    }
+
+    /// Opens where a setup hint's problem is fixed. A setup step pushes over the chat on iPhone (the
+    /// drawer closes to show it); beside the list (iPad) the chat has no stack of its own to push on,
+    /// so the step opens in the profile. Everything else opens in the profile.
+    private func fix(_ target: SetupIssueHint.Target, split: Bool) {
+        switch target {
+        case .step(let step):
+            if split {
+                openDetails([DetailsRoute.connection, step])
+            } else {
+                if threadsOpen { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = false } }
+                home.append(step)
+            }
+        case .setup: openDetails([DetailsRoute.connection])
+        case .model: openDetails([DetailsRoute.model])
+        case .agents: openDetails([DetailsRoute.agents])
+        case .updates: openDetails([DetailsRoute.connection, DetailsRoute.updates])
+        }
     }
 
     private func chatPage(split: Bool) -> some View {
@@ -97,19 +125,16 @@ struct RootView: View {
                 statusOpen = true
             },
             openVoice: openLiveVoice,
-            openSetup: { openDetails([DetailsRoute.hands, DetailsRoute.setup]) },
-            // Beside the list (iPad) the chat has no stack of its own to push on: the step opens in the profile.
-            openSetupStep: { step in
-                if split { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home.append(step) }
-            },
-            openModel: { openDetails([DetailsRoute.model]) },
+            openSetup: { fix(.setup, split: split) },
+            openSetupStep: { fix(.step($0), split: split) },
+            openModel: { fix(.model, split: split) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
-            openAgents: { openDetails([DetailsRoute.settings]) },
-            openUpdates: { openDetails([DetailsRoute.updates]) }
+            openAgents: { fix(.agents, split: split) },
+            openUpdates: { fix(.updates, split: split) }
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat. Poki's card opens beside the picture and leaves it in sight.
-        .environment(\.bearCovered, threadsOpen || (detailsOpen && width != .regular))
+        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && width != .regular))
     }
 
     @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
@@ -141,7 +166,7 @@ struct RootView: View {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
-                NavigationStack { sessions }
+                NavigationStack { sessions(split: true) }
                     .frame(width: 375)
                 Divider().ignoresSafeArea()
                 NavigationStack {
@@ -155,7 +180,7 @@ struct RootView: View {
                     .navigationDestination(for: HomeRoute.self) { destination($0, split: false) }
                     .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
             }
-            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions }
+            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions(split: false) }
         }
     }
 
@@ -186,8 +211,7 @@ struct RootView: View {
             },
             openSetup: {
                 var next = NavigationPath()
-                next.append(DetailsRoute.hands)
-                next.append(DetailsRoute.setup)
+                next.append(DetailsRoute.connection)
                 detailsPath = next
             },
             openSession: { id in
@@ -200,6 +224,7 @@ struct RootView: View {
 
     var body: some View {
         navigation
+        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
@@ -235,6 +260,13 @@ struct RootView: View {
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` opens the voice page.
         .onOpenURL { url in open(link: url) }
+        // On the window, not the view: sheets and full-screen covers take it too, and Automatic hands back to iOS.
+        .onChange(of: appearance, initial: true) { _, value in
+            let style = (Appearance(rawValue: value) ?? .automatic).style
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { window.overrideUserInterfaceStyle = style }
+            }
+        }
         .onAppear(perform: openLaunchScreen)
         .task {
             #if DEBUG
@@ -251,14 +283,19 @@ struct RootView: View {
         AppLog.shared.add("app", "opened by link poki://\(url.host() ?? "")")
         // Pairing is not interrupted: it stays on the pairing step, where the PIN is.
         guard !model.pairingUnderWay else { return }
+        // During the first run a pairing file or a setup link opens its step there; nothing else moves.
+        if welcoming {
+            if let step = model.open(link: url) { welcomeLink = step }
+            return
+        }
         // A pairing file or a setup link (from Poki Setup on a computer, AirDrop or Files) opens
         // setup at that step, where the result is shown.
         if let step = model.open(link: url) {
             detailsOpen = false
             threadsOpen = false
-            if width == .regular { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home = NavigationPath([step]) }
+            if width == .regular { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
-            openDetails([DetailsRoute.hands, DetailsRoute.setup])
+            openDetails([DetailsRoute.connection])
         } else if url.host() == "log" {
             openDetails([DetailsRoute.history])
         } else if url.host() == "voice" {
@@ -312,6 +349,7 @@ struct RootView: View {
         if let address = defaults.string(forKey: "pokiVoiceBridge") { _ = model.voice.setBridge(address) }
         // `-pokiHome sessions|paused` (the old home's samples): the conversations, open.
         if defaults.string(forKey: "pokiHome") != nil, defaults.string(forKey: "pokiChat") == nil { threadsOpen = true }
+        if FirstRun.isDue() { welcoming = true }
         switch defaults.string(forKey: "pokiScreen") {
         case "chat":
             show(.chat)
@@ -327,9 +365,9 @@ struct RootView: View {
             let step = defaults.integer(forKey: "pokiSetupStep")
             if step > 0 {
                 let target = SetupStep.shown[min(step, SetupStep.shown.count) - 1]
-                openDetails([DetailsRoute.hands, DetailsRoute.setup, target])
+                openDetails([DetailsRoute.connection, target])
             } else {
-                openDetails([DetailsRoute.hands, DetailsRoute.setup])
+                openDetails([DetailsRoute.connection])
             }
         case "moreSettings", "details", "status":
             // More Settings is gone: its rows are on Poki's profile, by what they are about.
@@ -337,26 +375,30 @@ struct RootView: View {
         case "statusCard":
             cardUnder = nil
             statusOpen = true
-        case "hands":
-            openDetails([DetailsRoute.hands])
+        case "hands", "connection":
+            openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.approvals])
-        case "health":
-            openDetails([DetailsRoute.health])
-        case "connect", "settings":
-            openDetails([DetailsRoute.settings])
+            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+        case "health", "advanced":
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+        case "connect", "settings", "agents":
+            openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.health, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.health, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
-                openDetails([DetailsRoute.settings, SettingsRoute.connector(first)])
+                openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
             } else {
-                openDetails([DetailsRoute.settings])
+                openDetails([DetailsRoute.agents])
             }
         case "model":
             openDetails([DetailsRoute.model])
+        case "memory":
+            openDetails([SettingsRoute.memory])
+        case "appearance":
+            openDetails([DetailsRoute.appearance])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break

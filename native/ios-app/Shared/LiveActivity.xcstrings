@@ -1128,19 +1128,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启代理或 LocalDevVPN"
+            "value" : "连接 LocalDevVPN 或开启代理"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enable in proxy app or LocalDevVPN."
+            "value" : "Connect LocalDevVPN or enable in proxy app."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟代理或 LocalDevVPN"
+            "value" : "連線 LocalDevVPN 或開啟代理"
           }
         }
       }
@@ -1151,19 +1151,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开代理或 LocalDevVPN 后返回"
+            "value" : "连 LocalDevVPN 或开代理后返回"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enable in proxy or LocalDevVPN, then return."
+            "value" : "Connect LocalDevVPN or enable proxy, then return."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開代理或 LocalDevVPN 後返回"
+            "value" : "連 LocalDevVPN 或開代理後返回"
           }
         }
       }
