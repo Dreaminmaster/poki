@@ -135,3 +135,23 @@ test('an interrupted R2 asset uses the same GitHub release and signed integrity'
   await assert.rejects(downloadIpa(beta.tag_name, downloads, files[0].name), { code: 'setup_checksum_mismatch' });
   assert.equal(mirrorRequests, before, 'a corrupt R2 asset must not fall back');
 });
+
+
+test('the repository source cannot be replaced by inherited environment values', async t => {
+  const source = await releaseSource(t);
+  const beta = setupRelease(source, dmg(source));
+  source.publish([beta]);
+  source.use();
+  const variables = ['POKI_RELEASE_CATALOG_URL', 'POKI_RELEASE_PUBLIC_KEY'];
+  const previous = variables.map(name => process.env[name]);
+  t.after(() => variables.forEach((name, index) => {
+    if (previous[index] === undefined) delete process.env[name];
+    else process.env[name] = previous[index];
+  }));
+  process.env.POKI_RELEASE_CATALOG_URL = 'invalid-source';
+  process.env.POKI_RELEASE_PUBLIC_KEY = 'invalid-key';
+  const selected = await latestSetup();
+  assert.equal(selected.source, 'r2');
+  assert.equal(selected.tag, beta.tag_name);
+  assert.equal(selected.url, beta.assets[0].browser_download_url);
+});

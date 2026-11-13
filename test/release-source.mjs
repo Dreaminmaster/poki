@@ -1,16 +1,18 @@
 // A signed release source on loopback for tests: one reply per path, and a log of the paths asked for.
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { createServer } from 'node:http';
+import fs from 'node:fs/promises';
 
 export async function releaseSource(t) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const replies = new Map();
   const asked = [];
-  const previous = Object.fromEntries(['POKI_RELEASE_CATALOG_URL', 'POKI_RELEASE_PUBLIC_KEY'].map(name => [name, process.env[name]]));
-  t.after(() => {
-    for (const [name, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[name]; else process.env[name] = value;
-    }
+  let config;
+  const readFile = fs.readFile;
+  const configUrl = new URL('../config/release-source.json', import.meta.url).href;
+  t.mock.method(fs, 'readFile', (path, ...options) => {
+    if (config && path instanceof URL && path.href === configUrl) return Promise.resolve(JSON.stringify(config));
+    return readFile(path, ...options);
   });
   const server = createServer((req, res) => {
     asked.push(req.url);
@@ -42,8 +44,7 @@ export async function releaseSource(t) {
     },
     // Points the installer at this source for the rest of the test.
     use(path = '/catalog.json', key = source.publicKey) {
-      process.env.POKI_RELEASE_CATALOG_URL = origin + path;
-      process.env.POKI_RELEASE_PUBLIC_KEY = key;
+      config = { url: origin + path, public_key: key };
     },
   };
   return source;

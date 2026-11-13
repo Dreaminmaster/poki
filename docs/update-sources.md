@@ -4,9 +4,11 @@ Poki, Poki Setup and the checkout installer use Beta. Saved preferences for othe
 
 ## Configuration
 
-`config/release-source.json` contains `url` and `public_key`. The key is the 32-byte Ed25519 public key encoded as hexadecimal. The checked-in configuration is empty. Such a development build reports that R2 is not configured and uses GitHub. Do not describe it as a deployed R2 migration.
+`config/release-source.json` contains `url` and `public_key`. The key is the 32-byte Ed25519 public key encoded as hexadecimal. The checked-in configuration is empty. A build with empty configuration reports that R2 is not configured and uses GitHub. Do not describe it as a deployed R2 migration.
 
-Provide `POKI_RELEASE_CATALOG_URL` and `POKI_RELEASE_PUBLIC_KEY` to the Rust build to embed the approved source. The same environment variables override configuration at runtime for the desktop tools and Node installer. The Node installer also reads the configuration file at runtime. Private test endpoints and signing keys belong in private deployment configuration, not in Git. Never distribute a catalog signing private key.
+The approved production catalog address and verification public key belong in this repository file so reviewers can inspect the trust configuration with the code. Rust embeds the file at build time. The Node installer reads it at runtime. Environment variables do not override either value. Leave both fields empty until production resources are separately approved.
+
+Store the catalog signing private key only in GitHub Actions secrets. Never commit it, embed it in a client, or place it in the release configuration. Private test endpoints remain outside the public repository. Creating production R2 resources and publishing a migration build require separate authorization.
 
 The signed envelope has base64 `payload` and `signature` strings. The signature covers the exact decoded payload bytes. The payload contains `schema: 1` and `releases`, using GitHub-compatible release fields. Every asset additionally declares `size` and `sha256`. Assets use the catalog's HTTPS origin beneath `/releases/`. Local loopback HTTP is supported for isolated verification.
 

@@ -1,13 +1,13 @@
 // Signatures cover the exact decoded catalog bytes.
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
 
 export class ReleaseUnavailable extends Error {}
 
 async function source() {
-  const config = JSON.parse(await readFile(new URL('../../config/release-source.json', import.meta.url), 'utf8'));
-  const address = process.env.POKI_RELEASE_CATALOG_URL ?? config.url;
-  const publicKey = process.env.POKI_RELEASE_PUBLIC_KEY ?? config.public_key;
+  const config = JSON.parse(await fs.readFile(new URL('../../config/release-source.json', import.meta.url), 'utf8'));
+  const address = config.url;
+  const publicKey = config.public_key;
   if (!address && !publicKey) throw new ReleaseUnavailable('R2 is not configured in this build. Using GitHub.');
   if (!address) throw new Error('The release source has no catalog address');
   if (!/^[a-fA-F0-9]{64}$/.test(publicKey)) throw new Error('Release catalog verification key is not configured; nothing was downloaded');

@@ -72,11 +72,7 @@ fn valid_url(value: &str) -> Result<reqwest::Url> {
 }
 
 fn source() -> Result<Source> {
-    let mut source: Source = serde_json::from_str(include_str!("../../../config/release-source.json"))?;
-    if let Some(url) = option_env!("POKI_RELEASE_CATALOG_URL") { source.url = url.into(); }
-    if let Some(key) = option_env!("POKI_RELEASE_PUBLIC_KEY") { source.public_key = key.into(); }
-    if let Ok(url) = std::env::var("POKI_RELEASE_CATALOG_URL") { source.url = url; }
-    if let Ok(key) = std::env::var("POKI_RELEASE_PUBLIC_KEY") { source.public_key = key; }
+    let source: Source = serde_json::from_str(include_str!("../../../config/release-source.json"))?;
     if source.url.is_empty() && source.public_key.is_empty() {
         return Err(Error::ReleaseUnavailable("R2 is not configured in this build. Using GitHub."));
     }
@@ -88,7 +84,7 @@ pub(crate) async fn read() -> Result<Vec<Value>> { read_from(&source()?).await }
 
 pub(crate) async fn read_from(source: &Source) -> Result<Vec<Value>> {
     if source.url.is_empty() {
-        return Err(Error::msg("This release source has no catalog address. Set POKI_RELEASE_CATALOG_URL."));
+        return Err(Error::msg("This release source has no catalog address. Configure config/release-source.json."));
     }
     let base = valid_url(&source.url)?;
     let key_bytes: [u8; 32] = hex::decode(&source.public_key).ok().and_then(|v| v.try_into().ok())
