@@ -130,7 +130,8 @@ struct TalkBar: View {
                 }
                 round(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", label: muted ? "Unmute Poki’s Voice" : "Mute Poki’s Voice",
                       identifier: "composer.talk.mute", action: toggleMute)
-                capsule("End", fill: Tint.solid, ink: Tint.onSolid, identifier: "composer.talk.end", action: end)
+                // The send button's blue, in light and dark (the owner, 2026-11-13: not white on black).
+                capsule("End", fill: Tint.blue, ink: .white, identifier: "composer.talk.end", action: end)
                     .accessibilityLabel(Text("End Talk"))
             }
         }
