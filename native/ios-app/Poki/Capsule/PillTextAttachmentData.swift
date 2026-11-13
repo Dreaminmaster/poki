@@ -21,14 +21,22 @@ struct PillTextAttachmentData: Equatable {
     let text: String
     /// The name as the capsule shows it ("Uber" for a typed "uber").
     var label: String { app.label(for: text) }
+
+    /// How far below the baseline the pill starts, so it sits centred on the surrounding text.
+    var baselineOffset: CGFloat {
+        fontData.descender + (fontData.lineHeight - PillMetrics(pointSize: fontData.pointSize).height) / 2
+    }
     /// The font of the text around the pill, which the pill is centred on and scaled to.
     let fontData: Font
+    /// In your blue bubble rather than the message field.
+    var onAccent = false
 }
 
 extension PillTextAttachmentData {
-    init(app: AppCapsule, text: String, font: UIFont) {
+    init(app: AppCapsule, text: String, font: UIFont, onAccent: Bool = false) {
         self.app = app
         self.text = text
         fontData = Font(descender: font.descender, lineHeight: font.lineHeight, pointSize: font.pointSize)
+        self.onAccent = onAccent
     }
 }

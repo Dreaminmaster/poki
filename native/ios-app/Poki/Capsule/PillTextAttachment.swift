@@ -18,11 +18,7 @@ final class PillTextAttachment: NSTextAttachment {
     init(pillData: PillTextAttachmentData, traits: UITraitCollection) {
         self.pillData = pillData
         super.init(data: nil, ofType: nil)
-        let renderer = ImageRenderer(content: PillView(data: pillData)
-            .environment(\.colorScheme, traits.userInterfaceStyle == .dark ? .dark : .light))
-        renderer.scale = traits.displayScale > 0 ? traits.displayScale : 3
-        renderer.proposedSize = ProposedViewSize(PillMetrics(pointSize: pillData.fontData.pointSize).size(for: pillData.label))
-        image = renderer.uiImage
+        image = PillView.image(pillData, scale: traits.displayScale, dark: traits.userInterfaceStyle == .dark)
         bounds = pillRect(maxWidth: .greatestFiniteMagnitude)
     }
 
@@ -40,11 +36,9 @@ final class PillTextAttachment: NSTextAttachment {
     }
 
     private func pillRect(maxWidth: CGFloat) -> CGRect {
-        let fontData = pillData.fontData
-        let size = PillMetrics(pointSize: fontData.pointSize).size(for: pillData.label)
+        let size = PillMetrics(pointSize: pillData.fontData.pointSize).size(for: pillData.label)
         var rect = CGRect(origin: .zero, size: size)
-        // Align the pill text vertically with the surrounding text.
-        rect.origin.y = fontData.descender + (fontData.lineHeight - rect.height) / 2.0
+        rect.origin.y = pillData.baselineOffset
         rect.size.width = min(rect.size.width, maxWidth)
         return rect
     }

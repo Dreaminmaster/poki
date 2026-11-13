@@ -2,8 +2,10 @@
 // Sources/ConversationUI/MessageBubble.swift), Copyright (c) 2024 Andrew Mackarous, MIT License. See
 // THIRD_PARTY_NOTICES.md. Changed: Poki's message kinds, the tail corner on the last bubble of a run,
 // 60 pt kept free on the far side, and the colours: an outside agent's request in ink, and for
-// ESP-376 your bubble in Poki's blue and Poki's words in a white bubble with a soft shadow.
+// ESP-376 your bubble in Poki's blue and Poki's words in a white bubble with a soft shadow; in your
+// bubble the apps you named show as capsules, as in the message field.
 import SwiftUI
+import UIKit
 
 struct MessageBubble: View {
     /// Poki's words, yours, or an outside agent's request to Poki.
@@ -12,6 +14,8 @@ struct MessageBubble: View {
     var text: String
     /// The last bubble of its run has the small corner on its side.
     var tail: Bool
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack {
@@ -30,8 +34,9 @@ struct MessageBubble: View {
                     .contextMenu { copyButton { UIPasteboard.general.string = text } }
                 Spacer(minLength: .messageInsetPadding)
             } else {
-                Text(rendered)
+                (direction == .outgoing ? withCapsules : Text(rendered))
                     .font(.body)
+                    .accessibilityLabel(Text(verbatim: text))
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(direction == .guest ? Tint.onSolid : Color.white)
                     .padding(.vertical, .messageVerticalPadding)
@@ -56,6 +61,24 @@ struct MessageBubble: View {
             return AttributedString(text)
         }
         return markdown
+    }
+
+    /// Your words with each app's name as its capsule; the words themselves are what was sent, and
+    /// what Copy copies.
+    private var withCapsules: Text {
+        let segments = CapsuleText.segments(text)
+        guard segments.contains(where: { if case .app = $0 { true } else { false } }) else { return Text(rendered) }
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        return segments.reduce(Text(verbatim: "")) { line, segment in
+            switch segment {
+            case .text(let words):
+                return line + Text(verbatim: words)
+            case .app(let app, let words):
+                let data = PillTextAttachmentData(app: app, text: words, font: font, onAccent: true)
+                guard let image = PillView.image(data, scale: displayScale, dark: scheme == .dark) else { return line + Text(verbatim: words) }
+                return line + Text(Image(uiImage: image)).baselineOffset(data.baselineOffset)
+            }
+        }
     }
 
     private var shape: UnevenRoundedRectangle {
