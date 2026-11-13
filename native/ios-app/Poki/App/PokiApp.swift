@@ -73,6 +73,7 @@ struct RootView: View {
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
     @State private var welcomeLink: SetupStep?
+    @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
     @Namespace private var profile
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
@@ -105,15 +106,15 @@ struct RootView: View {
         switch target {
         case .step(let step):
             if split {
-                openDetails([DetailsRoute.hands, DetailsRoute.setup, step])
+                openDetails([DetailsRoute.connection, step])
             } else {
                 if threadsOpen { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = false } }
                 home.append(step)
             }
-        case .setup: openDetails([DetailsRoute.hands, DetailsRoute.setup])
+        case .setup: openDetails([DetailsRoute.connection])
         case .model: openDetails([DetailsRoute.model])
-        case .agents: openDetails([DetailsRoute.settings])
-        case .updates: openDetails([DetailsRoute.updates])
+        case .agents: openDetails([DetailsRoute.agents])
+        case .updates: openDetails([DetailsRoute.connection, DetailsRoute.updates])
         }
     }
 
@@ -208,8 +209,7 @@ struct RootView: View {
             },
             openSetup: {
                 var next = NavigationPath()
-                next.append(DetailsRoute.hands)
-                next.append(DetailsRoute.setup)
+                next.append(DetailsRoute.connection)
                 detailsPath = next
             },
             openSession: { id in
@@ -258,6 +258,13 @@ struct RootView: View {
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` opens the voice page.
         .onOpenURL { url in open(link: url) }
+        // On the window, not the view: sheets and full-screen covers take it too, and Automatic hands back to iOS.
+        .onChange(of: appearance, initial: true) { _, value in
+            let style = (Appearance(rawValue: value) ?? .automatic).style
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { window.overrideUserInterfaceStyle = style }
+            }
+        }
         .onAppear(perform: openLaunchScreen)
         .task {
             #if DEBUG
@@ -284,9 +291,9 @@ struct RootView: View {
         if let step = model.open(link: url) {
             detailsOpen = false
             threadsOpen = false
-            if width == .regular { openDetails([DetailsRoute.hands, DetailsRoute.setup, step]) } else { home = NavigationPath([step]) }
+            if width == .regular { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
-            openDetails([DetailsRoute.hands, DetailsRoute.setup])
+            openDetails([DetailsRoute.connection])
         } else if url.host() == "log" {
             openDetails([DetailsRoute.history])
         } else if url.host() == "voice" {
@@ -342,9 +349,9 @@ struct RootView: View {
             let step = defaults.integer(forKey: "pokiSetupStep")
             if step > 0 {
                 let target = SetupStep.shown[min(step, SetupStep.shown.count) - 1]
-                openDetails([DetailsRoute.hands, DetailsRoute.setup, target])
+                openDetails([DetailsRoute.connection, target])
             } else {
-                openDetails([DetailsRoute.hands, DetailsRoute.setup])
+                openDetails([DetailsRoute.connection])
             }
         case "moreSettings", "details", "status":
             // More Settings is gone: its rows are on Poki's profile, by what they are about.
@@ -352,26 +359,30 @@ struct RootView: View {
         case "statusCard":
             cardUnder = nil
             statusOpen = true
-        case "hands":
-            openDetails([DetailsRoute.hands])
+        case "hands", "connection":
+            openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.approvals])
-        case "health":
-            openDetails([DetailsRoute.health])
-        case "connect", "settings":
-            openDetails([DetailsRoute.settings])
+            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+        case "health", "advanced":
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+        case "connect", "settings", "agents":
+            openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.health, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.health, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
-                openDetails([DetailsRoute.settings, SettingsRoute.connector(first)])
+                openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
             } else {
-                openDetails([DetailsRoute.settings])
+                openDetails([DetailsRoute.agents])
             }
         case "model":
             openDetails([DetailsRoute.model])
+        case "memory":
+            openDetails([SettingsRoute.memory])
+        case "appearance":
+            openDetails([DetailsRoute.appearance])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break
