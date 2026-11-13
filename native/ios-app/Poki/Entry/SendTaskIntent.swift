@@ -20,8 +20,10 @@ struct SendTaskToPokiIntent: ForegroundContinuableIntent {
 
     init() {}
 
+    // Started, it ends with nothing to answer: you tapped Done once for the task, and Poki's
+    // notification says when it is done. A sentence back would wait for a second Done.
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         guard let chat = AskPoki.chat, let app = AskPoki.app else {
             return try await showPoki(LocalizedStringResource("Poki wasn’t ready. Try again in a moment.", table: "Entry"))
         }
@@ -36,18 +38,18 @@ struct SendTaskToPokiIntent: ForegroundContinuableIntent {
         guard app.sessionOn else {
             return try await showPoki(LocalizedStringResource("Poki started the task. Turn Poki on so it can act on the phone.", table: "Entry"))
         }
-        return .result(dialog: IntentDialog(LocalizedStringResource("Poki is on it. It tells you when it’s done.", table: "Entry")))
+        return .result()
     }
 
     @MainActor
-    private func showPoki(_ words: LocalizedStringResource) async throws -> IntentResultContainer<Never, Never, Never, IntentDialog> {
+    private func showPoki(_ words: LocalizedStringResource) async throws -> IntentResultContainer<Never, Never, Never, Never> {
         PokiEntry.shared.ask(.show)
         if #available(iOS 26.0, *) {
             try await continueInForeground(IntentDialog(words), alwaysConfirm: false)
         } else {
             throw needsToContinueInForegroundError(IntentDialog(words), continuation: nil)
         }
-        return .result(dialog: IntentDialog(words))
+        return .result()
     }
 }
 

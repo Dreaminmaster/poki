@@ -50,7 +50,12 @@ struct SettingsRow: View {
     var warns = false
     /// A coloured dot before the value (the relay's state on External Agents).
     var dot: Color? = nil
+    /// What ends the row in place of a value: a green tick for a thing that is done, an arrow for a row
+    /// that leaves Poki (the system's own chevron ends the rows that open a page).
+    var accessory: Accessory? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    enum Accessory { case done, leaves }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -64,6 +69,14 @@ struct SettingsRow: View {
             Spacer(minLength: 8)
             // The value keeps its width (a model's name, the way of asking); the caption wraps instead.
             if !typeSize.isAccessibilitySize, let value { valueView(value).lineLimit(1).layoutPriority(1) }
+            switch accessory {
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Tint.green).accessibilityLabel(Text("Done"))
+            case .leaves:
+                Image(systemName: "arrow.up.forward").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
+                    .accessibilityHidden(true)
+            case nil: EmptyView()
+            }
         }
         .padding(.vertical, 6)
     }
@@ -82,14 +95,16 @@ struct SettingsRow: View {
     }
 }
 
-/// The subpages' rows: a Label's symbol on the same round ground as the home page's rows, so every
-/// page under Settings draws its icons one way.
+/// The subpages' rows: a Label's symbol on the same round ground as the home page's rows, at the same
+/// size, with the same gap, weight and height (`SettingsRow`), so every page under Settings draws its
+/// rows one way.
 struct SettingsLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             SettingsLabelIcon { configuration.icon }
-            configuration.title
+            configuration.title.fontWeight(.semibold)
         }
+        .padding(.vertical, 6)
     }
 }
 
@@ -105,10 +120,11 @@ struct SettingsLabel<Title: View, Icon: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             SettingsLabelIcon { icon }
-            title
+            title.fontWeight(.semibold)
         }
+        .padding(.vertical, 6)
     }
 }
 
@@ -120,11 +136,12 @@ extension SettingsLabel where Title == Text, Icon == Image {
 
 private struct SettingsLabelIcon<Icon: View>: View {
     @Environment(\.isEnabled) private var isEnabled
-    @ScaledMetric(relativeTo: .body) private var size = 30.0
+    @ScaledMetric(relativeTo: .body) private var size = 34.0
+    @ScaledMetric(relativeTo: .body) private var glyph = 17.0
     @ViewBuilder var icon: Icon
     var body: some View {
         icon
-            .font(.system(size: 15, weight: .semibold))
+            .font(.system(size: glyph, weight: .semibold))
             .foregroundStyle(Tint.blueText)
             .frame(width: size, height: size)
             .background(Tint.blueSoft, in: .circle)
@@ -135,13 +152,23 @@ private struct SettingsLabelIcon<Icon: View>: View {
 }
 
 extension View {
-    /// A page under Settings: Poki's page ground under the system's grouped rows, the round icons on
-    /// its labels.
+    /// A page under Settings, the home page of Settings included: the round icons on its labels, the
+    /// system's grouped rows 16 pt apart, and under them the home page's own light, standing still.
     func settingsPage() -> some View {
         labelStyle(SettingsLabelStyle())
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(16)
+            .contentMargins(.top, 4, for: .scrollContent)
             .scrollContentBackground(.hidden)
-            .background(Tint.page.ignoresSafeArea())
+            .background { HomeBackdrop(home: true, working: false, frozen: true) }
     }
+}
+
+/// A section's heading as the settings pages write it: in the words' own case.
+struct SettingsHeader: View {
+    var title: LocalizedStringKey
+    init(_ title: LocalizedStringKey) { self.title = title }
+    var body: some View { Text(title).textCase(nil) }
 }
 
 /// A capsule button: black for the action you reach for most (Pause), outlined for the rest.

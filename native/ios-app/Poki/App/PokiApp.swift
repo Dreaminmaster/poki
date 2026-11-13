@@ -113,7 +113,7 @@ struct RootView: View {
         case .setup: openDetails([DetailsRoute.connection])
         case .model: openDetails([DetailsRoute.model])
         case .agents: openDetails([DetailsRoute.agents])
-        case .updates: openDetails([DetailsRoute.connection, DetailsRoute.updates])
+        case .updates: openDetails([DetailsRoute.updates])
         }
     }
 
@@ -188,6 +188,9 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
+            // Every page's top scroll edge is the system's soft one: the chat, the conversations, and
+            // the pages pushed over them under the system's bar.
+            .softTopEdge()
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
             .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
@@ -205,10 +208,6 @@ struct RootView: View {
 
     private var profilePage: some View {
         PokiDetailsView(
-            openVoice: {
-                detailsOpen = false
-                openLiveVoice()
-            },
             openSetup: {
                 var next = NavigationPath()
                 next.append(DetailsRoute.connection)
@@ -220,6 +219,9 @@ struct RootView: View {
             },
             path: $detailsPath
         )
+        // Presented on its own, so it says the edge's style itself rather than counting on the
+        // presenting page's.
+        .softTopEdge()
     }
 
     var body: some View {
@@ -390,15 +392,15 @@ struct RootView: View {
         case "hands", "connection":
             openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+            openDetails([DetailsRoute.approvals])
         case "health", "advanced":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+            openDetails([DetailsRoute.advanced])
         case "connect", "settings", "agents":
             openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
                 openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
@@ -411,6 +413,12 @@ struct RootView: View {
             openDetails([SettingsRoute.memory])
         case "appearance":
             openDetails([DetailsRoute.appearance])
+        case "voiceSettings":
+            openDetails([DetailsRoute.voice])
+        case "conversations":
+            openDetails([DetailsRoute.conversations])
+        case "updates":
+            openDetails([DetailsRoute.updates])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break
