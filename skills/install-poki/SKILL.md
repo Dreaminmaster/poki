@@ -28,7 +28,7 @@ In Poki 0.4.0, open the conversations drawer and tap the Settings button at the 
 
 ## Which Poki you get
 
-The installer installs the newest build on its channel: Alpha, unless you pass `--channel stable`, `beta` or `pre-alpha`. A channel also offers the more stable channels' builds, and a channel with no release yet takes the next less stable channel's newest (Stable, then Beta, then Alpha, then Pre-alpha). So Stable and Beta install the Alpha build until they have releases of their own. Do not state a version from memory; read it from the run:
+The installer installs the newest build on its channel: Alpha, unless you pass `--channel stable`, `beta` or `pre-alpha`. A channel also offers the more stable channels' builds, and a channel with no release yet takes the next less stable channel's newest (Stable, then Beta, then Alpha, then Pre-alpha). Stable and Beta therefore use the Alpha build while neither Stable nor Beta offers an installable release. Do not state a version from memory; read it from the run:
 
 - The `channel` step prints `<channel>: Poki <version> (<build>)`, the release this run installs. For a Beta or Stable release the part in brackets is the release name (`beta.1`) or empty, not the build number.
 - The `install` step prints `Poki <version> (<build>) installed`, with the build number from the app itself.
@@ -128,7 +128,7 @@ Tell the user these after the result:
 - **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > General > Updates > Signing Options > Apple Account, Poki prepares a refreshed build 3 days before signing ends and asks the user to tap Install Refresh or Install Update.
 - **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and refreshes.
 
-With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below for renewal too; keep the same version if only renewing an expired signature. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
+With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below for renewal too. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. An equal version and build is allowed when only the signature needs renewal. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
 
 ## Update an installed Poki
 
