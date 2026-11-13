@@ -2420,6 +2420,28 @@
         }
       }
     },
+    "Connection works. Model: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection works. Model: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接正常，应答模型：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線正常，回應模型：%@"
+          }
+        }
+      }
+    },
     "Continue" : {
       "localizations" : {
         "en" : {
@@ -5653,6 +5675,28 @@
         }
       }
     },
+    "No answer within 10 seconds. Check the address and the network, then try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No answer within 10 seconds. Check the address and the network, then try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10 秒内没有应答，请检查地址和网络后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10 秒內沒有回應，請檢查地址和網路後重試。"
+          }
+        }
+      }
+    },
     "No Archived Conversations" : {
       "comment" : "Settings > Conversations when nothing is archived.",
       "localizations" : {
@@ -5869,6 +5913,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無應答"
+          }
+        }
+      }
+    },
+    "Not enough quota or permission. Check the account’s billing and the key’s permissions." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not enough quota or permission. Check the account’s billing and the key’s permissions."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "额度或权限不足，请检查账户余额和密钥权限。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "額度或權限不足，請檢查帳號餘額和金鑰權限。"
           }
         }
       }
@@ -7168,6 +7234,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "待處理：%@"
+          }
+        }
+      }
+    },
+    "Poki can’t reach this address. Check the address and the network." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki can’t reach this address. Check the address and the network."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连不上这个接口地址，请检查地址和网络。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連不上這個 API 地址，請檢查地址和網路。"
           }
         }
       }
@@ -9210,6 +9298,28 @@
         }
       }
     },
+    "Saved. Change it and save again, or keep it as it is." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved. Change it and save again, or keep it as it is."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存。可以修改后再次保存，也可以保持现状。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存。可以修改後再次儲存，也可以維持現狀。"
+          }
+        }
+      }
+    },
     "SIGNING · OPTIONAL" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10629,12 +10739,166 @@
         }
       }
     },
+    "Test Connection" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test Connection"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試連線"
+          }
+        }
+      }
+    },
+    "Testing…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testing…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在测试…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在測試…"
+          }
+        }
+      }
+    },
+    "The address answers, but has no chat API there. Check that it ends in /v1." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address answers, but has no chat API there. Check that it ends in /v1."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址能连上，但没有找到对话接口，请确认地址以 /v1 结尾。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址可以連上，但沒有找到對話 API，請確認地址以 /v1 結尾。"
+          }
+        }
+      }
+    },
+    "The key is not valid. Check that it was copied in full." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The key is not valid. Check that it was copied in full."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密钥无效，请确认密钥已完整复制。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "金鑰無效，請確認金鑰已完整複製。"
+          }
+        }
+      }
+    },
+    "The model %@ doesn’t exist, or this key can’t use it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The model %@ doesn’t exist, or this key can’t use it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型「%@」不存在，或这个密钥无权使用它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型「%@」不存在，或這個金鑰無權使用它。"
+          }
+        }
+      }
+    },
     "The page Poki is using. Double-tap to take over." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 正在用的页面。连按两下接手。"
+          }
+        }
+      }
+    },
+    "The server returned an error (%lld)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server returned an error (%lld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务端返回错误（%lld）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器回傳錯誤（%lld）。"
+          }
+        }
+      }
+    },
+    "The test didn’t finish." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The test didn’t finish."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试没有完成。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試沒有完成。"
           }
         }
       }
