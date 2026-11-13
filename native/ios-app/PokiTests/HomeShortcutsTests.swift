@@ -55,7 +55,7 @@ final class HomeShortcutsTests: XCTestCase {
         let shown = pills(routines: [routine], requests: busy + history)
         XCTAssertEqual(shown.map(\.text), ["Order oat milk again", "Star Poki", "看看电池", "拍一张照片", "记一条待办",
                                             "看看购物车", "看看购物车"])
-        XCTAssertEqual(shown[1].prompt, "Open https://github.com/JosssphZhou/poki in the built-in browser and star it")
+        XCTAssertEqual(shown[1].prompt, "Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me")
         XCTAssertEqual(shown[1].appName, "GitHub", "a name in bold before the action, as on every pill")
         XCTAssertNotNil(shown[1].icon.flatMap(AppIconStore.carried), "GitHub's mark, carried in the app")
 

@@ -7268,24 +7268,24 @@
         }
       }
     },
-    "Open https://github.com/JosssphZhou/poki in the built-in browser and star it" : {
+    "Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open https://github.com/JosssphZhou/poki in the built-in browser and star it"
+            "value" : "Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在内置浏览器打开 https://github.com/JosssphZhou/poki，给 Poki 点个 Star"
+            "value" : "在内置浏览器打开 https://github.com/JosssphZhou/poki，给 Poki 点个 Star。如果我没登录 GitHub，就打开 https://github.com/login?return_to=/JosssphZhou/poki 交给我自己登录"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在內建瀏覽器打開 https://github.com/JosssphZhou/poki，給 Poki 點個 Star"
+            "value" : "在內建瀏覽器打開 https://github.com/JosssphZhou/poki，給 Poki 點個 Star。如果我沒登入 GitHub，就打開 https://github.com/login?return_to=/JosssphZhou/poki 交給我自己登入"
           }
         }
       }
