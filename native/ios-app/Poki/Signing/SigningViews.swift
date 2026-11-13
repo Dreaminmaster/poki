@@ -342,7 +342,7 @@ struct GitHubAccountPage: View {
                 Section {
                     Button("Sign In with GitHub") { copied = false; Task { await signer.signInToGitHub() } }
                 } footer: {
-                    Text("For people developing Poki. Poki asks GitHub for no permissions, and the sign-in stays in this iPhone’s Keychain.")
+                    Text("For people developing Poki. You sign in through Poki Preview Sign-in, a GitHub app that can only read the builds and pull requests of the Poki repository. The sign-in stays in this iPhone’s Keychain.")
                 }
             }
             if let error = signer.githubError {

@@ -3653,18 +3653,18 @@
         }
       }
     },
-    "For people developing Poki. Poki asks GitHub for no permissions, and the sign-in stays in this iPhone’s Keychain." : {
+    "For people developing Poki. You sign in through Poki Preview Sign-in, a GitHub app that can only read the builds and pull requests of the Poki repository. The sign-in stays in this iPhone’s Keychain." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "供参与开发 Poki 的人使用。Poki 不向 GitHub 申请任何权限，登录信息只保存在这台 iPhone 的钥匙串中。"
+            "value" : "供参与开发 Poki 的人使用。通过 GitHub 上的 Poki Preview Sign-in 应用登录，它只能读取 Poki 仓库的构建记录和拉取请求。登录信息只保存在这台 iPhone 的钥匙串中。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "供參與開發 Poki 的人使用。Poki 不向 GitHub 申請任何權限，登入資訊只儲存在這台 iPhone 的鑰匙圈中。"
+            "value" : "供參與開發 Poki 的人使用。透過 GitHub 上的 Poki Preview Sign-in 應用程式登入，它只能讀取 Poki 倉庫的構建記錄和拉取請求。登入資訊只儲存在這台 iPhone 的鑰匙圈中。"
           }
         }
       }
