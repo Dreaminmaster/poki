@@ -81,7 +81,7 @@ final class ActivityController {
     /// The device name `start` was last asked with: the activity is wanted, shown or not.
     private var wanted: String?
     /// Wanted but not shown because nothing is happening: not a fault.
-    var waitsForWork: Bool { activity == nil && wanted != nil && state.phase == .idle && hidesWhenIdle() }
+    var waitsForWork: Bool { activity == nil && wanted != nil && state.isQuiet && hidesWhenIdle() }
 
     var isRunning: Bool { activity != nil }
 
@@ -101,7 +101,7 @@ final class ActivityController {
     func start(deviceName: String) {
         wanted = deviceName
         guard activity == nil else { return }
-        if state.phase == .idle, hidesWhenIdle() { lastError = nil; return }
+        if state.isQuiet, hidesWhenIdle() { lastError = nil; return }
         guard enabled else { lastError = "Live Activities are off for Poki (Settings > Poki > Live Activities)."; return }
         // A Live Activity left from an earlier run of the app is replaced.
         for old in Activity<PokiActivityAttributes>.activities { Task { await old.end(nil, dismissalPolicy: .immediate) } }
@@ -175,9 +175,9 @@ final class ActivityController {
         let alert = transition(from: old)
         if state.phase == .working, let app = state.app { keepIcon(app) }
         // No idle activity where iOS's background task stands in: it comes with the work and goes with it.
-        if activity == nil, let wanted, state.phase != .idle, canStart() {
+        if activity == nil, let wanted, !state.isQuiet, canStart() {
             start(deviceName: wanted)
-        } else if activity != nil, state.phase == .idle, hidesWhenIdle() {
+        } else if activity != nil, state.isQuiet, hidesWhenIdle() {
             hide()
         }
         // Something needs the person and there is no Live Activity to pop up: a banner instead (an
