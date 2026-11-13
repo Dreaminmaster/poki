@@ -1,9 +1,46 @@
 import SwiftUI
 import WebKit
 
-/// Poki's browser in the chat (ESP-145): a card above the message field with the live page and the
-/// latest steps. Take Over moves the page into a sheet the owner can use; Stop ends the task. The card
-/// shows while the browser is open and closes with its button when no task is running.
+/// Poki's browser in the conversation, where a task began using it, above the answer the task gives:
+/// the live page while it is this conversation's page in use, otherwise the site it showed.
+struct BrowserCard: View {
+    var id: UUID
+    var visit: BrowserVisit
+    @Environment(ChatModel.self) private var chat
+    private var browser: PokiBrowser { PokiBrowser.shared }
+
+    var body: some View {
+        if chat.liveBrowser == id, browser.isOpen {
+            BrowserPanel()
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: "globe")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(visit.host.isEmpty ? String(localized: "Poki’s Browser") : visit.host)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(visit.title.isEmpty ? String(localized: "Done") : visit.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// Poki's browser in the chat (ESP-145): the live page and the latest steps, in the card of the task
+/// using it. Take Over moves the page into a sheet the owner can use; Stop ends the task. Close, when no
+/// task is running, puts the page away and leaves the card with the site it showed.
 struct BrowserPanel: View {
     @Environment(ChatModel.self) private var chat
     @Bindable private var browser = PokiBrowser.shared
