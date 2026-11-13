@@ -443,3 +443,81 @@ final class VoiceLanguageTests: XCTestCase {
         XCTAssertNil(transcription?["language"], "a fixed transcription language would mishear a user who switches")
     }
 }
+
+/// The Live Activity during a talk: it says what the talk is doing in the state's own `voice` field,
+/// its End ends the talk, and an approval is never pushed aside by it.
+extension VoiceModelTests {
+    private func following(_ h: Harness) -> (ActivityController, TalkActivity) {
+        let activity = ActivityController()
+        return (activity, TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false }))
+    }
+
+    func testTheLiveActivitySaysWhatTheTalkIsDoing() async {
+        let h = Harness()
+        let (activity, watcher) = following(h)
+        await h.talk()
+        await h.time.settle()
+        XCTAssertEqual(activity.state.voice, .listening)
+        XCTAssertEqual(activity.state.face.content, StatusWord.listening.text)
+        XCTAssertTrue(activity.state.face.endsTalk)
+        XCTAssertTrue(activity.state.face.talkGlow, "the island's brand band shows while a talk is on")
+
+        h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
+                    ["type": "conversation.item.input_audio_transcription.completed", "transcript": "What iOS version is this?"],
+                    ["type": "response.created", "response": ["id": "r1"]], ["type": "output_audio_buffer.started"])
+        await h.time.settle()
+        XCTAssertEqual(activity.state.voice, .speaking)
+        XCTAssertEqual(activity.state.face.content, StatusWord.speaking.text)
+
+        h.voice.stop()
+        await h.time.settle()
+        XCTAssertNil(activity.state.voice)
+        XCTAssertFalse(activity.state.face.endsTalk)
+        XCTAssertFalse(activity.state.face.talkGlow)
+        withExtendedLifetime(watcher) {}
+    }
+
+    func testEndOnTheLiveActivityEndsTheTalk() async throws {
+        let h = Harness()
+        let (activity, watcher) = following(h)
+        await h.talk()
+        XCTAssertTrue(h.voice.isOn)
+        let ended = expectation(for: NSPredicate { _, _ in !h.voice.isOn }, evaluatedWith: nil)
+        _ = try await EndTalkIntent().perform()
+        await fulfillment(of: [ended], timeout: 2)
+        XCTAssertTrue(h.link.closed)
+        await h.time.settle()
+        XCTAssertNil(activity.state.voice)
+        withExtendedLifetime(watcher) {}
+    }
+
+    func testAnApprovalDuringATalkKeepsTheLiveActivity() async {
+        let h = Harness()
+        let (activity, watcher) = following(h)
+        await h.talk()
+        await h.time.settle()
+        let approval = PendingApproval(id: "a1", app: "Messages", summary: "Tap “Send”", reason: "sending", expires: Date().addingTimeInterval(120))
+        activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?" }
+
+        // Poki speaks while the approval waits: the approval keeps the card and the island, with no End.
+        h.link.play(["type": "response.created", "response": ["id": "r1"]], ["type": "output_audio_buffer.started"])
+        await h.time.settle()
+        XCTAssertEqual(activity.state.phase, .approval)
+        XCTAssertEqual(activity.state.face.bottom, .approval(id: "a1"))
+        XCTAssertFalse(activity.state.face.endsTalk)
+
+        // Answered: the talk is back on the Live Activity, with End.
+        activity.update { $0.phase = .idle; $0.approval = nil; $0.headline = "Waiting for agent" }
+        XCTAssertEqual(activity.state.face.content, StatusWord.speaking.text)
+        XCTAssertTrue(activity.state.face.endsTalk)
+
+        // A talk that ends while an approval waits leaves the approval where it is.
+        activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?" }
+        h.voice.stop()
+        await h.time.settle()
+        XCTAssertEqual(activity.state.phase, .approval)
+        XCTAssertEqual(activity.state.approval, approval)
+        XCTAssertNil(activity.state.voice)
+        withExtendedLifetime(watcher) {}
+    }
+}

@@ -114,6 +114,10 @@ struct ActivityFace: Hashable {
     var stale = false
     /// Who is calling: the outside agent whose badge sits beside the meta value.
     var caller: String?
+    /// A talk with Poki is on: the card and the island carry End, which ends the talk (EndTalkIntent).
+    var endsTalk = false
+    /// A talk with Poki is on: the expanded island draws the brand band along its lower edge.
+    var talkGlow = false
 }
 
 /// Where a tap on the Live Activity goes, handled by RootView's onOpenURL.
