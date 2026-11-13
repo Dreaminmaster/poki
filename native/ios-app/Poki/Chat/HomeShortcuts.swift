@@ -16,6 +16,8 @@ struct HomeShortcut: Identifiable, Equatable {
     var prompt: String
     /// The owner changed it (long press, Edit): it keeps its place and words whatever the ranking does.
     var edited = false
+    /// The icon for a pill with no app, a PNG in Poki/AppIcons (`AppIconView.carried`); nil draws Poki's.
+    var icon: String?
     var id: String { key }
 }
 

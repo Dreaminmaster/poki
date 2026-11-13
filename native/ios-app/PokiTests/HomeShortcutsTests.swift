@@ -33,13 +33,13 @@ final class HomeShortcutsTests: XCTestCase {
     }
 
     func testANewOwnerSeesTheExamples() {
-        XCTAssertEqual(texts(), ["Tell the team I’m late", "Star Poki on GitHub", "Text Mom I’m on my way", "Book a ride home",
+        XCTAssertEqual(texts(), ["Tell the team I’m late", "Star Poki", "Text Mom I’m on my way", "Book a ride home",
                                  "Order my usual coffee", "Add milk to my list", "Post today’s photo"])
     }
 
     func testRoutinesThenRepeatedRequestsThenExamples() {
         XCTAssertEqual(texts(routines: [routine], requests: history),
-                       ["Order oat milk again", "Star Poki on GitHub", "看看电池", "Tell the team I’m late", "Text Mom I’m on my way",
+                       ["Order oat milk again", "Star Poki", "看看电池", "Tell the team I’m late", "Text Mom I’m on my way",
                         "Book a ride home", "Order my usual coffee"])
     }
 
@@ -53,10 +53,11 @@ final class HomeShortcutsTests: XCTestCase {
         let busy = own.enumerated().flatMap { n, text in [HomeShortcuts.Request(text: text, at: ago(Double(n + 1))),
                                                            HomeShortcuts.Request(text: text, at: ago(Double(n + 1) + 0.5))] }
         let shown = pills(routines: [routine], requests: busy + history)
-        XCTAssertEqual(shown.map(\.text), ["Order oat milk again", "Star Poki on GitHub", "看看电池", "拍一张照片", "记一条待办",
+        XCTAssertEqual(shown.map(\.text), ["Order oat milk again", "Star Poki", "看看电池", "拍一张照片", "记一条待办",
                                             "看看购物车", "看看购物车"])
         XCTAssertEqual(shown[1].prompt, "Open https://github.com/JosssphZhou/poki in the built-in browser and star it")
-        XCTAssertEqual(shown[1].app, "", "Poki's icon")
+        XCTAssertEqual(shown[1].appName, "GitHub", "a name in bold before the action, as on every pill")
+        XCTAssertNotNil(shown[1].icon.flatMap(AppIconStore.carried), "GitHub's mark, carried in the app")
 
         XCTAssertEqual(texts(forgotten: [HomeIdea.star.key]), ["Tell the team I’m late", "Text Mom I’m on my way", "Book a ride home",
                                                                "Order my usual coffee", "Add milk to my list", "Post today’s photo"])
@@ -65,13 +66,13 @@ final class HomeShortcutsTests: XCTestCase {
     func testTheOrderFollowsUse() {
         let recent = history + [.init(text: "打开天气看看明天", at: ago(0.3)), .init(text: "打开天气看看后天", at: ago(0.2)),
                                 .init(text: "打开天气，看看后天", at: ago(0.1))]
-        XCTAssertEqual(Array(texts(requests: recent).prefix(3)), ["看看后天", "Star Poki on GitHub", "看看电池"])
+        XCTAssertEqual(Array(texts(requests: recent).prefix(3)), ["看看后天", "Star Poki", "看看电池"])
     }
 
     func testAForgottenShortcutStaysAway() {
         let key = HomeShortcuts.normalize("打开设置看看电池")
         XCTAssertEqual(Array(texts(requests: history, forgotten: [key]).prefix(3)),
-                       ["Tell the team I’m late", "Star Poki on GitHub", "Text Mom I’m on my way"])
+                       ["Tell the team I’m late", "Star Poki", "Text Mom I’m on my way"])
         let example = HomeShortcuts.normalize("Tell the team I’m late")
         XCTAssertFalse(texts(forgotten: [example]).contains("Tell the team I’m late"))
     }
@@ -121,7 +122,7 @@ final class HomeShortcutsTests: XCTestCase {
         defer { for (key, value) in zip(keys, before) { defaults.set(value, forKey: key) } }
 
         let store = HomeShortcutStore()
-        // The second is starring Poki, which has Poki's icon and no app.
+        // The second is starring Poki, which has GitHub's mark and no app.
         let (first, second) = (store.shortcuts[0], store.shortcuts[2])
         store.edit(first, sentence: first.prompt + " please", app: first.app)
         store.edit(second, sentence: "Water the plants", app: nil)

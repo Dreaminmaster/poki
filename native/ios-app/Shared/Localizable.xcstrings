@@ -9976,24 +9976,24 @@
         }
       }
     },
-    "Star Poki on GitHub" : {
+    "Star Poki" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Star Poki on GitHub"
+            "value" : "Star Poki"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "给 Poki 点个 Star"
+            "value" : "给 Poki 点 Star"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "給 Poki 點個 Star"
+            "value" : "給 Poki 點 Star"
           }
         }
       }
@@ -24039,6 +24039,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已執行的操作"
+          }
+        }
+      }
+    },
+    "Star Poki on GitHub" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上为 Poki 加星标"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上為 Poki 加星標"
           }
         }
       }

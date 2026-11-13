@@ -337,12 +337,13 @@ enum HomeIdea {
 
     /// Starring Poki on GitHub, second on the home page from the first open, for a new owner and one
     /// who updates alike: the list is worked out again at each launch, so nothing is stored for it.
-    /// It has no app (Poki's icon, as an edited pill without one), because the task runs in Poki's own
-    /// browser, which hands the page over when GitHub asks to sign in. Its key does not change with the
-    /// language, so Forget holds after the iPhone's language changes.
+    /// Like every pill it reads as an icon, a name in bold and an action (GitHub's mark, GitHub,
+    /// starring Poki), but it has no app this iPhone opens: the task runs in Poki's own browser, which
+    /// hands the page over when GitHub asks to sign in. Its key does not change with the language, so
+    /// Forget holds after the iPhone's language changes.
     static var star: HomeShortcut {
-        HomeShortcut(key: "starpokiongithub", app: "", appName: "", text: String(localized: "Star Poki on GitHub"),
-                     prompt: String(localized: "Open https://github.com/JosssphZhou/poki in the built-in browser and star it"))
+        HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: String(localized: "Star Poki"),
+                     prompt: String(localized: "Open https://github.com/JosssphZhou/poki in the built-in browser and star it"), icon: "github")
     }
 
     static func examples(for language: AppLanguage) -> [HomeShortcut] {
@@ -595,7 +596,7 @@ private struct ShortcutPill: View {
     var body: some View {
         Button { if !locked { pick() } } label: {
             HStack(spacing: 8) {
-                AppIconView(app: idea.app, size: 24, alwaysLight: true)
+                AppIconView(app: idea.app, size: 24, alwaysLight: true, carried: idea.icon)
                 HStack(spacing: 5) {
                     if !idea.appName.isEmpty {
                         Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
@@ -617,7 +618,7 @@ private struct ShortcutPill: View {
         // What the menu offers, for VoiceOver, which has no long press.
         .accessibilityAction(named: Text("Edit"), edit)
         .accessibilityAction(named: Text("Forget"), forget)
-        .accessibilityIdentifier("home.idea." + (idea.app.isEmpty ? "poki" : idea.app))
+        .accessibilityIdentifier("home.idea." + (idea.app.isEmpty ? idea.icon ?? "poki" : idea.app))
         // Said here and not on the row: the pills live in the scroll view's own hosting view.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
