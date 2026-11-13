@@ -329,7 +329,8 @@ export class DeviceRelay extends DurableObject {
   }
 
   phone() {
-    return this.ctx.getWebSockets('phone').find(ws => ws.deserializeAttachment()?.ready);
+    return this.ctx.getWebSockets('phone').find(ws =>
+      ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.ready);
   }
 
   async fetch(request) {
