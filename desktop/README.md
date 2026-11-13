@@ -34,6 +34,7 @@ Poki Setup ships its command line tool, `poki-setup`, inside the app: `/Applicat
 - With `--json`, every command prints its result on stdout and its progress on stderr, one JSON object per line. Exit codes: 0 done, 1 failed, 2 a person has to act, 3 waiting for Apple's sign-in code.
 - Sign-in works without a terminal: `login <email> --password-stdin`, then `login --code <code>` when Apple asks for one. The person can also run `login <email>` in their own terminal, which keeps the password out of the agent.
 - `poki-setup update` updates Poki Setup itself on the chosen channel.
+- `poki-setup preview` signs in to GitHub and chooses a pull request's preview build instead of the channel (`sign-in`, `on`, a PR number, `none`). Pre-alpha needs the same sign-in. See [Preview builds](../docs/release-channels.md#preview-builds-of-pull-requests).
 - `poki-setup prompt` prints the instructions to hand an agent ([AGENT-PROMPT.md](AGENT-PROMPT.md)). The app copies the same text: Poki > Copy Prompt for Your Agent on a Mac, Settings > Use an agent on Windows.
 
 ## Build

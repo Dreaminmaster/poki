@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, failureText, type Account as AccountT, type AppInfo, type Team } from "../api";
 import { t } from "../i18n";
+import { GitHubCard } from "./GitHub";
 import { Capsule, Card, ErrorBox, Field, Toggle } from "../ui";
 
 export default function Account({ info }: { info: AppInfo | null }) {
@@ -73,6 +74,7 @@ export default function Account({ info }: { info: AppInfo | null }) {
           </form>
         </Card>
       )}
+      <GitHubCard />
     </>
   );
 }
