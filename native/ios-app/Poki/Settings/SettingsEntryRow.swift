@@ -10,14 +10,14 @@ extension EnvironmentValues {
 }
 
 /// Settings as a round glass button, with an amber dot while something there needs you (no model
-/// yet, setup not finished, an update waiting).
+/// yet, setup not finished, an update waiting, the relay offline).
 struct SettingsEntryButton: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openPokiSettings) private var open
     @Environment(\.drawerSliding) private var sliding
 
     private var needsYou: Bool {
-        !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update"
+        !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update" || model.relayStatus.isOffline
     }
 
     var body: some View {

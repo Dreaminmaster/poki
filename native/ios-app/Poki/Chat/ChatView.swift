@@ -20,6 +20,8 @@ struct ChatView: View {
     var openModel: () -> Void
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)? = nil
+    /// Opens External Agents, from the home page's hint.
+    var openAgents: () -> Void = {}
     /// Opens Updates, from the home page's hint.
     var openUpdates: () -> Void = {}
 
@@ -115,7 +117,8 @@ struct ChatView: View {
             HomePage(home: home, writing: writing, pick: { draft = $0; writing = true }) {
                 if home, let update { UpdatePill(version: update, open: openUpdates) }
                 if home, let hint = homeHint {
-                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel, openUpdates: openUpdates)
+                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel,
+                                  openAgents: openAgents, openUpdates: openUpdates)
                 }
             }
             .allowsHitTesting(home)
@@ -434,7 +437,7 @@ extension SetupIssueHint {
             return SetupIssueHint(message: String(localized: "Poki’s signing ends soon") + "\n" + warning.message,
                                   link: String(localized: "Open Updates ›"), target: .updates)
         }
-        return first(model: model)
+        return first(model: model) ?? relayIssue(model: model)
     }
 
     /// Home's one line (ESP-321): what main's two tab dots said, one problem at a time. A runner or
@@ -442,14 +445,18 @@ extension SetupIssueHint {
     /// offline (the Agents dot). The chat doesn't show the relay: it needs no relay to reply.
     @MainActor static func home(model: AppModel) -> SetupIssueHint? {
         if let hint = first(model: model, looks: true) { return hint }
-        if case .offline = model.relayStatus {
-            return SetupIssueHint(
-                message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
-                link: String(localized: "External Agents ›"),
-                target: .agents
-            )
-        }
-        return nil
+        return relayIssue(model: model)
+    }
+
+    /// The relay is offline, so agents can't reach this iPhone (main's Agents dot and its "Relay
+    /// offline" row). Not shown while the relay is off or connecting.
+    @MainActor static func relayIssue(model: AppModel) -> SetupIssueHint? {
+        guard model.relayStatus.isOffline else { return nil }
+        return SetupIssueHint(
+            message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
+            link: String(localized: "External Agents ›"),
+            target: .agents
+        )
     }
 }
 

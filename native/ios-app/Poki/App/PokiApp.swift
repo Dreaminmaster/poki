@@ -101,6 +101,7 @@ struct RootView: View {
             },
             openModel: { openDetails([DetailsRoute.model]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
+            openAgents: { openDetails([DetailsRoute.settings]) },
             openUpdates: { openDetails([DetailsRoute.updates]) }
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
