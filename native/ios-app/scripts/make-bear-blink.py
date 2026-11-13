@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """make-bear-blink.py: makes the blinking bear's pictures from the bear's own cutouts (ESP-468).
 
-For every face with open eyes, it finds the two dark pupils in Poki/Bear/PokiBearCutSmall-<face>.png,
-fills them with the eye's own white from around them (PokiBearLids-<face>.png), and prints where
-the pupils are, as the Swift table `BearEyes.table` in Poki/Bear/BearPortrait.swift. The portrait
-draws the filled picture and lays the pupils back over it from the original, so it can squeeze
-them shut for a blink. Run it again when the cutouts change; it needs Pillow, NumPy and SciPy.
+For every face with open eyes, it finds the two dark pupils in Poki/Bear/PokiBearCutSmall-<face>.png
+and the white eye round each, fills both eyes with the face's own colour from around them
+(PokiBearLids-<face>.png), and prints where the eyes are, as the Swift table `BearEyes.table` in
+Poki/Bear/BlinkingFace.swift. The face draws the filled picture and lays each whole eye, white and
+pupil, back over it from the original, so the eye can be squeezed shut for a blink without leaving
+its white behind. Run it again when the cutouts change; it needs Pillow, NumPy and SciPy.
 """
 import sys
 from pathlib import Path
@@ -19,34 +20,55 @@ FACES = ["hello", "ready", "thinking", "on-your-phone", "checking", "needs-you",
          "tripped", "cant-reach", "listening", "speaking"]
 # A pupil is a dark blob of at least this many pixels; the smile is smaller.
 PUPIL = 500
-# How far past the pupil's edge the fill reaches, so no dark fringe is left.
+# How far past the eye's edge the fill reaches, so no light fringe is left.
 MARGIN = 3
+# The eye's white: light and nearly grey, unlike the face's periwinkle.
+WHITE_LUMA = 226
+WHITE_CHROMA = 34
 
 
 def pupils(rgba):
+    """The two pupils, left first, each as a mask."""
     dark = (rgba[..., :3].mean(-1) < 90) & (rgba[..., 3] > 200)
     labels, count = ndimage.label(dark)
     sizes = ndimage.sum(dark, labels, range(1, count + 1))
-    boxes = ndimage.find_objects(labels)
-    found = [boxes[i] for i, size in enumerate(sizes) if size >= PUPIL]
+    found = [i + 1 for i, size in enumerate(sizes) if size >= PUPIL]
     if len(found) != 2:
         sys.exit(f"expected two pupils, found {len(found)}")
-    return sorted(found, key=lambda box: box[1].start)
+    masks = [labels == i for i in found]
+    return sorted(masks, key=lambda mask: np.nonzero(mask)[1].min())
 
 
-def ellipse(shape, box, grow):
-    ys, xs = np.mgrid[0:shape[0], 0:shape[1]]
-    cy = (box[0].start + box[0].stop - 1) / 2
-    cx = (box[1].start + box[1].stop - 1) / 2
-    ry = (box[0].stop - box[0].start) / 2 + grow
-    rx = (box[1].stop - box[1].start) / 2 + grow
-    return ((ys - cy) / ry) ** 2 + ((xs - cx) / rx) ** 2 <= 1
+def eye(rgba, pupil):
+    """The whole eye round a pupil: the white touching it, the pupil, and what they enclose, grown by MARGIN."""
+    rgb = rgba[..., :3]
+    white = (rgb.mean(-1) > WHITE_LUMA) & (rgb.max(-1) - rgb.min(-1) < WHITE_CHROMA) & (rgba[..., 3] > 250)
+    labels, _ = ndimage.label(white | pupil)
+    touching = set(np.unique(labels[ndimage.binary_dilation(pupil, iterations=4) & (white | pupil)])) - {0}
+    whole = ndimage.binary_fill_holes(np.isin(labels, list(touching)))
+    return ndimage.binary_dilation(whole, iterations=MARGIN)
 
 
-def fill(rgb, hole):
-    """Fills the hole from its edge inward, each pixel the mean of its known neighbours, then smooths."""
-    rgb = rgb.copy()
-    known = ~hole
+def cover(mask):
+    """The rectangle whose inscribed ellipse holds every pixel of the mask: the view masks each eye with that
+    ellipse, so a filled pixel outside it would show while the eye is open."""
+    ys, xs = np.nonzero(mask)
+    x0, x1, y0, y1 = xs.min() - 1.0, xs.max() + 2.0, ys.min() - 1.0, ys.max() + 2.0
+    while True:
+        cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+        if (((xs + 0.5 - cx) / rx) ** 2 + ((ys + 0.5 - cy) / ry) ** 2).max() <= 0.97:
+            return x0, y0, x1 - x0, y1 - y0
+        x0, x1, y0, y1 = x0 - 1, x1 + 1, y0 - 1, y1 + 1
+
+
+def fill(rgba, hole):
+    """Fills the hole from its edge inward, each pixel the mean of its known neighbours, then smooths.
+    Only the face's own colour feeds it: a mouth or blush touching an eye would otherwise bleed in."""
+    rgb = rgba[..., :3].copy()
+    face = (rgb[..., 2] > rgb[..., 0]) & (rgb.mean(-1) > 150) & (rgba[..., 3] > 250)
+    near = ndimage.binary_dilation(hole, iterations=12)
+    work = hole | (near & ~face)
+    known = ~work
     kernel = np.ones((3, 3))
     while not known.all():
         weight = ndimage.convolve(known.astype(float), kernel, mode="nearest")
@@ -57,8 +79,10 @@ def fill(rgb, hole):
         known = known | edge
     for _ in range(40):
         blurred = ndimage.uniform_filter(rgb, size=(3, 3, 1), mode="nearest")
-        rgb[hole] = blurred[hole]
-    return rgb
+        rgb[work] = blurred[work]
+    out = rgba[..., :3].copy()
+    out[hole] = rgb[hole]
+    return out
 
 
 def main():
@@ -67,15 +91,13 @@ def main():
         image = Image.open(BEAR / f"PokiBearCutSmall-{face}.png").convert("RGBA")
         rgba = np.asarray(image).astype(float)
         side = rgba.shape[0]
-        boxes = pupils(rgba)
-        hole = ellipse(rgba.shape[:2], boxes[0], MARGIN) | ellipse(rgba.shape[:2], boxes[1], MARGIN)
+        eyes = [eye(rgba, pupil) for pupil in pupils(rgba)]
         out = rgba.copy()
-        out[..., :3] = fill(rgba[..., :3], hole)
+        out[..., :3] = fill(rgba, eyes[0] | eyes[1])
         Image.fromarray(out.round().clip(0, 255).astype(np.uint8)).save(BEAR / f"PokiBearLids-{face}.png", optimize=True)
         rects = []
-        for box in boxes:
-            x, y = box[1].start - MARGIN, box[0].start - MARGIN
-            w, h = box[1].stop - box[1].start + 2 * MARGIN, box[0].stop - box[0].start + 2 * MARGIN
+        for mask in eyes:
+            x, y, w, h = cover(mask)
             rects.append(f"CGRect(x: {x / side:.4f}, y: {y / side:.4f}, width: {w / side:.4f}, height: {h / side:.4f})")
         rows.append(f'        .{camel(face)}: [{", ".join(rects)}],')
     print("    static let table: [PokiMood: [CGRect]] = [")
