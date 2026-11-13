@@ -417,8 +417,10 @@ struct HomePage<Footer: View>: View {
     private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
     @State private var greetedAt = Date.now
-    /// A pill's Forget menu is open: both rows stand still under it.
+    /// A pill's menu is open: both rows stand still under it.
     @State private var menuOpen = false
+    /// The pill whose Edit page is open.
+    @State private var editing: HomeShortcut?
 
     var body: some View {
         GeometryReader { geometry in
@@ -469,15 +471,21 @@ struct HomePage<Footer: View>: View {
         .task(id: SessionStore.shared.sessions.count) {
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }
+        .sheet(item: $editing) { shortcut in
+            ShortcutEditor(shortcut: shortcut) { sentence, app in shortcutStore.edit(shortcut, sentence: sentence, app: app) }
+        }
     }
 
     /// A pill: the app's icon, its name and the action, the name and the action in one size and told
-    /// apart by weight and shade (the owner: the name and the words after it did not match).
+    /// apart by weight and shade (the owner: the name and the words after it did not match). An edited
+    /// one with no app this iPhone knows is Poki's icon and the words.
     private func pill(_ idea: HomeShortcut) -> some View {
         HStack(spacing: 8) {
             AppIconView(app: idea.app, size: 24, alwaysLight: true)
             HStack(spacing: 5) {
-                Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                if !idea.appName.isEmpty {
+                    Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                }
                 Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
             }
             .lineLimit(1)
@@ -504,6 +512,7 @@ struct HomePage<Footer: View>: View {
                 // went on under it.
                 .contentShape(.contextMenuPreview, Capsule())
                 .contextMenu {
+                    Button("Edit", systemImage: "pencil") { editing = idea }
                     Button("Forget", systemImage: "eye.slash", role: .destructive) { shortcutStore.forget(idea) }
                 } preview: {
                     pill(idea)
@@ -513,9 +522,9 @@ struct HomePage<Footer: View>: View {
                         .onDisappear { menuOpen = false }
                 }
                 .livePillGlass()
-                .accessibilityLabel(Text(verbatim: idea.appName + ", " + idea.text))
+                .accessibilityLabel(Text(verbatim: [idea.appName, idea.text].filter { !$0.isEmpty }.joined(separator: ", ")))
                 .accessibilityHint(Text("Puts this in the message field"))
-                .accessibilityIdentifier("home.idea." + idea.app)
+                .accessibilityIdentifier("home.idea." + (idea.app.isEmpty ? "poki" : idea.app))
                 // Said here and not on the row: the pills live in the scroll view's own hosting view.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }

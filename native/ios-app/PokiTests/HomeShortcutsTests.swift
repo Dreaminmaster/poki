@@ -23,8 +23,9 @@ final class HomeShortcutsTests: XCTestCase {
     }
     private let routine = HomeShortcuts.Remembered(text: "Order oat milk again", app: "com.starbucks.mystarbucks", runs: 4, at: Date(timeIntervalSince1970: 1_799_950_000))
 
-    private func pills(routines: [HomeShortcuts.Remembered] = [], requests: [HomeShortcuts.Request] = [], forgotten: Set<String> = []) -> [HomeShortcut] {
-        HomeShortcuts.rank(routines: routines, requests: requests, examples: HomeIdea.examples, forgotten: forgotten, now: now)
+    private func pills(routines: [HomeShortcuts.Remembered] = [], requests: [HomeShortcuts.Request] = [], forgotten: Set<String> = [],
+                       edits: [HomeShortcuts.Edit] = []) -> [HomeShortcut] {
+        HomeShortcuts.rank(routines: routines, requests: requests, examples: HomeIdea.examples, forgotten: forgotten, edits: edits, now: now)
     }
     private func texts(routines: [HomeShortcuts.Remembered] = [], requests: [HomeShortcuts.Request] = [], forgotten: Set<String> = []) -> [String] {
         pills(routines: routines, requests: requests, forgotten: forgotten).map(\.text)
@@ -86,6 +87,53 @@ final class HomeShortcutsTests: XCTestCase {
         XCTAssertNil(ShortcutApp.leading("notes about the trip"), "notes in lower case is a word")
         XCTAssertNil(ShortcutApp.leading("Book a ride home"))
         XCTAssertNil(ShortcutApp.leading("打开设置"), "an app and nothing to do")
+    }
+
+    /// The owner (2026-11-13): an edited pill's icon must show. Edited in place, it keeps its app's icon,
+    /// and with no app this iPhone knows it stays on the page, as Poki's icon and the words; both come
+    /// back after a restart. Old code had no edit, and dropped any pill without a known app.
+    func testAnEditedShortcutKeepsItsIconAndOutlivesARestart() {
+        let defaults = UserDefaults.standard
+        let keys = ["home.shortcuts.edited", "home.shortcuts.forgotten"]
+        let before = keys.map { defaults.object(forKey: $0) }
+        for key in keys { defaults.removeObject(forKey: key) }
+        defer { for (key, value) in zip(keys, before) { defaults.set(value, forKey: key) } }
+
+        let store = HomeShortcutStore()
+        let (first, second) = (store.shortcuts[0], store.shortcuts[1])
+        store.edit(first, sentence: first.prompt + " please", app: first.app)
+        store.edit(second, sentence: "Water the plants", app: nil)
+
+        for shown in [store.shortcuts, HomeShortcutStore().shortcuts] {
+            XCTAssertEqual(shown[0].prompt, first.prompt + " please")
+            XCTAssertEqual(shown[0].app, first.app)
+            XCTAssertNotNil(AppIconStore.shared.icon(shown[0].app), "\(shown[0])")
+            XCTAssertEqual(shown[1].prompt, "Water the plants")
+            XCTAssertEqual(shown[1].text, "Water the plants")
+            XCTAssertEqual(shown[1].app, "", "no app: AppIconView draws Poki's icon")
+        }
+    }
+
+    /// An edit holds its place while the history changes, and stays when the pill it replaced is gone.
+    func testAnEditOutlivesThePillItReplaced() {
+        let edit = HomeShortcuts.Edit(replaces: HomeShortcuts.normalize("打开设置看看电池"), sentence: "打开备忘录记一条待办", app: "com.apple.mobilenotes")
+        let withIt = pills(requests: history, edits: [edit])
+        XCTAssertEqual(withIt.first?.text, "记一条待办")
+        XCTAssertEqual(withIt.first?.app, "com.apple.mobilenotes")
+
+        let without = pills(edits: [edit])
+        XCTAssertEqual(without.count, 6)
+        XCTAssertEqual(without.last?.prompt, "打开备忘录记一条待办")
+    }
+
+    /// The Edit page: a sentence that begins with another app takes that app's icon; one that loses the
+    /// app it began with has none; a routine's words that never named its app keep it.
+    func testAnEditedSentenceTakesItsAppAlong() {
+        let settings = "com.apple.Preferences"
+        XCTAssertEqual(ShortcutApp.following("打开淘宝看看物流", was: "打开设置看看电池", app: settings), "com.taobao.taobao4iphone")
+        XCTAssertNil(ShortcutApp.following("看看电池", was: "打开设置看看电池", app: settings))
+        XCTAssertEqual(ShortcutApp.following("Order oat milk twice", was: "Order oat milk again", app: "com.starbucks.mystarbucks"),
+                       "com.starbucks.mystarbucks")
     }
 
     func testPrivateRequestsNeverBecomePills() {

@@ -14,6 +14,8 @@ struct HomeShortcut: Identifiable, Equatable {
     /// What to do in the app, without its name.
     var text: String
     var prompt: String
+    /// The owner changed it (long press, Edit): it keeps its place and words whatever the ranking does.
+    var edited = false
     var id: String { key }
 }
 
@@ -67,6 +69,15 @@ enum ShortcutApp {
         return out.filter { !$0.isEmpty }
     }
 
+    /// The app an edited sentence goes with: the one it now begins with; none when it began with `app`
+    /// and names it no more (the pill then shows Poki's icon); otherwise `app` as it was, as for a
+    /// routine whose words never named its app.
+    static func following(_ sentence: String, was old: String, app: String?) -> String? {
+        if let lead = leading(sentence) { return lead.id }
+        if let app, leading(old)?.id == app, !AppIconStore.bundleIDs(namedIn: sentence).contains(app) { return nil }
+        return app
+    }
+
     private static let openings = ["please ", "can you ", "could you ", "help me ", "请帮我", "帮我", "麻烦", "请"]
     private static let verbs = ["open ", "go to ", "in ", "打开", "去", "在", "用"]
     private static let joints = ["and ", "then ", "to ", "里", "上", "中", "然后"]
@@ -81,12 +92,15 @@ enum ShortcutApp {
 enum HomeShortcuts {
     struct Request: Equatable { var text: String; var at: Date }
     struct Remembered: Equatable { var text: String; var app: String?; var runs: Int; var at: Date }
+    /// A quick action the owner changed, kept on this iPhone: the sentence a tap puts in the message
+    /// field and its app (a bundle ID; nil for none), in place of the pill whose key is `replaces`.
+    struct Edit: Codable, Equatable { var replaces: String; var sentence: String; var app: String? }
 
     /// At least this many, and as many as there are default examples.
     static let shown = 6
 
     static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], forgotten: Set<String>,
-                     now: Date) -> [HomeShortcut] {
+                     edits: [Edit] = [], now: Date) -> [HomeShortcut] {
         var out: [HomeShortcut] = []
         func taken(_ key: String) -> Bool {
             key.isEmpty || forgotten.contains { similar($0, key) } || out.contains { similar($0.key, key) }
@@ -106,7 +120,28 @@ enum HomeShortcuts {
         }
 
         for example in examples where !taken(example.key) { out.append(example) }
-        return Array(out.prefix(max(shown, examples.count)))
+        let limit = max(shown, examples.count)
+        var pills = Array(out.prefix(limit))
+
+        // The owner's edits: each in the place of the pill it replaced, or at the end when that pill is
+        // no longer worked out; the others make room for them.
+        var left = edits
+        for i in pills.indices {
+            guard let e = left.firstIndex(where: { similar($0.replaces, pills[i].key) }) else { continue }
+            pills[i] = pill(left.remove(at: e))
+        }
+        pills += left.map(pill)
+        while pills.count > limit, let i = pills.lastIndex(where: { !$0.edited }) { pills.remove(at: i) }
+        return pills
+    }
+
+    /// An edit as its pill: its app's icon and name, or Poki's icon and no name when it has no app this
+    /// iPhone knows; the words after the app's name when the sentence begins with it.
+    static func pill(_ edit: Edit) -> HomeShortcut {
+        let app = ShortcutApp.named(edit.app)
+        let action = ShortcutApp.leading(edit.sentence).flatMap { $0.id == app?.id ? $0.action : nil }
+        return HomeShortcut(key: edit.replaces, app: app?.id ?? "", appName: app?.name ?? "",
+                            text: action ?? edit.sentence, prompt: edit.sentence, edited: true)
     }
 
     /// A routine's app is the one it was recorded in; its words lose the app's name if they begin with it.
@@ -203,18 +238,26 @@ enum HomeShortcuts {
 }
 
 /// The quick actions the home page shows, worked out once and again only when the history, the
-/// routines or the forgotten ones change.
+/// routines, the forgotten ones or the edited ones change.
 @MainActor @Observable
 final class HomeShortcutStore {
     static let shared = HomeShortcutStore()
-    private(set) var shortcuts: [HomeShortcut] = HomeIdea.examples
+    private(set) var shortcuts: [HomeShortcut] = []
     @ObservationIgnored private var basis: [String] = []
     @ObservationIgnored private var routes: [HomeShortcuts.Remembered] = []
     @ObservationIgnored private var requests: [HomeShortcuts.Request] = []
     @ObservationIgnored private let defaults = UserDefaults.standard
     private static let forgottenKey = "home.shortcuts.forgotten"
+    private static let editedKey = "home.shortcuts.edited"
+
+    init() { rank(now: Date()) }
 
     var forgotten: Set<String> { Set(defaults.stringArray(forKey: Self.forgottenKey) ?? []) }
+
+    /// The owner's edits, oldest first.
+    var edits: [HomeShortcuts.Edit] {
+        defaults.data(forKey: Self.editedKey).flatMap { try? JSONDecoder().decode([HomeShortcuts.Edit].self, from: $0) } ?? []
+    }
 
     func refresh(sessions: [SavedSession], routines: [Routine], now: Date = Date()) {
         let requests = sessions.compactMap { session -> HomeShortcuts.Request? in
@@ -233,11 +276,25 @@ final class HomeShortcutStore {
     /// Long press, Forget: gone from the home page, also after a restart.
     func forget(_ shortcut: HomeShortcut) {
         defaults.set(Array(forgotten.union([shortcut.key])).sorted(), forKey: Self.forgottenKey)
+        keep(edits.filter { $0.replaces != shortcut.key })
         basis = []
         rank(now: Date())
     }
 
+    /// Long press, Edit, Save: the pill in its place with these words and this app, also after a
+    /// restart and whatever the history does after.
+    func edit(_ shortcut: HomeShortcut, sentence: String, app: String?) {
+        let edit = HomeShortcuts.Edit(replaces: shortcut.key, sentence: sentence.trimmingCharacters(in: .whitespacesAndNewlines), app: app)
+        keep(edits.filter { $0.replaces != shortcut.key } + [edit])
+        rank(now: Date())
+    }
+
+    private func keep(_ edits: [HomeShortcuts.Edit]) {
+        defaults.set(try? JSONEncoder().encode(edits), forKey: Self.editedKey)
+    }
+
     private func rank(now: Date) {
-        shortcuts = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, forgotten: forgotten, now: now)
+        shortcuts = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, forgotten: forgotten,
+                                       edits: edits, now: now)
     }
 }
