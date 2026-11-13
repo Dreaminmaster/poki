@@ -92,6 +92,35 @@ final class SelfSigner {
     /// so it exits cleanly when iOS replaces it, and comes back on after.
     var beforeInstall: () -> Void = {}
 
+    enum InstallFinish: Equatable {
+        case idle, installing, waitingForExit
+        case needsReopen(installed: Bool)
+    }
+    private(set) var installFinish = InstallFinish.idle
+    private var finishTimer: Timer?
+    private var foregroundObserver: NSObjectProtocol?
+
+    var installMessage: String? {
+        switch installFinish {
+        case .idle: nil
+        case .installing: String(localized: "Installing the update. Features are unavailable until you reopen Poki.")
+        case .waitingForExit: String(localized: "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.")
+        case .needsReopen(let installed): installed
+            ? String(localized: "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki.")
+            : String(localized: "To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki.")
+        }
+    }
+
+    var needsReopen: Bool {
+        if case .needsReopen = installFinish { return true }
+        return false
+    }
+
+    isolated deinit {
+        finishTimer?.invalidate()
+        if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
+    }
+
     private var started = false
     private var timer: Timer?
     private let log = AppLog.shared
@@ -225,7 +254,7 @@ final class SelfSigner {
     /// Prepares what is due, by itself: an update when the channel has a newer Poki, a refresh when
     /// the installed profile is close to expiring. Never installs.
     func maintain() {
-        guard signedIn, working == nil, phone() != nil else { return }
+        guard installFinish == .idle, signedIn, working == nil, phone() != nil else { return }
         Task {
             lastCheck = Date()
             if let rel = try? await SignerBridge.decode(Release.self, ["op": "check_update"]) {
@@ -297,6 +326,7 @@ final class SelfSigner {
 
     /// Installs the prepared build. iOS ends Poki when it lands; a notification brings it back.
     func install() async {
+        guard installFinish == .idle else { return }
         guard let p = next else { log.add("signing", "install tapped, but no build is ready"); return }
         log.add("signing", "install tapped: \(p.kind) \(p.version) (\(p.build))")
         guard isIdle() else {
@@ -314,6 +344,15 @@ final class SelfSigner {
         request["manifest"] = Self.home.appendingPathComponent("ready/\(p.kind)/manifest.json").path
         let reopen = "nz.zheha.poki.signing.reopen"
         scheduleReopenNotice(id: reopen)
+        installFinish = .installing
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.steppedAside else { return }
+                self.requireReopen()
+            }
+        }
         beforeInstall()
         steppedAside = false
         installFraction = nil
@@ -338,8 +377,14 @@ final class SelfSigner {
         }
         watch.cancel()
         UIApplication.shared.endBackgroundTask(background)
-        // Still here: iOS did not end Poki (or the install failed).
-        if lastError != nil { UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [reopen]) }
+        if lastError != nil {
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [reopen])
+            requireReopen()
+        } else {
+            installFinish = needsReopen ? .needsReopen(installed: true) : .waitingForExit
+            if !steppedAside { stepAside() }
+            working = installMessage
+        }
     }
 
     // MARK: Helpers
@@ -356,7 +401,7 @@ final class SelfSigner {
         working = title
         fraction = nil
         lastError = nil
-        defer { working = nil; fraction = nil }
+        defer { working = installMessage; fraction = nil }
         do { try await work() } catch {
             let code = (error as? SignerError)?.code ?? ""
             lastError = whyUnreachable() == .cellular && ["loopback", "handshake", "unreachable"].contains(code) ? LoopbackMonitor.needsWiFi : error.localizedDescription
@@ -374,6 +419,9 @@ final class SelfSigner {
         guard !steppedAside else { return }
         log.add("signing", "the install's last step: telling the owner Poki will close to finish")
         steppedAside = true
+        finishTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.requireReopen() }
+        }
         working = String(localized: "Finishing the update: Poki will close to finish it")
         // The last step: the owner is told Poki will close (the alert's OK steps aside, and iOS ends
         // Poki by itself otherwise); the notice says it again in case the alert was missed.
@@ -385,13 +433,26 @@ final class SelfSigner {
     var finishNotice = false
     /// OK on that alert: Poki leaves for the Home Screen.
     func finishNoticeAnswered() {
+        guard finishNotice else { return }
         finishNotice = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, !self.needsReopen else { return }
             UIApplication.shared.perform(NSSelectorFromString("suspend"))
         }
     }
 
+    private func requireReopen() {
+        guard installFinish != .idle, !needsReopen else { return }
+        installFinish = .needsReopen(installed: installFinish == .waitingForExit)
+        finishTimer?.invalidate()
+        finishNotice = false
+        fraction = nil
+        working = installMessage
+        log.add("signing", "old process still running: showing instructions to reopen Poki")
+    }
+
     private func show(_ progress: [String: Any]) {
+        guard !needsReopen else { return }
         switch progress["kind"] as? String {
         case "step":
             working = progress["title"] as? String ?? working; fraction = nil

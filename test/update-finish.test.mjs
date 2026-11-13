@@ -16,7 +16,16 @@ test('an installed update gives restart instructions when the old process surviv
     // Compile the real signer with platform adapters; the C bridge and iOS process are simulated.
     await writeFile(join(dir, 'SelfSigner.swift'), source.slice(0, source.indexOf('enum SignerBridge {'))
       .replace('import UIKit', 'import Observation').replace('import UserNotifications', ''));
-    await exec('swiftc', ['-parse-as-library', join(dir, 'SelfSigner.swift'),
+    const app = await readFile(new URL('../native/ios-app/Poki/App/AppModel.swift', import.meta.url), 'utf8');
+    const begin = app.indexOf('    func phoneTool(');
+    const end = app.indexOf('\n    }', begin) + '\n    }'.length;
+    await writeFile(join(dir, 'AppModel.swift'), `@MainActor final class AppModel {
+      let signer: SelfSigner
+      let core = FakeCore()
+      init(signer: SelfSigner) { self.signer = signer }
+      ${app.slice(begin, end)}
+    }`);
+    await exec('swiftc', ['-parse-as-library', join(dir, 'SelfSigner.swift'), join(dir, 'AppModel.swift'),
       fileURLToPath(new URL('./fixtures/update-finish/Runtime.swift', import.meta.url)),
       '-o', join(dir, 'check')]);
     const result = await exec(join(dir, 'check'));

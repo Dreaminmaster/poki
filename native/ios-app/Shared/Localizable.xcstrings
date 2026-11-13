@@ -30968,6 +30968,144 @@
           }
         }
       }
+    },
+    "Reopen Poki" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reopen Poki"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新打开 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新開啟 Poki"
+          }
+        }
+      }
+    },
+    "Finishing the Update" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finishing the Update"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新"
+          }
+        }
+      }
+    },
+    "Installing the update. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing the update. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装更新。重新打开 Poki 前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安裝更新。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安装，正在等待 Poki 关闭。重新打开 Poki 前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安裝，正在等待 Poki 關閉。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安装。请在多任务界面向上划掉 Poki，然后重新打开。重新打开前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安裝。請在多工處理畫面向上滑掉 Poki，然後重新開啟。重新開啟前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在多任务界面向上划掉 Poki，然后重新打开以完成更新。如果仍显示可用更新，请重试。重新打开前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在多工處理畫面向上滑掉 Poki，然後重新開啟以完成更新。如果仍顯示可用更新，請重試。重新開啟前，功能暫不可用。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
