@@ -27,7 +27,7 @@
 
 ## 빠른 시작
 
-**iPhone에 Poki App 설치하기.** [Alpha 릴리스](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)에서 Poki Setup을 다운로드하고 창의 안내를 따르세요. 자세한 내용은 [iPhone 설치 안내](README.md#poki-on-your-iphone)를 참고하세요. iPhone에는 10.7.0.1을 기기 자신으로 되돌리는 VPN 앱도 필요합니다. App Store의 무료 앱 LocalDevVPN이면 됩니다. 모델 계정은 직접 준비해야 합니다. ChatGPT Plus 또는 Pro 요금제로 로그인하는 것이 가장 간편하며, Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter의 API 키를 붙여 넣거나 OpenAI 호환 자체 서버를 사용할 수도 있습니다. Claude 구독으로는 로그인할 수 없으니 Anthropic API 키를 사용하세요.
+**iPhone에 Poki App 설치하기.** [Alpha 릴리스](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)에서 Poki Setup을 다운로드하고 창의 안내를 따르세요. 자세한 내용은 [iPhone 설치 안내](README.md#install-poki-on-your-iphone)를 참고하세요. iPhone에는 10.7.0.1을 기기 자신으로 되돌리는 VPN 앱도 필요합니다. App Store의 무료 앱 LocalDevVPN이면 됩니다. 모델 계정은 직접 준비해야 합니다. ChatGPT Plus 또는 Pro 요금제로 로그인하는 것이 가장 간편하며, Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter의 API 키를 붙여 넣거나 OpenAI 호환 자체 서버를 사용할 수도 있습니다. Claude 구독으로는 로그인할 수 없으니 Anthropic API 키를 사용하세요.
 
 **에이전트에게 설치를 맡기세요.** 아래 내용을 복사해 에이전트에게 전달하세요:
 

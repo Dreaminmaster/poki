@@ -27,7 +27,7 @@
 
 ## Inicio rápido
 
-**Instala Poki App en tu iPhone.** Descarga Poki Setup desde la [versión Alpha](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) y sigue las instrucciones de su ventana. Consulta la [guía de instalación en iPhone](README.md#poki-on-your-iphone). El iPhone también necesita una app de VPN que devuelva 10.7.0.1 al propio iPhone; la app gratuita LocalDevVPN de la App Store sirve. Necesitas tu propia cuenta de modelo: iniciar sesión con un plan ChatGPT Plus o Pro es lo más sencillo, y también puedes pegar una clave de API de Anthropic, OpenAI, Gemini, DeepSeek u OpenRouter, o usar tu propio servidor compatible con OpenAI. Una suscripción de Claude no permite iniciar sesión; usa una clave de API de Anthropic.
+**Instala Poki App en tu iPhone.** Descarga Poki Setup desde la [versión Alpha](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) y sigue las instrucciones de su ventana. Consulta la [guía de instalación en iPhone](README.md#install-poki-on-your-iphone). El iPhone también necesita una app de VPN que devuelva 10.7.0.1 al propio iPhone; la app gratuita LocalDevVPN de la App Store sirve. Necesitas tu propia cuenta de modelo: iniciar sesión con un plan ChatGPT Plus o Pro es lo más sencillo, y también puedes pegar una clave de API de Anthropic, OpenAI, Gemini, DeepSeek u OpenRouter, o usar tu propio servidor compatible con OpenAI. Una suscripción de Claude no permite iniciar sesión; usa una clave de API de Anthropic.
 
 **Deja que tu agente lo instale.** Copia esto a tu agente:
 
