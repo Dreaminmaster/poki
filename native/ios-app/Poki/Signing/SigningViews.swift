@@ -226,7 +226,7 @@ struct SigningOptionsPage: View {
             } header: {
                 Text("Release Channel")
             } footer: {
-                Text("Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta, Alpha and Pre-alpha get earlier builds.")
+                Text("Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel.")
             }
             Section {
                 LabeledContent("Installed") { Text(verbatim: "\(signer.installedVersion) (\(signer.installedBuild))") }

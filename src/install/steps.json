@@ -24,7 +24,7 @@
     "pairing_file": { "who": "phone", "say": "Open Poki on the iPhone and scan the code Poki Setup shows to give it the pairing file." },
     "open_poki": { "who": "phone", "say": "On the iPhone, open Settings > General > VPN & Device Management, tap your Apple Account under Developer App, tap Trust, then open Poki from the Home Screen and keep it open for a moment. I see by myself when Poki is open." },
     "open_poki_tell": { "who": "phone", "say": "On the iPhone, open Settings > General > VPN & Device Management, tap your Apple Account under Developer App, tap Trust, then open Poki from the Home Screen. Tell me when Poki is open." },
-    "loopback": { "who": "phone", "say": "Poki needs a VPN app on the iPhone that lets it reach 10.7.0.1. If you have none, install the free LocalDevVPN from the App Store. In Poki, open Setup > Connect to this iPhone and follow the one line for your VPN app. I see by myself when it works." }
+    "loopback": { "who": "phone", "say": "Poki needs a VPN app on the iPhone that lets it reach 10.7.0.1. If you have none, install the free LocalDevVPN from the App Store. In Poki, open Settings > Connection > Local Connection and follow the one line for your VPN app. I see by myself when it works." }
   },
   "errors": {
     "setup_download_failed": { "reason": "A release asset or its metadata could not be downloaded from GitHub.", "agent_fix": "Requests make at most 3 attempts; assets switch to the release asset API after a 5xx or connection failure. If both routes fail, report the URL/status and rerun later.", "retry": 3 },

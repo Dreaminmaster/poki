@@ -1,6 +1,6 @@
 # iOS UI language
 
-Poki's General settings offer **Follow System** (the default) and the localizations bundled with
+Settings › Appearance offers **Follow System** (the default) and the localizations bundled with
 this build. The initial translations are English, Simplified Chinese and Traditional Chinese.
 Follow System uses `Bundle.main.preferredLocalizations`, so iOS's per-app language setting takes
 precedence over the first language in the device's global list. An unsupported saved selection
@@ -33,7 +33,7 @@ its creation-time language. System-owned permission prompts and pickers remain c
   languages, preserving Dynamic Type and glyph coverage. Existing navigation bars update their
   fonts in place, without replacing controllers.
 
-User/model messages, task plans, app/account names, diagnostic logs and recorded conversation text
+User/model messages, task plans, user-supplied app/account names, diagnostic logs and recorded conversation text
 remain content in their original language. Only the current untouched introduction has retained
 in-memory UI identity and can be reworded on a language change; its entry IDs, timestamps and session
 ID stay intact. Opening a saved conversation does not translate its history. UI language does not
@@ -45,7 +45,7 @@ alter speech recognition, model prompts, provider routing, credentials or approv
    `Shared/LiveActivity.xcstrings`, `Poki/Chat/Chat.xcstrings` and `Poki/InfoPlist.xcstrings` catalogs.
    English source keys are the fallback; a missing explicit English value is not a missing translation.
 2. Declare the shipped language in `CFBundleLocalizations` in `project-base.yml`. XcodeGen compiles
-   the same shared catalogs into the app and widget. General discovers the resulting bundle
+   the same shared catalogs into the app and widget. The language picker discovers the resulting bundle
    localizations; no new preference enum, settings row or translation engine is needed.
 3. Review machine-assisted drafts, especially permission, approval, deletion and payment wording.
    Review plural/interpolation variants and accessibility labels. Adding a locale does not translate
@@ -74,7 +74,7 @@ system/unsupported language matching, region preservation, shared preferences, a
 state, untouched introduction identity, and language changes during a local scripted model request.
 `GreetingTests` and `LiveActivityTests` provide nearby regressions; no live model account is needed.
 
-In General, switch English → 简体中文 → 繁體中文 → Follow System. Check the active navigation title,
+In Settings › Appearance, switch English → 简体中文 → 繁體中文 → Follow System. Check the active navigation title,
 section labels, Settings back navigation, Home greeting/suggestions/status, and the message field's
 accessibility label. Relaunch with an explicit choice, then with Follow System under another iOS app
 language. Keep a draft while opening Settings and verify it remains when closing Settings. Separately

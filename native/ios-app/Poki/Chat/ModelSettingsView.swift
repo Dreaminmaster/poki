@@ -27,6 +27,17 @@ struct ModelSettingsView: View {
                 Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
             }
 
+            Section {
+                NavigationLink(value: DetailsRoute.voice) {
+                    LabeledContent {
+                        Text(VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? "Live Voice" : "Dictation Only")
+                    } label: {
+                        SettingsLabel("Voice", systemImage: "waveform")
+                    }
+                }
+                .accessibilityIdentifier("details.voice")
+            }
+
             // With no account yet the card above has Add Account, and an empty group would only be a heading.
             if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
             Section {
@@ -298,7 +309,7 @@ private struct LiveVoiceFeature: View {
 
 /// Add Account: the account types, each with how it connects; choosing one opens its key, address or
 /// sign-in.
-private struct AddAccount: View {
+struct AddAccount: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: ModelProvider?
     @State private var signingIn = false
@@ -341,14 +352,19 @@ private struct AddAccount: View {
 }
 
 /// Entering, replacing or removing one provider's key. The field is secure and the key is never shown
-/// again after it is saved.
-private struct KeyEntry: View {
+/// again after it is saved. Test Connection sends one small request with what is on the page (the typed
+/// key, or the saved one when the field is empty); Save tests too and keeps the page open on a failure,
+/// saved all the same.
+struct KeyEntry: View {
     @Environment(\.dismiss) private var dismiss
     var provider: ModelProvider
     @State private var key = ""
     @State private var url = ModelKeys.customURL
     @State private var modelID = ModelKeys.customModel
     @State private var failed = false
+    @State private var testing = false
+    @State private var result: ConnectionCheck.Result?
+    @State private var saved = false
 
     var body: some View {
         NavigationStack {
@@ -373,6 +389,34 @@ private struct KeyEntry: View {
                     }
                 }
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
+                if provider.wired {
+                    Section {
+                        Button(action: test) {
+                            HStack {
+                                Text(testing ? "Testing…" : "Test Connection")
+                                Spacer()
+                                if testing { ProgressView() }
+                            }
+                        }
+                        .disabled(testing || testKey == nil)
+                        .accessibilityIdentifier("keyEntry.test")
+                    } footer: {
+                        if let result, !testing {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label {
+                                    Text(result.words)
+                                } icon: {
+                                    Image(systemName: result.passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                }
+                                .foregroundStyle(result.passed ? Color(.systemGreen) : Color(.systemOrange))
+                                if let detail = result.detail { Text(verbatim: detail) }
+                                if saved, !result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("keyEntry.result")
+                        }
+                    }
+                }
                 if ModelKeys.hasKey(provider) {
                     Section { Button("Remove Key", role: .destructive) { ModelKeys.remove(provider); dismiss() } }
                 }
@@ -380,8 +424,39 @@ private struct KeyEntry: View {
             .navigationTitle(Text(verbatim: provider.name))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave) }
+                ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave || testing) }
+            }
+        }
+    }
+
+    /// The key a test sends: the one typed, else the saved one. A custom endpoint may have none, but
+    /// needs an address and a model.
+    private var testKey: String? {
+        let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if provider == .custom {
+            let ready = URL(string: url.trimmingCharacters(in: .whitespaces))?.scheme?.hasPrefix("http") == true && !modelID.trimmingCharacters(in: .whitespaces).isEmpty
+            return ready ? (typed.isEmpty ? ModelKeys.key(provider) ?? "" : typed) : nil
+        }
+        return typed.isEmpty ? ModelKeys.key(provider) : typed
+    }
+
+    private func test() {
+        guard let testKey else { return }
+        check(testKey, closeIfPassed: false)
+    }
+
+    private func check(_ key: String, closeIfPassed: Bool) {
+        testing = true
+        result = nil
+        let (url, modelID) = (url, modelID)
+        Task {
+            let outcome = await ConnectionCheck.run(provider, key: key, customURL: url, modelID: modelID)
+            result = outcome
+            testing = false
+            if closeIfPassed, outcome.passed {
+                try? await Task.sleep(for: .milliseconds(900))
+                dismiss()
             }
         }
     }
@@ -391,6 +466,7 @@ private struct KeyEntry: View {
     }
 
     private func save() {
+        let tested = testKey
         do {
             if provider == .custom {
                 ModelKeys.customURL = url.trimmingCharacters(in: .whitespaces)
@@ -407,7 +483,9 @@ private struct KeyEntry: View {
                 Task { _ = try? await ModelCatalog.refresh(provider) }
             }
             key = ""
-            dismiss()
+            saved = true
+            // Tested once saved; a failure keeps the page open with the result, the key saved all the same.
+            if provider.wired, let tested { check(tested, closeIfPassed: true) } else { dismiss() }
         } catch {
             failed = true
         }

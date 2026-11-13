@@ -264,6 +264,7 @@ final class AppModel {
     func inProcessReadyForProbe() { inProcessSession = .open; host.update(runner: .running); probeDriven = true }
 
     func phoneTool(_ name: String, arguments: String) async -> (text: String, isError: Bool) {
+        if let message = signer.installMessage { return (message, true) }
         let result = await core.tool(name, arguments: arguments)
         return (result.text, result.isError)
     }
@@ -588,6 +589,7 @@ final class AppModel {
     /// setup step the person just did in Settings.
     func becameActive() {
         inFront = true
+        guard signer.installFinish == .idle else { return }
         InProcessWDA.gate.withLock { $0.inFront = true }
         cameToFront = Date()
         // A pairing file and disk image Poki Setup put in the container while Poki was running (or
@@ -641,7 +643,7 @@ final class AppModel {
     var loopbackSentence: String {
         if tunnel.available { return "In Poki, open Setup > Connect to this iPhone and turn on Poki's own connection." }
         guard let app = ProxyApps.all.first(where: \.isInstalled) else {
-            return "Install a VPN app that can reach 10.7.0.1 (Karing, Surge, Loon or Shadowrocket), then in Poki open Setup > Connect to this iPhone."
+            return "Install the free LocalDevVPN from the App Store and tap Connect in it. Another VPN app that can reach 10.7.0.1 also works, such as Karing, Surge, Loon or Shadowrocket: in Poki, open Setup > Connect to this iPhone and follow the line for it."
         }
         switch app.install {
         case .url: return "In Poki, open Setup > Connect to this iPhone > \(app.name), tap Install, then confirm in \(app.name)."
@@ -1975,7 +1977,7 @@ final class AppModel {
 
     // MARK: Relay and connectors
 
-    static let noRelay = "Enter your relay’s address first in Settings › External Agents › Address. Poki has no default relay."
+    static let noRelay = "Enter your relay’s address first in Settings › Agents › Address. Poki has no default relay."
 
     /// Saves the relay address the person entered; false when it is not one. A running session moves
     /// to the new relay at once.

@@ -14,14 +14,25 @@ releases Poki Setup installs and renews with.
 A channel includes the channels above it: Beta installs the newest Stable or Beta release, Alpha
 the newest Stable, Beta or Alpha, and Pre-alpha the newest release of any kind. Poki Setup's own
 updates (`desktop-v*`, `desktop-alpha-*` and `desktop-prealpha-*` tags) follow the same channel.
+If no installable release exists in a channel or any more stable channel it includes, Poki Setup
+tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. Stable and Beta
+therefore fall back to Alpha while neither offers a release. This is `pick` in
+`desktop/core/src/release.rs`, not a change to the saved channel.
+
+The checkout installer defaults to Alpha (`bin/install-iphone.mjs`); Poki Setup without a saved
+choice defaults to Stable. On November 13, 2026, Alpha offered Poki 0.4.0 (1130), and Beta and
+Stable had no app release of their own. Read current release metadata on each run. Do not pin
+that snapshot or silently switch an existing user's channel.
+
 Poki Setup orders versions so that `0.3.0-beta.1 < 0.3.0-beta.2 < 0.3.0 < 0.3.0-712`: a pre-release
 suffix sorts below the plain version, a build number above it.
 
 Until November 2026 app releases were tagged `ios-vX.Y.Z`, `ios-vX.Y.Z-beta.K`, `ios-alpha-X.Y.Z-N` and
-`ios-prealpha-X.Y.Z-N`; Poki Setup reads both schemes. Poki Setup 0.2.2 and earlier read only the old
-ones, so every pre-alpha and alpha is also copied into the old rolling releases `ios-prealpha-latest`
-and `ios-alpha-latest`, which carry the Poki Setup update too. That copy stops once those versions
-are gone. Betas and stables exist only as `app-*`.
+`ios-prealpha-X.Y.Z-N`; Poki Setup reads both schemes. Older Poki Setup builds that do not recognize `app-*` still need the old
+rolling releases `ios-prealpha-latest` and `ios-alpha-latest`, which carry the Poki Setup update too.
+Compatibility depends on the build, not just the 0.2.2 version label: revision `481faf22`, whose main commit count is
+661, already recognizes both schemes. This is a source check, not a check of the shipped binary. Pre-alpha and Alpha continue to publish those compatibility
+copies. Betas and stables exist only as `app-*`.
 
 N is the commit count of the built commit on `main`, so it only goes up while `main` is never
 rewritten. Betas and stables drop it from their names; inside the app, `CFBundleVersion` still

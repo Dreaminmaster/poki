@@ -1,13 +1,13 @@
 import Foundation
 
-/// The language the iPhone names apps in, from its first preferred language: Simplified or Traditional
+/// The language Poki uses to name known apps: Simplified or Traditional
 /// Chinese, or English for any other. Apps' names (`AppIconStore.name`) and the home page's default
-/// quick actions (`HomeIdea`) follow it.
+/// quick actions (`HomeIdea`) follow Poki’s UI language.
 enum AppLanguage {
     case english, simplifiedChinese, traditionalChinese
 
     static var current: AppLanguage {
-        let language = Locale.preferredLanguages.first ?? "en"
+        let language = AppLocalization.language
         if language.hasPrefix("zh-Hant") || language.hasPrefix("zh-TW") || language.hasPrefix("zh-HK") { return .traditionalChinese }
         return language.hasPrefix("zh") ? .simplifiedChinese : .english
     }

@@ -7,7 +7,7 @@ import PokiCore
 /// - Sensitivity Permissive, Balanced or Strict: in Poki's own chat and live call the chat model checks
 ///   the step against what the owner said, and allows it or not (auto-approval). The chat shows the
 ///   decision on a card and the Activity Log keeps it.
-/// - A step the model did not allow, and every step at Ask for Everything, is the owner's: With Message
+/// - A step the model did not allow, and every step at Ask All, is the owner's: With Message
 ///   Reply, the step is refused and the agent asks in words, and the owner's yes in the chat (or in the
 ///   notification's reply field) lets the next try through; With Confirmation, an Allow / Don't Allow
 ///   card, on the Live Activity, in a notification or in the chat.
@@ -158,10 +158,10 @@ extension ApprovalMode {
 extension ApprovalLevel {
     var title: String {
         switch self {
-        case .strict: AppLocalization.text(LocalizedStringResource("Strict"))
-        case .balanced: AppLocalization.text(LocalizedStringResource("Balanced"))
-        case .permissive: AppLocalization.text(LocalizedStringResource("Permissive"))
-        case .everything: AppLocalization.text(LocalizedStringResource("Ask for Everything"))
+        case .strict: AppLocalization.text("Strict")
+        case .balanced: AppLocalization.text("Balanced")
+        case .permissive: AppLocalization.text("Permissive")
+        case .everything: AppLocalization.text("Ask All")
         }
     }
     /// The saved sensitivity (`ApprovalChoice.resolve`).
