@@ -52,7 +52,7 @@ struct PairingScannerSheet: View {
                 dismiss()
             }
             .ignoresSafeArea()
-            .navigationTitle("Scan Pairing Code")
+            .navigationTitle(AppLocalization.text("Scan Pairing Code"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .safeAreaInset(edge: .bottom) {

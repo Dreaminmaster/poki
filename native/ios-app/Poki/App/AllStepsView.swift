@@ -16,13 +16,13 @@ struct AllStepsView: View {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in StepRow(row: row) }
                 } header: {
                     if let first = model.recentSteps.first {
-                        Text("\(Self.stepCount(model)). Started at \(first.at.formatted(date: .omitted, time: .shortened)).")
+                        Text("\(Self.stepCount(model)). Started at \(first.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).")
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(AppName.display(model.currentApp) ?? String(localized: "History"))
+        .navigationTitle(AppName.display(model.currentApp) ?? AppLocalization.text(LocalizedStringResource("History")))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -30,8 +30,8 @@ struct AllStepsView: View {
     @MainActor static func stepCount(_ model: AppModel) -> String {
         let steps = model.recentSteps
         let missed = steps.filter { !$0.ok }.count
-        let count = String(localized: "\(steps.count + (model.activityText != "Idle" ? 1 : 0)) steps")
-        return missed == 0 ? count : String(localized: "\(count), \(missed) missed")
+        let count = AppLocalization.text(LocalizedStringResource("\(steps.count + (model.activityText != "Idle" ? 1 : 0)) steps"))
+        return missed == 0 ? count : AppLocalization.text(LocalizedStringResource("\(count), \(missed) missed"))
     }
 
     struct Row {
@@ -45,12 +45,12 @@ struct AllStepsView: View {
     private var rows: [Row] {
         var out: [Row] = []
         if model.activityText != "Idle" {
-            out.append(Row(text: model.activityText, detail: model.approvals.isEmpty ? String(localized: "Working") : String(localized: "Waiting for Approval"),
+            out.append(Row(text: model.activityText, detail: model.approvals.isEmpty ? AppLocalization.text(LocalizedStringResource("Working")) : AppLocalization.text(LocalizedStringResource("Waiting for Approval")),
                            failed: false, at: Date()))
         }
         for step in model.recentSteps.reversed() {
-            let failure = step.failure.map { Bundle.main.localizedString(forKey: $0, value: $0, table: nil) }.map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            out.append(Row(text: step.text, detail: failure ?? AppName.display(step.app) ?? String(localized: "Done"), failed: !step.ok, at: step.at))
+            let failure = step.failure.map { AppLocalization.bundle.localizedString(forKey: $0, value: $0, table: nil) }.map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            out.append(Row(text: step.text, detail: failure ?? AppName.display(step.app) ?? AppLocalization.text(LocalizedStringResource("Done")), failed: !step.ok, at: step.at))
         }
         return out
     }

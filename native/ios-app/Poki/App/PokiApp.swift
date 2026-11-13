@@ -15,6 +15,7 @@ struct PokiApp: App {
         // Settings an update, a reinstall or a re-sign lost come back from the Keychain, before anything
         // reads them; from here on every change is mirrored there.
         SettingsVault.restore()
+        AppLocalization.publish()
         SettingsVault.watch()
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
@@ -44,6 +45,13 @@ struct PokiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model).environment(chat)
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)
+                .background(LanguageNavigationFonts())
+                .onChange(of: AppLocalization.shared.preference) { _, _ in
+                    model.languageChanged()
+                    chat.languageChanged()
+                }
         }
     }
 }
@@ -223,7 +231,7 @@ struct RootView: View {
         navigation
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
-        .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
+        .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
                presenting: model.connectionAsk) { _ in
             Button("Don’t Allow", role: .cancel) { model.answerConnection(false) }
@@ -382,6 +390,8 @@ struct RootView: View {
             openDetails([SettingsRoute.memory])
         case "appearance":
             openDetails([DetailsRoute.appearance])
+        case "language":
+            openDetails([DetailsRoute.language])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break

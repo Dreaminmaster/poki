@@ -203,26 +203,26 @@ final class LoopbackMonitor {
     }
     #endif
 
-    static var cellularHint: String { String(localized: "This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi.") }
+    static var cellularHint: String { AppLocalization.text(LocalizedStringResource("This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi.")) }
     /// Renewing, updating and the first mount of the disk image go through the loopback (ESP-448).
-    static var needsWiFi: String { String(localized: "This step needs Wi-Fi. Connect and try again.") }
+    static var needsWiFi: String { AppLocalization.text(LocalizedStringResource("This step needs Wi-Fi. Connect and try again.")) }
 
     var text: String {
         switch state {
-        case .checking: String(localized: "Checking…")
-        case .working: String(localized: "Working")
-        case .noAnswer: String(localized: "Tunnel on, no answer")
-        case .off: String(localized: "Off")
+        case .checking: AppLocalization.text(LocalizedStringResource("Checking…"))
+        case .working: AppLocalization.text(LocalizedStringResource("Working"))
+        case .noAnswer: AppLocalization.text(LocalizedStringResource("Tunnel on, no answer"))
+        case .off: AppLocalization.text(LocalizedStringResource("Off"))
         }
     }
 
     var detail: String {
         switch state {
-        case .checking: String(localized: "Looking for this iPhone at 10.7.0.1.")
-        case .working(let ms): String(localized: "This iPhone answers at 10.7.0.1 (\(ms) ms).")
+        case .checking: AppLocalization.text(LocalizedStringResource("Looking for this iPhone at 10.7.0.1."))
+        case .working(let ms): AppLocalization.text(LocalizedStringResource("This iPhone answers at 10.7.0.1 (\(ms) ms)."))
         case .noAnswer where cellularOnly: Self.cellularHint
-        case .noAnswer: String(localized: "The local interface is present, but this iPhone does not answer at 10.7.0.1. Reconnect the local connection and check Wi-Fi. If it still does not answer, pair again in Setup › Pairing, then check Developer Mode.")
-        case .off: String(localized: "This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup.")
+        case .noAnswer: AppLocalization.text(LocalizedStringResource("The local interface is present, but this iPhone does not answer at 10.7.0.1. Reconnect the local connection and check Wi-Fi. If it still does not answer, pair again in Setup › Pairing, then check Developer Mode."))
+        case .off: AppLocalization.text(LocalizedStringResource("This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup."))
         }
     }
 }

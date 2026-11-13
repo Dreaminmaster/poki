@@ -4,12 +4,13 @@ import SwiftUI
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
 // conversations and from the status card on Poki's picture. It replaced ESP-174's details screen and its
 // "More Settings" layer. It now has the hierarchy of the redesign proposed in pull request 250,
-// drawn with Poki's own rows: the card, then one row each for Connection, Models, Agents, Memory and
-// Appearance, and every other setting on a page under one of them (signing, approvals and the advanced
-// pages under Connection, voice under Models). The rows and the card are PokiSettingsKit's.
+// drawn with Poki's own rows: the card, then one row each for Connection, Models, Agents, Memory,
+// Appearance and Language, and every other setting on a page under one of them (signing, approvals
+// and the advanced pages under Connection, voice under Models). The rows and the card are
+// PokiSettingsKit's.
 
 /// Settings: Poki's card with what it is doing and Pause, Voice and Activity; any problem that keeps it
-/// from working; then the five parts of Poki, each a row into its own page.
+/// from working; then the parts of Poki and its look and language, each a row into its own page.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -72,6 +73,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: String(localized: appearance.title))
                     }
                     .accessibilityIdentifier("details.appearance")
+                    NavigationLink(value: DetailsRoute.language) {
+                        SettingsRow(title: "Language", symbol: "globe", value: LanguageView.name(AppLocalization.shared.preference))
+                    }
+                    .accessibilityIdentifier("general.language")
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         .monospacedDigit()
@@ -83,7 +88,7 @@ struct PokiDetailsView: View {
             .listSectionSpacing(16)
             .contentMargins(.top, 4, for: .scrollContent)
             .settingsPage()
-            .navigationTitle("Settings")
+            .navigationTitle(AppLocalization.text("Settings"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -110,12 +115,14 @@ struct PokiDetailsView: View {
                     AgentsAndRelayView(path: $path)
                 case .updates:
                     Form { SigningSection() }
-                        .navigationTitle("Signing & Updates")
+                        .navigationTitle(AppLocalization.text("Signing & Updates"))
                         .navigationBarTitleDisplayMode(.inline)
                 case .approvals:
                     ApprovalsSettingsView()
                 case .appearance:
                     AppearanceView()
+                case .language:
+                    LanguageView()
                 } }
                 .settingsPage()
             }
@@ -131,29 +138,29 @@ struct PokiDetailsView: View {
     private var hasModel: Bool { isSample || ModelKeys.hasUsableKey }
     private var brainValue: String {
         if isSample { return "GPT-6.1 Terra" }
-        return hasModel ? ModelKeys.selectedModelName : String(localized: "Add")
+        return hasModel ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add"))
     }
 
     private var setupDone: Bool { isSample || model.setupComplete }
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
     /// Setup first, then a waiting update (both under Connection), then whether Poki is on.
     private var connectionValue: String {
-        if isSample { return String(localized: "On") }
+        if isSample { return AppLocalization.text(LocalizedStringResource("On")) }
         if !model.setupComplete {
             let steps = SetupStep.shown
-            return String(localized: "\(steps.filter(model.isDone).count) of \(steps.count)")
+            return AppLocalization.text(LocalizedStringResource("\(steps.filter(model.isDone).count) of \(steps.count)"))
         }
-        if updateWaits { return String(localized: "Update Available") }
-        if !model.sessionOn { return String(localized: "Off") }
-        return model.ownerPaused ? String(localized: "Paused") : String(localized: "On")
+        if updateWaits { return AppLocalization.text(LocalizedStringResource("Update Available")) }
+        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Off")) }
+        return model.ownerPaused ? AppLocalization.text(LocalizedStringResource("Paused")) : AppLocalization.text(LocalizedStringResource("On"))
     }
 
     private var agentsValue: String {
-        if isSample { return String(localized: "\(2) Connected") }
-        if model.relayAddress == nil || !model.relayEnabled { return String(localized: "Off") }
+        if isSample { return AppLocalization.text(LocalizedStringResource("\(2) Connected")) }
+        if model.relayAddress == nil || !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off")) }
         if model.relayStatus.isOffline { return Health.relay(model).word }
         let count = model.identity.secrets.count
-        return count == 0 ? String(localized: "None yet") : String(localized: "\(count) Connected")
+        return count == 0 ? AppLocalization.text(LocalizedStringResource("None yet")) : AppLocalization.text(LocalizedStringResource("\(count) Connected"))
     }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
@@ -161,7 +168,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance
+    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance, language
 }
 
 /// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring
@@ -229,7 +236,7 @@ private struct ConversationsSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Conversations")
+        .navigationTitle(AppLocalization.text("Conversations"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search"))
     }
@@ -397,7 +404,7 @@ struct ConnectionView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)
-        .navigationTitle("Connection")
+        .navigationTitle(AppLocalization.text("Connection"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume() }
         .sheet(isPresented: $guiding) {
@@ -492,7 +499,7 @@ struct ConnectionAdvancedView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)
-        .navigationTitle("Advanced")
+        .navigationTitle(AppLocalization.text("Advanced"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -548,6 +555,43 @@ struct AppearanceView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Appearance")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: Language
+
+/// Settings › Language: Follow System, or one of the languages Poki carries, each under its own name.
+/// The choice changes Poki's own screens at once (`AppLocalization`).
+struct LanguageView: View {
+    /// A language under its own name ("繁體中文"), or Follow System in the language now shown.
+    static func name(_ preference: String) -> String {
+        if preference == AppLocalization.system { return AppLocalization.text("Follow System") }
+        return Locale(identifier: preference).localizedString(forIdentifier: preference) ?? preference
+    }
+
+    var body: some View {
+        let chosen = AppLocalization.shared.preference
+        List {
+            Section {
+                ForEach([AppLocalization.system] + AppLocalization.languages, id: \.self) { option in
+                    Button { AppLocalization.shared.preference = option } label: {
+                        HStack {
+                            Text(verbatim: Self.name(option)).foregroundStyle(Color(.label))
+                            Spacer()
+                            if option == chosen {
+                                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                            }
+                        }
+                        .contentShape(.rect)
+                    }
+                    .accessibilityAddTraits(option == chosen ? .isSelected : [])
+                    .accessibilityIdentifier("language.\(option)")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(AppLocalization.text("Language"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -628,7 +672,7 @@ struct ApprovalsSettingsView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)
-        .navigationTitle("Approvals")
+        .navigationTitle(AppLocalization.text("Approvals"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -640,9 +684,9 @@ struct AgentsAndRelayView: View {
     @Binding var path: NavigationPath
 
     private var relayLine: String {
-        if model.relayAddress == nil { return String(localized: "Set an address first") }
-        if !model.relayEnabled { return String(localized: "Off, agents can’t reach this iPhone") }
-        if !model.sessionOn { return String(localized: "Waiting for Poki, turn Poki on and agents can connect") }
+        if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
+        if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
+        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
         return Health.relay(model).word
     }
 
@@ -665,7 +709,7 @@ struct AgentsAndRelayView: View {
 
                 NavigationLink(value: SettingsRoute.relay) {
                     LabeledContent {
-                        Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? String(localized: "Not Set"))
+                        Text(model.relayAddress.map { $0.origin.host() ?? $0.origin.absoluteString } ?? AppLocalization.text(LocalizedStringResource("Not Set")))
                             .foregroundStyle(model.relayAddress == nil ? Color.orange : Color.secondary)
                     } label: {
                         SettingsLabel("Address", systemImage: "network")
@@ -682,7 +726,7 @@ struct AgentsAndRelayView: View {
                     let last = SessionStore.shared.sessions(for: secret, among: model.identity.secrets).first
                     NavigationLink(value: SettingsRoute.connector(secret)) {
                         LabeledContent {
-                            Text(last.map { ChatTime.row($0.updated) } ?? String(localized: "Not Used Yet"))
+                            Text(last.map { ChatTime.row($0.updated) } ?? AppLocalization.text(LocalizedStringResource("Not Used Yet")))
                         } label: {
                             // An agent's own badge is its picture; only the generic symbol takes the round ground.
                             if let client = secret.agent ?? last?.client {
@@ -712,7 +756,7 @@ struct AgentsAndRelayView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Agents")
+        .navigationTitle(AppLocalization.text("Agents"))
         .navigationBarTitleDisplayMode(.inline)
     }
 

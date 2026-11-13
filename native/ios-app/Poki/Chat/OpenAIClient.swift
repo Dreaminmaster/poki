@@ -50,17 +50,17 @@ final class OpenAIClient: ModelClient {
             let text = apiErrorText(json, data, key: key)
             let code = (json?["error"] as? [String: Any])?["code"] as? String
             let words: String = switch status {
-            case 401: String(localized: "OpenAI did not accept the key. Check it in Settings › Models.")
-            case 403, 404: String(localized: "This OpenAI key can’t use \(ModelKeys.selectedModelName).")
-            case 429 where code == "insufficient_quota": String(localized: "This OpenAI key has no credit left. Check billing at platform.openai.com.")
-            case 429: String(localized: "OpenAI says the key has hit its rate limit. Try again in a minute.")
-            default: String(localized: "OpenAI answered \(status), \(text)")
+            case 401: AppLocalization.text(LocalizedStringResource("OpenAI did not accept the key. Check it in Settings › Models."))
+            case 403, 404: AppLocalization.text(LocalizedStringResource("This OpenAI key can’t use \(ModelKeys.selectedModelName)."))
+            case 429 where code == "insufficient_quota": AppLocalization.text(LocalizedStringResource("This OpenAI key has no credit left. Check billing at platform.openai.com."))
+            case 429: AppLocalization.text(LocalizedStringResource("OpenAI says the key has hit its rate limit. Try again in a minute."))
+            default: AppLocalization.text(LocalizedStringResource("OpenAI answered \(status), \(text)"))
             }
             throw ModelFailure(errorDescription: words)
         }
         if json["status"] as? String == "failed" {
             let text = ((json["error"] as? [String: Any])?["message"] as? String) ?? ""
-            throw ModelFailure(errorDescription: String(localized: "OpenAI answered \(status), \(text)"))
+            throw ModelFailure(errorDescription: AppLocalization.text(LocalizedStringResource("OpenAI answered \(status), \(text)")))
         }
         let output = json["output"] as? [[String: Any]] ?? []
         input.append(contentsOf: output)
