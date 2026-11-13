@@ -10,7 +10,8 @@
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | Español<br>
-  <a href="https://poki.bot">poki.bot</a>
+  <a href="https://poki.bot">poki.bot</a><br>
+  <sub>This translation describes an earlier release. The <a href="README.md">English README</a> covers Poki 0.4.0.</sub>
 </p>
 
 <!-- badges:start -->

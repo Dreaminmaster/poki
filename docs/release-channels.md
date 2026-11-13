@@ -6,7 +6,7 @@ releases Poki Setup installs and renews with.
 
 | Channel | Tag | Title | GitHub release | Who it is for |
 | --- | --- | --- | --- | --- |
-| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release (not marked Latest) | everyone |
+| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release | everyone |
 | Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease | testers |
 | Alpha | `app-X.Y.Z-alpha.N` | Poki v0.3.0 (712) Alpha | rolling `app-alpha-latest`, prerelease | early testers |
 | Pre-alpha | `app-X.Y.Z-prealpha.N` | Poki v0.3.0 (712) Pre-alpha | rolling `app-prealpha-latest`, prerelease | developers |
@@ -16,13 +16,27 @@ the newest Stable, Beta or Alpha, and Pre-alpha the newest release of any kind. 
 updates (`desktop-v*`, `desktop-alpha-*` and `desktop-prealpha-*` tags) follow the same channel.
 If no installable release exists in a channel or any more stable channel it includes, Poki Setup
 tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. Stable and Beta
-therefore fall back to Alpha while neither offers a release. This is `pick` in
-`desktop/core/src/release.rs`, not a change to the saved channel.
+therefore fall back to Alpha while neither offers a release of its own. This is `pick` in
+`desktop/core/src/release.rs`, not a change to the saved channel. The checkout installer finds
+Poki Setup the same way (`latestSetup` in `src/install/setup-app.mjs`).
 
 The checkout installer defaults to Alpha (`bin/install-iphone.mjs`); Poki Setup without a saved
-choice defaults to Stable. On November 13, 2026, Alpha offered Poki 0.4.0 (1130), and Beta and
-Stable had no app release of their own. Read current release metadata on each run. Do not pin
-that snapshot or silently switch an existing user's channel.
+choice defaults to Stable. Read current release metadata on each run, and do not silently switch
+an existing user's channel.
+
+## When GitHub refuses the release list
+
+Poki Setup, the checkout installer and the iPhone app read the release list from `api.github.com`
+without signing in. GitHub limits these anonymous requests per network address, 60 an hour, and
+everyone behind the same address shares that limit. Over it, GitHub answers 403 or 429, and the
+error reads `Could not read Poki's releases from GitHub` with the status. The phone shows Not Found
+as the newest version on its channel instead.
+
+Retrying at once does not help, because each attempt is another request against the same limit. Switch to
+another network or proxy node and try again, or wait an hour. In Poki Setup, Install from an IPA
+File installs a `Poki-external-*.ipa` and the `Poki-signing.zip` beside it downloaded from the
+release page in a browser, which does not read the list. Use it only over a Poki signed with the
+same Apple Account.
 
 Poki Setup orders versions so that `0.3.0-beta.1 < 0.3.0-beta.2 < 0.3.0 < 0.3.0-712`: a pre-release
 suffix sorts below the plain version, a build number above it.
@@ -164,8 +178,9 @@ It starts with cold caches (about 20 minutes) and will be
 removed once the pipeline above has shipped a few builds.
 
 The Mac server's update notice (`src/update-check.mjs`) reads `releases/latest` and only understands
-Poki MCP's `vX.Y.Z` tags, so app releases are never marked Latest: Latest stays on Poki MCP's newest
-release.
+Poki MCP's `vX.Y.Z` tags. While an app release is marked Latest, for example a Beta published as a
+full release, the notice shows nothing. Links to Poki MCP's prebuilt package therefore name its
+`vX.Y.Z` release instead of `releases/latest`.
 
 ## Approval coverage
 

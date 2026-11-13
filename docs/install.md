@@ -1,5 +1,9 @@
 # Install
 
+This guide installs Poki MCP from source, which needs full Xcode. To put the Poki app on an iPhone,
+use the [install-poki skill](../skills/install-poki/SKILL.md) or Poki Setup instead, as the
+[README](../README.md#install-poki-on-your-iphone) describes; that path does not need Xcode.
+
 For remote access, see [Remote iPhone over LAN or Tailscale](remote-iphone.md). Both paths require initial trusted USB setup; cross-network access also requires Tailscale.
 
 ## Requirements
@@ -136,7 +140,8 @@ To use a physical iPhone, first pair it with your Mac over USB. After that, keep
 - Where iOS asks for the passcode before automation (the XCTest session), it asks when you tap Start,
   while you are there, not in the middle of a task. A session that fails to open is reopened by Poki itself.
 - Before an update installs, Poki ends its Live Activity and background task.
-- Agents › Safety holds Approvals and the Activity Log. Settings has a Contribute section above Updates.
+- Settings is grouped into Connection, Models, Agents, Memory and Appearance. Connection holds
+  Approvals and Signing & Updates, where the app updates itself.
 - How Poki picks its control method, and what happens without a loopback: see
   [ios-loopback.md](ios-loopback.md#which-method-does-the-work).
 
