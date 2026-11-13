@@ -26,7 +26,7 @@
 
 ## クイックスタート
 
-**iPhone に Poki App をインストールする。** [Alpha リリース](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)から Poki Setup をダウンロードし、画面の案内に従ってください。詳しくは [iPhone のインストール手順](README.md#poki-on-your-iphone)を参照してください。
+**iPhone に Poki App をインストールする。** [Alpha リリース](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)から Poki Setup をダウンロードし、画面の案内に従ってください。詳しくは [iPhone のインストール手順](README.md#poki-on-your-iphone)を参照してください。iPhone には、10.7.0.1 を端末自身に戻す VPN アプリも必要です。App Store の無料アプリ LocalDevVPN で対応できます。モデルのアカウントはご自身で用意してください。ChatGPT Plus または Pro プランでのサインインがいちばん簡単です。Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter の API キーを貼り付けるか、OpenAI 互換の独自サーバーを使うこともできます。Claude のサブスクリプションではサインインできないため、Anthropic の API キーを使ってください。
 
 **エージェントにインストールを任せる。** 次の内容をエージェントに渡してください：
 
@@ -244,9 +244,11 @@ Poki は AGPL-3.0 ライセンスの定めるとおり、無保証かつ「現�
 
 ## ライセンス
 
-Poki は [AGPL-3.0-only ライセンス](LICENSE)のもとでオープンソースとして公開されています。
+Poki のコードは [AGPL-3.0-only ライセンス](LICENSE)のもとでオープンソースとして公開されています。
 
-Copyright (c) 2026 Joseph Zhou and contributors. オープンソースの依存関係には、それぞれのライセンスが適用されます。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。コントリビュートについては [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
+Poki のクマ、アプリアイコン、その他の Poki のアートワークはこのライセンスの対象外です。Poki を紹介するためにスクリーンショットを使うことはできます。フォークには独自の名前とアートワークが必要です。詳しくは [BRAND.md](BRAND.md) をご覧ください。
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. オープンソースの依存関係とサードパーティの素材には、それぞれのライセンスが適用されます。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。コントリビュートについては [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
 
 ## 謝辞
 

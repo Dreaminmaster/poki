@@ -48,6 +48,12 @@ struct KnownApp {
 }
 
 enum KnownApps {
+    /// One identity lookup for app text, icons and the file passed to the widget.
+    static func find(_ value: String) -> KnownApp? {
+        let key = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return byID[key] ?? byName[key].flatMap { byID[$0.lowercased()] }
+    }
+
     /// Apple's apps, the apps people in mainland China use every day, and the apps the English home
     /// page's pills name and their common neighbours. Icons fetched on Nov 11 to 13 2026 (AppIcons.md).
     static let all: [KnownApp] = apple + china + english
@@ -116,7 +122,7 @@ enum KnownApps {
         KnownApp("cn.12306.rails12306", icon: "rails12306", "Railway 12306", "铁路12306", "鐵路12306", aliases: ["12306", "Railway12306"]),
         KnownApp("ctrip.com", icon: "ctrip", "Trip.com", "携程旅行", "攜程旅行", aliases: ["携程", "攜程", "Ctrip"]),
         KnownApp("com.netease.cloudmusic", icon: "netease-music", "NetEase Cloud Music", "网易云音乐", "網易雲音樂"),
-        KnownApp("com.tencent.QQMusic", icon: "qq-music", "QQ Music", "QQ音乐", "QQ音樂"),
+        KnownApp("com.tencent.QQMusic", icon: "qq-music", "QQ Music", "QQ音乐", "QQ音樂", aliases: ["QQ 音乐", "QQ 音樂"]),
         KnownApp("com.tencent.mqq", icon: "qq", "QQ"),
         KnownApp("com.laiwang.DingTalk", icon: "dingtalk", "DingTalk", "钉钉", "釘釘"),
         KnownApp("com.bytedance.ee.lark", icon: "feishu", "Feishu", "飞书", "飛書", aliases: ["Lark"]),

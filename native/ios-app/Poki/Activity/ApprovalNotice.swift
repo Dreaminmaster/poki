@@ -33,9 +33,8 @@ enum ApprovalNotice {
 
     static func post(_ approval: PendingApproval, caller: String? = nil) {
         let content = UNMutableNotificationContent()
-        content.title = caller.map { String(localized: "\($0) needs your OK") } ?? StatusWord.needsApproval.text
-        content.body = approval.sentence
-        if let kinds = approval.kindLine { content.subtitle = kinds }
+        // The one question, as on the card: from the rules' kind, never the agent's words.
+        content.title = approval.question
         content.categoryIdentifier = category
         content.userInfo = ["approval": approval.id]
         content.sound = .default

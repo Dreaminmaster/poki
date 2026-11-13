@@ -40,6 +40,64 @@ function runInstaller(state, { scenario = 'happy', env = {}, answer = {}, stateA
 
 const sub = (state, ...args) => exec(process.execPath, [cli, ...args, '--state', state]);
 
+test('update-only refuses configuration changes before contacting the phone', async t => {
+  for (const args of [['--channel', 'beta'], ['--model-key', 'openai'], ['--model-key-item', 'saved-key'], ['--reinstall']]) {
+    await t.test(args[0], async t => {
+      const state = await stateDir(t);
+      const requestLog = join(state, 'requests.jsonl');
+      const result = await runInstaller(state, {
+        args: ['--update-only', ...args],
+        env: { POKI_FAKE_REQUEST_LOG: requestLog },
+      });
+      assert.equal(result.code, 2, result.stderr);
+      assert.deepEqual(result.events.at(-1), {
+        event: 'update_result', ok: false, code: 'update_options_conflict',
+        reason: 'Update-only cannot change configuration; remove the conflicting options and retry the same update-only command.',
+      });
+      assert.equal(await readFile(requestLog, 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return '';
+        throw error;
+      }), '', 'rejected options must not reach the device helper');
+    });
+  }
+});
+
+test('update-only reports guarded renewal and fresh device readback through the CLI', async t => {
+  const cases = [
+    ['happy', 0, 'updated'],
+    ['update-not-newer', 2, 'update_preflight_failed'],
+    ['update-missing', 2, 'update_preflight_failed'],
+    ['update-team', 2, 'update_preflight_failed'],
+    ['update-channel', 2, 'update_preflight_failed'],
+    ['old-bridge', 2, 'update_unsupported'],
+    ['update-install-fails', 3, 'update_install_failed'],
+    ['update-disconnect', 3, 'update_install_failed'],
+    ['update-readback-mismatch', 4, 'update_readback_mismatch'],
+    ['update-readback-fails', 4, 'update_readback_failed'],
+  ];
+  for (const [scenario, exit, resultCode] of cases) await t.test(scenario, async t => {
+    const state = await stateDir(t);
+    const requestLog = join(state, 'requests.jsonl');
+    const result = await runInstaller(state, { scenario, args: ['--update-only'], env: { POKI_FAKE_REQUEST_LOG: requestLog } });
+    assert.equal(result.code, exit, result.stderr);
+    assert.equal(result.events.at(-1).code, resultCode);
+    assert.equal(result.events.at(-1).ok, exit === 0);
+    const requests = (await readFile(requestLog, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(requests.every(r => ['app_info', 'update_inspect', 'renew', 'update_readback'].includes(r.cmd)), 'update-only never invokes setup, pairing, channel writes, key transfer or relay deployment');
+    if (exit === 2) assert.ok(requests.every(r => r.cmd !== 'renew'), 'a rejected preflight never requests installation');
+    else assert.deepEqual(requests.find(r => r.cmd === 'renew').args, { udid: '00008999-000A11B22C33D44E', update_only: true, expected: { version: '0.4.0', build: '101' } });
+    assert.doesNotMatch(JSON.stringify(result.events), /00008999|TEAMID1234|tester@example/);
+    if (exit === 0) {
+      assert.deepEqual(result.events.map(e => e.event), ['update_installed', 'update_target', 'update_checks', 'update_readback', 'update_result']);
+      assert.equal(result.events[0].build, '100');
+      assert.equal(result.events[0].channel, 'alpha');
+      assert.match(result.events[0].team, /withheld/);
+      assert.equal(result.events[3].build, '101');
+      assert.equal(result.events.at(-1).simulated, true);
+    }
+  });
+});
+
 // The person types the Apple code into their own Terminal: it reaches the command on stdin.
 function typeCode(state, input, ...args) {
   const child = spawn(process.execPath, [cli, 'code', ...args, '--state', state], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -602,9 +660,9 @@ test('with no way into Poki\'s files (Poki Setup 0.2.1, no Xcode), the install f
   assert.equal(code, 3, stderr);
   assert.equal(events.at(-1).ok, false);
   assert.deepEqual(events.at(-1).unverified.map(s => s.step), ['model_key', 'loopback']);
-  assert.ok(events.some(e => e.event === 'note' && /Accounts and Models/.test(e.text)));
+  assert.ok(events.some(e => e.event === 'note' && /Settings > Models > Add Account/.test(e.text)));
   assert.ok(events.some(e => e.event === 'wait' && e.wait === 'open_poki_tell' && /Tell me/.test(e.say)), 'the agent confirms Poki is open with done');
-  assert.match(events.find(e => e.event === 'skipped' && e.step === 'model_key').reason, /Accounts and Models/);
+  assert.match(events.find(e => e.event === 'skipped' && e.step === 'model_key').reason, /Settings > Models > Add Account/);
   assert.match(events.find(e => e.event === 'skipped' && e.step === 'loopback').reason, /10\.7\.0\.1/);
   assert.doesNotMatch(await mac.securityLog(), /api-key/, 'with nowhere to put it, the key is not read');
 });
@@ -668,7 +726,7 @@ test('a Poki too old to write its hello still counts as open once devicectl sees
   assert.equal(events.at(-1).ok, false);
   assert.deepEqual(events.at(-1).unverified.map(s => s.step), ['model_key', 'loopback']);
   assert.match(events.find(e => e.event === 'done' && e.step === 'open_poki').detail, /running/);
-  assert.match(events.find(e => e.event === 'skipped' && e.step === 'model_key').reason, /Accounts and Models/);
+  assert.match(events.find(e => e.event === 'skipped' && e.step === 'model_key').reason, /Settings > Models > Add Account/);
   assert.match(events.find(e => e.event === 'skipped' && e.step === 'loopback').reason, /10\.7\.0\.1/);
   assert.doesNotMatch(await mac.securityLog(), /api-key/, 'a Poki that cannot take the key does not make the installer read it');
 });

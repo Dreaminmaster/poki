@@ -187,30 +187,6 @@ final class ApprovalTests: XCTestCase {
 
     }
 
-    /// The owner is asked in one sentence what the batch gets done, never the taps or the rule's
-    /// reason: four taps on one Delete ask "Delete in Settings", and the agent's own sentence, when it
-    /// gives one, is the question, cut to its first line.
-    func testFourTapsOnOneButtonAskOneSentence() async throws {
-        func ask(_ args: JSON) async throws -> Approval {
-            let wda = FakeWDA()
-            wda.source([("Button", "Delete"), ("Button", "Back")])
-            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
-            _ = await core.call("look", [:])
-            _ = await core.call("do", args)
-            return try XCTUnwrap(core.pendingApproval)
-        }
-        let taps: JSON = .array(Array(repeating: ["tap": 1], count: 4))
-
-        let approval = try await ask(["actions": taps])
-        XCTAssertTrue(approval.reason.hasPrefix("multiple sensitive actions"), approval.reason)
-        XCTAssertEqual(approval.ask, "Delete in Settings")
-
-        let purpose = "Order lunch from Sample Noodles, ¥38 in total"
-        let asked = try await ask(["actions": taps, "purpose": .string(purpose + "\nTap the row four times")])
-        XCTAssertEqual(asked.ask, purpose)
-        XCTAssertEqual(asked.kinds, [.deleting], "the rule's kind stays beside the agent's own words")
-    }
-
     /// "Payments, deletions and actions in Wallet always need your confirmation", whatever action the
     /// agent picks to touch the button: every kind of action is aimed at Pay and at Delete, with the
     /// rules for messages, calls and passwords off, and no touch may go down and lift on either before the owner

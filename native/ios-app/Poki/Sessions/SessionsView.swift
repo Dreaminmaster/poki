@@ -20,12 +20,8 @@ struct SessionsView: View {
     var openSession: (String) -> Void
     @State private var renaming: SavedSession?
     @State private var newName = ""
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.inThreadsDrawer) private var inDrawer
     @Environment(\.drawerSliding) private var sliding
-    /// The conversation's name: a step larger than the body, as a list of names only reads well.
-    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
 
     private var store: SessionStore { SessionStore.shared }
     private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
@@ -39,7 +35,7 @@ struct SessionsView: View {
                     row(session)
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                         .listRowSeparator(.hidden)
-                        .listRowBackground(ground(session))
+                        .listRowBackground(Color.clear)
                 }
             }
             if groups.isEmpty { empty }
@@ -64,8 +60,10 @@ struct SessionsView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            // The home page's own picture of Poki, small: the bear's face for its state.
-            PokiPortrait(mood: PokiStatus.current(model: model, chat: chat).mood, side: 32)
+            // The app's icon, small, rounded in the system's proportion for app icons.
+            Image("PokiIcon").resizable().scaledToFit().frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 32 * 0.225, style: .continuous))
+                .accessibilityHidden(true)
             Text(verbatim: "Poki").font(Prominent.font(size: 28, relativeTo: .title, .bold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Spacer()
@@ -120,13 +118,11 @@ struct SessionsView: View {
         session.kind == .poki && session.id == chat.sessionID && sampleHome == nil
     }
 
-    /// The selected row's soft fill; every other row stands on the list's ground.
-    @ViewBuilder private func ground(_ session: SavedSession) -> some View {
-        if current(session) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected).padding(.horizontal, 16)
-        } else {
-            Color.clear
-        }
+    /// The row's own ground, the drawer's colour (the selected row's soft blue over it): a long press
+    /// lifts a clean card, not the row's words over a grey shadow.
+    private func ground(_ session: SavedSession) -> some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebar)
+            .overlay { if current(session) { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Tint.sidebarSelected) } }
     }
 
     /// The app it worked in: for the chat's own task under way, the app it is in now.
@@ -135,41 +131,53 @@ struct SessionsView: View {
         return session.app
     }
 
-    /// The app whose icon the row shows: only once the icon is at hand, so a row without one starts at the
-    /// same place as the heading rather than leaving a gap.
-    private func icon(_ session: SavedSession) -> String? {
-        app(session).flatMap { AppIconStore.shared.icon($0, dark: scheme == .dark) != nil ? $0 : nil }
+
+    /// What its last run ended in, when that was not well: failed or stopped. Nothing for a conversation
+    /// still running, one that finished, or one that has not run.
+    private func lastRunProblem(_ session: SavedSession) -> SavedSession.Outcome? {
+        guard !session.live, let outcome = session.outcome, outcome != .done else { return nil }
+        return outcome
     }
 
-    /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for you.
+    /// One conversation: its app's small icon and its name, an amber dot at the end while a step waits for
+    /// you, or else a quiet mark when its last run failed or was stopped. Your turn comes first: it is the
+    /// one thing in the list to act on.
     private func row(_ session: SavedSession) -> some View {
         let needs = needsYou(session)
+        let trouble = needs ? nil : lastRunProblem(session)
         let app = app(session)
         return Button { open(session) } label: {
             HStack(spacing: 12) {
-                if let icon = icon(session) { AppIconView(app: icon, size: 22) }
-                Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
-                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+                ConversationTitle(session: session, app: app)
                 Spacer(minLength: 8)
                 if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
+                else if let trouble {
+                    Image(systemName: trouble == .failed ? "exclamationmark.circle.fill" : "pause.circle.fill")
+                        .font(.system(size: 14)).foregroundStyle(trouble == .failed ? Tint.red : Color.secondary)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 10).frame(minHeight: 48)
+            .background(ground(session))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         // A long press lifts the row's own rounded shape, not the list's whole width, so the lifted row
         // and its menu stay inside the drawer rather than over the chat beside it.
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
-        .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil]
+        .accessibilityValue(Text(verbatim: [AppName.display(app), needs ? String(localized: "Needs your attention") : nil,
+                                                         trouble.map { $0 == .failed ? String(localized: "Failed") : String(localized: "Stopped") }]
             .compactMap { $0 }.joined(separator: ", ")))
-        // In the drawer a sideways drag closes it, so Rename and Delete are only in the menu there.
+        // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !inDrawer {
                 if !session.live, sampleHome == nil {
                     Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
+                }
+                if !session.live, sampleHome == nil {
+                    Button("Archive", systemImage: "archivebox") { store.archive(session.id) }.tint(Tint.blue)
                 }
                 Button("Rename", systemImage: "pencil") { startRename(session) }
             }
@@ -177,6 +185,7 @@ struct SessionsView: View {
         .contextMenu {
             Button("Rename", systemImage: "pencil") { startRename(session) }
             if !session.live, sampleHome == nil {
+                Button("Archive", systemImage: "archivebox") { store.archive(session.id) }
                 Button("Delete", systemImage: "trash", role: .destructive) { store.delete(session.id) }
             }
         }
@@ -190,7 +199,7 @@ struct SessionsView: View {
 
     private var shown: [SavedSession] {
         if sampleHome == "paused" { return [] }
-        return sampleHome == "sessions" ? Self.sampleSessions : store.ordered
+        return sampleHome == "sessions" ? Self.sampleSessions : store.listed
     }
 
     /// When a conversation last moved, for the faint headings between the days.
@@ -346,6 +355,28 @@ extension View {
     }
 }
 
+/// A conversation as the lists show it (the drawer, Settings > Conversations): the small icon of the app
+/// it worked in, only once the icon is at hand so a row without one starts where the others' names do,
+/// then its name, a step larger than the body, as a list of names only reads well.
+struct ConversationTitle: View {
+    var session: SavedSession
+    /// The app it worked in, when the row knows better than what is saved (a task under way).
+    var app: String? = nil
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var nameSize: CGFloat = 18
+
+    var body: some View {
+        let app = app ?? session.app
+        HStack(spacing: 12) {
+            if let app, AppIconStore.shared.icon(app, dark: scheme == .dark) != nil { AppIconView(app: app, size: 22) }
+            Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
+                .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
+        }
+        .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
+    }
+}
+
 /// What a row shows on its leading side: the icon of the app the conversation worked in, with the
 /// outside agent's badge on its corner for an agent's session or hand-off. Without an app icon, an
 /// agent's badge, or for a chat with Poki the one placeholder tile.
@@ -453,10 +484,7 @@ struct SessionView: View {
             if asking || running != nil || sample {
                 VStack(spacing: 8) {
                     if session?.live == true, let approval = model.approvals.first {
-                        // A message of the handed-over task: who it goes to and the words, as in the chat.
-                        let words = running?.askWords[approval.id]
-                        ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? approval.kindLine ?? "",
-                                        quote: words?.quote ?? "", expires: approval.expires,
+                        ApprovalAskCard(title: approval.question, expires: approval.expires,
                                         answer: { approved in model.resolve(approval, approved: approved) })
                     } else if session?.live == true, let text = model.handoffText {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)

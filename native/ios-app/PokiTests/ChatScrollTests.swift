@@ -57,7 +57,7 @@ final class ChatScrollTests: XCTestCase {
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         let chat = ChatModel(app: app)
         let window = try show(NavigationStack {
-            ChatView(openDetails: {}, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(app).environment(chat))
         settle { Self.find(CapsuleTextView.self, in: window) != nil }
         let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))

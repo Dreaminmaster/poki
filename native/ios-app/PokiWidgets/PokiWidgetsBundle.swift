@@ -18,7 +18,7 @@ struct PokiLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PokiActivityAttributes.self) { context in
             let face = context.face
-            LockScreenCard(face: face)
+            LockScreenCard(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
                 .environment(\.colorScheme, .dark)
                 // Outside the line above, where the system's own appearance can still be read: the flat
                 // colour that goes with the card's gradient, and light or dark handed down to the card.
@@ -28,15 +28,15 @@ struct PokiLiveActivity: Widget {
         } dynamicIsland: { context in
             let face = context.face
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face) }
-                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face) }
-                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face) }
+                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
+                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
+                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
             } compactLeading: {
-                CompactLeading(face: face)
+                CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             } compactTrailing: {
-                CompactTrailing(face: face)
+                CompactTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             } minimal: {
-                MinimalView(face: face)
+                MinimalView(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             }
             .widgetURL(face.link)
             // Always Poki's blue; the system draws the outline only over a dark background, at its own width.

@@ -12,7 +12,10 @@ struct ActivityPreview: View {
     @State private var only = UserDefaults.standard.string(forKey: "pokiActivityState")
     private let demo = UserDefaults.standard.string(forKey: "pokiActivityDemo")
 
-    init() { if Thumbnail.previewImage == nil { Thumbnail.previewImage = Self.sampleScreen() } }
+    init() {
+        if Thumbnail.previewImage == nil { Thumbnail.previewImage = Self.sampleScreen() }
+        AppIconFile.preview = { AppIconStore.shared.icon($0) }
+    }
 
     var body: some View {
         let samples = Self.makeSamples()
@@ -137,18 +140,9 @@ struct ActivityPreview: View {
         var approval = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 1)
         approval.app = messages
         // What PokiCore asks for when the agent taps Send in Messages.
-        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25),
-                                            ask: "Send a message in \(messages)", kinds: ["sending"])
+        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: ChatModel.Sample.reason, expires: now.addingTimeInterval(25))
         approval.since = now.addingTimeInterval(-61)
         approval.stepCount = 4
-
-        // Four taps on one Delete, worded by the rules, and a payment the agent worded itself.
-        var fourTaps = approval
-        fourTaps.app = "Lunch"
-        fourTaps.approval = PendingApproval(id: "four", app: "Lunch", summary: "Tap “Delete”, then tap “Delete”, then tap “Delete”, then tap “Delete”",
-                                            reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: deleting (\"delete\"); action 3: deleting (\"delete\"); action 4: deleting (\"delete\")", expires: now.addingTimeInterval(48), ask: "Delete in Lunch", kinds: ["deleting"])
-        var purpose = fourTaps
-        purpose.approval = ChatModel.Sample.lunchApproval
 
         var deciding = approval
         deciding.phase = .deciding; deciding.decision = true
@@ -166,8 +160,8 @@ struct ActivityPreview: View {
         done.since = now.addingTimeInterval(-84); done.endedAt = now
         done.stepCount = 12; done.failedCount = 1
 
-        // A two-step task from Poki's own chat counts its plan's steps ("1/2"), not the taps under them
-        // (main #150), and says the step under way in the plan's words, not the tap (ESP-467).
+        // A two-step task from Poki's own chat says the step under way in the plan's words, not the tap
+        // (ESP-467), and never how many steps there are.
         let steps = [String(localized: "Open Messages"), String(localized: "Open the chat with Mom")]
         var plan = working
         plan.headline = "Tap “Messages”"
@@ -178,8 +172,9 @@ struct ActivityPreview: View {
         planNext.previous = "Tap “Messages”"
         planNext.stepCount = 7
         planNext.plan?.current = 2
+        planNext.failedSteps = [1]
         var planDone = done
-        planDone.plan = .init(steps: steps, current: 2)
+        planDone.plan = .init(steps: steps, current: 2, title: String(localized: "Text Mom"))
 
         var ready = PokiState(phase: .idle, headline: "Waiting for agent", thumbnailVersion: 0)
         var idle = PokiState(phase: .idle, headline: "Runner asleep", thumbnailVersion: 0)
@@ -204,7 +199,7 @@ struct ActivityPreview: View {
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
 
-        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("fourtaps", fourTaps), ("purpose", purpose), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
+        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
@@ -244,7 +239,7 @@ private struct LockScreenFrame: View {
     var state: PokiState
     var body: some View {
         let card = RoundedRectangle(cornerRadius: ActivityMetrics.lockCorner, style: .continuous)
-        LockScreenCard(face: state.face)
+        LockScreenCard(face: state.face).dynamicTypeSize(...ActivityMetrics.largestType)
             .frame(maxWidth: 371)
             .background(ActivityTheme.current.lockBackground ?? Color(.secondarySystemGroupedBackground), in: card)
             .containerShape(card)
@@ -273,7 +268,7 @@ private struct TopBannerFrame: View {
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            LockScreenCard(face: state.face)
+            LockScreenCard(face: state.face).dynamicTypeSize(...ActivityMetrics.largestType)
                 .frame(maxWidth: 371)
                 .background(ActivityTheme.current.lockBackground ?? Site.boardBlue, in: card)
                 .containerShape(card)
@@ -298,12 +293,12 @@ private struct IslandExpandedFrame: View {
         let shape = RoundedRectangle(cornerRadius: ActivityMetrics.islandCorner, style: .continuous)
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
-                IslandLeading(face: face)
+                IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
                 Spacer(minLength: 120)
-                IslandTrailing(face: face)
+                IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             }
             .frame(height: ActivityMetrics.systemCameraRow, alignment: .top)
-            IslandBottom(face: face)
+            IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
         }
         .frame(width: 374)
         .clipShape(RoundedRectangle(cornerRadius: ActivityMetrics.islandClipCorner).inset(by: ActivityMetrics.islandClip))
@@ -329,25 +324,30 @@ private struct IslandExpandedFrame: View {
 /// The compact island: the bear's block, the camera, the words, and the minimal circle beside it.
 private struct IslandCompactFrame: View {
     var state: PokiState
+    /// `-pokiActivityClip YES`: the line the system cuts at, dashed red, to compare with the design.
+    private let clip = UserDefaults.standard.bool(forKey: "pokiActivityClip")
     var body: some View {
         let face = state.face
+        let inset = ActivityMetrics.compactClip
         HStack(spacing: 12) {
             HStack(spacing: 0) {
-                CompactLeading(face: face)
+                CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
                 Spacer(minLength: 0).frame(width: 125.33)
-                CompactTrailing(face: face).frame(minWidth: 44, alignment: .trailing).padding(.trailing, 7)
+                CompactTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType).frame(minWidth: 44, alignment: .trailing).padding(.trailing, 7)
             }
             .frame(height: ActivityMetrics.compactHeight)
             .background(.black, in: .capsule)
             .clipShape(.capsule)
             .overlay { Capsule().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
-            MinimalView(face: face)
+            .overlay { if clip { Capsule().inset(by: inset).stroke(.red, style: StrokeStyle(lineWidth: 0.75, dash: [2, 2])) } }
+            MinimalView(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
                 .background(.black, in: .circle)
                 .overlay { Circle().strokeBorder(ActivityTheme.current.outline, lineWidth: 1) }
+                .overlay { if clip { Circle().inset(by: inset).stroke(.red, style: StrokeStyle(lineWidth: 0.75, dash: [2, 2])) } }
             // Short of room (the phone on its side, a second Live Activity): each block in a 28-point circle.
             HStack(spacing: 4) {
-                CompactLeading(face: face)
-                CompactTrailing(face: face)
+                CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
+                CompactTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             }
             .environment(\.narrowIslandPreview, true)
             .padding(.horizontal, 4)

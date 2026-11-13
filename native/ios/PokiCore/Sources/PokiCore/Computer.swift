@@ -503,11 +503,11 @@ final class Computer: @unchecked Sendable {
         return min(max(0, until - now()), actions.reduce(0) { $0 + actionCap($1) } + longestPause + config.readTimeout)
     }
 
-    func act(actions: [JSON], full: Bool, finish: Bool = false, purpose: String? = nil, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
-        restartNote(await actNow(actions: actions, full: full, finish: finish, purpose: purpose, session: session, answerBy: answerBy))
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
+        restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy))
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, purpose: String? = nil, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
         var started = now()
@@ -608,8 +608,7 @@ final class Computer: @unchecked Sendable {
                     }
                 }
                 let approval = approvals.pending.flatMap { $0.fingerprint == fingerprint ? $0 : nil }
-                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason,
-                                         kinds: steps.map { ApprovalKind(reason: $0.reason) }, purpose: purpose, fingerprint: fingerprint)
+                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, fingerprint: fingerprint)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))

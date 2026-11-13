@@ -51,7 +51,9 @@ fi
   echo "Relay: Poki Setup's Update Relay deploys this release's relay Worker. To update it yourself, download [poki-relay-worker.js](https://github.com/$GITHUB_REPOSITORY/releases/download/$ROLLING/poki-relay-worker.js) (SHA-256 in SHA256SUMS), open your poki-relay Worker in the Cloudflare dashboard, choose Edit code, replace everything with this file and deploy. For a new relay, use deploy/cf-relay/deploy.sh."
   echo
   echo "### Changes $since"
-  git log --no-merges --format='- %s (%h)' $range | head -60
+  # -n, not | head: with pipefail, head closing the pipe early fails the step (exit 141) once
+  # more than 60 commits came in since the last build.
+  git log -n 60 --no-merges --format='- %s (%h)' $range
 } > notes.md
 
 # The versioned tag first: if it cannot be made, nothing is published.

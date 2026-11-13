@@ -24,6 +24,39 @@ enum ActivityBear: String, Hashable {
         case .checking: (0.4669, 0.5192)
         }
     }
+
+    /// Where the picture's top-left corner stands in the compact island's left block, the picture
+    /// 27.2 points a side (`ActivityMetrics.compactBear`), so the whole bear, ears and outline, stays
+    /// inside the 4.33 points the system cuts off the island's edge. Measured per pose in ESP-503's
+    /// design (the island 36.67 tall, 393-point class): each pose's head sits elsewhere in its square.
+    /// The design has no thinking bear; it stands where the ready one does.
+    var compactOrigin: CGPoint {
+        switch self {
+        case .phone: CGPoint(x: 17.43, y: 3.84)
+        case .needs: CGPoint(x: 17.73, y: 2.44)
+        case .turn: CGPoint(x: 17.73, y: 2.23)
+        case .done: CGPoint(x: 17.73, y: 2.94)
+        case .tripped: CGPoint(x: 18.43, y: 2.54)
+        case .ready, .thinking: CGPoint(x: 17.03, y: 3.34)
+        case .paused: CGPoint(x: 16.83, y: 2.74)
+        case .checking: CGPoint(x: 17.13, y: 3.64)
+        }
+    }
+
+    /// The same in a circle 28 points across, the picture 22.6 a side (`ActivityMetrics.circleBear`):
+    /// the circle where the island is short of room, and the minimal circle's visible part.
+    var circleOrigin: CGPoint {
+        switch self {
+        case .phone: CGPoint(x: 3.29, y: 1.96)
+        case .needs: CGPoint(x: 3.54, y: 0.79)
+        case .turn: CGPoint(x: 3.54, y: 0.63)
+        case .done: CGPoint(x: 3.54, y: 1.21)
+        case .tripped: CGPoint(x: 4.12, y: 0.88)
+        case .ready, .thinking: CGPoint(x: 2.95, y: 1.54)
+        case .paused: CGPoint(x: 2.79, y: 1.04)
+        case .checking: CGPoint(x: 3.04, y: 1.79)
+        }
+    }
 }
 
 /// What the Live Activity shows for a state, worked out once per phase. The Lock Screen, the expanded
@@ -45,10 +78,12 @@ struct ActivityFace: Hashable {
         case symbol(String, ActivityTone)
     }
     enum Compact: Hashable {
-        /// Two lines: the app the step is in ("Messages") over its count ("2/5", "Step 7"). Without an
-        /// app, the count alone. A plan's step does not fit the compact island's 52 points (ESP-467).
-        case steps(text: String?, count: String)
-        /// Words and short counts ("2/6", "Stalled").
+        /// The icon of the app the run is in, which the app wrote to the App Group container
+        /// (`AppIconFile`); the run's time where there is no icon.
+        case app(String, since: Date?)
+        /// How long the run has taken, counted up by the system.
+        case elapsed(Date)
+        /// Words and the setup checklist's fixed count ("2/6", "Stalled").
         case text(String, ActivityTone)
         /// The pairing code, tabular digits.
         case code(String)
@@ -61,9 +96,10 @@ struct ActivityFace: Hashable {
     }
     enum Bottom: Hashable {
         case none
-        /// The run under way: with a plan, one segment per step, lit up to the one under way; Stop
-        /// beside it.
-        case progress(step: Int, total: Int?, stop: Bool)
+        /// The run under way, never how far it has come: an agent's count of steps changes as it goes.
+        /// `line`: once the run is in an app or has a plan, one line that says work goes on, without
+        /// segments. Stop beside it.
+        case progress(line: Bool, stop: Bool)
         case approval(id: String)
         /// The answer is on its way to PokiCore.
         case deciding(String)
@@ -75,6 +111,11 @@ struct ActivityFace: Hashable {
         case segments(number: Int, count: Int)
     }
     enum Thumbnail: Hashable { case none, large, small }
+    /// What the compact island's right side shows while Poki works: the icon of the app the run is in
+    /// (`.icon`, which falls back to the time where the app is not known), or always the run's time
+    /// (`.time`). The design has both; until one is chosen, this line picks it.
+    enum WorkingTrailing { case icon, time }
+    static let workingTrailing = WorkingTrailing.icon
     /// How tall the expanded island and the Lock Screen card are, and how large the bear in them.
     enum Size: Hashable { case low, working, asking, tall }
 
@@ -82,11 +123,9 @@ struct ActivityFace: Hashable {
     var symbol: String = "sparkles"
     var bear: ActivityBear
     var size: Size
-    /// The small line over the title: which step this is ("Step 2 of 5"), in the accent colour.
+    /// The small line over the title, in the accent colour: the app a run is in, the setup checklist's step.
     var kicker: String? = nil
-    /// Beside it, quieter: the app in front.
-    var place: String? = nil
-    /// A fresh event ("Started", "Allowed", "Carrying on") takes the place's spot for a few seconds.
+    /// Beside it for a few seconds, quieter: a fresh event ("Started", "Allowed", "Carrying on").
     var event: String? = nil
     var eventTone: ActivityTone = .accent
     /// The top-right value.
@@ -100,11 +139,6 @@ struct ActivityFace: Hashable {
     /// The secondary line under the title.
     var subtitle: String? = nil
     var subtitleLines = 1
-    /// The expanded island's one main line where it has no room for the title on two lines and the
-    /// subtitle under it: an agent's sentence led by the rules' kinds.
-    var islandContent: String? = nil
-    /// The step before this one, ticked, under the title of the expanded island.
-    var previous: String? = nil
     var bottom: Bottom
     /// The latest screenshot on the right of the Lock Screen card.
     var thumbnail: Thumbnail = .none
@@ -143,38 +177,26 @@ extension PokiActivityAttributes.Event {
 extension PokiState {
     var hasThumbnail: Bool { thumbnailVersion > 0 }
 
-    /// "12 steps in 1:24".
-    var runLine: String {
-        let steps = stepCount == 1 ? String(activity: "1 step") : String(activity: "\(stepCount) steps")
-        guard let since, let endedAt else { return steps }
-        let time = Duration.seconds(max(0, endedAt.timeIntervalSince(since))).formatted(.time(pattern: .minuteSecond))
-        return String(activity: "\(steps) in \(time)")
-    }
-
-    /// "12 steps in 1:24, 1 missed".
-    var runSummary: String {
-        failedCount > 0 ? String(activity: "\(runLine), \(failedCount) missed") : runLine
-    }
-
-    /// "Finished in Messages".
-    var doneTitle: String {
-        if let app, !app.isEmpty, app != "unknown" {
-            return String(activity: "Finished in \(ActivityWords.local(app))")
+    /// Where and how long a finished run took: "Done in Messages, took 1:24". Never a count of steps,
+    /// which an agent changes as it goes.
+    var runSummary: String? {
+        let place = AppName.display(app)
+        let time = since.flatMap { since in endedAt.map { Duration.seconds(max(0, $0.timeIntervalSince(since))).formatted(.time(pattern: .minuteSecond)) } }
+        switch (place, time) {
+        case let (place?, time?): return String(activity: "Finished in \(place), took \(time)")
+        case let (nil, time?): return String(activity: "Took \(time)")
+        case let (place?, nil): return String(activity: "Finished in \(place)")
+        default: return nil
         }
-        if headline.hasPrefix("Finished in ") {
-            let place = String(headline.dropFirst("Finished in ".count))
-            return String(activity: "Finished in \(ActivityWords.local(place))")
-        }
-        return StatusWord.done.text
     }
 
-    /// The one count every presentation shows (ESP-328, the inventory of state machines, item 2): the
-    /// compact island, the expanded island, the Lock Screen card and the segments all read it here,
-    /// so they cannot disagree. With a plan from the chat's model a step is a step of that plan;
-    /// without one it is an action on the phone, and no total is made up.
-    var progress: (step: Int, total: Int?) {
-        if let plan, plan.total > 0 { return (min(max(plan.current, 1), plan.total), plan.total) }
-        return (stepCount + 1, nil)
+    /// What a finished run did: the plan's title, else Poki's own line.
+    var doneTitle: String { plan?.title?.nonBlank ?? StatusWord.done.text }
+
+    /// The plan's step under way, from 1.
+    private var planNumber: Int? {
+        guard let plan, plan.total > 0 else { return nil }
+        return min(max(plan.current, 1), plan.total)
     }
 
     /// What the run is doing, worded so a glance at the island says which part of the task this is
@@ -190,7 +212,7 @@ extension PokiState {
     /// The task's own words: the plan's step under way, else the task's name.
     private var taskWords: String? {
         guard let plan else { return nil }
-        return planStep(progress.step) ?? plan.title?.nonBlank
+        return planNumber.flatMap(planStep) ?? plan.title?.nonBlank
     }
 
     /// The plan's step `number`, from 1, in the model's words.
@@ -199,16 +221,24 @@ extension PokiState {
         return plan.steps[number - 1].nonBlank
     }
 
+    /// The compact island's right side while Poki works (`ActivityFace.workingTrailing`): the app's
+    /// icon, or the run's time where the app is not known.
+    private func workingCompact(app: String?) -> ActivityFace.Compact {
+        if ActivityFace.workingTrailing == .icon, let app { return .app(app, since: since) }
+        if let since { return .elapsed(since) }
+        return .symbol("hand.tap.fill", .accent)
+    }
+
     var face: ActivityFace { face(stale: false) }
 
     /// The face for the widget: `stale` when ActivityKit says the content is past its stale date.
     func face(stale: Bool) -> ActivityFace {
         var face = baseFace
         face.caller = caller
-        // A fresh event ("Started", "Allowed") shows beside the step's count for a few seconds. An
-        // app switch already shows as the app's name there and only lights it up.
-        if let event, !phase.holdsApproval {
-            face.event = event.kind == .app ? (app.map { ActivityWords.local($0) } ?? event.text) : ActivityWords.local(event.text)
+        // A fresh event ("Started", "Allowed") shows beside the app's name for a few seconds. An app
+        // switch is the app's name itself, already there.
+        if let event, !phase.holdsApproval, event.kind != .app {
+            face.event = ActivityWords.local(event.text)
             face.eventTone = event.tone
         }
         if stale, phase == .working || phase == .handoff {
@@ -217,10 +247,8 @@ extension PokiState {
             face.symbol = "clock.badge.exclamationmark"
             face.bear = .paused
             face.kicker = nil
-            face.place = nil
             face.event = String(activity: "Not updating")
             face.eventTone = .quiet
-            face.previous = nil
             face.meta = .none
             face.bottom = .none
             face.compact = .text(String(activity: "Stalled"), .quiet)
@@ -232,30 +260,27 @@ extension PokiState {
     private var baseFace: ActivityFace {
         switch phase {
         case .working:
-            let (step, total) = progress
-            let name = app.map { ActivityWords.local($0) } ?? (voice != nil ? String(activity: "Voice") : nil)
+            let inApp = app.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
+            let name = AppName.display(inApp) ?? (voice != nil ? String(activity: "Voice") : nil)
             return ActivityFace(
                 symbol: voice != nil ? "waveform" : "hand.tap.fill",
                 bear: .phone, size: .working,
-                kicker: total.map { String(activity: "Step \(step) of \($0)") } ?? String(activity: "Step \(step)"),
-                place: name,
+                kicker: name,
                 meta: since.map { ActivityFace.Meta.elapsed($0) } ?? ActivityFace.Meta.none,
                 content: doing ?? StatusWord.running.text,
-                previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
-                bottom: .progress(step: step, total: total, stop: true),
+                bottom: .progress(line: name != nil || plan != nil, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
-                compact: .steps(text: name, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
+                compact: workingCompact(app: inApp))
         case .approval, .deciding:
             guard let approval else { return quietFace }
+            let question = approval.question
             if phase == .deciding {
                 let allowed = decision == true
                 return ActivityFace(
                     symbol: allowed ? "checkmark.circle.fill" : "xmark.circle.fill",
                     bear: allowed ? .phone : .needs, size: .asking,
                     meta: .none,
-                    content: approval.sentence,
-                    subtitle: approval.kindLine,
-                    islandContent: approval.islandLine,
+                    content: question,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
@@ -264,9 +289,7 @@ extension PokiState {
                 symbol: "hand.raised.fill",
                 bear: .needs, size: .asking,
                 meta: .countdown(approval.expires),
-                content: approval.sentence,
-                subtitle: approval.kindLine,
-                islandContent: approval.islandLine,
+                content: question,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))
@@ -274,7 +297,7 @@ extension PokiState {
             return ActivityFace(
                 symbol: "checkmark.circle.fill",
                 bear: .done, size: .low,
-                meta: .symbol("checkmark", .accent), lockMeta: endedAt.map { ActivityFace.Meta.clock($0) } ?? ActivityFace.Meta.none,
+                meta: .symbol("checkmark", .accent), lockMeta: ActivityFace.Meta.none,
                 content: doneTitle,
                 subtitle: runSummary,
                 bottom: .none,

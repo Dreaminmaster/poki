@@ -6,6 +6,8 @@ license: AGPL-3.0-only
 
 # Poki MCP
 
+For installation or updates of the standalone iPhone app, read [install-poki](../install-poki/SKILL.md) in the repository. If this skill was copied alone, use `skills/install-poki/SKILL.md` in the Poki checkout. The iPhone update branch checks the existing data, signing identity and release channel before installation. Updating the Mac's MCP service does not update the iPhone app.
+
 ## Tool discovery
 
 The default `tools/list` contains the tools for device selection, screen reads, app launch, touch, text input, navigation, prompts, and batches. For tools outside that list, read `docs/tools.md` in the Poki checkout used by your registered MCP server. This skill can be copied into a client skill directory.

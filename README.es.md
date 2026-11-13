@@ -26,7 +26,7 @@
 
 ## Inicio rápido
 
-**Instala Poki App en tu iPhone.** Descarga Poki Setup desde la [versión Alpha](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) y sigue las instrucciones de su ventana. Consulta la [guía de instalación en iPhone](README.md#poki-on-your-iphone).
+**Instala Poki App en tu iPhone.** Descarga Poki Setup desde la [versión Alpha](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) y sigue las instrucciones de su ventana. Consulta la [guía de instalación en iPhone](README.md#poki-on-your-iphone). El iPhone también necesita una app de VPN que devuelva 10.7.0.1 al propio iPhone; la app gratuita LocalDevVPN de la App Store sirve. Necesitas tu propia cuenta de modelo: iniciar sesión con un plan ChatGPT Plus o Pro es lo más sencillo, y también puedes pegar una clave de API de Anthropic, OpenAI, Gemini, DeepSeek u OpenRouter, o usar tu propio servidor compatible con OpenAI. Una suscripción de Claude no permite iniciar sesión; usa una clave de API de Anthropic.
 
 **Deja que tu agente lo instale.** Copia esto a tu agente:
 
@@ -244,9 +244,11 @@ En caso de ambigüedad, prevalece la versión en inglés.
 
 ## Licencia
 
-Poki es código abierto bajo la [licencia AGPL-3.0-only](LICENSE).
+El código de Poki es código abierto bajo la [licencia AGPL-3.0-only](LICENSE).
 
-Copyright (c) 2026 Joseph Zhou and contributors. Las dependencias de código abierto conservan sus respectivas licencias; consulta [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Para contribuir, consulta [CONTRIBUTING.md](CONTRIBUTING.md).
+El oso de Poki, el icono de la app y el resto de las ilustraciones de Poki no están cubiertos por esa licencia. Puedes usar capturas de pantalla para hablar de Poki; un fork necesita su propio nombre y sus propias ilustraciones. Consulta [BRAND.md](BRAND.md).
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Las dependencias de código abierto y los recursos de terceros conservan sus respectivas licencias; consulta [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Para contribuir, consulta [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Agradecimientos
 

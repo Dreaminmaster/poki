@@ -1,69 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "%@ in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@，用时 %2$@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@，用時 %2$@"
-          }
-        }
-      }
-    },
-    "%@, %lld missed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@，%2$lld 步未完成"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@，%2$lld 步未完成"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@, %lld missed"
-          }
-        }
-      }
-    },
-    "%@: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@: %2$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@：%2$@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@：%2$@"
-          }
-        }
-      }
-    },
     "%lld of %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -83,40 +20,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld/%2$lld"
-          }
-        }
-      }
-    },
-    "%lld steps" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 步"
-          }
-        }
-      }
-    },
-    "1 step" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 步"
           }
         }
       }
@@ -151,6 +54,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允許"
+          }
+        }
+      }
+    },
+    "Allow a call?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许拨打电话吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許撥打電話嗎？"
+          }
+        }
+      }
+    },
+    "Allow a step in a protected app?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许在受保护的应用里操作吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許在受保護的 App 裡操作嗎？"
+          }
+        }
+      }
+    },
+    "Allow deletion?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许删除吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許刪除嗎？"
+          }
+        }
+      }
+    },
+    "Allow payment?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许付款吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許付款嗎？"
+          }
+        }
+      }
+    },
+    "Allow sending a message?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许发送消息吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許傳送訊息嗎？"
+          }
+        }
+      }
+    },
+    "Allow typing a password?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许输入密码吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許輸入密碼嗎？"
           }
         }
       }
@@ -230,13 +235,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允许这一步？"
+            "value" : "允许这一步吗？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "允許這一步？"
+            "value" : "允許這一步嗎？"
           }
         }
       }
@@ -323,23 +328,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Background"
-          }
-        }
-      }
-    },
-    "Call" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "通话"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "通話"
           }
         }
       }
@@ -522,53 +510,82 @@
         }
       }
     },
-    "Delete in %@" : {
+    "Delete in %@?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将在%@删除内容"
+            "value" : "在“%@”里删除？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將在%@刪除內容"
+            "value" : "在「%@」裡刪除？"
           }
         }
       }
     },
-    "Delete something" : {
+    "Delete this?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将删除内容"
+            "value" : "删除？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將刪除內容"
+            "value" : "刪除？"
           }
         }
       }
     },
-    "Deletion" : {
+    "Deleting" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "删除"
+            "value" : "正在删除"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleting"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "刪除"
+            "value" : "正在刪除"
+          }
+        }
+      }
+    },
+    "Deleting in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“%@”中删除"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleting in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」中刪除"
           }
         }
       }
@@ -996,6 +1013,29 @@
         }
       }
     },
+    "Finished in %@, took %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done in %1$@, took %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在“%1$@”完成，用时 %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在「%1$@」完成，用時 %2$@"
+          }
+        }
+      }
+    },
     "General › VPN & Device Management. Trust Poki Runner's developer." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1015,40 +1055,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "一般 › 裝置管理 › 信任開發者"
-          }
-        }
-      }
-    },
-    "Go on in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将在%@继续操作"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將在%@繼續操作"
-          }
-        }
-      }
-    },
-    "Go on with this step" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将继续操作"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將繼續操作"
           }
         }
       }
@@ -1122,19 +1128,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启代理或 LocalDevVPN"
+            "value" : "连接 LocalDevVPN 或开启代理"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enable in proxy app or LocalDevVPN."
+            "value" : "Connect LocalDevVPN or enable in proxy app."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟代理或 LocalDevVPN"
+            "value" : "連線 LocalDevVPN 或開啟代理"
           }
         }
       }
@@ -1145,19 +1151,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开代理或 LocalDevVPN 后返回"
+            "value" : "连 LocalDevVPN 或开代理后返回"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enable in proxy or LocalDevVPN, then return."
+            "value" : "Connect LocalDevVPN or enable proxy, then return."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開代理或 LocalDevVPN 後返回"
+            "value" : "連 LocalDevVPN 或開代理後返回"
           }
         }
       }
@@ -1322,19 +1328,65 @@
         }
       }
     },
-    "Make a payment" : {
+    "Make a payment?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将付款"
+            "value" : "付款？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將付款"
+            "value" : "付款？"
+          }
+        }
+      }
+    },
+    "Making a payment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在付款"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paying"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在付款"
+          }
+        }
+      }
+    },
+    "Making a payment in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“%@”中付款"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paying in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」中付款"
           }
         }
       }
@@ -1820,87 +1872,19 @@
         }
       }
     },
-    "Password" : {
+    "Pay in %@?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "密码"
+            "value" : "在“%@”里付款？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "密碼"
-          }
-        }
-      }
-    },
-    "Pay in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将通过%@付款"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將透過%@付款"
-          }
-        }
-      }
-    },
-    "Payment" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "付款"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "付款"
-          }
-        }
-      }
-    },
-    "Place a call" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将拨打电话"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將撥打電話"
-          }
-        }
-      }
-    },
-    "Place a call in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将在%@拨打电话"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將在%@撥打電話"
+            "value" : "在「%@」裡付款？"
           }
         }
       }
@@ -2277,23 +2261,6 @@
         }
       }
     },
-    "Protected app" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "受保护的应用"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "受保護的應用"
-          }
-        }
-      }
-    },
     "Ready" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2431,53 +2398,82 @@
         }
       }
     },
-    "Send a message" : {
+    "Send a message?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将发送消息"
+            "value" : "发送信息？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將傳送訊息"
+            "value" : "傳送資訊？"
           }
         }
       }
     },
-    "Send a message in %@" : {
+    "Send in %@?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将在%@发送消息"
+            "value" : "在“%@”里发送？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將在%@傳送訊息"
+            "value" : "在「%@」裡傳送？"
           }
         }
       }
     },
-    "Sending" : {
+    "Sending a message" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "发送"
+            "value" : "正在发消息"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending message"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "傳送"
+            "value" : "正在傳訊息"
+          }
+        }
+      }
+    },
+    "Sending a message in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“%@”发消息"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」傳訊息"
           }
         }
       }
@@ -2639,23 +2635,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在啟動"
-          }
-        }
-      }
-    },
-    "Step %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 %lld 步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 %lld 步"
           }
         }
       }
@@ -3135,6 +3114,23 @@
         }
       }
     },
+    "Took %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用时 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用時 %@"
+          }
+        }
+      }
+    },
     "Turn On Developer Mode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3221,36 +3217,19 @@
         }
       }
     },
-    "Type a password" : {
+    "Type a password?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将输入密码"
+            "value" : "输入密码？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將輸入密碼"
-          }
-        }
-      }
-    },
-    "Type a password in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将在%@输入密码"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將在%@輸入密碼"
+            "value" : "輸入密碼？"
           }
         }
       }
@@ -3295,6 +3274,52 @@
         }
       }
     },
+    "Typing a password" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在输密码"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typing password"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在輸密碼"
+          }
+        }
+      }
+    },
+    "Typing a password in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“%@”输密码"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typing password in %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%@」輸密碼"
+          }
+        }
+      }
+    },
     "UI Automation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3308,23 +3333,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "UI 自動化"
-          }
-        }
-      }
-    },
-    "Unchecked step" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未能核对的操作"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未能核對的操作"
           }
         }
       }
@@ -3375,36 +3383,19 @@
         }
       }
     },
-    "Use %@" : {
+    "Use %@?" : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将使用%@"
+            "value" : "使用 %@？"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即將使用%@"
-          }
-        }
-      }
-    },
-    "Use this app" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将使用这个应用"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即將使用這個應用"
+            "value" : "使用 %@？"
           }
         }
       }
@@ -4063,139 +4054,18 @@
         }
       }
     },
-    "%@ in %lld" : {
-      "extractionState" : "manual",
+    "Input in %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，用时 %2$lld"
+            "value" : "在“%@”中输入"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@，用時 %2$lld"
-          }
-        }
-      }
-    },
-    "%lld in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，用时 %2$@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，用時 %2$@"
-          }
-        }
-      }
-    },
-    "%lld in %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，用时 %2$lld"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，用時 %2$lld"
-          }
-        }
-      }
-    },
-    "%@, %@ missed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@，%2$@ 步未完成"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@，%2$@ 步未完成"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@, %@ missed"
-          }
-        }
-      }
-    },
-    "%lld, %@ missed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，%2$@ 步未完成"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，%2$@ 步未完成"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld, %@ missed"
-          }
-        }
-      }
-    },
-    "%lld, %lld missed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，%2$lld 步未完成"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld，%2$lld 步未完成"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld, %lld missed"
-          }
-        }
-      }
-    },
-    "%@ steps" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 步"
+            "value" : "在「%@」中輸入"
           }
         }
       }
@@ -4366,23 +4236,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 %lld 裡傳送？"
-          }
-        }
-      }
-    },
-    "Step %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 %@ 步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "第 %@ 步"
           }
         }
       }

@@ -56,6 +56,9 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// ActivityController. What the Live Activity shows as the step is `progress` (ActivityFace).
         var stepCount = 0
         var failedCount = 0
+        /// The plan's steps (from 1) under which an action did not go through: their segments draw red.
+        /// Optional so a state saved before this field still decodes. Kept by ActivityController.
+        var failedSteps: [Int]? = nil
         /// The step before the one under way, in English like `headline`: the expanded island shows
         /// it ticked under the current one. Kept by ActivityController.
         var previous: String?
@@ -109,49 +112,27 @@ struct PokiActivityAttributes: ActivityAttributes {
 struct PendingApproval: Codable, Hashable {
     var id: String
     var app: String
-    /// The actions as PokiCore's step labels ("Tap “Delete”, then tap “Delete”"): for the logs only.
     var summary: String
-    /// Why it needs the owner, from PokiCore's rules: `sending a message ("send")`. For the logs only.
+    /// Why it needs the owner, from PokiCore's rules: `sending a message ("send")`, `a payment ("pay")`.
     var reason: String
     var expires: Date
-    /// PokiCore's one sentence for the owner (`Approval.ask`): the agent's own words, or what the rules
-    /// saw and where ("Delete in Notes").
-    var ask = ""
-    /// The agent wrote `ask` (do's `purpose`), so the rules' own kinds go beside it.
-    var byAgent = false
-    /// What the rules saw (`ApprovalKind`'s raw values), most serious first.
-    var kinds: [String] = []
 
-    /// What the owner is asked, in one sentence, on every card, the island, the alert and the
-    /// notification: the agent's words as they are, or PokiCore's in the system's language.
-    var sentence: String {
-        if ask.isEmpty { return String(activity: "Allow this step?") }
-        return byAgent ? ask : ActivityWords.ask(ask)
-    }
-
-    /// The rules' kinds beside the agent's own sentence ("Payment and Deletion"): an agent can call a
-    /// payment something harmless. Nil when the sentence is PokiCore's, which names the kind itself.
-    var kindLine: String? {
-        guard byAgent else { return nil }
-        let words = kinds.compactMap(Self.kindWord)
-        return words.isEmpty ? nil : ListFormatter.localizedString(byJoining: words)
-    }
-
-    /// The kinds and the sentence on one line ("Payment: Order lunch, ¥38 in total"), for the island.
-    var islandLine: String? { kindLine.map { String(activity: "\($0): \(sentence)") } }
-
-    static func kindWord(_ kind: String) -> String? {
-        switch kind {
-        case "payment": String(activity: "Payment")
-        case "deleting": String(activity: "Deletion")
-        case "sending": String(activity: "Sending")
-        case "call": String(activity: "Call")
-        case "password": String(activity: "Password")
-        case "input": String(activity: "Protected app")
-        // The rules could not read what the press does.
-        case "unread": String(activity: "Unchecked step")
-        default: nil
+    /// The approval as one short question, the same on every card, the island, the Lock Screen and
+    /// the notification. It comes from the kind the rules saw in PokiCore's reason, never from the
+    /// agent's words ("Allow payment?").
+    var question: String {
+        // Several sensitive actions in one batch: the first one's kind, as PokiCore asks from it.
+        var reason = self.reason
+        if let first = reason.range(of: #"^multiple sensitive actions: action \d+: "#, options: .regularExpression) {
+            reason = String(reason[first.upperBound...])
         }
+        if reason.hasPrefix("a payment") { return String(activity: "Allow payment?") }
+        if reason.hasPrefix("deleting") { return String(activity: "Allow deletion?") }
+        if reason.hasPrefix("sending") { return String(activity: "Allow sending a message?") }
+        if reason.hasPrefix("a call") { return String(activity: "Allow a call?") }
+        if reason.hasPrefix("typing into a password") { return String(activity: "Allow typing a password?") }
+        if reason.hasPrefix("input in") { return String(activity: "Allow a step in a protected app?") }
+        return String(activity: "Allow this step?")
     }
 }
 

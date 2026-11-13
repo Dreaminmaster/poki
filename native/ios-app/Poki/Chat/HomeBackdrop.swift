@@ -4,8 +4,11 @@ import SwiftUI
 /// The conversation's ground is always there: a clean pale page with a faint brand-blue glow behind
 /// the message field, under a quarter of the screen high, still unless Poki is at work. Over it, on the
 /// home page, lies the home's light: paper white above, blue rising from the bottom edge, breathing
-/// slowly (ESP-470). Your first message makes the home's light sink 260 points and fade, so it seems
-/// to draw back to the glow and stop there.
+/// slowly (ESP-470). In light, your first message makes the home's light sink 260 points and fade, so
+/// it seems to draw back to the glow and stop there. In dark it stays where it is, stops breathing and
+/// dims to a little under half: under the dark ground's plain top three quarters the conversation read
+/// as black after the home's blue, so it keeps the same light, only quieter, and going in is a dimming
+/// rather than a change of ground.
 ///
 /// Points, colours, grain and bright edge are the design's final table (定稿-首页渐变和玻璃参数,
 /// sections 1 to 4, 9 and 10). The system's mesh was laid beside the design's own rendering of the same
@@ -14,9 +17,9 @@ import SwiftUI
 /// stack takes the width of its widest layer and stretches the meshes to it, which is how the bright
 /// edge, laid in the stack at its own 797 points, once showed only the middle half of the light.
 ///
-/// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on, and its
-/// clock stops while the app is not active, another page covers this one or the drawer is open. With Reduce Motion nothing
-/// sinks either; the change between the two layers is a fade.
+/// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on or the phone
+/// running hot, and its clock stops while the app is not active, another page covers this one or the
+/// drawer is open. With Reduce Motion nothing sinks either; the change between the two layers is a fade.
 struct HomeBackdrop: View {
     /// The home page is in front.
     var home: Bool
@@ -30,11 +33,15 @@ struct HomeBackdrop: View {
     @Environment(\.coveredByDrawer) private var covered
     /// False while another page is pushed over this one.
     @State private var shown = false
-    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// How strongly the home's light shows behind the conversation in dark: as much as keeps the system's
+    /// secondary text above 4.5 to 1 right down to the message field, where the light is brightest. At
+    /// half it measured 4.4 there.
+    static let darkChatLight = 0.45
 
     var body: some View {
         let dark = scheme == .dark
-        let resting = reduceMotion || frozen || lowPower || PerfSwitch.on(.backdropStill)
+        let strained = DeviceStrain.shared.resting
+        let resting = reduceMotion || frozen || strained || PerfSwitch.on(.backdropStill)
         let seen = shown && scenePhase == .active && !covered
         let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
@@ -44,22 +51,19 @@ struct HomeBackdrop: View {
                 .animation(.easeInOut(duration: 0.6), value: working)
             DriftingMesh(mesh: .home, dark: dark, drift: breathing)
                 .overlay(alignment: .bottom) { EdgeLight(dark: dark) }
-                .offset(y: home || reduceMotion ? 0 : 260)
-                .opacity(home ? 1 : 0)
+                .offset(y: home || reduceMotion || dark ? 0 : 260)
+                .opacity(home ? 1 : dark ? Self.darkChatLight : 0)
                 .animation(HomeMotion.ground(reduceMotion), value: home)
         }
         // Coming back to the page, the light takes a second to start breathing again rather than
         // jumping to where its clock has got to.
-        .animation(.easeInOut(duration: 1), value: seen && !lowPower)
+        .animation(.easeInOut(duration: 1), value: seen && !strained)
         .overlay { Grain.image.resizable(resizingMode: .tile).opacity(0.03).blendMode(.overlay) }
         .compositingGroup()
         .ignoresSafeArea()
         .accessibilityHidden(true)
         .onAppear { shown = true }
         .onDisappear { shown = false }
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
-            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        }
     }
 }
 

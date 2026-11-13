@@ -28,39 +28,53 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertNil(agent.state.plan)
     }
 
-    /// One step count on every presentation of the Live Activity (the inventory of state machines,
-    /// item 2): with a plan from the chat's model, the compact island, the line above the title and
-    /// the row of segments all say the plan's step, however many actions lie under it; without a
-    /// plan they all count actions, and no total is made up.
-    func testEveryPresentationShowsTheSameStep() {
+    func testANewRunDoesNotKeepTheLastRunsApp() {
+        let controller = ActivityController()
+        controller.update { $0.phase = .working; $0.headline = "Open Notes" }
+        controller.update { $0.app = "Notes" }
+        controller.update { $0.phase = .done }
+        controller.update { $0.phase = .working; $0.headline = "Open WeChat" }
+        XCTAssertNil(controller.state.app)
+        controller.update { $0.app = "WeChat" }
+        XCTAssertEqual(controller.state.app, "WeChat")
+    }
+
+    /// No presentation of the Live Activity counts a run's steps: an agent changes its count as it
+    /// goes, so "2/5", "Step 8" and "12 steps" read as broken promises. The line over the title names
+    /// the app, the compact island shows the app or the time, the line under the title has no
+    /// segments, and a finished run says where and how long, with or without a plan.
+    func testNoPresentationCountsTheRunsSteps() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
         var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
+        state.app = "Messages"
+        state.since = start
         state.stepCount = 7
         state.plan = .init(steps: ["Open Messages", "Open the chat", "Write it", "Check it", "Send it"], current: 2)
-        var face = state.face
-        XCTAssertEqual(face.kicker, "Step 2 of 5")
-        XCTAssertTrue(face.compact.counts("2/5"))
-        XCTAssertEqual(face.bottom, .progress(step: 2, total: 5, stop: true))
+        for plan in [state.plan, nil] {
+            state.plan = plan
+            let face = state.face
+            XCTAssertEqual(face.kicker, "Messages")
+            XCTAssertEqual(face.compact, ActivityFace.workingTrailing == .icon ? .app("Messages", since: start) : .elapsed(start))
+            XCTAssertEqual(face.bottom, .progress(line: true, stop: true))
+        }
 
-        state.plan = nil
-        face = state.face
-        XCTAssertEqual(face.kicker, "Step 8")
-        XCTAssertTrue(face.compact.counts("Step 8"))
-        XCTAssertEqual(face.bottom, .progress(step: 8, total: nil, stop: true))
+        state.phase = .done
+        state.endedAt = start.addingTimeInterval(84)
+        state.plan = .init(steps: ["Open Messages", "Send it"], current: 2, title: "Text Mom")
+        XCTAssertEqual(state.face.content, "Text Mom")
+        XCTAssertEqual(state.face.subtitle, "Done in Messages, took 1:24")
     }
 
     /// ESP-467: the island and the Lock Screen say what the task is doing, never the single tap under
-    /// it. With the chat's plan, the step under way in the plan's words (and the one before it, ticked);
-    /// without a plan, a line of Poki's own. The compact island never shows a tap either.
+    /// it. With the chat's plan, the step under way in the plan's words; without a plan, a line of
+    /// Poki's own. The compact island never shows a tap either.
     func testTheIslandSaysThePlansStepNotTheTap() {
         var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
         state.stepCount = 3
-        state.previous = "Tap “Messages”"
         state.plan = .init(steps: ["Open the chat with Mom", "Send “On my way”"], current: 2, title: "Text Mom", to: "Mom")
         var face = state.face
         XCTAssertEqual(face.content, "Send “On my way”")
-        XCTAssertEqual(face.previous, "Open the chat with Mom")
         XCTAssertFalse(face.compact.says("Tap"))
-        XCTAssertTrue(face.compact.counts("2/2"))
 
         // An outside agent's run has no plan: no tap on any presentation.
         state.plan = nil
@@ -68,24 +82,20 @@ final class LiveActivityTests: XCTestCase {
         face = state.face
         XCTAssertEqual(face.content, StatusWord.running.text)
         XCTAssertFalse(face.compact.says("Tap"))
-        XCTAssertTrue(face.compact.counts("Step 4"))
     }
 
-    /// ESP-467: the compact island's 52 points cut a plan's step to a few characters, so it names the app
-    /// the step is in over the count ("Messages" over "2/2"), and with no app the count alone.
-    func testTheCompactIslandNamesTheAppOverTheCount() {
-        var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
-        state.app = "Messages"
-        state.plan = .init(steps: ["Open the chat with Mom", "Send “On my way”"], current: 2, title: "Text Mom", to: "Mom")
-        var face = state.face
-        XCTAssertTrue(face.compact.says("Messages"))
-        XCTAssertFalse(face.compact.says("On my way"))
-        XCTAssertTrue(face.compact.counts("2/2"))
+    /// The compact island's right side names where the run is without words: the icon of the app it
+    /// is in, and the run's time while that app is not known. Before the run reaches an app there is
+    /// no line under the title yet (the runner waking).
+    func testTheCompactIslandShowsTheAppOrTheTime() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        var state = PokiState(phase: .working, headline: "Open WeChat", thumbnailVersion: 0)
+        state.since = start
+        XCTAssertEqual(state.face.compact, .elapsed(start))
+        XCTAssertEqual(state.face.bottom, .progress(line: false, stop: true))
 
-        state.app = nil
-        face = state.face
-        XCTAssertFalse(face.compact.says("Mom"))
-        XCTAssertTrue(face.compact.counts("2/2"))
+        state.app = "WeChat"
+        XCTAssertEqual(state.face.compact, ActivityFace.workingTrailing == .icon ? .app("WeChat", since: start) : .elapsed(start))
     }
 
     /// ESP-467: while the runner starts, every stage says one main line (Poki waking up) and names the
@@ -112,5 +122,4 @@ private extension ActivityFace.Compact {
         let words = Mirror(reflecting: self).children.first.map { String(describing: $0.value) } ?? ""
         return words.contains(text)
     }
-    func counts(_ count: String) -> Bool { says(count) }
 }

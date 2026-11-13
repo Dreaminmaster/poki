@@ -634,7 +634,7 @@ final class AppModel {
     var loopbackSentence: String {
         if tunnel.available { return "In Poki, open Setup > Connect to this iPhone and turn on Poki's own connection." }
         guard let app = ProxyApps.all.first(where: \.isInstalled) else {
-            return "Install a VPN app that can reach 10.7.0.1 (Karing, Surge, Loon or Shadowrocket), then in Poki open Setup > Connect to this iPhone."
+            return "Install the free LocalDevVPN from the App Store and tap Connect in it. Another VPN app that can reach 10.7.0.1 also works, such as Karing, Surge, Loon or Shadowrocket: in Poki, open Setup > Connect to this iPhone and follow the line for it."
         }
         switch app.install {
         case .url: return "In Poki, open Setup > Connect to this iPhone > \(app.name), tap Install, then confirm in \(app.name)."
@@ -689,6 +689,7 @@ final class AppModel {
         }
         #endif
         Thumbnail.previewImage = ActivityPreview.sampleScreen()
+        AppIconFile.preview = { AppIconStore.shared.icon($0) }
         sessionOn = true
         relayStatus = .ready
         currentApp = messages
@@ -709,7 +710,7 @@ final class AppModel {
         ]
         activityText = String(localized: "Tap “Send”")
         approvals = [PendingApproval(id: "sample", app: messages, summary: String(localized: "Send “On my way” to Mom"),
-                                     reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25), ask: "Send a message in \(messages)", kinds: ["sending"])]
+                                     reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))]
     }
 
     // MARK: Session
@@ -1517,6 +1518,7 @@ final class AppModel {
     }
 
     func runTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
+        if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments) }
         if probeDriven { return await core.callTool(name, arguments: arguments) }
         if !sessionOn { startSession() }
         guard sessionOn else {
@@ -1557,7 +1559,7 @@ final class AppModel {
     /// Each request is answered by the owner on its own card or notification.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
-        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary) (\(approval.reason)); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
+        log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
         // The Live Activity pops up for it, but iOS folds the island back after a few seconds and a tap
@@ -1966,7 +1968,7 @@ final class AppModel {
 
     // MARK: Relay and connectors
 
-    static let noRelay = "Enter your relay’s address first in Settings › External Agents › Address. Poki has no default relay."
+    static let noRelay = "Enter your relay’s address first in Settings › Agents › Address. Poki has no default relay."
 
     /// Saves the relay address the person entered; false when it is not one. A running session moves
     /// to the new relay at once.

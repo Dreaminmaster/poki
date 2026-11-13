@@ -21,6 +21,9 @@ import WidgetKit
 /// 376 wide there and at most 160 tall (the system's limit for a Live Activity). Every view here
 /// draws one `ActivityFace`, so the four presentations always say the same thing.
 enum ActivityMetrics {
+    /// The largest text size the Live Activity draws: above it the one question and the two answers
+    /// no longer fit the Lock Screen card or the island, so they stay at this size.
+    static let largestType: DynamicTypeSize = .large
     /// The card's corner as iOS draws it, and the expanded island's.
     static let lockCorner: CGFloat = 24
     static let islandCorner: CGFloat = 46
@@ -36,18 +39,24 @@ enum ActivityMetrics {
     static let islandClip: CGFloat = 12.33
     static let islandClipCorner: CGFloat = 36
     static let compactHeight: CGFloat = 36.67
+    /// What the system cuts off the compact island's and the minimal circle's edge: the bear stays
+    /// whole inside it. Measured at the bottom edge on the iOS 27 simulator; the other sides are taken
+    /// to be the same. Not yet measured on a phone.
+    static let compactClip: CGFloat = 4.33
     /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
-    static let compactBear: CGFloat = 39
+    static let compactBear: CGFloat = 27.2
     /// The compact island's right block during a run: one width from step to step, so the island
     /// keeps its size while the words change.
     static let compactWords: CGFloat = 52
-    /// Short of room, every block fits a circle this wide; the bear's whole picture is then this long a side.
+    /// The app's icon on the compact island's right during a run, and in the circle short of room.
+    static let compactIcon: CGFloat = 22
+    static let narrowIcon: CGFloat = 18
+    /// Short of room, every block fits a circle this wide.
     static let narrowCircle: CGFloat = 28
-    static let narrowBear: CGFloat = 31.6
-    /// The minimal circle's bear: the whole picture's side, the same for every pose, so the bear
-    /// does not grow or shrink when the state changes.
-    static let minimalBear: CGFloat = 36.7
+    /// The bear's whole picture in that circle and in the minimal circle: one side for every pose, so
+    /// the bear does not grow or shrink when the state changes.
+    static let circleBear: CGFloat = 22.6
     static let button: CGFloat = 38
     static let stopCircle: CGFloat = 46
     static let stopCapsule: CGFloat = 34
@@ -66,8 +75,7 @@ enum ActivityMetrics {
         case .low:
             Sizes(island: 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
         case .working:
-            // Without a plan there is no line of segments. The ticked previous step's line is kept from the
-            // first step on, so the island keeps its height and the bear its place from step to step.
+            // Before the run is in an app it has no line yet (the runner waking): the lower island.
             Sizes(island: (face.bottom.hasLine ? 118 : 106) + 18, islandBear: 96, islandLeft: 104,
                   lock: face.bottom.hasLine ? 134 : 124, lockBear: 116, lockLeft: 122, lockBearInset: 4)
         case .asking:
@@ -90,8 +98,8 @@ enum ActivityMetrics {
 }
 
 extension ActivityFace.Bottom {
-    /// A run with a plan draws its steps as segments.
-    var hasLine: Bool { if case .progress(_, let total, _) = self { total != nil } else { false } }
+    /// A run in an app, or with a plan, draws the line that says work goes on.
+    var hasLine: Bool { if case .progress(let line, _) = self { line } else { false } }
     var isProgress: Bool { if case .progress = self { true } else { false } }
     var isHandoff: Bool { if case .handoff = self { true } else { false } }
     var isApproval: Bool { switch self { case .approval, .deciding: true; default: false } }
@@ -193,9 +201,7 @@ struct LockScreenCard: View {
                     }
                     .padding(.top, 4)
                 }
-                if case .progress(let step, let total?, _) = face.bottom {
-                    SegmentLine(step: step, total: total, palette: palette).padding(.top, 9)
-                }
+                if face.bottom.hasLine { RunLine(palette: palette).padding(.top, 9) }
             }
             .padding(.trailing, reserved)
             Spacer(minLength: 0)
@@ -277,33 +283,23 @@ struct IslandBottom: View {
 
     @ViewBuilder private func words(_ palette: ActivityPalette) -> some View {
         let hasKicker = face.kicker != nil || face.event != nil
-        if case .progress(let step, let total, let stop) = face.bottom {
+        if case .progress(let line, let stop) = face.bottom {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
                     Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1)
                     Title(face: face, palette: palette).padding(.top, 2)
-                    // Held empty on the first step (see `sizes`): a new step never grows the island.
-                    HStack(spacing: 5) {
-                        if let previous = face.previous {
-                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
-                            Text(previous).font(theme.subtitle).lineLimit(1).contentTransition(.interpolate)
-                        }
-                    }
-                    .foregroundStyle(palette.quiet)
-                    .frame(height: 16).padding(.top, 2)
-                    if let total { SegmentLine(step: step, total: total, palette: palette).padding(.top, 11) }
+                    if line { RunLine(palette: palette).padding(.top, 11) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if stop {
                     // In the lowest island the circle sits a little higher, clear of the corner.
                     StopButton(surface: .island)
-                        .padding(.top, (total == nil ? 6 : 16) + 9)
+                        .padding(.top, (line ? 16 : 6) + 9)
                         .transition(.opacity)
                 }
             }
             .padding(.trailing, 20)
         } else {
-            let face = oneLine(self.face)
             let top: CGFloat = face.size == .tall ? 3 : 5
             // A capsule 14 up and 24 in clears the corner of the system's clip.
             let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking, .tall: 14 }
@@ -324,25 +320,17 @@ struct IslandBottom: View {
     }
 }
 
-/// The face with its island line, if it has one, as the title and no subtitle.
-private func oneLine(_ face: ActivityFace) -> ActivityFace {
-    guard let line = face.islandContent else { return face }
-    var island = face
-    island.content = line
-    island.subtitle = nil
-    return island
-}
-
 // MARK: Dynamic Island, compact and minimal
 
-/// Direction three's small bear (ESP-344 board F-06, A): head, hands and what they hold, the picture's
-/// lower edge 3 points under the island's. Every mouth sits above the 4.33 points the system cuts off.
-/// A new state changes the pose where the bear stands. Short of room, the bear in a circle 28 points across.
+/// The whole small bear (ESP-503): ears, head and outline inside the 4.33 points the system cuts off,
+/// a soft shade over its lower edge. A new state changes the pose where the bear stands. Short of
+/// room, the bear in a circle 28 points across.
 struct CompactLeading: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
         let side = ActivityMetrics.compactBear
+        let origin = face.bear.compactOrigin
         LimitedWidth { narrow in
             if narrow {
                 NarrowBear(bear: face.bear)
@@ -350,7 +338,8 @@ struct CompactLeading: View {
                 ZStack {
                     Image(face.bear.image).resizable().interpolation(.high)
                         .frame(width: side, height: side)
-                        .offset(x: 11, y: ActivityMetrics.compactHeight + 3 - side)
+                        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 6) }
+                        .offset(x: origin.x, y: origin.y)
                         .frame(width: ActivityMetrics.compactBlock, height: ActivityMetrics.compactHeight, alignment: .topLeading)
                         .id(face.bear)
                         .transition(.opacity)
@@ -364,7 +353,7 @@ struct CompactLeading: View {
     }
 }
 
-/// Two short lines: what the task is doing, made smaller or cut to fit, over its count.
+/// The right of the compact island: the app a run is in, its time, or a short word or symbol.
 struct CompactTrailing: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
@@ -378,12 +367,20 @@ struct CompactTrailing: View {
         .animation(dimmed ? nil : ActivityMotion.step, value: face.compact)
     }
 
-    /// Short of room: a count, the countdown or a symbol, inside a circle 28 points across. A run
-    /// without a plan, and a count too long to fit, leave the block empty: the system then closes it.
+    /// Short of room: the app's icon, a time, a short count or a symbol, inside a circle 28 points
+    /// across. A count too long to fit leaves the block empty: the system then closes it.
     @ViewBuilder private func narrow(_ palette: ActivityPalette) -> some View {
         let side = ActivityMetrics.narrowCircle
         switch face.compact {
-        case .steps(_, let count) where count.contains("/") && count.count <= 5:
+        case .app(let app, _):
+            if let icon = AppIconFile.image(app) {
+                AppIcon(image: icon, side: ActivityMetrics.narrowIcon).frame(width: side, height: side)
+            } else {
+                DefaultAppIcon(size: ActivityMetrics.narrowIcon).frame(width: side, height: side)
+            }
+        case .elapsed(let since):
+            RunTime(since: since, font: theme.narrowTimer, colour: palette.text, width: 26).frame(width: side, height: side)
+        case .text(let count, _) where count.contains("/") && count.count <= 5:
             Text(count).font(theme.narrowCount).foregroundStyle(palette.text)
                 .lineLimit(1).minimumScaleFactor(0.75)
                 .frame(maxWidth: 26).frame(width: side, height: side)
@@ -403,21 +400,14 @@ struct CompactTrailing: View {
     private func wide(_ palette: ActivityPalette) -> some View {
         ZStack {
             switch face.compact {
-            case .steps(let text, let count):
-                VStack(alignment: .trailing, spacing: 0) {
-                    if let text {
-                        Text(text).font(theme.compact).foregroundStyle(palette.text).frame(height: 15)
-                            .truncationMode(.tail)
-                            .contentTransition(.interpolate)
-                        Text(count).font(theme.compactCount).foregroundStyle(palette.quiet).frame(height: 13)
-                            .contentTransition(.numericText())
-                    } else {
-                        Text(count).font(theme.compact.monospacedDigit()).foregroundStyle(palette.text)
-                            .contentTransition(.numericText())
-                    }
+            case .app(let app, _):
+                if let icon = AppIconFile.image(app) {
+                    AppIcon(image: icon, side: ActivityMetrics.compactIcon).padding(.trailing, 3)
+                } else {
+                    DefaultAppIcon(size: ActivityMetrics.compactIcon).padding(.trailing, 3)
                 }
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
+            case .elapsed(let since):
+                RunTime(since: since, font: theme.compact.monospacedDigit(), colour: palette.text, width: 42)
             case .text(let text, let tone):
                 Text(text).font(theme.compact).foregroundStyle(palette.color(tone))
                     .lineLimit(1).minimumScaleFactor(0.8)
@@ -448,37 +438,37 @@ struct CompactTrailing: View {
     }
 }
 
-/// The bear where the island is short of room, and the minimal circle there: in a circle 28 points
-/// across, set by the middle of its head and hand, its body cut by the lower edge.
+/// The bear where the island is short of room: the whole bear in a circle 28 points across, placed
+/// per pose (`ActivityBear.circleOrigin`).
 private struct NarrowBear: View {
     var bear: ActivityBear
     var body: some View {
-        let side = ActivityMetrics.narrowBear
-        let middle = bear.middle
-        let radius = ActivityMetrics.narrowCircle / 2
+        let side = ActivityMetrics.circleBear
+        let origin = bear.circleOrigin
+        let circle = ActivityMetrics.narrowCircle
         ZStack {
             Image(bear.image).resizable().interpolation(.high)
                 .frame(width: side, height: side)
-                .offset(x: radius - middle.x * side, y: radius - middle.y * side)
-                .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                .offset(x: origin.x, y: origin.y)
+                .frame(width: circle, height: circle, alignment: .topLeading)
                 .id(bear)
                 .transition(.opacity)
         }
-        .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 5) }
-        .frame(width: radius * 2, height: radius * 2)
+        .frame(width: circle, height: circle)
         .clipShape(.circle)
     }
 }
 
-/// Another app's activity shares the island: only the bear, no ring, set by the middle of its head
-/// and hand so every pose sits the same way in the circle, its body cut by the lower edge.
+/// Another app's activity shares the island: only the bear, no ring, the whole bear inside the
+/// circle's visible part (the circle less the 4.33 points the system cuts off), placed per pose.
 struct MinimalView: View {
     var face: ActivityFace
     @Environment(\.isLuminanceReduced) private var dimmed
     var body: some View {
-        let side = ActivityMetrics.minimalBear
-        let middle = face.bear.middle
-        let radius = ActivityMetrics.compactHeight / 2
+        let side = ActivityMetrics.circleBear
+        let inset = ActivityMetrics.compactClip
+        let origin = face.bear.circleOrigin
+        let circle = ActivityMetrics.compactHeight
         LimitedWidth { narrow in
             if narrow {
                 NarrowBear(bear: face.bear)
@@ -486,13 +476,12 @@ struct MinimalView: View {
                 ZStack {
                     Image(face.bear.image).resizable().interpolation(.high)
                         .frame(width: side, height: side)
-                        .offset(x: radius - middle.x * side, y: radius - middle.y * side)
-                        .frame(width: radius * 2, height: radius * 2, alignment: .topLeading)
+                        .offset(x: inset + origin.x, y: inset + origin.y)
+                        .frame(width: circle, height: circle, alignment: .topLeading)
                         .id(face.bear)
                         .transition(.opacity)
                 }
-                .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.5), height: 6) }
-                .frame(width: radius * 2, height: radius * 2)
+                .frame(width: circle, height: circle)
                 .clipShape(.circle)
             }
         }
@@ -539,8 +528,8 @@ private struct Rim: View {
     }
 }
 
-/// Over the title: which step this is, in the accent colour, and beside it the app in front, or for
-/// a few seconds what just happened ("Started", "Allowed").
+/// Over the title: the app the run is in, in the accent colour, and beside it for a few seconds what
+/// just happened ("Started", "Allowed").
 private struct Kicker: View {
     var face: ActivityFace
     var palette: ActivityPalette
@@ -552,9 +541,9 @@ private struct Kicker: View {
                     .contentTransition(.numericText())
                     .layoutPriority(1)
             }
-            if let word = face.event ?? face.place {
+            if let word = face.event {
                 Text(word).font(theme.place)
-                    .foregroundStyle(face.event == nil ? palette.quiet : palette.color(face.eventTone))
+                    .foregroundStyle(palette.color(face.eventTone))
                     .contentTransition(.interpolate)
             }
             // An outside agent's run: its badge follows the app's name and never gives way to it.
@@ -582,15 +571,12 @@ private struct Title: View {
             // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do,
             // 24 bold for Poki's state on a short Lock Screen card.
             let stepLike = face.size == .working || face.size == .low
-            // An approval's question is one whole sentence ("Order lunch, ¥38 in total"): two lines
-            // rather than cut.
-            let asking = face.size == .asking && !large
             Text(face.content)
                 .font(large ? theme.status : stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
                 .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                .lineLimit(asking ? 2 : 1).minimumScaleFactor(large ? 0.65 : 0.8)
+                .lineLimit(1).minimumScaleFactor(large ? 0.65 : 0.8)
                 .contentTransition(.interpolate)
-                .frame(height: asking ? nil : large ? 30 : stepLike ? 24 : 25, alignment: .leading)
+                .frame(height: large ? 30 : stepLike ? 24 : 25, alignment: .leading)
         }
     }
 }
@@ -678,7 +664,7 @@ private struct Control: View {
         switch face.bottom {
         case .none:
             EmptyView()
-        case .progress(_, _, let stop):
+        case .progress(_, let stop):
             if stop, surface == .lockScreen { StopButton(surface: surface).transition(.opacity) }
         case .approval(let id):
             ApprovalButtons(approvalID: id, surface: surface)
@@ -710,16 +696,101 @@ private struct Control: View {
     }
 }
 
-/// One segment per step, 4 points high, 3 apart: lit up to the step under way.
+/// The run under way, without saying how far: a track with a soft light on it, the same at every
+/// step. Drawn still: a Live Activity does not run repeating animations, and the island and the Lock
+/// Screen card only change when an update comes.
+private struct RunLine: View {
+    var palette: ActivityPalette
+    var body: some View {
+        GeometryReader { box in
+            ZStack(alignment: .leading) {
+                Capsule().fill(palette.track)
+                LinearGradient(colors: [palette.segmentDone.opacity(0), palette.segmentDone, palette.segmentDone.opacity(0)],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: (box.size.width * 0.34).rounded())
+                    .clipShape(.capsule)
+                    .offset(x: box.size.width * 0.28)
+            }
+        }
+        .frame(height: 4)
+        .clipShape(.capsule)
+        .accessibilityHidden(true)
+    }
+}
+
+/// How long the run has taken, counted up by the system, in the compact island.
+private struct RunTime: View {
+    var since: Date
+    var font: Font
+    var colour: Color
+    var width: CGFloat
+    var body: some View {
+        // No fixedSize on timer text (see TimerText): a fixed frame instead.
+        Text(timerInterval: since...since.addingTimeInterval(12 * 3600), countsDown: false)
+            .font(font).foregroundStyle(colour)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .frame(width: width, alignment: .trailing)
+    }
+}
+
+/// An app's icon in the island: its own picture, the system's corner.
+private struct AppIcon: View {
+    var image: UIImage
+    var side: CGFloat
+    var body: some View {
+        Image(uiImage: image).resizable().interpolation(.high)
+            .frame(width: side, height: side)
+            .clipShape(.rect(cornerRadius: side * 5 / 22, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// The icon of the app a run is in, for the compact island. The app writes it to the App Group
+/// container when the run comes into the app (the widget cannot look icons up itself), one file per
+/// app, so a late or failed write never shows another app's icon.
+enum AppIconFile {
+    /// The island draws it at 22 points: three times that, and the file stays small.
+    static let pixels: CGFloat = 66
+    /// The app's own previews draw icons from this when there is no file (the widget never sets it).
+    @MainActor static var preview: ((String) -> UIImage?)?
+
+    static func url(_ app: String) -> URL? {
+        let key = KnownApps.find(app)?.id ?? app.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = key.lowercased().utf8.prefix(64).map { String(format: "%02x", $0) }.joined()
+        return SharedContainer.url?.appendingPathComponent("app-icons", isDirectory: true).appendingPathComponent(name + ".png")
+    }
+
+    @MainActor static func image(_ app: String) -> UIImage? {
+        url(app).flatMap { UIImage(contentsOfFile: $0.path) } ?? preview?(app)
+    }
+
+    /// Writes `icon` for `app`, shrunk to `pixels`, unless the file is already there.
+    static func write(_ icon: UIImage, for app: String) {
+        guard let url = url(app), !FileManager.default.fileExists(atPath: url.path) else { return }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let small = UIGraphicsImageRenderer(size: CGSize(width: pixels, height: pixels), format: format).pngData { _ in
+            icon.draw(in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? small.write(to: url, options: .atomic)
+    }
+}
+
+
+/// One segment per step, 4 points high, 3 apart: lit up to the step under way, red where an action
+/// under the step did not go through.
 private struct SegmentLine: View {
     var step: Int
     var total: Int
     var palette: ActivityPalette
+    var failed: [Int] = []
     var body: some View {
         HStack(spacing: 3) {
             ForEach(1...max(1, total), id: \.self) { index in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(index <= step ? palette.segmentDone : palette.track)
+                    .fill(index > step ? palette.track : failed.contains(index) ? palette.segmentFailed : palette.segmentDone)
                     .frame(height: 4)
             }
         }
