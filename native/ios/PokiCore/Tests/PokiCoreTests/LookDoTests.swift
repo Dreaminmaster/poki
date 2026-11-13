@@ -74,8 +74,30 @@ final class LookDoTests: XCTestCase {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": [200, 900]]]])
+        XCTAssertTrue(result.isError, result.text)
         XCTAssertTrue(result.text.contains("not_hittable: [200, 900] is off the screen (390x844 points)"), result.text)
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testInvalidActionArraysAreRejectedBeforeAnyActionRuns() async {
+        let (core, wda, _) = makeCore()
+        let invalid: [JSON] = [
+            [:], ["actions": "oops"], ["actions": [7]],
+            ["actions": .array(Array(repeating: ["tap": [100, 100]], count: 21))],
+        ]
+        for args in invalid {
+            let result = await core.call("do", args)
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("nothing was sent"), result.text)
+        }
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testNegativeWaitIsAnActionError() async {
+        let (core, _, _) = makeCore()
+        let result = await core.call("do", ["actions": [["wait": -5]]])
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("wait takes nonnegative milliseconds"), result.text)
     }
 
     func testASwipeStartsInsideTheListClearOfTheReplyBarAsAQuickFlick() async {

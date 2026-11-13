@@ -128,7 +128,7 @@ final class ToolTests: XCTestCase {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": 9]]])
-        XCTAssertFalse(result.isError, "the screen was read, so the answer is not an error; its error line says what was wrong")
+        XCTAssertTrue(result.isError, "a screen read does not make the failed action successful")
         XCTAssertTrue(result.text.contains("element 9 is not in the latest read"), result.text)
         XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
     }
@@ -910,6 +910,22 @@ final class MCPTests: XCTestCase {
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "look", "arguments": .object([:])]], session: session).body)
         XCTAssertEqual(call["result"]?["content"]?[1]?["type"], "image")
         XCTAssertEqual(call["result"]?["isError"], false)
+    }
+
+    func testFailedActionReturnsErrorAndRecoveryImageOverMCP() async throws {
+        let (core, wda, _) = makeCore()
+        let initialized = await post(core, ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["protocolVersion": "2025-06-18"]])
+        let session = try XCTUnwrap(initialized.headers["mcp-session-id"])
+        _ = await post(core, ["jsonrpc": "2.0", "method": "notifications/initialized"], session: session)
+        let response = await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": [
+            "name": "do", "arguments": ["actions": [["tap": 9999]]],
+        ]], session: session)
+        XCTAssertEqual(response.status, 200)
+        let result = try JSON.parse(response.body)["result"]
+        XCTAssertEqual(result?["isError"], true)
+        XCTAssertEqual(result?["content"]?[1]?["type"], "image")
+        XCTAssertTrue(result?["content"]?[0]?["text"]?.string?.contains("nothing was sent") == true)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
     }
 
     /// The app opens its session when an agent connects, so the first look does not pay for it.
