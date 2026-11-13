@@ -31038,6 +31038,29 @@
         }
       }
     },
+    "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以回到主屏幕等待。更新安装完成后，Poki 会自动关闭，之后请重新打开 Poki。如果一直没有变化，请用电脑上的 Poki Setup 更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以回到主畫面等待。更新安裝完成後，Poki 會自動關閉，之後請重新開啟 Poki。如果一直沒有變化，請用電腦上的 Poki Setup 更新。"
+          }
+        }
+      }
+    },
     "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." : {
       "extractionState" : "manual",
       "localizations" : {
