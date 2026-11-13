@@ -283,7 +283,7 @@ private struct LoopbackPage: View {
     var body: some View {
         let monitor = model.loopback
         let localReady = model.hasOpenInProcessSession && !monitor.isWorking
-        let detail: LocalizedStringKey = monitor.isWorking || monitor.state == .noAnswer ? LocalizedStringKey(monitor.detail) : "Checking 10.7.0.1 every few seconds…"
+        let detail = LocalizedStringKey(monitor.detail)
         Section {
             LabeledContent {
                 if monitor.state == .checking && !localReady { ProgressView() }
@@ -395,7 +395,8 @@ private struct LoopbackPage: View {
         switch monitor.state {
         case .working: "Loopback Is On"
         case .noAnswer: "Tunnel On, No Answer"
-        default: "Not On Yet"
+        case .checking: "Checking…"
+        case .off: "Off"
         }
     }
 }
@@ -477,7 +478,7 @@ private struct LoopbackStatusRow: View {
     var body: some View {
         let working = model.loopback.isWorking
         LabeledContent("Loopback") {
-            Text(working ? "Working" : model.loopback.state == .noAnswer ? "No Answer" : "Checking…")
+            Text(model.loopback.text)
                 .foregroundStyle(working ? Color.green : Color.secondary)
         }
         .onAppear { model.loopback.resume() }
