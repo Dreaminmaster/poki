@@ -47,7 +47,7 @@ export function GitHubCard() {
   return (
     <Card>
       <h2>{t("GitHub Account")}</h2>
-      <p className="muted small">{state?.has_token ? t("The Pre-alpha channel is now offered. With Preview Builds on, Settings lists builds of pull requests under the channel.") : t("Optional, for people developing Poki. Poki Setup asks GitHub for no permissions.")}</p>
+      <p className="muted small">{state?.has_token ? t("The Pre-alpha channel is now offered. With Preview Builds on, Settings lists builds of pull requests under the channel.") : t("Optional, for people developing Poki. You sign in through Poki Preview Sign-in, a GitHub app that can only read the builds and pull requests of the Poki repository.")}</p>
       <ErrorBox error={error} />
       {state?.has_token ? (
         <div className="stack">

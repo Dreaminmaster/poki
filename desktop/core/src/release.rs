@@ -550,13 +550,17 @@ pub fn set_github_token(token: &str) -> Result<()> {
     crate::apple::store::secret_set(GITHUB_TOKEN, token)
 }
 
-/// The GitHub App that GitHub's device sign-in runs under (app 5678895: "Enable Device Flow" on,
-/// user tokens that do not expire, Actions and Pull requests read; no client secret is involved
-/// and the ID is public). `POKI_GITHUB_CLIENT_ID` overrides it.
-pub const GITHUB_CLIENT_ID: &str = "Iv23linjHPGV8Hd0O2sQ";
+/// The client ID of Poki Preview Sign-in, the GitHub App that the preview sign-in runs under, on
+/// Poki Setup and on the iPhone (the launcher takes it from here). The app is the repository
+/// owner's, with repository permissions Actions read and Pull requests read and nothing else,
+/// "Enable Device Flow" on and user tokens that do not expire, and it is installed only on this
+/// repository. A user token can do what both the app and the person can do, so it must never be
+/// the release bot's app, which can write code, pull requests and workflows. The ID is public and
+/// needs no client secret. `POKI_GITHUB_CLIENT_ID` overrides it for development.
+pub const PREVIEW_SIGN_IN_APP_CLIENT_ID: &str = "Iv23lizFeswRVZtONUKT";
 
 fn github_client_id() -> Result<String> {
-    std::env::var("POKI_GITHUB_CLIENT_ID").ok().filter(|v| !v.trim().is_empty()).or_else(|| (!GITHUB_CLIENT_ID.is_empty()).then(|| GITHUB_CLIENT_ID.to_string()))
+    std::env::var("POKI_GITHUB_CLIENT_ID").ok().filter(|v| !v.trim().is_empty()).or_else(|| (!PREVIEW_SIGN_IN_APP_CLIENT_ID.is_empty()).then(|| PREVIEW_SIGN_IN_APP_CLIENT_ID.to_string()))
         .ok_or_else(|| Error::msg("This build of Poki has no GitHub sign-in set up."))
 }
 

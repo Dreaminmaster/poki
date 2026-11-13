@@ -249,7 +249,8 @@ final class SelfSigner {
     }
 
     /// GitHub's device sign-in, for preview builds: shows a code to enter on github.com, then waits
-    /// until GitHub says it was entered. The sign-in asks for no permissions.
+    /// until GitHub says it was entered. The token can only read this repository's Actions and pull
+    /// requests (the Poki Preview Sign-in app, see `PREVIEW_SIGN_IN_APP_CLIENT_ID` in desktop/core).
     func signInToGitHub() async {
         githubError = nil
         var started = ""
@@ -434,8 +435,8 @@ final class SelfSigner {
 
     /// Installs the prepared build. iOS ends Poki when it lands; a notification brings it back.
     func install() async {
-        // The choice may have changed elsewhere (Poki Setup, the command line) since the status
-        // was read; next goes by the current one.
+        // The choice may have changed since the status was read (an update check drops a preview
+        // that is gone); next goes by the current one.
         await reload()
         guard let p = next else { log.add("signing", "install tapped, but no build is ready"); return }
         log.add("signing", "install tapped: \(p.kind) \(p.version) (\(p.build))")

@@ -88,12 +88,14 @@ is tried on a phone before it reaches any channel.
 - **Pre-alpha needs the same sign-in.** The Pre-alpha channel is offered only to signed-in GitHub
   users. Without a sign-in, a saved Pre-alpha choice behaves as Alpha.
 - **Going back.** Choose None. The next update check follows the release channel again. A preview
-  build that was already downloaded and signed is not installed after that: Poki drops it, and the
-  signer refuses to install a prepared build that is no longer the one chosen.
+  build that was already downloaded and signed is not installed after that: it may stay on disk, but
+  Poki no longer offers it, and the signer refuses to install a prepared build that is no longer
+  the one chosen.
 - **When GitHub cannot be read.** If the check for the chosen preview fails (no connection, a GitHub
   error, or the request limit), the choice is kept and nothing is installed. Poki and Poki Setup say
   so; try again later. Only a preview that GitHub confirms is gone (its pull request was closed or
-  merged, the label came off, or the build expired) sends you back to the channel.
+  merged, its builds were deleted after the label came off, or the build expired) sends you back
+  to the channel.
 
 ### Trying a preview build on a phone
 
@@ -101,24 +103,33 @@ Do this once per pull request you test, after its preview build has finished (th
 is green and lists a `Poki-preview-pr<N>-...` artifact).
 
 Poki needs a Poki with the GitHub sign-in on the phone, its Apple Account signed in under Build
-Options (to sign the download), and the loopback on (Setup lists it). Without those, use Poki Setup
-on a Mac instead (below).
+Options (to sign the download and to renew the preview by itself), and the loopback on (Setup lists
+it).
+
+**Quit Poki Setup on your computer first, or the test is void.** Poki Setup 0.2.2 and earlier do not
+know preview builds. When the signature it installed is about to expire, it renews Poki by itself
+with the channel's build, which silently replaces the preview on the phone. Keep it quit for as
+long as you test, and let the phone renew Poki (it needs the Apple Account above). Before you report,
+check that Poki Version still shows the PR.
 
 1. **Sign in to GitHub.** Setup › Build Options › GitHub Account › Sign In with GitHub. Tap Copy
    Code and Open GitHub, sign in on github.com, paste the code and approve. Back in Poki the page
    shows your GitHub name.
 2. **Turn on preview builds.** On the same page, turn on Preview Builds.
-3. **Choose the pull request.** Go back to Build Options. Under Preview Build, choose the PR, for
-   example `0.3.1 (762) PR 206`. Newest Preview Build shows the same build.
-4. **Install.** Go back to Setup. Under Signing, tap Download and Install Update. Poki downloads,
-   signs and installs the preview, closes, and opens again from the notification.
+3. **Choose the pull request.** Go back to Build Options. Under Preview Build, choose the PR. It is
+   listed as `<version> (<build>) PR <N>`, for example `0.3.2 (<build>) PR 242`. Newest Preview
+   Build shows the same build.
+4. **Install.** Go back to Setup. Under Signing, tap Download and Install Update. If Poki has
+   already downloaded and signed it by itself, the button reads Install Update instead. Poki
+   installs the preview, closes, and opens again from the notification.
 5. **Check.** Setup › Signing › Poki Version shows `<version> (<build>) PR <N>`.
 6. **Go back to the channel.** Build Options › Preview Build › None. If a preview update had been
    prepared but not installed, Install Update disappears. The next channel update installs as
    usual.
 
-With Poki Setup on a Mac: Account › GitHub › Sign In with GitHub, then Preview Builds on. On the
-Setup page choose the PR under Preview Build, then Install. From the command line:
+With a Poki Setup that has the GitHub sign-in (none is released yet; 0.2.2 does not have it): on a
+Mac, Account › GitHub › Sign In with GitHub, then Preview Builds on. On the Setup page choose the PR
+under Preview Build, then Install. From the command line:
 `poki-setup preview sign-in`, `poki-setup preview on`, `poki-setup preview <N>`, then install or
 renew as usual, and `poki-setup preview none` to go back.
 
@@ -126,9 +137,14 @@ What to report: the build line Poki shows, whether the install finished, and any
 GitHub Account page, Build Options or Setup showed. For a failed GitHub check, also say whether
 the choice was still there afterwards.
 
-The sign-in uses GitHub's device flow under a GitHub App that can only read Actions and pull
-requests. Its client ID is the `GITHUB_CLIENT_ID` constant in `desktop/core/src/release.rs`
-(`POKI_GITHUB_CLIENT_ID` overrides it for development). It is public, not a secret.
+The sign-in uses GitHub's device flow under Poki Preview Sign-in, a GitHub App of its own that can
+only read this repository's Actions and pull requests. It is not the bot's app: a user token can
+do what both the app and the person can do, so a sign-in under the bot's app would leave a token
+that can push code and change workflows on the phone of everyone with write access here. The app's client ID is the
+`PREVIEW_SIGN_IN_APP_CLIENT_ID` constant in `desktop/core/src/release.rs` (`POKI_GITHUB_CLIENT_ID`
+overrides it for development). It is public, not a secret. If an earlier test build had you
+authorize Poki Repo Bot, revoke it under GitHub Settings › Applications › Authorized GitHub Apps
+and sign out of GitHub in Poki.
 
 ## Checks
 
@@ -143,10 +159,12 @@ check runs only for `desktop/core` and its Cargo files. A skipped job counts as 
   read), installed on this repository, with its id and private key in the Actions secrets
   `POKI_BOT_APP_ID` and `POKI_BOT_PRIVATE_KEY`.
 - Labels `promotion`, `soak-override`, `blocker` and `preview`.
-- A GitHub App for the GitHub sign-in of preview builds: Device Flow enabled, "Expire user
-  authorization tokens" off, repository permissions Actions read and Pull requests read, no
-  webhook, installed on this repository. Its client ID is `GITHUB_CLIENT_ID` in
-  `desktop/core/src/release.rs`.
+- A second GitHub App, Poki Preview Sign-in, only for the GitHub sign-in of preview builds, owned
+  by the repository owner and separate from the bot's: Device Flow enabled, "Expire user
+  authorization tokens" off (Poki keeps the token and has no refresh), repository permissions
+  Actions read and Pull requests read (Metadata read comes with them), no account permissions,
+  webhook off, installed only on this repository. Its client ID is `PREVIEW_SIGN_IN_APP_CLIENT_ID`
+  in `desktop/core/src/release.rs`.
 - The `alpha`, `beta`, and `stable` environments are configured with `JosssphZhou` as the only
   required reviewer and administrator bypass disabled. Self-review prevention is off so the owner
   can approve a run they started. Agents must not approve on the owner's behalf.

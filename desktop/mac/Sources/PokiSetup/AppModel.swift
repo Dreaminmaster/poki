@@ -230,7 +230,8 @@ final class AppModel: ObservableObject {
     }
 
     /// GitHub's device sign-in: shows a code to enter on github.com, then waits until GitHub says
-    /// it was entered. The sign-in asks for no permissions.
+    /// it was entered. The token can only read this repository's Actions and pull requests (the Poki
+    /// Preview Sign-in app, see `PREVIEW_SIGN_IN_APP_CLIENT_ID` in desktop/core).
     func signInToGitHub() async {
         githubError = nil
         var started = ""

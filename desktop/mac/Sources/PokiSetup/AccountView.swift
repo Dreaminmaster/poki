@@ -206,7 +206,7 @@ struct GitHubAccountSection: View {
             // Signed out, nothing names what the sign-in unlocks.
             Text(model.previews.hasToken
                  ? "The Pre-alpha channel is now offered. With Preview Builds on, the Setup page lists builds of pull requests under the channel."
-                 : "Optional, for people developing Poki. Poki Setup asks GitHub for no permissions.")
+                 : "Optional, for people developing Poki. You sign in through Poki Preview Sign-in, a GitHub app that can only read the builds and pull requests of the Poki repository.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
