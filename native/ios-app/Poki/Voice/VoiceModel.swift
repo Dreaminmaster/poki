@@ -319,7 +319,16 @@ final class VoiceModel {
 
     /// A live (Realtime) conversation can start: the OpenAI key on this iPhone or the voice bridge.
     /// Without one, voice is dictation into the message field, turn by turn.
-    var canTalkLive: Bool { VoiceDirect.apiKey != nil || bridge != nil }
+    var canTalkLive: Bool { VoiceDirect.apiKey != nil || bridge != nil || rehearsing }
+
+    /// A simulator's development build that asked for TalkRehearsal: talks connect to it, with no key.
+    var rehearsing: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        TalkRehearsal.asked
+        #else
+        false
+        #endif
+    }
 
     /// A live Realtime conversation is on (not the hold-to-dictate fallback).
     var isLive: Bool { link != nil }
@@ -362,11 +371,28 @@ final class VoiceModel {
     }
     #endif
 
+    /// The app's connection: OpenAI's Realtime API, or TalkRehearsal when a simulator build asked for it.
+    static let connection: @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { onEvent, onClosed in
+        #if DEBUG && targetEnvironment(simulator)
+        if TalkRehearsal.asked { return TalkRehearsal(onEvent: onEvent, onClosed: onClosed) }
+        #endif
+        return VoiceLink(onEvent: onEvent, onClosed: onClosed)
+    }
+
+    /// Only reached when `rehearsing`.
+    private static var rehearsalToken: VoiceBridge.Token {
+        #if DEBUG && targetEnvironment(simulator)
+        TalkRehearsal.token
+        #else
+        preconditionFailure("a talk with no key and no bridge outside a rehearsal")
+        #endif
+    }
+
     func start(microphone: Bool = true) async {
         guard link == nil, dictation == nil, !isConnecting else { return }
         // The OpenAI key on this iPhone first (no Mac needed), then the bridge, then dictation.
         let key = VoiceDirect.apiKey
-        if key == nil, bridge == nil {
+        if key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.localizedDescription) }
             return
         }
@@ -375,7 +401,7 @@ final class VoiceModel {
         let number = session
         do {
             let token: VoiceBridge.Token
-            if let key { token = try await VoiceDirect.token(apiKey: key) } else { token = try await bridge!.token() }
+            if rehearsing { token = Self.rehearsalToken } else if let key { token = try await VoiceDirect.token(apiKey: key) } else { token = try await bridge!.token() }
             // Ended (End, or the button again) while the key was exchanged.
             guard number == session else { return }
             localTools = Set(token.local_tools)

@@ -270,10 +270,13 @@ struct RootView: View {
         }
     }
 
-    /// Opens the full-screen Voice page over Poki's chat and starts the live voice conversation if ready.
+    /// Talk with Poki: a live conversation starts in the chat, which stays in front (pull request #250's
+    /// way). Without a live voice (no OpenAI key, no voice bridge) the Voice page opens instead: its hold
+    /// to talk takes one turn at a time through Poki's chat model, or says what to set up.
     private func openLiveVoice() {
-        show(.voice)
-        if !model.voice.isOn, model.voice.canTalkLive {
+        guard model.voice.canTalkLive else { show(.voice); return }
+        show(.chat)
+        if !model.voice.isOn {
             ApprovalNotice.requestPermission()
             Task { await model.voice.start() }
         }

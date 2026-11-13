@@ -49,6 +49,28 @@ struct CardSkin {
     var across: [Gradient.Stop] { zip(Self.across, rows[1].colours).map { Gradient.Stop(color: Color(hex: $1), location: Double($0)) } }
 }
 
+/// Poki's brand band: the card's lowest row of blues, left to right, where its light is brightest. The
+/// island's glow while you talk with Poki and the talk's marks in the app draw it.
+enum BrandBand {
+    static var colours: [Color] { CardSkin.light.rows[CardSkin.light.rows.count - 1].colours.map { Color(hex: $0) } }
+}
+
+/// While you talk with Poki: the brand band low in the expanded island, rising out of its bottom edge
+/// and fading upward and toward the sides. Plain gradients and masks, no blur, so nothing in it asks
+/// for an effect a Live Activity may not draw. Seen in the simulator only so far, not on a phone.
+struct TalkGlow: View {
+    var body: some View {
+        LinearGradient(colors: BrandBand.colours, startPoint: .leading, endPoint: .trailing)
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .white.opacity(0.35), location: 0.45),
+                                         .init(color: .white, location: 1)], startPoint: .top, endPoint: .bottom))
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .white, location: 0.22),
+                                         .init(color: .white, location: 0.78), .init(color: .clear, location: 1)],
+                                 startPoint: .leading, endPoint: .trailing))
+            .frame(height: 30)
+            .accessibilityHidden(true)
+    }
+}
+
 /// The card's ground: the mesh and the halo behind the bear. It stands still: a Live Activity may
 /// not run an animation of its own. Whether a Live Activity draws a `MeshGradient` on a phone is not
 /// known (it does on the iOS 27 simulator), so the mesh's middle row lies under it as a plain

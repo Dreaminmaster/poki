@@ -779,6 +779,40 @@
         }
       }
     },
+    "End" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束"
+          }
+        }
+      }
+    },
+    "End talk" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束對話"
+          }
+        }
+      }
+    },
     "Enter your passcode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2496,29 +2530,6 @@
         }
       }
     },
-    "Speak to Poki, or tap to open Voice." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Speak, or tap for Voice"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "直接说话或轻点打开语音"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "直接說話或輕點開啟語音"
-          }
-        }
-      }
-    },
     "Stalled" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2776,6 +2787,23 @@
         }
       }
     },
+    "Talk with Poki" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話"
+          }
+        }
+      }
+    },
     "Tap" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2852,29 +2880,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輕點螢幕"
-          }
-        }
-      }
-    },
-    "Tap to return to Voice." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap to return to Voice"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "轻点返回语音"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "輕點返回語音"
           }
         }
       }

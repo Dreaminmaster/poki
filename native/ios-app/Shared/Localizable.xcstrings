@@ -666,6 +666,22 @@
         }
       }
     },
+    "Add your key in Settings › Model. Dictate works without one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「设置 › 模型」里添加密钥。听写不需要密钥。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「設定 › 模型」裡新增金鑰。聽寫不需要金鑰。"
+          }
+        }
+      }
+    },
     "ADDRESSES" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3215,6 +3231,22 @@
       }
     },
     "End conversation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束對話"
+          }
+        }
+      }
+    },
+    "End Talk" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -5907,6 +5939,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無需設定"
+          }
+        }
+      }
+    },
+    "Not Now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以后再说"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以後再說"
           }
         }
       }
@@ -9232,6 +9280,38 @@
         }
       }
     },
+    "Speak" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說話"
+          }
+        }
+      }
+    },
+    "Speak live; Poki answers and acts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音对话，Poki 回答并操作"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時語音對話，Poki 回答並操作"
+          }
+        }
+      }
+    },
     "STATUS" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10561,6 +10641,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拍照"
+          }
+        }
+      }
+    },
+    "Talk with Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話"
+          }
+        }
+      }
+    },
+    "Talk with Poki needs an OpenAI API key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话需要 OpenAI API 密钥"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話需要 OpenAI API 金鑰"
           }
         }
       }
@@ -12728,6 +12840,22 @@
         }
       }
     },
+    "Unmute Poki’s Voice" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消 Poki 的语音静音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消 Poki 的語音靜音"
+          }
+        }
+      }
+    },
     "USE YOUR PROXY APP" : {
       "localizations" : {
         "zh-Hans" : {
@@ -13863,6 +13991,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請求失敗。"
+          }
+        }
+      }
+    },
+    "Your words appear in the message field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说的话写进输入框"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說的話寫進輸入框"
           }
         }
       }

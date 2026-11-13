@@ -269,8 +269,13 @@ struct IslandBottom: View {
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
+        // A talk with Poki is on: the brand band along the island's lower edge, under the words.
+        .background(alignment: .bottom) {
+            if face.talkGlow, !dimmed { TalkGlow().transition(.opacity) }
+        }
         .foregroundStyle(palette.text)
         .environment(\.colorScheme, .dark)
+        .animation(dimmed ? nil : ActivityMotion.phase, value: face.talkGlow)
         .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
         .animation(dimmed ? nil : ActivityMotion.step, value: face.content)
     }
@@ -294,11 +299,14 @@ struct IslandBottom: View {
                     if let total { SegmentLine(step: step, total: total, palette: palette, failed: face.failedSteps).padding(.top, 11) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if stop {
-                    // In the lowest island the circle sits a little higher, clear of the corner.
-                    StopButton(surface: .island)
-                        .padding(.top, (total == nil ? 6 : 16) + 9)
-                        .transition(.opacity)
+                if stop || face.endsTalk {
+                    // In the lowest island the circles sit a little higher, clear of the corner.
+                    HStack(spacing: 10) {
+                        if face.endsTalk { EndTalkButton(circle: true) }
+                        if stop { StopButton(surface: .island) }
+                    }
+                    .padding(.top, (total == nil ? 6 : 16) + 9)
+                    .transition(.opacity)
                 }
             }
             .padding(.trailing, 20)
@@ -664,9 +672,15 @@ private struct Control: View {
         let palette = theme.palette(surface)
         switch face.bottom {
         case .none:
-            EmptyView()
+            if face.endsTalk { EndTalkButton(circle: false).transition(.opacity) }
         case .progress(_, _, let stop):
-            if stop, surface == .lockScreen { StopButton(surface: surface).transition(.opacity) }
+            if surface == .lockScreen {
+                HStack(spacing: 8) {
+                    if stop { StopButton(surface: surface) }
+                    if face.endsTalk { EndTalkButton(circle: false) }
+                }
+                .transition(.opacity)
+            }
         case .approval(let id):
             ApprovalButtons(approvalID: id, surface: surface)
                 .transition(.activityRow)
@@ -804,6 +818,35 @@ struct StopButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(String(activity: "Stop")))
+    }
+}
+
+/// End during a talk with Poki: ends the talk and closes the microphone; a task Poki is on goes on.
+/// Beside the island's Stop, a circle with the microphone struck through; elsewhere a white capsule
+/// that says End, drawn as Stop is. Ending a talk here is pull request #250's interaction.
+struct EndTalkButton: View {
+    var circle: Bool
+    private let theme = ActivityTheme.current
+    var body: some View {
+        Button(intent: EndTalkIntent()) {
+            if circle {
+                let side = ActivityMetrics.stopCircle
+                Image(systemName: "mic.slash.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: side, height: side)
+                    .background(.white.opacity(0.18), in: .circle)
+                    .contentShape(.circle)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "mic.slash.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(ActivityTheme.red)
+                    Text(String(activity: "End")).font(theme.button).foregroundStyle(Color(hex: 0x111111))
+                }
+                .padding(.horizontal, 14)
+                .frame(height: ActivityMetrics.stopCapsule)
+                .background(.white, in: .capsule)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(activity: "End talk")))
     }
 }
 

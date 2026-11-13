@@ -146,6 +146,10 @@ extension PokiActivityAttributes.Event {
 extension PokiState {
     var hasThumbnail: Bool { thumbnailVersion > 0 }
 
+    /// Nothing to say: no work, nobody needed, no talk with Poki. Where something else already says
+    /// Poki is on, the Live Activity steps aside then.
+    var isQuiet: Bool { phase == .idle && voice == nil }
+
     /// "12 steps in 1:24".
     var runLine: String {
         let steps = stepCount == 1 ? String(activity: "1 step") : String(activity: "\(stepCount) steps")
@@ -208,6 +212,11 @@ extension PokiState {
     func face(stale: Bool) -> ActivityFace {
         var face = baseFace
         face.caller = caller
+        // During a talk the card and the island carry End, while Poki listens, speaks or works on a step
+        // of the talk. Anything that needs the person (an approval, a hand-off) or tells of a problem
+        // keeps them to itself.
+        face.endsTalk = voice != nil && (phase == .idle || phase == .working) && !stale
+        face.talkGlow = voice != nil && !stale
         // A fresh event ("Started", "Allowed") shows beside the step's count for a few seconds. An
         // app switch already shows as the app's name there and only lights it up.
         if let event, !phase.holdsApproval {
@@ -341,13 +350,13 @@ extension PokiState {
         case .idle:
             if let voice {
                 let (line, hint, bear): (String, String, ActivityBear) = switch voice {
-                case .listening: (StatusWord.listening.text, String(activity: "Speak to Poki, or tap to open Voice."), .ready)
+                case .listening: (StatusWord.listening.text, String(activity: "Talk with Poki"), .ready)
                 case .thinking: (StatusWord.thinking.text, String(activity: "Working out the next step."), .thinking)
-                case .speaking: (StatusWord.speaking.text, String(activity: "Tap to return to Voice."), .ready)
+                case .speaking: (StatusWord.speaking.text, String(activity: "Talk with Poki"), .ready)
                 }
                 return ActivityFace(
                     symbol: "waveform",
-                    bear: bear, size: .low,
+                    bear: bear, size: .working,
                     meta: .none,
                     content: line,
                     subtitle: hint,

@@ -203,6 +203,8 @@ final class AppModel {
     private let pairer: DevicePairing
     private let pairingKeepAlive = KeepAlive()
     private let activity = ActivityController()
+    /// The Live Activity during a talk with Poki: what the talk is doing, and End.
+    private var talkActivity: TalkActivity?
     let log = AppLog.shared
     private var eventsTask: Task<Void, Never>?
     private var handoffTimer: Timer?
@@ -305,7 +307,8 @@ final class AppModel {
                                let result = await core.tool(name, arguments: arguments)
                                return (result.text, result.isError)
                            },
-                           holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() })
+                           holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
+                           connection: VoiceModel.connection)
         self.launcher = launcher
         self.pairer = pairer
         host.update(key: identity.signingKey, hashes: identity.accessHashes)
@@ -347,6 +350,8 @@ final class AppModel {
         // The same answers from the approval notification's own buttons.
         ApprovalNotice.registerActions()
         listenForApprovals()
+        talkActivity = TalkActivity(voice: voice, activity: activity, deviceName: { UIDevice.current.name },
+                                    keepsActivity: { [weak self] in self?.sessionOn == true })
         // One pump for the app's whole life. Cancelling a task that reads an AsyncStream ends the
         // stream for good, so a pump per session would go silent after the first Turn off (no steps,
         // no approvals, no relay state in the log, which is what happened on the phone).
