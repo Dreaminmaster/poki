@@ -209,6 +209,14 @@ final class VoiceModel {
     /// The live conversation's row in the session list, and the lines that belong to it.
     private var transcript: (id: String, started: Date, from: Int)?
     private(set) var calls: [VoiceCall] = []
+    /// The person spoke over Poki's answer, or stopped it: the talk's screens say so for `interruptedShows`.
+    private(set) var interrupted = false
+    private var interruptedLapse: Task<Void, Never>?
+    static let interruptedShows: Duration = .milliseconds(1400)
+    #if DEBUG && targetEnvironment(simulator)
+    /// A screenshot's state, held whatever the session does next (`-pokiTalkHold`).
+    var staged: TalkState?
+    #endif
     /// Model audio off: for silent test runs. Speech is still transcribed into `lines`.
     var muted = false { didSet { link?.setRemoteVolume(muted ? 0 : 1) } }
     /// The last measured turn: from the end of speech to the first audio of the answer that carries a tool result.
@@ -281,22 +289,18 @@ final class VoiceModel {
         self.holdMicrophone = holdMicrophone
         self.connection = connection
         self.time = time
-        // In the background Poki stops listening, also while still connecting, unless an answer is still due
-        // or a step it was asked for is running: that step brings another app to the front itself, and the
-        // conversation ends as soon as its result is said.
+        // Poki in the background goes on with the talk (the owner, 2026-11-13): you speak to it from the
+        // app you went to, and the Live Activity says what it is doing and carries End. It ends there as
+        // it does in front, when nobody speaks for `followUp` after an answer. Only the wait for a server
+        // that says nothing is shorter there.
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.inBackground = true
-                guard self.isOn else { return }
-                guard !self.answerDue else {
-                    // Kept for what is still due, but not for ever: the wait for the server now has 30 s.
-                    self.lastActivity = self.time.now()
-                    if self.ready { self.watchForStall(session: self.session) }
-                    return
-                }
-                self.log.add("voice", "Poki went to the background with nothing left to say: conversation ended")
-                self.stop()
+                guard self.isOn, self.answerDue else { return }
+                // What is still due is waited for, but not for ever: the wait for the server now has 30 s.
+                self.lastActivity = self.time.now()
+                if self.ready { self.watchForStall(session: self.session) }
             }
         }
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -319,7 +323,52 @@ final class VoiceModel {
 
     /// A live (Realtime) conversation can start: the OpenAI key on this iPhone or the voice bridge.
     /// Without one, voice is dictation into the message field, turn by turn.
-    var canTalkLive: Bool { VoiceDirect.apiKey != nil || bridge != nil }
+    var canTalkLive: Bool { VoiceDirect.apiKey != nil || bridge != nil || rehearsing }
+
+    /// Talk with Poki was asked for with no live voice (no OpenAI key, no voice bridge), from the message
+    /// field's button, Poki's profile or `poki://voice`: the message field says what is missing, with
+    /// the way to the key, and sets this back.
+    var keyAsked = false
+
+    /// A simulator's development build that asked for TalkRehearsal: talks connect to it, with no key.
+    var rehearsing: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        TalkRehearsal.asked
+        #else
+        false
+        #endif
+    }
+
+    /// What the talk is doing, for its screens: nil while no talk is on and none has just failed.
+    var talkState: TalkState? {
+        #if DEBUG && targetEnvironment(simulator)
+        if let staged { return staged }
+        #endif
+        switch phase {
+        case .off: return nil
+        case .lost(let why): return .failed(why)
+        case .connecting: return .connecting
+        case .listening: return interrupted ? .interrupted : .listening
+        case .hearing: return interrupted ? .interrupted : .hearing
+        case .thinking: return calls.contains { $0.state == .running } ? .acting : .thinking
+        case .speaking: return .speaking
+        }
+    }
+
+    /// Puts away why the last talk ended, once it has been read.
+    func dismissProblem() {
+        if case .lost = phase { phase = .off }
+    }
+
+    private func markInterrupted() {
+        interrupted = true
+        interruptedLapse?.cancel()
+        interruptedLapse = Task { [weak self] in
+            await self?.time.sleep(Self.interruptedShows)
+            guard !Task.isCancelled else { return }
+            self?.interrupted = false
+        }
+    }
 
     /// A live Realtime conversation is on (not the hold-to-dictate fallback).
     var isLive: Bool { link != nil }
@@ -341,12 +390,20 @@ final class VoiceModel {
         return true
     }
 
+    /// Takes the Mac voice bridge's address off this iPhone. A talk that runs through it ends first: its
+    /// next step would go to the bridge.
+    func removeBridge() {
+        if isLive || isConnecting, VoiceDirect.apiKey == nil { stop() }
+        bridge = nil
+        VoiceBridge.saved = nil
+    }
+
     /// `poki://voice` can come from any web page, message or app, so it only shows the Voice tab. A link
     /// never changes the voice bridge and never turns on the microphone: the person enters the address
     /// and taps Talk to Poki in the app.
     func open(_ url: URL) {
         let asked = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map(\.name)
-        if !asked.isEmpty { log.add("voice", "a link asked for \(asked.joined(separator: ", ")); links only open the Voice tab") }
+        if !asked.isEmpty { log.add("voice", "a link asked for \(asked.joined(separator: ", ")); links only bring the chat to the front") }
     }
 
     #if DEBUG
@@ -362,11 +419,28 @@ final class VoiceModel {
     }
     #endif
 
+    /// The app's connection: OpenAI's Realtime API, or TalkRehearsal when a simulator build asked for it.
+    static let connection: @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { onEvent, onClosed in
+        #if DEBUG && targetEnvironment(simulator)
+        if TalkRehearsal.asked { return TalkRehearsal(onEvent: onEvent, onClosed: onClosed) }
+        #endif
+        return VoiceLink(onEvent: onEvent, onClosed: onClosed)
+    }
+
+    /// Only reached when `rehearsing`.
+    private static var rehearsalToken: VoiceBridge.Token {
+        #if DEBUG && targetEnvironment(simulator)
+        TalkRehearsal.token
+        #else
+        preconditionFailure("a talk with no key and no bridge outside a rehearsal")
+        #endif
+    }
+
     func start(microphone: Bool = true) async {
         guard link == nil, dictation == nil, !isConnecting else { return }
         // The OpenAI key on this iPhone first (no Mac needed), then the bridge, then dictation.
         let key = VoiceDirect.apiKey
-        if key == nil, bridge == nil {
+        if key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.localizedDescription) }
             return
         }
@@ -375,7 +449,7 @@ final class VoiceModel {
         let number = session
         do {
             let token: VoiceBridge.Token
-            if let key { token = try await VoiceDirect.token(apiKey: key) } else { token = try await bridge!.token() }
+            if rehearsing { token = Self.rehearsalToken } else if let key { token = try await VoiceDirect.token(apiKey: key) } else { token = try await bridge!.token() }
             // Ended (End, or the button again) while the key was exchanged.
             guard number == session else { return }
             localTools = Set(token.local_tools)
@@ -456,6 +530,8 @@ final class VoiceModel {
     /// the conversation are kept for one opened soon after, before the chat takes them.
     private func endSession() {
         keepOpen()
+        interruptedLapse?.cancel()
+        interrupted = false
         stallWatch?.cancel()
         stallWatch = nil
         if ready, let from = transcript?.from {
@@ -506,7 +582,7 @@ final class VoiceModel {
                 if left > .zero { wait = left; continue }
                 if waitingOnServer {
                     log.add("voice", "the server said nothing for \(inBackground ? Self.backgroundStall : Self.stall) while Poki waited on it: conversation ended")
-                    lines.append(VoiceLine(role: .note, text: "Poki stopped waiting: the server did not answer."))
+                    lines.append(VoiceLine(role: .note, text: String(localized: "The server did not answer. The talk ended.")))
                     stop()
                     return
                 }
@@ -526,15 +602,9 @@ final class VoiceModel {
     private var idle: Bool { link != nil && ready && !answerDue }
 
     /// Once idle, the conversation waits `followUp` for the person to go on; if nobody speaks it ends and
-    /// lets go of the microphone. In the background (an answer just said) it ends at once.
+    /// lets go of the microphone. The same in front and in the background.
     private func endIfDone() {
-        guard idle else { return }
-        if inBackground {
-            log.add("voice", "the answer has played in the background: conversation ended")
-            stop()
-            return
-        }
-        guard endWindow == nil else { return }
+        guard idle, endWindow == nil else { return }
         endWindow = Task { [weak self, time] in
             await time.sleep(Self.followUp)
             guard let self, !Task.isCancelled else { return }
@@ -619,6 +689,7 @@ final class VoiceModel {
     func stopTalking() {
         if let dictation { dictation.stopSpeaking(); if phase == .speaking { phase = .listening }; return }
         guard let link else { return }
+        if phase == .speaking { markInterrupted() }
         if activeResponse != nil { link.send(["type": "response.cancel"]) }
         link.send(["type": "output_audio_buffer.clear"])
         // Without this the next answer (say, when a running step finishes) picks the cut-off reply back up.
@@ -648,8 +719,8 @@ final class VoiceModel {
     private func closed(_ reason: String, session number: Int) {
         guard number == session, link != nil else { return }
         endSession()
-        phase = .lost("Connection lost")
-        lines.append(VoiceLine(role: .note, text: "Connection lost (\(reason)). Nothing is sent again; reconnect to hear how running steps ended."))
+        phase = .lost(TalkState.connectionLost)
+        lines.append(VoiceLine(role: .note, text: String(localized: "Connection lost. Nothing is sent again. Talk again to hear how running steps ended.")))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
     }
@@ -671,6 +742,8 @@ final class VoiceModel {
         case "input_audio_buffer.speech_started":
             keepOpen()
             if phase != .hearing { log.add("voice", "speech started") }
+            // Spoken over Poki's answer: the server drops the answer's audio, and the talk says so.
+            if phase == .speaking { markInterrupted() }
             phase = .hearing
         case "input_audio_buffer.speech_stopped":
             phase = .thinking
@@ -897,14 +970,14 @@ final class VoiceModel {
 
     private static func describe(_ call: VoiceCall) -> String {
         switch call.name {
-        case "get_ios_version": "Reading the iOS version"
-        case "open_settings": "Opening Settings"
-        case "read_screen": "Reading the screen"
-        case "open_app": "Opening an app"
-        case "tap_text": "Tapping"
-        case "go_home": "Going Home"
-        case "look": "Looking at the screen"
-        case "do": "Using the phone"
+        case "get_ios_version": String(localized: "Reading the iOS version")
+        case "open_settings": String(localized: "Opening Settings")
+        case "read_screen": String(localized: "Reading the screen")
+        case "open_app": String(localized: "Opening an app")
+        case "tap_text": String(localized: "Tapping")
+        case "go_home": String(localized: "Going Home")
+        case "look": String(localized: "Looking at the screen")
+        case "do": String(localized: "Using the phone")
         default: call.name
         }
     }

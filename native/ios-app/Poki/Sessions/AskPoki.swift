@@ -11,7 +11,7 @@ enum AskPoki {
 
     static let description = "Hand a REPETITIVE phone task to Poki, the small agent on this iPhone: something the owner does often (the same order, the same message, the same settings), ideally one Poki already has a saved routine for (routines {action: \"list\"} shows them). Poki repeats it by itself with the owner's own model, which is quicker but less capable than you, and answers with the result. For anything new, unusual or tricky, drive the phone yourself with look and do; when that worked and could come again, save it with routines {action: \"save\", name, description} so Poki (and ask_poki) can repeat it next time. One task at a time. A task can take minutes: when it is not done before your call would time out, the answer says it is still working, and you call ask_poki with {\"check\": true} a little later for the result."
 
-    private static weak var app: AppModel?
+    private(set) static weak var app: AppModel?
     /// The owner's chat (the Debug probe's `chat` mode sends to it).
     private(set) static weak var chat: ChatModel?
     private static var running: [String: ChatModel] = [:]
@@ -93,6 +93,9 @@ enum AskPoki {
 
     /// The hand-off running in this session, for its live transcript.
     static func live(_ id: String) -> ChatModel? { running[id] }
+
+    /// The session of the hand-off under way, if one is.
+    static var liveSessionID: String? { running.keys.first }
 }
 
 /// Resumes a continuation once; later answers are dropped.
