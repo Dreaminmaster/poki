@@ -169,6 +169,7 @@ struct ActivityPreview: View {
         planNext.previous = "Tap “Messages”"
         planNext.stepCount = 7
         planNext.plan?.current = 2
+        planNext.failedSteps = [1]
         var planDone = done
         planDone.plan = .init(steps: steps, current: 2)
 

@@ -128,7 +128,11 @@ final class ActivityController {
     func record(step text: String, ok: Bool) {
         update { state in
             state.stepCount += 1
-            if !ok { state.failedCount += 1 }
+            if !ok {
+                state.failedCount += 1
+                // Under a plan, the step it went wrong in turns red.
+                if let step = state.plan?.current, !(state.failedSteps ?? []).contains(step) { state.failedSteps = (state.failedSteps ?? []) + [step] }
+            }
             // Only a step that went through is shown ticked under the next one.
             state.previous = ok ? String(text.prefix(80)) : nil
         }
@@ -150,7 +154,7 @@ final class ActivityController {
             ? ActivityContent(state: state, staleDate: nil, relevanceScore: 0) : nil
         let policy: ActivityUIDismissalPolicy = final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60))
         state.guide = nil; state.pin = nil; state.since = nil; state.event = nil; state.previous = nil
-        state.stepCount = 0; state.failedCount = 0; state.endedAt = nil; state.decision = nil; state.plan = nil
+        state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.decision = nil; state.plan = nil
         let previous = tail
         tail = Task { await previous?.value; await activity.end(final, dismissalPolicy: policy) }
     }
@@ -207,10 +211,12 @@ final class ActivityController {
         // The chat publishes its plan just before its first step, so a plan set since the last run
         // finished is the next run's.
         if state.plan != nil, state.plan != old.plan { planFinished = false }
+        // The red steps belong to their plan.
+        if state.plan?.steps != old.plan?.steps { state.failedSteps = nil }
         // A new run of steps: from anything that is not already a run.
         let runPhases = Self.runPhases
         if state.phase == .working, !runPhases.contains(old.phase) {
-            state.stepCount = 0; state.failedCount = 0; state.endedAt = nil; state.previous = nil
+            state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.previous = nil
             tally = Tally()
             if planFinished { state.plan = nil; planFinished = false }
             AppLog.shared.add("activity", "run started from \(old.phase.rawValue)\(activity == nil ? " with no Live Activity" : "")")
@@ -358,7 +364,7 @@ final class ActivityController {
             self.update { state in
                 state.phase = .idle
                 state.headline = "Waiting for agent"
-                state.previous = nil; state.stepCount = 0; state.failedCount = 0
+                state.previous = nil; state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil
                 state.since = nil; state.endedAt = nil; state.event = nil; state.plan = nil
             }
         }

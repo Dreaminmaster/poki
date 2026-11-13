@@ -56,6 +56,9 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// ActivityController. What the Live Activity shows as the step is `progress` (ActivityFace).
         var stepCount = 0
         var failedCount = 0
+        /// The plan's steps (from 1) under which an action did not go through: their segments draw red.
+        /// Optional so a state saved before this field still decodes. Kept by ActivityController.
+        var failedSteps: [Int]? = nil
         /// The step before the one under way, in English like `headline`: the expanded island shows
         /// it ticked under the current one. Kept by ActivityController.
         var previous: String?

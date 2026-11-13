@@ -103,6 +103,8 @@ struct ActivityFace: Hashable {
     /// The step before this one, ticked, under the title of the expanded island.
     var previous: String? = nil
     var bottom: Bottom
+    /// The plan's steps with a failed action, from 1: their segments are red.
+    var failedSteps: [Int] = []
     /// The latest screenshot on the right of the Lock Screen card.
     var thumbnail: Thumbnail = .none
     var compact: Compact
@@ -240,6 +242,7 @@ extension PokiState {
                 content: doing ?? StatusWord.running.text,
                 previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
+                failedSteps: failedSteps ?? [],
                 thumbnail: hasThumbnail ? .large : .none,
                 compact: .steps(text: name, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:

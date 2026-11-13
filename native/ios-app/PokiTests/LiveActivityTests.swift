@@ -28,6 +28,23 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertNil(agent.state.plan)
     }
 
+    /// A step of the plan under which an action did not go through shows red; a new plan starts clean.
+    func testAFailedActionMarksItsPlanStepRed() {
+        let controller = ActivityController()
+        controller.update { $0.plan = .init(steps: ["Open Notes", "Write the list", "Check it"], current: 1); $0.phase = .working }
+        controller.record(step: "Tap “New”", ok: false)
+        controller.update { $0.plan?.current = 2 }
+        controller.record(step: "Type “Milk”", ok: true)
+        XCTAssertEqual(controller.state.face.failedSteps, [1])
+        controller.update { $0.plan?.current = 3 }
+        controller.record(step: "Tap “Done”", ok: false)
+        controller.record(step: "Tap “Done”", ok: false)
+        XCTAssertEqual(controller.state.face.failedSteps, [1, 3])
+
+        controller.update { $0.plan = .init(steps: ["Open Clock", "Add an alarm"], current: 1) }
+        XCTAssertEqual(controller.state.face.failedSteps, [])
+    }
+
     /// One step count on every presentation of the Live Activity (the inventory of state machines,
     /// item 2): with a plan from the chat's model, the compact island, the line above the title and
     /// the row of segments all say the plan's step, however many actions lie under it; without a

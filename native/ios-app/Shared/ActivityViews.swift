@@ -194,7 +194,7 @@ struct LockScreenCard: View {
                     .padding(.top, 4)
                 }
                 if case .progress(let step, let total?, _) = face.bottom {
-                    SegmentLine(step: step, total: total, palette: palette).padding(.top, 9)
+                    SegmentLine(step: step, total: total, palette: palette, failed: face.failedSteps).padding(.top, 9)
                 }
             }
             .padding(.trailing, reserved)
@@ -291,7 +291,7 @@ struct IslandBottom: View {
                     }
                     .foregroundStyle(palette.quiet)
                     .frame(height: 16).padding(.top, 2)
-                    if let total { SegmentLine(step: step, total: total, palette: palette).padding(.top, 11) }
+                    if let total { SegmentLine(step: step, total: total, palette: palette, failed: face.failedSteps).padding(.top, 11) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if stop {
@@ -697,16 +697,18 @@ private struct Control: View {
     }
 }
 
-/// One segment per step, 4 points high, 3 apart: lit up to the step under way.
+/// One segment per step, 4 points high, 3 apart: lit up to the step under way, red where an action
+/// under the step did not go through.
 private struct SegmentLine: View {
     var step: Int
     var total: Int
     var palette: ActivityPalette
+    var failed: [Int] = []
     var body: some View {
         HStack(spacing: 3) {
             ForEach(1...max(1, total), id: \.self) { index in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(index <= step ? palette.segmentDone : palette.track)
+                    .fill(index > step ? palette.track : failed.contains(index) ? palette.segmentFailed : palette.segmentDone)
                     .frame(height: 4)
             }
         }
