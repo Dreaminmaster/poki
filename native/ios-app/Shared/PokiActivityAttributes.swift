@@ -109,167 +109,47 @@ struct PokiActivityAttributes: ActivityAttributes {
 struct PendingApproval: Codable, Hashable {
     var id: String
     var app: String
-    /// The actions as PokiCore's step labels ("Tap “Delete”, then tap “Delete”"): for the logs only.
     var summary: String
-    /// Why it needs the owner, from PokiCore's rules: `sending a message ("send")`. For the logs only.
+    /// Why it needs the owner, from PokiCore's rules: `sending a message ("send")`, `a payment ("pay")`.
     var reason: String
     var expires: Date
-    /// PokiCore's one sentence for the owner (`Approval.ask`): the agent's own words, or what the rules
-    /// saw and where ("Delete in Notes").
-    var ask = ""
-    /// The agent wrote `ask` (do's `purpose`), so the rules' own kinds go beside it.
-    var byAgent = false
-    /// What the rules saw (`ApprovalKind`'s raw values), most serious first.
-    var kinds: [String] = []
 
-    /// What the owner is asked, in one sentence, on every card, the island, the alert and the
-    /// notification: the agent's words as they are, or the rules' own in the system's language, which
-    /// name every kind they saw ("In Lunch, about to delete something and pay").
-    var sentence: String {
-        if byAgent, !ask.isEmpty { return ask }
-        if let rules = rulesSentence { return rules }
-        return ask.isEmpty ? String(activity: "Allow this step?") : ActivityWords.ask(ask)
-    }
-
-    /// The rules' sentence from the kinds and the app; nil for an approval saved before kinds were kept.
-    var rulesSentence: String? {
-        guard let first = kinds.first else { return nil }
+    /// The approval as a short question, from PokiCore's reason and the app: "Send in Messages?".
+    /// The summary ("Tap “Send”") says how, which the thumbnail shows better.
+    var question: String {
+        // PokiCore names the app, or says "unknown", or describes the home screen at length.
         let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
-        guard kinds.count > 1 else { return Self.oneKind(first, place: place) }
-        let verbs = ListFormatter.localizedString(byJoining: kinds.compactMap(Self.verb))
-        return place.map { String(activity: "In \($0), about to \(verbs)") } ?? String(activity: "About to \(verbs)")
+        if reason.hasPrefix("sending") { return place.map { String(activity: "Send in \($0)?") } ?? String(activity: "Send a message?") }
+        if reason.hasPrefix("a payment") { return place.map { String(activity: "Pay in \($0)?") } ?? String(activity: "Make a payment?") }
+        if reason.hasPrefix("deleting") { return place.map { String(activity: "Delete in \($0)?") } ?? String(activity: "Delete this?") }
+        if reason.hasPrefix("typing into a password") { return String(activity: "Type a password?") }
+        if reason.hasPrefix("input in"), let place { return String(activity: "Use \(place)?") }
+        return String(activity: "Allow this step?")
     }
 
-    /// Every kind the rules saw ("Payment and Deletion"), for the lines that carry only text: the
-    /// notification's subtitle and the island's alert. Nil when the rules saw none.
-    var kindLine: String? {
-        let words = kinds.compactMap(Self.kindWord)
-        return words.isEmpty ? nil : ListFormatter.localizedString(byJoining: words)
+    /// The reason as a line under the summary: "Sending a message in Messages".
+    var reasonLine: String {
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
+        if reason.hasPrefix("sending") {
+            return place.map { String(activity: "Sending a message in \($0)") } ?? String(activity: "Sending a message")
+        }
+        if reason.hasPrefix("a payment") {
+            return place.map { String(activity: "Making a payment in \($0)") } ?? String(activity: "Making a payment")
+        }
+        if reason.hasPrefix("deleting") {
+            return place.map { String(activity: "Deleting in \($0)") } ?? String(activity: "Deleting")
+        }
+        if reason.hasPrefix("typing into a password") {
+            return place.map { String(activity: "Typing a password in \($0)") } ?? String(activity: "Typing a password")
+        }
+        var text = reason
+        if let quote = text.range(of: " (\"") { text = String(text[..<quote.lowerBound]) }
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        if let place, !text.contains(" in ") {
+            return "\(text) in \(place)"
+        }
+        return text
     }
-
-    /// The kinds and the sentence on one line ("Payment: Order lunch, ¥38 in total"), for the alert,
-    /// which is text only; the kinds lead, so a cut never takes them.
-    var alertLine: String { kindLine.map { String(activity: "\($0): \(sentence)") } ?? sentence }
-
-    /// The rules' kinds as tags over the sentence, on every card, the island and the Lock Screen:
-    /// an agent can word a payment as something harmless ("Payment cancelled, nothing to approve"),
-    /// so the tags, which the agent cannot touch, are what stands out. Never cut.
-    var tags: [ApprovalTag] {
-        kinds.compactMap { kind in Self.kindWord(kind).map { ApprovalTag(word: $0, warning: Self.warning.contains(kind)) } }
-    }
-
-    /// The kinds in the warning colour: money, deletions, and the apps where every input waits
-    /// (banking, Wallet).
-    static let warning: Set<String> = ["payment", "deleting", "input"]
-
-    private static func oneKind(_ kind: String, place: String?) -> String? {
-        switch kind {
-        case "payment": place.map { String(activity: "Pay in \($0)") } ?? String(activity: "Make a payment")
-        case "deleting": place.map { String(activity: "Delete in \($0)") } ?? String(activity: "Delete something")
-        case "sending": place.map { String(activity: "Send a message in \($0)") } ?? String(activity: "Send a message")
-        case "call": place.map { String(activity: "Place a call in \($0)") } ?? String(activity: "Place a call")
-        case "password": place.map { String(activity: "Type a password in \($0)") } ?? String(activity: "Type a password")
-        case "input": place.map { String(activity: "Use \($0)") } ?? String(activity: "Use this app")
-        case "unread": place.map { String(activity: "Go on in \($0)") } ?? String(activity: "Go on with this step")
-        default: nil
-        }
-    }
-
-    /// What a kind does, to list several in one sentence.
-    private static func verb(_ kind: String) -> String? {
-        switch kind {
-        case "payment": String(activity: "pay")
-        case "deleting": String(activity: "delete something")
-        case "sending": String(activity: "send a message")
-        case "call": String(activity: "place a call")
-        case "password": String(activity: "type a password")
-        case "input": String(activity: "use a protected app")
-        case "unread": String(activity: "take a step Poki could not check")
-        default: nil
-        }
-    }
-
-    static func kindWord(_ kind: String) -> String? {
-        switch kind {
-        case "payment": String(activity: "Payment")
-        case "deleting": String(activity: "Deletion")
-        case "sending": String(activity: "Sending")
-        case "call": String(activity: "Call")
-        case "password": String(activity: "Password")
-        case "input": String(activity: "Protected app")
-        // The rules could not read what the press does.
-        case "unread": String(activity: "Unchecked step")
-        default: nil
-        }
-    }
-}
-
-extension PokiActivityAttributes.ContentState {
-    /// ActivityKit refuses an update over 4 KB, and with it the island and its alert. Every text an
-    /// agent or an app can make long is cut by UTF-8 bytes here (a few characters can carry thousands
-    /// of combining marks). If the state still does not fit, the agent's own words go first (the
-    /// approval's sentence, which the rules' own replaces, and the hand-off's note), then the plan, so
-    /// an update is never lost to its size.
-    func fitted(within limit: Int = 3_500) -> Self {
-        func size(_ state: Self) -> Int { (try? JSONEncoder().encode(state).count) ?? Int.max }
-        guard size(self) > limit else { return self }
-        var state = self
-        state.headline = state.headline.cut(toBytes: 240)
-        state.label = state.label?.cut(toBytes: 120)
-        state.app = state.app?.cut(toBytes: 120)
-        state.caller = state.caller?.cut(toBytes: 60)
-        state.pin = state.pin?.cut(toBytes: 32)
-        state.previous = nil
-        if let title = state.guide?.title { state.guide?.title = title.cut(toBytes: 160) }
-        if let text = state.event?.text { state.event?.text = text.cut(toBytes: 160) }
-        if var plan = state.plan {
-            plan.steps = plan.steps.map { $0.cut(toBytes: 90) }
-            plan.title = plan.title?.cut(toBytes: 160)
-            plan.to = plan.to?.cut(toBytes: 120)
-            state.plan = plan
-        }
-        if var handoff = state.handoff {
-            handoff.text = handoff.text?.cut(toBytes: 240)
-            handoff.app = handoff.app?.cut(toBytes: 120)
-            state.handoff = handoff
-        }
-        if var approval = state.approval {
-            approval.app = approval.app.cut(toBytes: 120)
-            approval.summary = approval.summary.cut(toBytes: 240)
-            approval.reason = approval.reason.cut(toBytes: 180)
-            approval.ask = approval.ask.cut(toBytes: 360)
-            state.approval = approval
-        }
-        guard size(state) > limit else { return state }
-        if var approval = state.approval {
-            approval.ask = ""; approval.byAgent = false; approval.summary = ""; approval.reason = ""
-            state.approval = approval
-        }
-        state.handoff?.text = nil
-        guard size(state) > limit else { return state }
-        state.plan = nil
-        return state
-    }
-}
-
-extension String {
-    /// At most `bytes` of UTF-8, cut between characters.
-    func cut(toBytes bytes: Int) -> String {
-        guard utf8.count > bytes else { return self }
-        var out = ""
-        for character in self {
-            guard out.utf8.count + character.utf8.count <= bytes else { break }
-            out.append(character)
-        }
-        return out
-    }
-}
-
-/// One kind the rules saw, as a tag over an approval's sentence.
-struct ApprovalTag: Hashable {
-    var word: String
-    /// Payment, deletion, a protected app: drawn in the warning colour.
-    var warning: Bool
 }
 
 enum SharedContainer {

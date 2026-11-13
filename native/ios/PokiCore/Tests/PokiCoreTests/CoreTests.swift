@@ -187,52 +187,6 @@ final class ApprovalTests: XCTestCase {
 
     }
 
-    /// The owner is asked in one sentence what the batch gets done, never the taps or the rule's
-    /// reason: four taps on one Delete ask "Delete in Settings", and the agent's own sentence, when it
-    /// gives one, is the question, cut to its first line.
-    func testFourTapsOnOneButtonAskOneSentence() async throws {
-        func ask(_ args: JSON) async throws -> Approval {
-            let wda = FakeWDA()
-            wda.source([("Button", "Delete"), ("Button", "Back")])
-            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
-            _ = await core.call("look", [:])
-            _ = await core.call("do", args)
-            return try XCTUnwrap(core.pendingApproval)
-        }
-        let taps: JSON = .array(Array(repeating: ["tap": 1], count: 4))
-
-        let approval = try await ask(["actions": taps])
-        XCTAssertTrue(approval.reason.hasPrefix("multiple sensitive actions"), approval.reason)
-        XCTAssertEqual(approval.ask, "Delete in Settings")
-
-        let purpose = "Order lunch from Sample Noodles, ¥38 in total"
-        let asked = try await ask(["actions": taps, "purpose": .string(purpose + "\nTap the row four times")])
-        XCTAssertEqual(asked.ask, purpose)
-        XCTAssertEqual(asked.kinds, [.deleting], "the rule's kind stays beside the agent's own words")
-    }
-
-    /// The agent's sentence rides in every Live Activity update while the approval waits, and
-    /// ActivityKit refuses an update over 4 KB, the island and its alert with it. A sentence of ten
-    /// characters can be 6 KB: one character under 3,000 combining accents. So the sentence is cut by
-    /// bytes too, and loses control characters, direction overrides and stacked marks.
-    func testTheAgentsSentenceFitsTheLiveActivity() async throws {
-        func ask(_ purpose: String) async throws -> String {
-            let wda = FakeWDA()
-            wda.source([("Button", "Delete"), ("Button", "Back")])
-            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
-            _ = await core.call("look", [:])
-            _ = await core.call("do", ["actions": [["tap": 1]], "purpose": .string(purpose)])
-            return try XCTUnwrap(core.pendingApproval).ask
-        }
-        let stacked = try await ask("付" + String(repeating: "\u{0301}", count: 3000) + "款已取消\u{202E}，无需批准\u{0007}\n第二行")
-        XCTAssertLessThanOrEqual(stacked.utf8.count, 360)
-        XCTAssertEqual(stacked, "付\u{0301}\u{0301}款已取消，无需批准")
-
-        let long = try await ask(String(repeating: "删", count: 200))
-        XCTAssertLessThanOrEqual(long.utf8.count, 360)
-        XCTAssertTrue(long.hasSuffix("…"))
-    }
-
     /// "Payments, deletions and actions in Wallet always need your confirmation", whatever action the
     /// agent picks to touch the button: every kind of action is aimed at Pay and at Delete, with the
     /// rules for messages, calls and passwords off, and no touch may go down and lift on either before the owner

@@ -91,107 +91,15 @@ public enum TapClearance: Sendable, Equatable {
     }
 }
 
-/// What a rule saw in an action that needs the owner, for the owner's eyes. Most serious first: the
-/// question names a batch's first kind.
-public enum ApprovalKind: String, Sendable, Equatable, CaseIterable {
-    case payment, deleting, sending, call, password, input
-    /// The rules could not read what the press does (a screen not read yet, a point that may have moved).
-    case unread
-
-    /// What the kind does, to list several in one sentence ("delete something and pay").
-    var verb: String {
-        switch self {
-        case .payment: "pay"
-        case .deleting: "delete something"
-        case .sending: "send a message"
-        case .call: "place a call"
-        case .password: "type a password"
-        case .input: "use a protected app"
-        case .unread: "take a step Poki could not check"
-        }
-    }
-
-    public init(reason: String) {
-        if reason.hasPrefix("a payment") { self = .payment }
-        else if reason.hasPrefix("deleting") { self = .deleting }
-        else if reason.hasPrefix("sending a message") { self = .sending }
-        else if reason.hasPrefix("a call") { self = .call }
-        else if reason.hasPrefix("typing into a password") || reason.hasPrefix("submitting a password") { self = .password }
-        else if reason.hasPrefix("input in") { self = .input }
-        else { self = .unread }
-    }
-}
-
 public struct Approval: Sendable, Equatable {
     public var id: String
     public var app: String
-    /// The actions, as step labels ("Tap “Delete”, then tap “Delete”"): for logs and the auto-check.
     public var summary: String
     public var reason: String
-    /// What the rules saw, each kind once, most serious first.
-    public var kinds: [ApprovalKind]
-    /// The agent's own sentence for what the actions get done (`do`'s `purpose`).
-    public var purpose: String?
     public var requested: Date
     public var expires: Date
     /// The actions it covers, as a fingerprint: the same actions sent again run once it is granted.
     var fingerprint: String
-
-    /// The one sentence the owner is asked: the agent's own words, or what the rules saw and where.
-    /// Never the actions or the reason (seen on the phone: four taps on a shop's row asked as four
-    /// "Tap" labels over "multiple sensitive actions: action 1: deleting").
-    public var ask: String {
-        if let purpose { return purpose }
-        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : app
-        // Several kinds in one batch: each of them, so a deletion is never hidden behind a payment.
-        if kinds.count > 1 {
-            let verbs = kinds.map(\.verb)
-            let list = verbs.count == 2 ? verbs.joined(separator: " and ") : verbs.dropLast().joined(separator: ", ") + ", and " + verbs[verbs.count - 1]
-            return place.map { "In \($0), \(list)" } ?? list.prefix(1).uppercased() + list.dropFirst()
-        }
-        switch kinds.first ?? .unread {
-        case .payment: return place.map { "Pay in \($0)" } ?? "Make a payment"
-        case .deleting: return place.map { "Delete in \($0)" } ?? "Delete something"
-        case .sending: return place.map { "Send a message in \($0)" } ?? "Send a message"
-        case .call: return place.map { "Place a call in \($0)" } ?? "Place a call"
-        case .password: return place.map { "Type a password in \($0)" } ?? "Type a password"
-        case .input: return place.map { "Use \($0)" } ?? "Use this app"
-        case .unread: return place.map { "Go on in \($0)" } ?? "Go on with this step"
-        }
-    }
-
-    /// At most this many UTF-8 bytes of the agent's sentence: it rides in every Live Activity update
-    /// while the approval waits, and ActivityKit refuses an update over 4 KB, island and alert with it.
-    static let purposeBytes = 360
-
-    /// The agent's sentence as the owner reads it: its first line without control or format characters
-    /// (direction overrides among them) and with at most two combining marks on a character, at most
-    /// 120 characters and `purposeBytes` bytes; nil when nothing is left.
-    static func purpose(_ text: String?) -> String? {
-        guard let first = text?.split(whereSeparator: \.isNewline).first else { return nil }
-        var clean = String.UnicodeScalarView()
-        var marks = 0
-        for scalar in first.unicodeScalars {
-            switch scalar.properties.generalCategory {
-            case .control, .format, .lineSeparator, .paragraphSeparator: continue
-            case .nonspacingMark, .spacingMark, .enclosingMark:
-                marks += 1
-                if marks > 2 { continue }
-            default: marks = 0
-            }
-            clean.append(scalar)
-        }
-        let line = String(clean).trimmingCharacters(in: .whitespaces)
-        guard !line.isEmpty else { return nil }
-        let ellipsis = "…"
-        if line.count <= 120, line.utf8.count <= purposeBytes { return line }
-        var cut = ""
-        for character in line {
-            guard cut.count < 119, cut.utf8.count + character.utf8.count + ellipsis.utf8.count <= purposeBytes else { break }
-            cut.append(character)
-        }
-        return cut.trimmingCharacters(in: .whitespaces) + ellipsis
-    }
 }
 
 /// Pending and granted approvals. At most one is pending; it is granted or declined only from the app
@@ -248,12 +156,9 @@ final class Approvals: @unchecked Sendable {
         return found?.value.approval
     }
 
-    func request(app: String, summary: String, reason: String, kinds: [ApprovalKind]? = nil, purpose: String? = nil, fingerprint: String) -> Approval {
+    func request(app: String, summary: String, reason: String, fingerprint: String) -> Approval {
         let date = Date()
-        let seen = Set(kinds ?? [ApprovalKind(reason: reason)])
-        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason,
-                                kinds: ApprovalKind.allCases.filter(seen.contains), purpose: Approval.purpose(purpose),
-                                requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint)
+        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint)
         lock.lock()
         // One pending at a time: a new request replaces an older one, which ends unanswered.
         let replaced = entries.values.filter { $0.decision == nil }

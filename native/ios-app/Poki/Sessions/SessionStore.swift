@@ -362,7 +362,7 @@ final class SessionStore {
             currentSession = nil
         case .approvalRequested(let approval):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow: \(approval.sentence)"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow \(approval.summary)"), ok: nil))) }
         case .approvalEnded(_, let approved):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
             update(agent: id) { $0.entries.append(ChatEntry(.note(approved == true ? .approved(Date()) : approved == false ? .declined : .expired))) }

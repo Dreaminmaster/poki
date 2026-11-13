@@ -137,26 +137,9 @@ struct ActivityPreview: View {
         var approval = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 1)
         approval.app = messages
         // What PokiCore asks for when the agent taps Send in Messages.
-        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25),
-                                            ask: "Send a message in \(messages)", kinds: ["sending"])
+        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))
         approval.since = now.addingTimeInterval(-61)
         approval.stepCount = 4
-
-        // Four taps on one Delete, worded by the rules, and a payment the agent worded itself.
-        var fourTaps = approval
-        fourTaps.app = "Lunch"
-        fourTaps.approval = PendingApproval(id: "four", app: "Lunch", summary: "Tap “Delete”, then tap “Delete”, then tap “Delete”, then tap “Delete”",
-                                            reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: deleting (\"delete\"); action 3: deleting (\"delete\"); action 4: deleting (\"delete\")", expires: now.addingTimeInterval(48), ask: "Delete in Lunch", kinds: ["deleting"])
-        var purpose = fourTaps
-        purpose.approval = ChatModel.Sample.lunchApproval
-        var cart = fourTaps
-        cart.approval = ChatModel.Sample.cartApproval
-        var trick = fourTaps
-        trick.approval = ChatModel.Sample.trickApproval
-        var unchecked = fourTaps
-        unchecked.approval = ChatModel.Sample.uncheckedApproval
-        var wide = fourTaps
-        wide.approval = ChatModel.Sample.wideApproval
 
         var deciding = approval
         deciding.phase = .deciding; deciding.decision = true
@@ -212,7 +195,7 @@ struct ActivityPreview: View {
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
 
-        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("fourtaps", fourTaps), ("purpose", purpose), ("cart", cart), ("trick", trick), ("unchecked", unchecked), ("wide", wide), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
+        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
@@ -247,23 +230,13 @@ struct ActivityPreview: View {
     }
 }
 
-/// The widths drawn: a 402-point iPhone's by default; `-pokiActivityWidth 353` draws the Lock Screen
-/// card a 375-point phone's width and the island 21 points narrower than on a 402-point one.
-private enum PreviewWidth {
-    static let lock: CGFloat = {
-        let set = UserDefaults.standard.double(forKey: "pokiActivityWidth")
-        return set > 0 ? set : 371
-    }()
-    static let island: CGFloat = 374 - (371 - lock)
-}
-
 /// The Lock Screen presentation as iOS lays it out: 371 points wide, the card's corner and tint.
 private struct LockScreenFrame: View {
     var state: PokiState
     var body: some View {
         let card = RoundedRectangle(cornerRadius: ActivityMetrics.lockCorner, style: .continuous)
         LockScreenCard(face: state.face)
-            .frame(maxWidth: PreviewWidth.lock)
+            .frame(maxWidth: 371)
             .background(ActivityTheme.current.lockBackground ?? Color(.secondarySystemGroupedBackground), in: card)
             .containerShape(card)
             .clipShape(card)
@@ -292,7 +265,7 @@ private struct TopBannerFrame: View {
             .padding(.bottom, 6)
 
             LockScreenCard(face: state.face)
-                .frame(maxWidth: PreviewWidth.lock)
+                .frame(maxWidth: 371)
                 .background(ActivityTheme.current.lockBackground ?? Site.boardBlue, in: card)
                 .containerShape(card)
                 .clipShape(card)
@@ -323,7 +296,7 @@ private struct IslandExpandedFrame: View {
             .frame(height: ActivityMetrics.systemCameraRow, alignment: .top)
             IslandBottom(face: face)
         }
-        .frame(width: PreviewWidth.island)
+        .frame(width: 374)
         .clipShape(RoundedRectangle(cornerRadius: ActivityMetrics.islandClipCorner).inset(by: ActivityMetrics.islandClip))
         .background(.black, in: shape)
         .clipShape(shape)

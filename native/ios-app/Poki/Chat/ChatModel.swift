@@ -75,15 +75,6 @@ struct ApprovalNote: Equatable, Codable {
     /// A refusal the owner can lift by saying yes in the chat (With Message Reply).
     var reply = false
     var answered: Date?
-    /// The approval's one sentence and kinds (`PendingApproval`); nil in a note saved before them.
-    var ask: String? = nil
-    var byAgent: Bool? = nil
-    var kinds: [String]? = nil
-
-    /// What the card says it asked: the same sentence and kinds as the Live Activity.
-    var asked: PendingApproval? {
-        ask.map { PendingApproval(id: id, app: app, summary: summary, reason: why, expires: .distantPast, ask: $0, byAgent: byAgent ?? false, kinds: kinds ?? []) }
-    }
 }
 
 /// The chat: the owner's messages, Poki's answers and the steps it takes, and the model loop that runs
@@ -634,8 +625,8 @@ final class ChatModel {
 
     nonisolated static func sendingWords(_ approval: PendingApproval, typed: String, to: String?) -> AskWords {
         let place = approval.app.isEmpty || approval.app == "unknown" || approval.app.contains("(") ? nil : ActivityWords.local(approval.app)
-        return AskWords(title: to.map { String(localized: "Send this to \($0)?") } ?? approval.sentence,
-                        detail: place.map { String(localized: "\($0), sent as you") } ?? "",
+        return AskWords(title: to.map { String(localized: "Send this to \($0)?") } ?? approval.question,
+                        detail: place.map { String(localized: "\($0), sent as you") } ?? approval.reasonLine,
                         quote: typed)
     }
 
@@ -672,7 +663,7 @@ final class ChatModel {
                 if let i = steps.lastIndex(where: { $0.state == .current }) {
                     steps[i].state = .waiting
                 } else {
-                    steps.append(PlanStep(approval.sentence, state: .waiting))
+                    steps.append(PlanStep(approval.summary, state: .waiting))
                 }
             }
             let route = ApprovalClassifier.route(approval, voiceOn: app.voice.isOn)
@@ -682,7 +673,7 @@ final class ChatModel {
             noteID = nil
             if let words = sendingWords(approval) { askWords[approval.id] = words }
             asked = ApprovalNote(id: approval.id, summary: approval.summary, app: approval.app, why: approval.reason,
-                                 byModel: route != .owner, state: .asking, ask: approval.ask, byAgent: approval.byAgent, kinds: approval.kinds)
+                                 byModel: route != .owner, state: .asking)
             setNote(.approval(asked!))
         case .approvalEnded(let id, let approved):
             askWords[id] = nil
@@ -808,54 +799,6 @@ final class ChatModel {
             default: "WhatsApp"
             }
         }
-        /// `-pokiChat lunch`: an agent's own sentence for a payment, and an earlier delete the rules
-        /// worded themselves, allowed.
-        static var lunchApproval: PendingApproval {
-            PendingApproval(id: "lunch", app: "Lunch", summary: "Tap “Place order”", reason: "a payment (\"place order\")", expires: Date().addingTimeInterval(48),
-                            ask: String(localized: "Order lunch from Sample Noodles, ¥38 in total"), byAgent: true, kinds: ["payment"])
-        }
-        /// A cart's Clear, then Check out, with no sentence from the agent: the rules name both kinds.
-        static var cartApproval: PendingApproval {
-            PendingApproval(id: "cart", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”",
-                            reason: "multiple sensitive actions: action 1: deleting (\"clear\"); action 2: a payment (\"check out\")",
-                            expires: Date().addingTimeInterval(48), ask: "In Lunch, pay and delete something", kinds: ["payment", "deleting"])
-        }
-        /// A payment the agent words as nothing to approve: the rules' tag still says Payment.
-        /// A Delete, then a press the rules could not read: the review's widest pair of tags in English.
-        static var uncheckedApproval: PendingApproval {
-            PendingApproval(id: "unchecked", app: "Lunch", summary: "Tap “Delete”, then tap at 200, 640",
-                            reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: unread", expires: Date().addingTimeInterval(48),
-                            ask: "In Lunch, delete something and take a step Poki could not check", kinds: ["deleting", "unread"])
-        }
-
-        /// Four kinds in one batch: the tags take more than one line wherever they are.
-        static var wideApproval: PendingApproval {
-            PendingApproval(id: "wide", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”, then tap “Send”, then tap at 200, 640",
-                            reason: "multiple sensitive actions", expires: Date().addingTimeInterval(48),
-                            ask: "In Lunch, pay, delete something, send a message, and take a step Poki could not check",
-                            kinds: ["payment", "deleting", "sending", "unread"])
-        }
-
-        static func approval(_ scene: String?) -> PendingApproval {
-            switch scene {
-            case "cart": cartApproval
-            case "trick": trickApproval
-            case "unchecked": uncheckedApproval
-            case "wide": wideApproval
-            default: lunchApproval
-            }
-        }
-
-        static let approvalScenes = ["lunch", "cart", "trick", "unchecked", "wide"]
-
-        static var trickApproval: PendingApproval {
-            PendingApproval(id: "trick", app: "Lunch", summary: "Tap “Place order”", reason: "a payment (\"place order\")", expires: Date().addingTimeInterval(48),
-                            ask: String(localized: "Payment cancelled, nothing to approve"), byAgent: true, kinds: ["payment"])
-        }
-        static var lunchDeleted: ApprovalNote {
-            ApprovalNote(id: "lunch-delete", summary: "Tap “Delete”, then tap “Delete”", app: "Lunch", why: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: deleting (\"delete\")",
-                         byModel: false, state: .allowed, answered: Date().addingTimeInterval(-30), ask: "Delete in Lunch", byAgent: false, kinds: ["deleting"])
-        }
         /// The step a scene's approval card asks about.
         static var approval: PendingApproval {
             PendingApproval(id: "sample", app: "WhatsApp", summary: String(localized: "Send “Running 10 min late. Save me a seat!” to Mom"),
@@ -863,7 +806,7 @@ final class ChatModel {
         }
     }
 
-    /// `-pokiChat empty|working|approval|lunch|handoff|failed|approved|rested|demo`: the boards' conversations, for
+    /// `-pokiChat empty|working|approval|handoff|failed|approved|rested|demo`: the boards' conversations, for
     /// the build's screenshots only. Nothing is sent.
     private func loadSample(_ scene: String) {
         let start = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: Date()) ?? Date()
@@ -890,9 +833,6 @@ final class ChatModel {
             // The last step waits for your answer (the chat shows its card above the message field).
             modelPlan = Sample.momSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 3, then: .waiting)]
-        case "lunch", "cart", "trick", "unchecked", "wide":
-            entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Order my usual lunch"), delivered: true)), onIt,
-                       ChatEntry(.note(.approval(Sample.lunchDeleted)))]
         case "handoff":
             // The phone is back with you for the passcode: the step waits, the card says it is your turn.
             modelPlan = Sample.coffeeSteps

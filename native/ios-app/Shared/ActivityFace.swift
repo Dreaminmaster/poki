@@ -100,9 +100,6 @@ struct ActivityFace: Hashable {
     /// The secondary line under the title.
     var subtitle: String? = nil
     var subtitleLines = 1
-    /// The rules' kinds over an approval's sentence, in the place of the kicker: never cut, so a long
-    /// sentence gives way first.
-    var tags: [ApprovalTag] = []
     /// The step before this one, ticked, under the title of the expanded island.
     var previous: String? = nil
     var bottom: Bottom
@@ -247,14 +244,15 @@ extension PokiState {
                 compact: .steps(text: name, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:
             guard let approval else { return quietFace }
+            let question = approval.question
             if phase == .deciding {
                 let allowed = decision == true
                 return ActivityFace(
                     symbol: allowed ? "checkmark.circle.fill" : "xmark.circle.fill",
                     bear: allowed ? .phone : .needs, size: .asking,
                     meta: .none,
-                    content: approval.sentence,
-                    tags: approval.tags,
+                    content: question,
+                    subtitle: approval.reasonLine,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
@@ -263,8 +261,8 @@ extension PokiState {
                 symbol: "hand.raised.fill",
                 bear: .needs, size: .asking,
                 meta: .countdown(approval.expires),
-                content: approval.sentence,
-                tags: approval.tags,
+                content: question,
+                subtitle: approval.reasonLine,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))
