@@ -194,7 +194,7 @@ struct LockScreenCard: View {
                     .padding(.top, 4)
                 }
                 if case .progress(let step, let total?, _) = face.bottom {
-                    SegmentLine(step: step, total: total, palette: palette).padding(.top, 9)
+                    SegmentLine(step: step, total: total, palette: palette, failed: face.failedSteps).padding(.top, 9)
                 }
             }
             .padding(.trailing, reserved)
@@ -291,7 +291,7 @@ struct IslandBottom: View {
                     }
                     .foregroundStyle(palette.quiet)
                     .frame(height: 16).padding(.top, 2)
-                    if let total { SegmentLine(step: step, total: total, palette: palette).padding(.top, 11) }
+                    if let total { SegmentLine(step: step, total: total, palette: palette, failed: face.failedSteps).padding(.top, 11) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if stop {
@@ -303,7 +303,6 @@ struct IslandBottom: View {
             }
             .padding(.trailing, 20)
         } else {
-            let face = oneLine(self.face)
             let top: CGFloat = face.size == .tall ? 3 : 5
             // A capsule 14 up and 24 in clears the corner of the system's clip.
             let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking, .tall: 14 }
@@ -322,15 +321,6 @@ struct IslandBottom: View {
             .padding(.bottom, bottom)
         }
     }
-}
-
-/// The face with its island line, if it has one, as the title and no subtitle.
-private func oneLine(_ face: ActivityFace) -> ActivityFace {
-    guard let line = face.islandContent else { return face }
-    var island = face
-    island.content = line
-    island.subtitle = nil
-    return island
 }
 
 // MARK: Dynamic Island, compact and minimal
@@ -582,15 +572,12 @@ private struct Title: View {
             // 19 points semibold for a step and a finished run, 20 bold for a question or a thing to do,
             // 24 bold for Poki's state on a short Lock Screen card.
             let stepLike = face.size == .working || face.size == .low
-            // An approval's question is one whole sentence ("Order lunch, ¥38 in total"): two lines
-            // rather than cut.
-            let asking = face.size == .asking && !large
             Text(face.content)
                 .font(large ? theme.status : stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
                 .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                .lineLimit(asking ? 2 : 1).minimumScaleFactor(large ? 0.65 : 0.8)
+                .lineLimit(1).minimumScaleFactor(large ? 0.65 : 0.8)
                 .contentTransition(.interpolate)
-                .frame(height: asking ? nil : large ? 30 : stepLike ? 24 : 25, alignment: .leading)
+                .frame(height: large ? 30 : stepLike ? 24 : 25, alignment: .leading)
         }
     }
 }
@@ -710,16 +697,18 @@ private struct Control: View {
     }
 }
 
-/// One segment per step, 4 points high, 3 apart: lit up to the step under way.
+/// One segment per step, 4 points high, 3 apart: lit up to the step under way, red where an action
+/// under the step did not go through.
 private struct SegmentLine: View {
     var step: Int
     var total: Int
     var palette: ActivityPalette
+    var failed: [Int] = []
     var body: some View {
         HStack(spacing: 3) {
             ForEach(1...max(1, total), id: \.self) { index in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(index <= step ? palette.segmentDone : palette.track)
+                    .fill(index > step ? palette.track : failed.contains(index) ? palette.segmentFailed : palette.segmentDone)
                     .frame(height: 4)
             }
         }

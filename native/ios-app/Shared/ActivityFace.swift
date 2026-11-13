@@ -100,12 +100,11 @@ struct ActivityFace: Hashable {
     /// The secondary line under the title.
     var subtitle: String? = nil
     var subtitleLines = 1
-    /// The expanded island's one main line where it has no room for the title on two lines and the
-    /// subtitle under it: an agent's sentence led by the rules' kinds.
-    var islandContent: String? = nil
     /// The step before this one, ticked, under the title of the expanded island.
     var previous: String? = nil
     var bottom: Bottom
+    /// The plan's steps with a failed action, from 1: their segments are red.
+    var failedSteps: [Int] = []
     /// The latest screenshot on the right of the Lock Screen card.
     var thumbnail: Thumbnail = .none
     var compact: Compact
@@ -243,19 +242,20 @@ extension PokiState {
                 content: doing ?? StatusWord.running.text,
                 previous: plan == nil ? previous.map { ActivityWords.step($0) } : planStep(step - 1),
                 bottom: .progress(step: step, total: total, stop: true),
+                failedSteps: failedSteps ?? [],
                 thumbnail: hasThumbnail ? .large : .none,
                 compact: .steps(text: name, count: total.map { "\(step)/\($0)" } ?? String(activity: "Step \(step)")))
         case .approval, .deciding:
             guard let approval else { return quietFace }
+            let question = approval.question
             if phase == .deciding {
                 let allowed = decision == true
                 return ActivityFace(
                     symbol: allowed ? "checkmark.circle.fill" : "xmark.circle.fill",
                     bear: allowed ? .phone : .needs, size: .asking,
                     meta: .none,
-                    content: approval.sentence,
-                    subtitle: approval.kindLine,
-                    islandContent: approval.islandLine,
+                    content: question,
+                    subtitle: approval.reasonLine,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
@@ -264,9 +264,8 @@ extension PokiState {
                 symbol: "hand.raised.fill",
                 bear: .needs, size: .asking,
                 meta: .countdown(approval.expires),
-                content: approval.sentence,
-                subtitle: approval.kindLine,
-                islandContent: approval.islandLine,
+                content: question,
+                subtitle: approval.reasonLine,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))

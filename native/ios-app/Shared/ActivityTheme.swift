@@ -97,6 +97,8 @@ struct ActivityPalette {
     var buttonFill: Color
     /// The steps gone through (the one under way included), and those still to come.
     var segmentDone: Color
+    /// A step with a failed action.
+    var segmentFailed: Color
     var track: Color
     /// The one main button (Allow, Done): Poki's blue with white words on the black island, a white
     /// capsule with blue words on the blue card.
@@ -122,17 +124,17 @@ struct ActivityPalette {
 /// final board 02 and ESP-171 final Dynamic Island / Lock Screen boards).
 struct ActivityTheme {
     /// ESP-344's one rule: black, white and the system's grey, and one accent, Poki's blue. Red is
-    /// only the square in Stop and the mark of a problem. Green and yellow are gone.
+    /// only the square in Stop, a failed step's segment and the mark of a problem. Green and yellow are gone.
     /// On the blue card everything is white.
     var lock = ActivityPalette(
         quiet: .white.opacity(0.72), accent: .white, approval: .white, done: .white,
         problem: .white, reason: .white.opacity(0.72), buttonFill: .white.opacity(0.20),
-        segmentDone: .white, track: .white.opacity(0.28),
+        segmentDone: .white, segmentFailed: Self.red, track: .white.opacity(0.28),
         primaryFill: .white, primaryText: Site.boardInk, rim: Site.boardInk.opacity(0.55))
     var island = ActivityPalette(
         quiet: Self.secondary, accent: Site.sky, approval: Site.sky, done: Site.sky,
         problem: Self.red, reason: Self.secondary, buttonFill: .white.opacity(0.22),
-        segmentDone: Site.sky, track: .white.opacity(0.20),
+        segmentDone: Site.sky, segmentFailed: Self.red, track: .white.opacity(0.20),
         primaryFill: Site.boardBlue, primaryText: .white, rim: .black.opacity(0.70))
     /// The system's secondary label on black, and its red in dark.
     static let secondary = Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6)

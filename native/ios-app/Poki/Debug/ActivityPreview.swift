@@ -137,18 +137,9 @@ struct ActivityPreview: View {
         var approval = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 1)
         approval.app = messages
         // What PokiCore asks for when the agent taps Send in Messages.
-        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25),
-                                            ask: "Send a message in \(messages)", kinds: ["sending"])
+        approval.approval = PendingApproval(id: "a", app: messages, summary: String(localized: "Tap “Send”"), reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))
         approval.since = now.addingTimeInterval(-61)
         approval.stepCount = 4
-
-        // Four taps on one Delete, worded by the rules, and a payment the agent worded itself.
-        var fourTaps = approval
-        fourTaps.app = "Lunch"
-        fourTaps.approval = PendingApproval(id: "four", app: "Lunch", summary: "Tap “Delete”, then tap “Delete”, then tap “Delete”, then tap “Delete”",
-                                            reason: "multiple sensitive actions: action 1: deleting (\"delete\"); action 2: deleting (\"delete\"); action 3: deleting (\"delete\"); action 4: deleting (\"delete\")", expires: now.addingTimeInterval(48), ask: "Delete in Lunch", kinds: ["deleting"])
-        var purpose = fourTaps
-        purpose.approval = ChatModel.Sample.lunchApproval
 
         var deciding = approval
         deciding.phase = .deciding; deciding.decision = true
@@ -178,6 +169,7 @@ struct ActivityPreview: View {
         planNext.previous = "Tap “Messages”"
         planNext.stepCount = 7
         planNext.plan?.current = 2
+        planNext.failedSteps = [1]
         var planDone = done
         planDone.plan = .init(steps: steps, current: 2)
 
@@ -204,7 +196,7 @@ struct ActivityPreview: View {
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
 
-        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("fourtaps", fourTaps), ("purpose", purpose), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
+        let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.

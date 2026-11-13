@@ -28,7 +28,7 @@ enum Harness {
         return text
     }()
 
-    static var instructions: String { [PokiCore.toolInstructions, system].joined(separator: "\n\n") }
+    static var instructions: String { [PokiCore.toolInstructions, system, WebTools.instructions].joined(separator: "\n\n") }
 
     /// The instructions for a task: the above, then the saved notes and the routines that fit it.
     @MainActor static func instructions(for task: String) -> String {
@@ -50,7 +50,8 @@ enum Harness {
         return parts.joined(separator: "\n\n")
     }
 
-    static let tools: [ToolSpec] = phoneTools + [reportPlan, finishTask]
+    /// Poki's own browser's tools (ESP-145) sit beside the phone's.
+    static let tools: [ToolSpec] = phoneTools + WebTools.specs + [reportPlan, finishTask]
 
     /// PokiCore's catalog: look, do and status.
     static let phoneTools: [ToolSpec] = {

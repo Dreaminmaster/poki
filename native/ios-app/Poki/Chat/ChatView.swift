@@ -20,6 +20,8 @@ struct ChatView: View {
     var openModel: () -> Void
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)? = nil
+    /// Opens External Agents, from the home page's hint.
+    var openAgents: () -> Void = {}
     /// Opens Updates, from the home page's hint.
     var openUpdates: () -> Void = {}
 
@@ -73,7 +75,7 @@ struct ChatView: View {
 
     /// Poki is at work (or the sample scene shows it at work): the message field offers Stop.
     private var busy: Bool {
-        chat.running || ["working", "approval", "lunch", "handoff"].contains(sampleScene ?? "")
+        chat.running || ["working", "approval", "handoff"].contains(sampleScene ?? "")
     }
 
     /// A newer Poki is on the channel, or downloaded and ready to install: its version, for the home
@@ -101,7 +103,7 @@ struct ChatView: View {
         let home = isGreeting
         ZStack {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
-                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || sampleScene == "lunch" || chat.demoAsk != nil,
+                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
                            shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
@@ -115,7 +117,8 @@ struct ChatView: View {
             HomePage(home: home, writing: writing, pick: { draft = $0; writing = true }) {
                 if home, let update { UpdatePill(version: update, open: openUpdates) }
                 if home, let hint = homeHint {
-                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel, openUpdates: openUpdates)
+                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel,
+                                  openAgents: openAgents, openUpdates: openUpdates)
                 }
             }
             .allowsHitTesting(home)
@@ -137,6 +140,7 @@ struct ChatView: View {
         .bottomBar {
             if !bare { VStack(spacing: 8) {
                 asks
+                BrowserPanel()
                 ComposerInputView(input: $draft, focused: $writing, running: busy, progress: progress,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice)
             }
@@ -157,6 +161,7 @@ struct ChatView: View {
         .animation(.snappy, value: model.approvals.first?.id)
         .animation(.snappy, value: model.handoffText)
         .animation(.snappy, value: chat.demoAsk?.id)
+        .animation(.snappy, value: PokiBrowser.shared.isOpen)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: chat.running) { was, now in
             if was, !now, endedWell { DoneLinger.shared.celebrate() }
@@ -173,9 +178,6 @@ struct ChatView: View {
         if sampleScene == "approval" {
             let sample = ChatModel.Sample.approval, words = ChatModel.Sample.approvalWords
             ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: sample.expires, answer: { _ in })
-        } else if sampleScene == "lunch" {
-            let sample = ChatModel.Sample.lunchApproval
-            ApprovalAskCard(title: sample.sentence, detail: sample.kindLine ?? "", quote: "", expires: sample.expires, answer: { _ in })
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
         } else if let ask = chat.demoAsk {
@@ -183,10 +185,10 @@ struct ChatView: View {
             ApprovalAskCard(title: words.title, detail: words.detail, quote: words.quote, expires: ask.expires, answer: chat.answerDemo)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let approval = model.approvals.first {
-            // A message of this chat's own task: who it goes to and the words. Any other step: its one sentence.
+            // A message of this chat's own task: who it goes to and the words. Any other step: the step.
             let words = chat.askWords[approval.id]
-            ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? approval.kindLine ?? "",
-                            quote: words?.quote ?? "", expires: approval.expires,
+            ApprovalAskCard(title: words?.title ?? approval.question, detail: words?.detail ?? approval.reasonLine,
+                            quote: words?.quote ?? ActivityWords.label(approval.summary), expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let text = model.handoffText {
@@ -435,7 +437,7 @@ extension SetupIssueHint {
             return SetupIssueHint(message: String(localized: "Poki’s signing ends soon") + "\n" + warning.message,
                                   link: String(localized: "Open Updates ›"), target: .updates)
         }
-        return first(model: model)
+        return first(model: model) ?? relayIssue(model: model)
     }
 
     /// Home's one line (ESP-321): what main's two tab dots said, one problem at a time. A runner or
@@ -443,14 +445,18 @@ extension SetupIssueHint {
     /// offline (the Agents dot). The chat doesn't show the relay: it needs no relay to reply.
     @MainActor static func home(model: AppModel) -> SetupIssueHint? {
         if let hint = first(model: model, looks: true) { return hint }
-        if case .offline = model.relayStatus {
-            return SetupIssueHint(
-                message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
-                link: String(localized: "External Agents ›"),
-                target: .agents
-            )
-        }
-        return nil
+        return relayIssue(model: model)
+    }
+
+    /// The relay is offline, so agents can't reach this iPhone (main's Agents dot and its "Relay
+    /// offline" row). Not shown while the relay is off or connecting.
+    @MainActor static func relayIssue(model: AppModel) -> SetupIssueHint? {
+        guard model.relayStatus.isOffline else { return nil }
+        return SetupIssueHint(
+            message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
+            link: String(localized: "External Agents ›"),
+            target: .agents
+        )
     }
 }
 
@@ -1019,7 +1025,7 @@ private struct NoteLine: View {
         case .declined: String(localized: "Not approved, so Poki skipped that step")
         case .expired: String(localized: "The approval ran out, so Poki skipped that step")
         case .problem(let text): text
-        case .approval(let note): note.asked?.sentence ?? String(activity: "Allow this step?")
+        case .approval(let note): ActivityWords.label(note.summary)
         case .modelChecking: String(localized: "The model is checking this step")
         case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model, \(why)")
         case .modelDeclined(let why):
@@ -1063,10 +1069,11 @@ struct ApprovalNoteCard: View {
         }
     }
 
-    /// The rules' kinds beside the agent's own sentence; a note saved before the sentence names its app.
-    private var context: String? {
-        if let asked = note.asked { return asked.kindLine }
-        return note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : ActivityWords.local(note.app)
+    /// "Messages · sending a message": the app and PokiCore's reason, without its quoted word.
+    private var context: String {
+        let why = ActivityWords.reason(note.why)
+        let app = note.app.isEmpty || note.app == "unknown" || note.app.contains("(") ? nil : note.app
+        return [app, why.isEmpty ? nil : why].compactMap { $0 }.joined(separator: ", ")
     }
 
     var body: some View {
@@ -1081,11 +1088,9 @@ struct ApprovalNoteCard: View {
                     Text(at.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(Color(.secondaryLabel))
                 }
             }
-            if let sentence = note.asked?.sentence {
-                Text(verbatim: sentence).font(.subheadline).foregroundStyle(Color(.label))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let context {
+            Text(verbatim: ActivityWords.label(note.summary)).font(.subheadline).foregroundStyle(Color(.label))
+                .fixedSize(horizontal: false, vertical: true)
+            if !context.isEmpty {
                 Text(verbatim: context).font(.caption).foregroundStyle(Color(.secondaryLabel))
             }
             if !note.reason.isEmpty {
@@ -1424,6 +1429,27 @@ struct ComposerInputView: View {
 final class FieldDictation {
     /// The setting (Settings › Voice) that shows the microphone beside Send.
     nonisolated static let buttonKey = "pokiDictationButton"
+    /// Set once the first launch of the version with this setting has decided it (see `keepButtonForUpgrade`).
+    nonisolated static let buttonSettledKey = "pokiDictationButton.settled"
+
+    /// Earlier versions always showed the microphone, and the setting defaults to hidden, so a person
+    /// updating from one would lose it. The first launch with the setting turns it on for someone who
+    /// used the app before; a fresh install keeps the default (hidden). "Used before" is any trace an earlier
+    /// version left, none of which this version writes before it runs: a saved conversation, or a setting
+    /// an earlier version stored (pairing and setup progress, relay, model choice, approvals). Once only,
+    /// so a person who turns it off later keeps it off, and one who installed fresh and used the app for a
+    /// while is not mistaken for an upgrade. Call it before anything reads the setting.
+    nonisolated static func keepButtonForUpgrade(defaults: UserDefaults = .standard, sessionsFolder: URL = SessionStore.defaultFolder) {
+        guard !defaults.bool(forKey: buttonSettledKey) else { return }
+        defer { defaults.set(true, forKey: buttonSettledKey) }
+        guard defaults.object(forKey: buttonKey) == nil else { return }
+        let earlierSettings = ["setup", "relayAddress", "relayEnabled", "chat.provider", "chat.installationID", "approvals.ask", "wantsOn", "voice.model"]
+        let savedConversations = (try? FileManager.default.contentsOfDirectory(at: sessionsFolder, includingPropertiesForKeys: nil))?
+            .contains { $0.pathExtension == "json" } ?? false
+        if savedConversations || earlierSettings.contains(where: { defaults.object(forKey: $0) != nil }) {
+            defaults.set(true, forKey: buttonKey)
+        }
+    }
     private(set) var on = false
     private(set) var text = ""
     private(set) var base = ""

@@ -16,6 +16,9 @@ struct PokiApp: App {
         // reads them; from here on every change is mirrored there.
         SettingsVault.restore()
         SettingsVault.watch()
+        // Someone updating from an earlier version keeps the dictation microphone it always showed; this
+        // reads what that version left behind, so it runs before the conversations and the model load.
+        FieldDictation.keepButtonForUpgrade()
         // Page titles in Geist, the website's typeface (prominent text only).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
@@ -101,6 +104,7 @@ struct RootView: View {
             },
             openModel: { openDetails([DetailsRoute.model]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
+            openAgents: { openDetails([DetailsRoute.settings]) },
             openUpdates: { openDetails([DetailsRoute.updates]) }
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the

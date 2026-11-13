@@ -65,8 +65,7 @@ final class LiveCore: CoreSession {
             switch outcome { case .done(let text): delivery = text; case .failed(let text): delivery = "failed: \(text)" }
             return .toolFinished(summary: activity.summary, delivery: delivery, app: facts.app, thumbnail: facts.thumbnail, error: facts.error, session: activity.session)
         case .approvalRequested(let approval):
-            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires,
-                                                      ask: approval.ask, byAgent: approval.purpose != nil, kinds: approval.kinds.map(\.rawValue)))
+            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires))
         case .approvalEnded(let id, let approved): return .approvalEnded(id: id, approved: approved)
         case .handoffRequested(let id, let kind, let text, let app): return .handoffRequested(id: id, kind: kind, text: text, app: app)
         case .handoffEnded(let id, let how): return .handoffEnded(id: id, how: how)

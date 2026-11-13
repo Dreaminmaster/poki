@@ -56,6 +56,9 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// ActivityController. What the Live Activity shows as the step is `progress` (ActivityFace).
         var stepCount = 0
         var failedCount = 0
+        /// The plan's steps (from 1) under which an action did not go through: their segments draw red.
+        /// Optional so a state saved before this field still decodes. Kept by ActivityController.
+        var failedSteps: [Int]? = nil
         /// The step before the one under way, in English like `headline`: the expanded island shows
         /// it ticked under the current one. Kept by ActivityController.
         var previous: String?
@@ -109,49 +112,46 @@ struct PokiActivityAttributes: ActivityAttributes {
 struct PendingApproval: Codable, Hashable {
     var id: String
     var app: String
-    /// The actions as PokiCore's step labels ("Tap “Delete”, then tap “Delete”"): for the logs only.
     var summary: String
-    /// Why it needs the owner, from PokiCore's rules: `sending a message ("send")`. For the logs only.
+    /// Why it needs the owner, from PokiCore's rules: `sending a message ("send")`, `a payment ("pay")`.
     var reason: String
     var expires: Date
-    /// PokiCore's one sentence for the owner (`Approval.ask`): the agent's own words, or what the rules
-    /// saw and where ("Delete in Notes").
-    var ask = ""
-    /// The agent wrote `ask` (do's `purpose`), so the rules' own kinds go beside it.
-    var byAgent = false
-    /// What the rules saw (`ApprovalKind`'s raw values), most serious first.
-    var kinds: [String] = []
 
-    /// What the owner is asked, in one sentence, on every card, the island, the alert and the
-    /// notification: the agent's words as they are, or PokiCore's in the system's language.
-    var sentence: String {
-        if ask.isEmpty { return String(activity: "Allow this step?") }
-        return byAgent ? ask : ActivityWords.ask(ask)
+    /// The approval as a short question, from PokiCore's reason and the app: "Send in Messages?".
+    /// The summary ("Tap “Send”") says how, which the thumbnail shows better.
+    var question: String {
+        // PokiCore names the app, or says "unknown", or describes the home screen at length.
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
+        if reason.hasPrefix("sending") { return place.map { String(activity: "Send in \($0)?") } ?? String(activity: "Send a message?") }
+        if reason.hasPrefix("a payment") { return place.map { String(activity: "Pay in \($0)?") } ?? String(activity: "Make a payment?") }
+        if reason.hasPrefix("deleting") { return place.map { String(activity: "Delete in \($0)?") } ?? String(activity: "Delete this?") }
+        if reason.hasPrefix("typing into a password") { return String(activity: "Type a password?") }
+        if reason.hasPrefix("input in"), let place { return String(activity: "Use \(place)?") }
+        return String(activity: "Allow this step?")
     }
 
-    /// The rules' kinds beside the agent's own sentence ("Payment and Deletion"): an agent can call a
-    /// payment something harmless. Nil when the sentence is PokiCore's, which names the kind itself.
-    var kindLine: String? {
-        guard byAgent else { return nil }
-        let words = kinds.compactMap(Self.kindWord)
-        return words.isEmpty ? nil : ListFormatter.localizedString(byJoining: words)
-    }
-
-    /// The kinds and the sentence on one line ("Payment: Order lunch, ¥38 in total"), for the island.
-    var islandLine: String? { kindLine.map { String(activity: "\($0): \(sentence)") } }
-
-    static func kindWord(_ kind: String) -> String? {
-        switch kind {
-        case "payment": String(activity: "Payment")
-        case "deleting": String(activity: "Deletion")
-        case "sending": String(activity: "Sending")
-        case "call": String(activity: "Call")
-        case "password": String(activity: "Password")
-        case "input": String(activity: "Protected app")
-        // The rules could not read what the press does.
-        case "unread": String(activity: "Unchecked step")
-        default: nil
+    /// The reason as a line under the summary: "Sending a message in Messages".
+    var reasonLine: String {
+        let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : ActivityWords.local(app)
+        if reason.hasPrefix("sending") {
+            return place.map { String(activity: "Sending a message in \($0)") } ?? String(activity: "Sending a message")
         }
+        if reason.hasPrefix("a payment") {
+            return place.map { String(activity: "Making a payment in \($0)") } ?? String(activity: "Making a payment")
+        }
+        if reason.hasPrefix("deleting") {
+            return place.map { String(activity: "Deleting in \($0)") } ?? String(activity: "Deleting")
+        }
+        if reason.hasPrefix("typing into a password") {
+            return place.map { String(activity: "Typing a password in \($0)") } ?? String(activity: "Typing a password")
+        }
+        var text = reason
+        if let quote = text.range(of: " (\"") { text = String(text[..<quote.lowerBound]) }
+        text = text.prefix(1).uppercased() + text.dropFirst()
+        if let place, !text.contains(" in ") {
+            return "\(text) in \(place)"
+        }
+        return text
     }
 }
 

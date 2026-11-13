@@ -31,6 +31,9 @@ enum RelayStatus: Sendable, Equatable {
         case .offline(let why): "Offline: \(why)"
         }
     }
+    var isOffline: Bool {
+        if case .offline = self { true } else { false }
+    }
 }
 
 protocol CoreSession: AnyObject {
