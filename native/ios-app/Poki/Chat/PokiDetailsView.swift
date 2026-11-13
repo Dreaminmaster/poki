@@ -8,10 +8,9 @@ import SwiftUI
 // what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
 // approval method is changed on Poki's card in the chat only. The rows are PokiSettingsKit's.
 
-/// Settings: any problem that keeps Poki from working; then the parts of Poki in three groups of rows.
-/// The first group opens with where Poki stands (a row that only shows it) and the Activity Log. There
-/// is no card on top (the owner, 2026-11-13: with only the status and the log on it, it had no reason
-/// to be a card).
+/// Settings: Poki on top, as a group of rows like the groups under it (the owner, 2026-11-13: not a
+/// card of its own): the bear and its name, where Poki stands, and the Activity Log. Then any problem
+/// that keeps Poki from working, and the parts of Poki in three groups of rows.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -32,6 +31,18 @@ struct PokiDetailsView: View {
         NavigationStack(path: $path) {
             ScrollViewReader { scroll in
             List {
+                Section {
+                    // The first two rows only show: Connection's Automation switch turns Poki on and pauses it.
+                    PokiNameRow(mood: status.mood)
+                    SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: PokiStatusCopy.word(status), dot: status.mood.dot)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("details.status")
+                    NavigationLink(value: DetailsRoute.history) {
+                        SettingsRow(title: "Activity Log", symbol: "clock")
+                    }
+                    .accessibilityIdentifier("details.activity")
+                }
+
                 if !isSample {
                     let issues = Issue.current(model)
                     if !issues.isEmpty {
@@ -44,16 +55,8 @@ struct PokiDetailsView: View {
                     }
                 }
 
-                // Where Poki stands and what it has done, then what it works with.
+                // What Poki works with.
                 Section {
-                    // Shows only: Connection's Automation switch turns Poki on and pauses it.
-                    SettingsRow(title: "Poki", symbol: "pawprint", value: PokiStatusCopy.word(status), dot: status.mood.dot)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("details.status")
-                    NavigationLink(value: DetailsRoute.history) {
-                        SettingsRow(title: "Activity Log", symbol: "clock")
-                    }
-                    .accessibilityIdentifier("details.activity")
                     NavigationLink(value: DetailsRoute.connection) {
                         SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue, warns: !setupDone)
                     }
@@ -288,6 +291,34 @@ private struct ConversationsSettingsView: View {
         .navigationTitle("Archived Conversations")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search"))
+    }
+}
+
+/// The first row of Settings: the bear's face where the rows under it have their icon, and Poki's name.
+private struct PokiNameRow: View {
+    var mood: PokiMood
+    @ScaledMetric(relativeTo: .body) private var face = 34.0
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Group {
+                if let image = PokiMood.cutout(mood, small: true) {
+                    Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
+                }
+            }
+            .frame(width: face, height: face)
+            .background(mood == .paused ? Tint.night : Tint.portrait, in: .circle)
+            .clipShape(.circle)
+            .overlay(Circle().strokeBorder(Tint.ring, lineWidth: 1))
+            // As the rows' icons: the face does not make the row taller.
+            .padding(.vertical, -4)
+            .accessibilityHidden(true)
+            Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+        }
+        .padding(.vertical, 6)
+        .animation(.easeInOut(duration: 0.3), value: mood)
     }
 }
 
