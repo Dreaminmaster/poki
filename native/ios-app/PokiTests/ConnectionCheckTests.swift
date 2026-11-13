@@ -26,12 +26,19 @@ final class ModelServerStub: URLProtocol {
 @MainActor
 final class ConnectionCheckTests: XCTestCase {
     private let key = "placeholder-test-key"
+    private var language = AppLocalization.system
 
-    override func setUp() { URLProtocol.registerClass(ModelServerStub.self) }
+    /// The result's words follow Poki's language; these tests read the English ones.
+    override func setUp() {
+        URLProtocol.registerClass(ModelServerStub.self)
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+    }
 
     override func tearDown() {
         URLProtocol.unregisterClass(ModelServerStub.self)
         ModelServerStub.answer = nil
+        AppLocalization.shared.preference = language
     }
 
     private func check(_ answer: (status: Int, body: String)?) async -> ConnectionCheck.Result {

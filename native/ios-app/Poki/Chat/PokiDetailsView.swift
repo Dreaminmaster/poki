@@ -70,7 +70,7 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                     NavigationLink(value: DetailsRoute.appearance) {
-                        SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: String(localized: appearance.title))
+                        SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: AppLocalization.text(appearance.title))
                     }
                     .accessibilityIdentifier("details.appearance")
                     NavigationLink(value: DetailsRoute.language) {
@@ -538,7 +538,7 @@ struct AppearanceView: View {
                 ForEach(Appearance.allCases) { option in
                     Button { choice = option.rawValue } label: {
                         HStack {
-                            Text(option.title).foregroundStyle(Color(.label))
+                            Text(verbatim: AppLocalization.text(option.title)).foregroundStyle(Color(.label))
                             Spacer()
                             if option.rawValue == choice {
                                 Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
@@ -554,7 +554,7 @@ struct AppearanceView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Appearance")
+        .navigationTitle(AppLocalization.text("Appearance"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
