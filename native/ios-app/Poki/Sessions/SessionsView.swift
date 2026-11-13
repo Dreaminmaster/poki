@@ -167,7 +167,7 @@ struct SessionsView: View {
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
-        .accessibilityValue(Text(verbatim: [app.flatMap(AppIconStore.name), needs ? String(localized: "Needs your attention") : nil,
+        .accessibilityValue(Text(verbatim: [AppName.display(app), needs ? String(localized: "Needs your attention") : nil,
                                                          trouble.map { $0 == .failed ? String(localized: "Failed") : String(localized: "Stopped") }]
             .compactMap { $0 }.joined(separator: ", ")))
         // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.

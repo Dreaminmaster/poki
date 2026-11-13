@@ -26,12 +26,24 @@ final class AppNamePresentationTests: XCTestCase {
             .appendingPathComponent("AppNameEvidence")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let end = Date()
+        var known = ChatEntry(.plan([]))
+        known.title = "打开微信"
+        known.app = "com.tencent.xin"
+        var unknown = ChatEntry(.plan([]))
+        unknown.title = "打开应用"
+        unknown.app = "org.example.unlisted"
+        let archive = try JSONEncoder().encode([known, unknown])
+        let restored = try JSONDecoder().decode([ChatEntry].self, from: archive)
+        let icons = AppIconStore(installed: { _, _ in nil })
+        for identity in ["com.tencent.xin", " COM.TENCENT.XIN ", "微信", "WeChat"] {
+            XCTAssertNotNil(icons.icon(identity), "WeChat must have its carried icon even without a system icon")
+        }
         for (index, state) in [TaskCardState.done, .failed, .stopped, .running, .needsYou, .yourTurn].enumerated() {
             window.rootViewController = UIHostingController(rootView:
                 VStack(spacing: 20) {
-                    TaskCard(title: "打开微信", steps: [], state: state, app: "com.tencent.xin",
+                    TaskCard(title: restored[0].title ?? "", steps: [], state: state, app: restored[0].app,
                              started: end.addingTimeInterval(-13), ended: end)
-                    TaskCard(title: "打开应用", steps: [], state: state, app: "org.example.unlisted",
+                    TaskCard(title: restored[1].title ?? "", steps: [], state: state, app: restored[1].app,
                              started: end.addingTimeInterval(-13), ended: end)
                 }.padding().frame(maxHeight: .infinity).background(Color(.systemGroupedBackground))
                     .accessibilityElement(children: .contain).accessibilityIdentifier("app.names.\(index)"))
@@ -58,7 +70,7 @@ final class AppNamePresentationTests: XCTestCase {
                 XCTAssertTrue(source.contains("0:13"), "Omitting an app must retain its elapsed time")
             }
             XCTAssertFalse(source.contains("com.tencent.xin") || source.contains("org.example.unlisted"), "An internal identifier reached a task card: \(source)")
-            if state != .needsYou { XCTAssertTrue(source.contains(weChat), "The known app must have a name") }
+            if state != .needsYou { XCTAssertTrue(source.contains("\(weChat)，") || source.contains("\(weChat),"), "The subtitle must name the known app") }
         }
     }
 
@@ -66,15 +78,21 @@ final class AppNamePresentationTests: XCTestCase {
         for (app, expected) in [("com.tencent.xin", Optional(weChat)), ("org.example.unlisted", nil), ("My Reader", "My Reader")] {
             var state = PokiState(phase: .working, headline: "Thinking", thumbnailVersion: 0)
             state.app = app
+            state.plan = .init(steps: ["Open the app"], current: 1, title: "Open the app")
+            state.since = Date(timeIntervalSince1970: 0)
+            state.endedAt = Date(timeIntervalSince1970: 13)
             XCTAssertEqual(state.face.kicker, expected)
             state.event = .init(kind: .app, text: app)
-            XCTAssertEqual(state.face.event, expected)
+            XCTAssertNil(state.face.event, "App switches are already named by the kicker")
             state.phase = .done
-            XCTAssertFalse(state.face.content.contains(app) && app.contains("."))
-            if let expected { XCTAssertTrue(state.face.content.contains(expected)) }
+            XCTAssertEqual(state.face.content, "Open the app", "The completed task keeps its title")
+            XCTAssertTrue(state.face.subtitle?.contains("0:13") == true, "The duration stays visible with no app")
+            if let expected { XCTAssertTrue(state.face.subtitle?.contains(expected) == true) }
+            XCTAssertFalse(state.face.subtitle?.contains(app) == true && app.contains("."))
             state.app = nil
             state.headline = "Finished in \(app)"
-            XCTAssertFalse(state.doneTitle.contains(app) && app.contains("."))
+            XCTAssertEqual(state.doneTitle, "Open the app")
+            XCTAssertFalse(state.face.subtitle?.contains(app) == true)
             XCTAssertFalse(ActivityWords.label("Open \(app)").contains(app) && app.contains("."))
             XCTAssertFalse(ActivityWords.reason("input in \(app)").contains(app) && app.contains("."))
         }

@@ -372,11 +372,11 @@ struct CompactTrailing: View {
     @ViewBuilder private func narrow(_ palette: ActivityPalette) -> some View {
         let side = ActivityMetrics.narrowCircle
         switch face.compact {
-        case .app(let app, let since):
+        case .app(let app, _):
             if let icon = AppIconFile.image(app) {
                 AppIcon(image: icon, side: ActivityMetrics.narrowIcon).frame(width: side, height: side)
-            } else if let since {
-                RunTime(since: since, font: theme.narrowTimer, colour: palette.text, width: 26).frame(width: side, height: side)
+            } else {
+                DefaultAppIcon(size: ActivityMetrics.narrowIcon).frame(width: side, height: side)
             }
         case .elapsed(let since):
             RunTime(since: since, font: theme.narrowTimer, colour: palette.text, width: 26).frame(width: side, height: side)
@@ -400,11 +400,11 @@ struct CompactTrailing: View {
     private func wide(_ palette: ActivityPalette) -> some View {
         ZStack {
             switch face.compact {
-            case .app(let app, let since):
+            case .app(let app, _):
                 if let icon = AppIconFile.image(app) {
                     AppIcon(image: icon, side: ActivityMetrics.compactIcon).padding(.trailing, 3)
-                } else if let since {
-                    RunTime(since: since, font: theme.compact.monospacedDigit(), colour: palette.text, width: 42)
+                } else {
+                    DefaultAppIcon(size: ActivityMetrics.compactIcon).padding(.trailing, 3)
                 }
             case .elapsed(let since):
                 RunTime(since: since, font: theme.compact.monospacedDigit(), colour: palette.text, width: 42)
@@ -756,7 +756,8 @@ enum AppIconFile {
     @MainActor static var preview: ((String) -> UIImage?)?
 
     static func url(_ app: String) -> URL? {
-        let name = app.utf8.prefix(64).map { String(format: "%02x", $0) }.joined()
+        let key = KnownApps.find(app)?.id ?? app.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = key.lowercased().utf8.prefix(64).map { String(format: "%02x", $0) }.joined()
         return SharedContainer.url?.appendingPathComponent("app-icons", isDirectory: true).appendingPathComponent(name + ".png")
     }
 
