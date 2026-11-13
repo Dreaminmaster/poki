@@ -137,13 +137,14 @@ What to report: the build line Poki shows, whether the install finished, and any
 GitHub Account page, Build Options or Setup showed. For a failed GitHub check, also say whether
 the choice was still there afterwards.
 
-The sign-in uses GitHub's device flow under a GitHub App of its own that can only read Actions
-and pull requests. It is not the bot's app: a user token can do what both the app and the person
-can do, so a sign-in under the bot's app would leave a token that can push code and change
-workflows on the phone of everyone with write access here. The app's client ID is the
+The sign-in uses GitHub's device flow under Poki Preview Sign-in, a GitHub App of its own that can
+only read this repository's Actions and pull requests. It is not the bot's app: a user token can
+do what both the app and the person can do, so a sign-in under the bot's app would leave a token
+that can push code and change workflows on the phone of everyone with write access here. The app's client ID is the
 `PREVIEW_SIGN_IN_APP_CLIENT_ID` constant in `desktop/core/src/release.rs` (`POKI_GITHUB_CLIENT_ID`
-overrides it for development). It is public, not a secret. While the constant is empty, Poki and
-Poki Setup offer no GitHub sign-in, so nobody can turn on Preview Builds or choose Pre-alpha.
+overrides it for development). It is public, not a secret. If an earlier test build had you
+authorize Poki Repo Bot, revoke it under GitHub Settings › Applications › Authorized GitHub Apps
+and sign out of GitHub in Poki.
 
 ## Checks
 
@@ -158,12 +159,12 @@ check runs only for `desktop/core` and its Cargo files. A skipped job counts as 
   read), installed on this repository, with its id and private key in the Actions secrets
   `POKI_BOT_APP_ID` and `POKI_BOT_PRIVATE_KEY`.
 - Labels `promotion`, `soak-override`, `blocker` and `preview`.
-- A second GitHub App, only for the GitHub sign-in of preview builds, owned by the repository
-  owner and separate from the bot's: Device Flow enabled, "Expire user authorization tokens" off
-  (Poki keeps the token and has no refresh), repository permissions Actions read and Pull requests
-  read (Metadata read comes with them), no account permissions, webhook off, installable only on
-  this account and installed on this repository. Its client ID goes in
-  `PREVIEW_SIGN_IN_APP_CLIENT_ID` in `desktop/core/src/release.rs`.
+- A second GitHub App, Poki Preview Sign-in, only for the GitHub sign-in of preview builds, owned
+  by the repository owner and separate from the bot's: Device Flow enabled, "Expire user
+  authorization tokens" off (Poki keeps the token and has no refresh), repository permissions
+  Actions read and Pull requests read (Metadata read comes with them), no account permissions,
+  webhook off, installed only on this repository. Its client ID is `PREVIEW_SIGN_IN_APP_CLIENT_ID`
+  in `desktop/core/src/release.rs`.
 - The `alpha`, `beta`, and `stable` environments are configured with `JosssphZhou` as the only
   required reviewer and administrator bypass disabled. Self-review prevention is off so the owner
   can approve a run they started. Agents must not approve on the owner's behalf.
