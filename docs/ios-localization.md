@@ -81,8 +81,10 @@ state, untouched introduction identity, and language changes during a local scri
 talk bar's words, step lines and connection-lost note in each language;
 `VoiceModelTests.testWhyATalkCouldNotStartFollowsTheLanguageChosenInPoki` reads the reason under the
 talk bar with no model, with a bridge that no longer knows the address and with one that times out;
-`HomeShortcutsTests.testTheEditorsNoneChoiceFollowsTheLanguageChosenInPoki` reads the shortcut
-editor's None choice. Run them under an English and a Chinese simulator language.
+run them under an English and a Chinese simulator language.
+`scripts/check-shortcut-editor-language.mjs` opens a home pill's Edit popup through Poki MCP with
+Poki and the iPhone in different languages, and reads None at the top of the app choices and on the
+app row once picked.
 
 In Settings › Language, switch English → 简体中文 → 繁體中文 → Follow System. Check the active navigation title,
 section labels, Settings back navigation, Home greeting/suggestions/status, and the message field's

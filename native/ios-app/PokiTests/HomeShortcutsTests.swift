@@ -163,15 +163,4 @@ final class HomeShortcutsTests: XCTestCase {
         XCTAssertTrue(HomeShortcuts.isPrivate("Pay $12 for parking"))
         XCTAssertTrue(HomeShortcuts.isPrivate("Text Sam “running late”"))
     }
-
-    /// The Edit popup's app row offers None first, in the language chosen in Poki whatever the iPhone's.
-    func testTheEditorsNoneChoiceFollowsTheLanguageChosenInPoki() throws {
-        let shortcut = try XCTUnwrap(pills().first)
-        for (language, none) in [("en", "None"), ("zh-Hans", "无"), ("zh-Hant", "無")] {
-            AppLocalization.shared.preference = language
-            let editor = ShortcutEditor(shortcut: shortcut, save: { _, _ in })
-            XCTAssertEqual(editor.choices.first?.id, "", language)
-            XCTAssertEqual(editor.choices.first?.name, none, language)
-        }
-    }
 }
