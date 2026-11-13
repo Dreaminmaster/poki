@@ -1,7 +1,8 @@
 #!/bin/bash
 # Makes the asset catalogs from docs/images/poki-icon.png (macOS, needs swift): the app icon (the bear
 # full-bleed: the logo flattened on brand blue, no margin; iOS applies its own corner mask) and the Bear image for the app and the Live Activity. They are generated, not
-# checked in, so the one source image stays the only copy. Run before xcodegen.
+# checked in, so the source images in docs/images stay the only copies. The icon's dark and tinted
+# appearances are finished 1024 images there (poki-icon-dark.png, poki-icon-tinted.png), copied as they are. Run before xcodegen.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -21,7 +22,9 @@ APP="$HERE/Poki/Assets.xcassets"
 catalog "$APP"
 mkdir -p "$APP/AppIcon.appiconset"
 swift "$COMPOSE" "$ICON" "$APP/AppIcon.appiconset/icon-1024.png" 1024 1.0 "$BLUE"
-echo '{"images":[{"filename":"icon-1024.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"version":1,"author":"poki"}}' > "$APP/AppIcon.appiconset/Contents.json"
+cp "$ROOT/docs/images/poki-icon-dark.png" "$APP/AppIcon.appiconset/icon-1024-dark.png"
+cp "$ROOT/docs/images/poki-icon-tinted.png" "$APP/AppIcon.appiconset/icon-1024-tinted.png"
+echo '{"images":[{"filename":"icon-1024.png","idiom":"universal","platform":"ios","size":"1024x1024"},{"appearances":[{"appearance":"luminosity","value":"dark"}],"filename":"icon-1024-dark.png","idiom":"universal","platform":"ios","size":"1024x1024"},{"appearances":[{"appearance":"luminosity","value":"tinted"}],"filename":"icon-1024-tinted.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"version":1,"author":"poki"}}' > "$APP/AppIcon.appiconset/Contents.json"
 mkdir -p "$APP/AccentColor.colorset"
 echo '{"colors":[{"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0x20","green":"0x84","blue":"0xFD","alpha":"1.000"}}}],"info":{"version":1,"author":"poki"}}' > "$APP/AccentColor.colorset/Contents.json"
 bear "$APP"
