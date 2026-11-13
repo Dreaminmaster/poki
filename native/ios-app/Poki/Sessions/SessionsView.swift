@@ -11,21 +11,15 @@ import SwiftUI
 import UIKit
 
 /// The conversations, in the drawer under the chat (iPhone) and beside it (iPad): Poki's name on
-/// top, then while something keeps Poki from working one row that leads to its fix, then one line per
-/// conversation, the newest first, and floating over the list the button for a new conversation and
-/// the way into Settings.
+/// top, then one line per conversation, the newest first, and floating over the list the button for a
+/// new conversation and the way into Settings.
 struct SessionsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     var openChat: () -> Void
     var openSession: (String) -> Void
-    /// Opens the place that fixes the reminder row's problem.
-    var openFix: (SetupIssueHint.Target) -> Void = { _ in }
     @State private var renaming: SavedSession?
     @State private var newName = ""
-    /// The model accounts' version: they live outside the app's model, so the reminder row is given
-    /// this to go away once an account is added.
-    @State private var keys = ModelKeys.saved
     @Environment(\.inThreadsDrawer) private var inDrawer
     @Environment(\.drawerSliding) private var sliding
 
@@ -35,8 +29,6 @@ struct SessionsView: View {
     var body: some View {
         let groups = grouped
         List {
-            // None in the screenshots' samples.
-            if sampleHome == nil { DrawerReminder(keys: keys, open: openFix).equatable() }
             ForEach(groups, id: \.day) { group in
                 if groups.count > 1 { heading(group.day) }
                 ForEach(group.sessions) { session in
@@ -56,7 +48,6 @@ struct SessionsView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { controls }
         .background(Tint.sidebar.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in keys = ModelKeys.saved }
         .alert("Rename Session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) { renaming = nil }
@@ -330,56 +321,6 @@ struct SessionsView: View {
         } else {
             openSession(session.id)
         }
-    }
-}
-
-/// Above the conversations while something keeps Poki from working: the one problem the home page
-/// names (`SetupIssueHint.home`), its first line and the link to its fix, on an amber card. A tap
-/// anywhere on it opens that fix.
-///
-/// Equal to itself whatever its action, so it is not redrawn on each frame the drawer slides (the
-/// model accounts' check reads the keychain): it redraws when the app's model changes what it read,
-/// or when the accounts change (`keys`).
-private struct DrawerReminder: View, Equatable {
-    @Environment(AppModel.self) private var model
-    @Environment(\.drawerSliding) private var sliding
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// The model accounts' version.
-    let keys: Int
-    let open: (SetupIssueHint.Target) -> Void
-
-    static func == (a: Self, b: Self) -> Bool { a.keys == b.keys }
-
-    var body: some View {
-        if let hint = SetupIssueHint.home(model: model) { row(hint) }
-    }
-
-    private func row(_ hint: SetupIssueHint) -> some View {
-        let problem = hint.message.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? hint.message
-        return Button {
-            guard !sliding else { return }
-            open(hint.target)
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(Tint.amber)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(verbatim: problem).font(.subheadline.weight(.medium)).foregroundStyle(Tint.amberInk)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 3).multilineTextAlignment(.leading)
-                    Text(verbatim: hint.link).font(.footnote.weight(.semibold)).foregroundStyle(Tint.blueText)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Tint.amberSoft, in: .rect(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Tint.amberLine, lineWidth: 0.5))
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("threads.issue")
-        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
     }
 }
 
