@@ -98,7 +98,9 @@ struct VoicePage: View {
     private var workingDetail: String {
         if Self.sample == .working { return AppLocalization.text(LocalizedStringResource("Step 3 of 4, in Messages")) }
         let n = model.recentSteps.count + 1
-        return model.currentApp.map { AppLocalization.text(LocalizedStringResource("Step \(n), in \($0)")) } ?? AppLocalization.text(LocalizedStringResource("Step \(n)"))
+        return AppName.display(model.currentApp).map {
+            AppLocalization.text(LocalizedStringResource("Step \(n), in \($0)"))
+        } ?? AppLocalization.text(LocalizedStringResource("Step \(n)"))
     }
 
     /// Done steps and the one under way. The total is not known until the task ends, so it grows.

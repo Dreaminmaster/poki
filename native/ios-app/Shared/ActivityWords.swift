@@ -59,7 +59,10 @@ enum ActivityWords {
     /// system's language, without the word in brackets that set it off.
     static func reason(_ why: String) -> String {
         let plain = why.split(separator: "(").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-        if plain.hasPrefix("input in ") { return String(activity: "Input in \(String(plain.dropFirst("input in ".count)))") }
+        if plain.hasPrefix("input in ") {
+            guard let name = AppName.display(String(plain.dropFirst("input in ".count))) else { return "" }
+            return String(activity: "Input in \(name)")
+        }
         return local(plain)
     }
 
@@ -103,7 +106,10 @@ enum ActivityWords {
         if fixed != label { return fixed }
         if let rest = after("Press"), rest.hasSuffix(" button") { return String(activity: "Press \(String(rest.dropLast(7))) button") }
         if let key = after("Press") { return String(activity: "Press \(key)") }
-        if let app = after("Open") { return String(activity: "Open \(app)") }
+        if let app = after("Open") {
+            guard let name = AppName.display(app) else { return local("Open") }
+            return String(activity: "Open \(name)")
+        }
         return label
     }
 }

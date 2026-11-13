@@ -43,9 +43,7 @@ struct PillView: View {
                 if let icon = AppIconStore.shared.icon(data.app.id, dark: false) {
                     Image(uiImage: icon).resizable().interpolation(.high)
                 } else {
-                    Image(systemName: "app.dashed").font(.system(size: metrics.icon * 0.6)).foregroundStyle(ink.opacity(0.6))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(ink.opacity(0.12))
+                    DefaultAppIcon(size: metrics.icon)
                 }
             }
             .frame(width: metrics.icon, height: metrics.icon)

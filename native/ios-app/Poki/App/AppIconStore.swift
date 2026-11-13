@@ -21,6 +21,8 @@ import UIKit
 // 3. An icon fetched earlier from the App Store and kept in Caches/AppIcons.
 // 4. The App Store's public lookup by bundle ID (itunes.apple.com/lookup), on a view's `.task`. The
 //    request carries the bundle ID and the store's country only. A miss is remembered for a day.
+// Without any of these the view draws Poki's carried bear icon.
+
 // Without any of these the view draws one placeholder: a grey tile in the icon's shape with an app glyph.
 
 /// The language Poki names known apps in, from its effective UI language: Simplified or Traditional
@@ -102,8 +104,7 @@ final class AppIconStore {
     /// The bundle ID for an app's name, or `app` itself when it already is one.
     static func bundleID(_ app: String) -> String? {
         let name = app.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let id = KnownApps.byName[name.lowercased()] { return id }
-        if let known = KnownApps.byID[name.lowercased()] { return known.id }
+        if let known = KnownApps.find(name) { return known.id }
         // "com.tencent.xin": a reverse-DNS name with no spaces.
         if !name.contains(" "), name.split(separator: ".").count >= 3 { return name }
         return nil
@@ -112,8 +113,7 @@ final class AppIconStore {
     /// The name an app goes by on this iPhone, in its first language (English, Simplified or
     /// Traditional Chinese), from a bundle ID or any of its names; nil for an app not listed here.
     static func name(_ app: String) -> String? {
-        guard let id = bundleID(app), let known = KnownApps.byID[id.lowercased()] else { return nil }
-        return known.name(in: .current)
+        KnownApps.find(app)?.name(in: .current)
     }
 
     /// The bundle IDs of the apps `text` names, in any of their names: "打开美团外卖点下酒菜" names Meituan
@@ -163,7 +163,7 @@ final class AppIconStore {
     }
 }
 
-/// An app's icon in the Home Screen's shape at `size` points, or the placeholder tile.
+/// An app's icon in the Home Screen's shape at `size` points, or Poki's default icon.
 struct AppIconView: View {
     var app: String
     var size: CGFloat
@@ -179,9 +179,7 @@ struct AppIconView: View {
             if let image {
                 Image(uiImage: image).resizable().interpolation(.high).scaledToFill()
             } else {
-                Image(systemName: "app.dashed").font(.system(size: size * 0.5)).foregroundStyle(Color(.secondaryLabel))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.tertiarySystemFill))
+                DefaultAppIcon(size: size)
             }
         }
         .frame(width: size, height: size)

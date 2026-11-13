@@ -37,6 +37,16 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var attachments: [Data]?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
+    /// Browser visits belong to the request around this card, including after restoring a conversation.
+    static func taskUsedBrowser(in entries: [ChatEntry], at index: Int) -> Bool {
+        func isRequest(_ entry: ChatEntry) -> Bool {
+            switch entry.kind { case .you, .request: true; default: false }
+        }
+        let start = entries[..<index].lastIndex(where: isRequest) ?? entries.startIndex
+        let end = entries[(index + 1)...].firstIndex(where: isRequest) ?? entries.endIndex
+        return entries[start..<end].contains { if case .browser = $0.kind { true } else { false } }
+    }
+
     var isPoki: Bool { switch kind { case .poki, .plan: true; default: false } }
 }
 
