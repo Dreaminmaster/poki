@@ -327,6 +327,12 @@ enum HomeIdea {
 /// The home page's greeting (ESP-474): a hello for the time of day, as a chat app greets you (morning
 /// from 5, afternoon from 11, evening from 18, late from 23), and what Poki should do under it.
 enum HomeGreeting {
+    /// The two lines as VoiceOver reads them: the hello and the question, as one sentence.
+    static func spoken(at date: Date = .now) -> String {
+        let first = hello(at: date)
+        return first + (first.hasSuffix("，") ? "" : " ") + ask
+    }
+
     static func hello(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
         case 5..<11: String(localized: "Good morning.")
@@ -361,7 +367,9 @@ struct HomeGreetingView: View {
         .font(.system(size: size, weight: .semibold))
         .tracking(-0.6 * size / 28)
         .multilineTextAlignment(.center)
-        .accessibilityElement(children: .combine)
+        // Read as one sentence: in Chinese the hello's comma runs on into the question.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: HomeGreeting.spoken(at: date)))
         .accessibilityAddTraits(.isHeader)
     }
 }
