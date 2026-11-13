@@ -19,6 +19,9 @@ struct PokiApp: App {
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
         FieldDictation.keepButtonForUpgrade()
+        // Whether this phone gets the first run: not when an earlier version was used here. Read before
+        // anything this version writes, like the line above.
+        FirstRun.decide()
         // Page titles in Geist, the website's typeface (prominent text only).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
@@ -66,6 +69,10 @@ struct RootView: View {
     /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
     @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
+    /// The first run is up, over everything (`FirstRunGuide`).
+    @State private var welcoming = false
+    /// A setup step a link opened while the first run is up: it opens there.
+    @State private var welcomeLink: SetupStep?
     @Namespace private var profile
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
@@ -126,7 +133,7 @@ struct RootView: View {
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat. Poki's card opens beside the picture and leaves it in sight.
-        .environment(\.bearCovered, threadsOpen || (detailsOpen && width != .regular))
+        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && width != .regular))
     }
 
     @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
@@ -215,6 +222,7 @@ struct RootView: View {
 
     var body: some View {
         navigation
+        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
@@ -266,6 +274,11 @@ struct RootView: View {
         AppLog.shared.add("app", "opened by link poki://\(url.host() ?? "")")
         // Pairing is not interrupted: it stays on the pairing step, where the PIN is.
         guard !model.pairingUnderWay else { return }
+        // During the first run a pairing file or a setup link opens its step there; nothing else moves.
+        if welcoming {
+            if let step = model.open(link: url) { welcomeLink = step }
+            return
+        }
         // A pairing file or a setup link (from Poki Setup on a computer, AirDrop or Files) opens
         // setup at that step, where the result is shown.
         if let step = model.open(link: url) {
@@ -313,6 +326,7 @@ struct RootView: View {
         if let address = defaults.string(forKey: "pokiVoiceBridge") { _ = model.voice.setBridge(address) }
         // `-pokiHome sessions|paused` (the old home's samples): the conversations, open.
         if defaults.string(forKey: "pokiHome") != nil, defaults.string(forKey: "pokiChat") == nil { threadsOpen = true }
+        if FirstRun.isDue() { welcoming = true }
         switch defaults.string(forKey: "pokiScreen") {
         case "chat":
             show(.chat)

@@ -298,7 +298,7 @@ private struct LiveVoiceFeature: View {
 
 /// Add Account: the account types, each with how it connects; choosing one opens its key, address or
 /// sign-in.
-private struct AddAccount: View {
+struct AddAccount: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: ModelProvider?
     @State private var signingIn = false
@@ -344,7 +344,7 @@ private struct AddAccount: View {
 /// again after it is saved. Test Connection sends one small request with what is on the page (the typed
 /// key, or the saved one when the field is empty); Save tests too and keeps the page open on a failure,
 /// saved all the same.
-private struct KeyEntry: View {
+struct KeyEntry: View {
     @Environment(\.dismiss) private var dismiss
     var provider: ModelProvider
     @State private var key = ""

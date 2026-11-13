@@ -509,6 +509,28 @@
         }
       }
     },
+    "%lld switches, each turned on once. They tick themselves as you go." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld switches, each turned on once. They tick themselves as you go."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一共 %lld 个开关，每个只需打开一次。打开一个，我就自动勾上一个。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一共 %lld 個開關，每個只需打開一次。打開一個，我就自動勾上一個。"
+          }
+        }
+      }
+    },
     "1 link" : {
       "localizations" : {
         "zh-Hans" : {
@@ -666,6 +688,28 @@
         }
       }
     },
+    "Account Added" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account Added"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已添加账户"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已新增帳號"
+          }
+        }
+      }
+    },
     "ADDRESSES" : {
       "localizations" : {
         "zh-Hans" : {
@@ -700,6 +744,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "AGENTS"
+          }
+        }
+      }
+    },
+    "All Set" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Set"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "准备好了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "準備好了"
+          }
+        }
+      }
+    },
+    "Allow Microphone" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Microphone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许使用麦克风"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許使用麥克風"
           }
         }
       }
@@ -2508,6 +2596,28 @@
         }
       }
     },
+    "Continue with Step %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue with Step %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续第 %lld 步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續第 %lld 步"
+          }
+        }
+      }
+    },
     "Conversation" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3718,6 +3828,28 @@
         }
       }
     },
+    "Get Started" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Started"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始使用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始使用"
+          }
+        }
+      }
+    },
     "Gives Poki its own key to this iPhone. The key stays on this device." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3855,6 +3987,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "交還"
+          }
+        }
+      }
+    },
+    "Hello, I’m Poki" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hello, I’m Poki"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你好，我是 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你好，我是 Poki"
           }
         }
       }
@@ -4071,6 +4225,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "I paused after %lld steps. Tell me how you’d like to continue."
+          }
+        }
+      }
+    },
+    "I think with a model from your own account. Sign in or add a key. You can change it any time." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I think with a model from your own account. Sign in or add a key. You can change it any time."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我用你自己账户里的模型思考。登录或添加密钥，之后随时可以换。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我用你自己帳號裡的模型思考。登入或新增金鑰，之後隨時可以換。"
           }
         }
       }
@@ -5122,6 +5298,28 @@
         }
       }
     },
+    "Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Automation › Setup." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Automation › Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在可以先随便看看。开关都打开后，我就能使用这台 iPhone。开关在「设置 › 自动化 › 配置」里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在可以先隨便看看。開關都打開後，我就能使用這支 iPhone。開關在「設定 › 自動化 › 設定精靈」裡。"
+          }
+        }
+      }
+    },
     "Look at the screen" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5365,6 +5563,28 @@
         }
       }
     },
+    "More Providers" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More Providers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多服务商"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多服務商"
+          }
+        }
+      }
+    },
     "More Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5454,6 +5674,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "名稱，例如 Claude"
+          }
+        }
+      }
+    },
+    "Nearly There" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nearly There"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "就差一点"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "就差一點"
           }
         }
       }
@@ -5973,6 +6215,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無需設定"
+          }
+        }
+      }
+    },
+    "Not Now" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Now"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以后再说"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以後再說"
           }
         }
       }
@@ -7218,6 +7482,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已點一杯大杯燕麥拿鐵，9:10 到店自取。"
+          }
+        }
+      }
+    },
+    "Pick a Model" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a Model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选一个模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選一個模型"
           }
         }
       }
@@ -9298,6 +9584,28 @@
         }
       }
     },
+    "Show Welcome Pages Again" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Welcome Pages Again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新查看欢迎页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新查看歡迎頁"
+          }
+        }
+      }
+    },
     "Saved. Change it and save again, or keep it as it is." : {
       "localizations" : {
         "en" : {
@@ -9338,6 +9646,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "簽名（可選）"
+          }
+        }
+      }
+    },
+    "Start" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始"
           }
         }
       }
@@ -10675,6 +11005,28 @@
         }
       }
     },
+    "Talk Instead of Typing" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk Instead of Typing"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不想打字，直接说"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不想打字，直接說"
+          }
+        }
+      }
+    },
     "Tap Order" : {
       "localizations" : {
         "zh-Hans" : {
@@ -10735,6 +11087,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "接手"
+          }
+        }
+      }
+    },
+    "Tell me what you need, by text or by voice, and I do it on your iPhone while you watch." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tell me what you need, by text or by voice, and I do it on your iPhone while you watch."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "告诉我你要做什么，打字或说话都行，我在你的 iPhone 上做给你看。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "告訴我你要做什麼，打字或說話都行，我在你的 iPhone 上做給你看。"
           }
         }
       }
@@ -12324,6 +12698,28 @@
         }
       }
     },
+    "To hear you, I need the microphone and speech recognition." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To hear you, I need the microphone and speech recognition."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要听到你说话，我需要麦克风和语音识别。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要聽到你說話，我需要麥克風和語音辨識。"
+          }
+        }
+      }
+    },
     "Today" : {
       "localizations" : {
         "zh-Hans" : {
@@ -12352,6 +12748,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重試"
+          }
+        }
+      }
+    },
+    "Try “Order my usual coffee”. Type it, or say it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try “Order my usual coffee”. Type it, or say it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "试试「帮我点一杯常喝的咖啡」，打字或说出来都行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "試試「幫我點一杯常喝的咖啡」，打字或說出來都行。"
           }
         }
       }

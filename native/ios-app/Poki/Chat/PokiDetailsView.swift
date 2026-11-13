@@ -774,7 +774,12 @@ struct SetupLayer2View: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                .padding(.bottom, 8)
+
+                FirstRunAgain(wide: true)
+                    .font(.system(size: 17))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
             }
         }
         .background(Tint.page.ignoresSafeArea())
