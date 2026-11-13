@@ -22,11 +22,13 @@ struct PokiDetailsView: View {
     @State private var modelVersion = 0
 
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiDetailsSample") }
+    private static let lastRow = "details.lastRow"
 
     var body: some View {
         let power = isSample ? PowerTile.pause : PowerTile.card(model: model)
         let status = isSample ? PokiStatus(.ready) : PokiStatusCopy.card(PokiStatus.current(model: model, chat: chat), power: power)
         NavigationStack(path: $path) {
+            ScrollViewReader { scroll in
             List {
                 Section {
                     PokiSettingsCard(status: status, openActivity: { path.append(DetailsRoute.history) })
@@ -107,6 +109,7 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("details.health")
+                    .id(Self.lastRow)
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         .monospacedDigit()
@@ -115,6 +118,14 @@ struct PokiDetailsView: View {
                 }
             }
             .settingsPage()
+            // `-pokiSettingsEnd YES` opens the page at its end, for the build's screenshot of the rows
+            // below the first screen.
+            .task {
+                guard UserDefaults.standard.bool(forKey: "pokiSettingsEnd") else { return }
+                try? await Task.sleep(for: .seconds(0.6))
+                scroll.scrollTo(Self.lastRow, anchor: .center)
+            }
+            }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -203,7 +214,7 @@ enum DetailsRoute: Hashable {
     case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance
 }
 
-/// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring
+/// Settings > Archived Conversations: the archived conversations, each one line as in the drawer, to open, bring
 /// back or delete; and a search through every conversation, archived or not.
 private struct ConversationsSettingsView: View {
     var openSession: (String) -> Void
@@ -268,7 +279,7 @@ private struct ConversationsSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Conversations")
+        .navigationTitle("Archived Conversations")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search"))
     }
