@@ -188,6 +188,9 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
+            // Every page's top scroll edge is the system's soft one: the chat, the conversations, and
+            // the pages pushed over them under the system's bar.
+            .softTopEdge()
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
             .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
@@ -216,6 +219,9 @@ struct RootView: View {
             },
             path: $detailsPath
         )
+        // Presented on its own, so it says the edge's style itself rather than counting on the
+        // presenting page's.
+        .softTopEdge()
     }
 
     var body: some View {
