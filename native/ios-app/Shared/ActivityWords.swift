@@ -81,6 +81,13 @@ enum ActivityWords {
         return words.dropFirst().reduce(words[0]) { String(activity: "\($0), then \($1)") }
     }
 
+    /// A label's actions one by one, each in the system's language: the steps an approval lists.
+    static func steps(_ label: String) -> [String] {
+        actions(label).enumerated().map { index, part in
+            translate(index == 0 ? part : part.prefix(1).uppercased() + part.dropFirst())
+        }
+    }
+
     /// PokiCore's sentence for an approval (`Approval.ask` in PokiCore's Approvals.swift: "Delete in
     /// Notes") in the system's language. Another text stays as it is.
     static func ask(_ ask: String) -> String {

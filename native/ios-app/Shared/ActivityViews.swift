@@ -49,6 +49,8 @@ enum ActivityMetrics {
     /// does not grow or shrink when the state changes.
     static let minimalBear: CGFloat = 36.7
     static let button: CGFloat = 38
+    /// The largest text size the Lock Screen card and the island follow: both have a fixed height.
+    static let largestType = DynamicTypeSize.xxLarge
     static let stopCircle: CGFloat = 46
     static let stopCapsule: CGFloat = 34
     static let smallThumbnail = CGSize(width: 34, height: 72)
@@ -135,6 +137,9 @@ struct LockScreenCard: View {
         }
         .frame(height: sizes.lock)
         .frame(maxWidth: .infinity)
+        // The system gives the card a fixed height (at most 160 points): text past this size has no
+        // room in it, and would push the buttons off.
+        .dynamicTypeSize(...ActivityMetrics.largestType)
         .foregroundStyle(palette.text)
         .environment(\.colorScheme, .dark)
         .background {
@@ -146,7 +151,74 @@ struct LockScreenCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func words(_ palette: ActivityPalette) -> some View {
+    @ViewBuilder private func words(_ palette: ActivityPalette) -> some View {
+        if face.tags.isEmpty { plainWords(palette) } else { taggedWords(palette) }
+    }
+
+    /// An approval: the rules' kinds as tags, the sentence in large type, the buttons. What gives way,
+    /// in order: the screenshot (kept only while the tags fit on one line beside it), then the
+    /// sentence's second line. Where the tags, one line and the buttons still do not fit (many kinds
+    /// at a large text size), the card shows no Allow: an answer here must see every kind. It shows
+    /// the sentence and Open Poki instead, where the card in the chat lists every kind and step.
+    private func taggedWords(_ palette: ActivityPalette) -> some View {
+        let shot = Thumbnail.picture
+        let thumbnail = shot == nil ? nil : ActivityMetrics.thumbnail(face)
+        let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
+                               badge: face.badgePlace(.lockScreen) == .besideValue)
+        return ViewThatFits(in: .vertical) {
+            beside(palette, shot: shot, size: thumbnail, lines: 2)
+            beside(palette, shot: shot, size: thumbnail, lines: 1)
+            ApprovalElsewhere(face: face, palette: palette, surface: .lockScreen, lines: 2, meta: meta)
+                .padding(.top, 22).padding(.bottom, 16)
+            ApprovalElsewhere(face: face, palette: palette, surface: .lockScreen, lines: 1, meta: meta)
+                .padding(.top, 22).padding(.bottom, 16)
+        }
+    }
+
+    /// The tagged card, with the screenshot while the tags fit beside it on one line.
+    private func beside(_ palette: ActivityPalette, shot: UIImage?, size: CGSize?, lines: Int) -> some View {
+        ViewThatFits(in: .horizontal) {
+            if let shot, let size { tagged(palette, shot: shot, size: size, lines: lines) }
+            tagged(palette, shot: nil, size: nil, lines: lines)
+        }
+    }
+
+    /// The tagged card with or without the screenshot. Its widest wish is only the tags' row on one
+    /// line (the sentence and the buttons take whatever width they get), so `ViewThatFits` keeps the
+    /// screenshot exactly while the tags fit beside it.
+    private func tagged(_ palette: ActivityPalette, shot: UIImage?, size: CGSize?, lines: Int) -> some View {
+        let reserved = size.map { $0.width + 12 } ?? 0
+        let meta = MetaCluster(face: face, palette: palette, meta: face.lockMeta ?? face.meta,
+                               badge: face.badgePlace(.lockScreen) == .besideValue)
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 8) {
+                    ApprovalTags(tags: face.tags, palette: palette, note: face.event, noteTone: face.eventTone)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    meta.frame(height: 16).fixedSize()
+                }
+                Title(face: face, palette: palette, lines: lines)
+                    .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 3)
+                    .layoutPriority(-1)
+            }
+            .padding(.trailing, reserved)
+            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
+            Control(face: face, surface: .lockScreen)
+                .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
+                .padding(.top, 6)
+        }
+        .padding(.top, 22).padding(.bottom, 16)
+        .overlay(alignment: .topTrailing) {
+            if let shot, let size {
+                Thumbnail(image: shot, size: size, corner: face.thumbnail == .small ? ActivityMetrics.smallThumbnailCorner : 10)
+                    .padding(.top, 14)
+            }
+        }
+    }
+
+    private func plainWords(_ palette: ActivityPalette) -> some View {
         let top: CGFloat = switch face.size { case .low: 30; case .working, .asking: 22; case .tall: 20 }
         let bottom: CGFloat = switch face.size { case .low: 0; case .working: 12; case .asking, .tall: 16 }
         let hasKicker = face.kicker != nil || face.event != nil
@@ -269,6 +341,7 @@ struct IslandBottom: View {
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
+        .dynamicTypeSize(...ActivityMetrics.largestType)
         .foregroundStyle(palette.text)
         .environment(\.colorScheme, .dark)
         .animation(dimmed ? nil : ActivityMotion.phase, value: face.bear)
@@ -302,8 +375,19 @@ struct IslandBottom: View {
                 }
             }
             .padding(.trailing, 20)
+        } else if !face.tags.isEmpty {
+            // An approval: the rules' kinds as tags, the sentence in large type (two lines, then one),
+            // the buttons. Where the tags, one line and the buttons do not all fit (many kinds at a
+            // large text size), no Allow: the sentence and Open Poki, as on the Lock Screen card.
+            ViewThatFits(in: .vertical) {
+                tagged(palette, lines: 2)
+                tagged(palette, lines: 1)
+                ApprovalElsewhere(face: face, palette: palette, surface: .island, lines: 2)
+                ApprovalElsewhere(face: face, palette: palette, surface: .island, lines: 1)
+            }
+            .padding(.trailing, 24)
+            .padding(.bottom, 14)
         } else {
-            let face = oneLine(self.face)
             let top: CGFloat = face.size == .tall ? 3 : 5
             // A capsule 14 up and 24 in clears the corner of the system's clip.
             let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking, .tall: 14 }
@@ -324,13 +408,48 @@ struct IslandBottom: View {
     }
 }
 
-/// The face with its island line, if it has one, as the title and no subtitle.
-private func oneLine(_ face: ActivityFace) -> ActivityFace {
-    guard let line = face.islandContent else { return face }
-    var island = face
-    island.content = line
-    island.subtitle = nil
-    return island
+extension IslandBottom {
+    private func tagged(_ palette: ActivityPalette, lines: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ApprovalTags(tags: face.tags, palette: palette, note: face.event, noteTone: face.eventTone).padding(.top, 1)
+            HStack(spacing: 6) {
+                Title(face: face, palette: palette, lines: lines).layoutPriority(-1)
+                if face.badgePlace(.island) == .afterReason, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
+            }
+            .padding(.top, 2)
+            Spacer(minLength: 4)
+            Control(face: face, surface: .island)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// An approval where its kinds, the sentence and the answers do not all fit: the sentence, and a
+/// button into Poki, whose card lists every kind and every step. No Allow: an answer given here
+/// would be given without seeing every kind the rules saw. Once answered, the answer's line instead.
+private struct ApprovalElsewhere: View {
+    var face: ActivityFace
+    var palette: ActivityPalette
+    var surface: ActivitySurface
+    var lines: Int
+    /// The countdown, on the Lock Screen card; the island draws its own beside the camera.
+    var meta: MetaCluster?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                Title(face: face, palette: palette, lines: lines)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let meta { meta.frame(height: 16).fixedSize() }
+            }
+            Spacer(minLength: 6)
+            if case .approval = face.bottom {
+                OpenPokiButton(link: face.link, surface: surface)
+            } else {
+                Control(face: face, surface: surface)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 // MARK: Dynamic Island, compact and minimal
@@ -392,6 +511,8 @@ struct CompactTrailing: View {
                 .font(theme.narrowTimer).foregroundStyle(palette.approval)
                 .multilineTextAlignment(.center)
                 .frame(width: 26).frame(width: side, height: side)
+                // The circle is 28 points across at every text size: past the default the digits leave it.
+                .dynamicTypeSize(...DynamicTypeSize.large)
         case .symbol(let name, let tone):
             StateSymbol(name: name, tone: tone, palette: palette, size: name == "checkmark" ? 15.5 : name.hasPrefix("exclamationmark") ? 16 : 15)
                 .frame(width: side, height: side)
@@ -436,6 +557,8 @@ struct CompactTrailing: View {
                         .frame(width: ActivityMetrics.compactWords, height: 13, alignment: .trailing)
                 }
                 .frame(width: ActivityMetrics.compactWords, alignment: .trailing)
+                // Two lines in the island's 36.67 points: past this size the countdown leaves it.
+                .dynamicTypeSize(...DynamicTypeSize.xLarge)
             case .countdown(let until):
                 TimerText(range: Countdown.range(until), down: true, colour: palette.approval, width: 42)
             case .symbol(let name, let tone):
@@ -564,12 +687,91 @@ private struct Kicker: View {
     }
 }
 
+/// The rules' kinds over an approval's sentence: small tags with a fill, money, deletions and
+/// protected apps in the warning colour. Always whole and readable: where one line has no room they
+/// go on to the next (`TagFlow`), and a tag wider than the whole line breaks its own words; the
+/// sentence under them gives way instead. A fresh event ("Not updating") follows the tags.
+struct ApprovalTags: View {
+    var tags: [ApprovalTag]
+    var palette: ActivityPalette
+    var note: String? = nil
+    var noteTone: ActivityTone = .accent
+    private let theme = ActivityTheme.current
+    var body: some View {
+        TagFlow(spacing: 4, lineSpacing: 3) {
+            ForEach(tags, id: \.self) { tag in
+                Text(tag.word)
+                    .font(theme.tag)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 6).padding(.vertical, 1.5)
+                    .frame(minHeight: 16)
+                    .background(tag.warning ? ActivityTheme.warning : palette.buttonFill, in: .rect(cornerRadius: 8))
+            }
+            if let note {
+                Text(note).font(theme.place).foregroundStyle(palette.color(noteTone))
+                    .lineLimit(1).frame(minHeight: 16)
+            }
+        }
+    }
+}
+
+/// Tags left to right, on to the next line where the line is full. Each keeps its ideal width up to
+/// the whole line; a wider one gets the line and wraps its own words. With no width proposed (the
+/// widest it would like, as `ViewThatFits` asks), all on one line.
+struct TagFlow: Layout {
+    var spacing: CGFloat = 4
+    var lineSpacing: CGFloat = 3
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = arrange(width: proposal.width, subviews)
+        let width = lines.map(\.width).max() ?? 0
+        let height = lines.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(0, lines.count - 1))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for line in arrange(width: bounds.width, subviews) {
+            var x = bounds.minX
+            for item in line.items {
+                subviews[item.index].place(at: CGPoint(x: x, y: y + (line.height - item.size.height) / 2),
+                                           proposal: ProposedViewSize(item.size))
+                x += item.size.width + spacing
+            }
+            y += line.height + lineSpacing
+        }
+    }
+
+    private struct Line { var items: [(index: Int, size: CGSize)] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat?, _ subviews: Subviews) -> [Line] {
+        let room = width ?? .infinity
+        var lines = [Line()]
+        for index in subviews.indices {
+            let ideal = subviews[index].sizeThatFits(.unspecified)
+            let size = ideal.width <= room ? ideal : subviews[index].sizeThatFits(ProposedViewSize(width: room, height: nil))
+            let start = lines[lines.count - 1].items.isEmpty ? 0 : lines[lines.count - 1].width + spacing
+            if start + size.width > room, !lines[lines.count - 1].items.isEmpty { lines.append(Line()) }
+            var line = lines[lines.count - 1]
+            line.width = (line.items.isEmpty ? 0 : line.width + spacing) + size.width
+            line.height = max(line.height, size.height)
+            line.items.append((index, size))
+            lines[lines.count - 1] = line
+        }
+        return lines.filter { !$0.items.isEmpty }
+    }
+}
+
 /// The main line. A new step's words blend into the old ones where they stand.
 private struct Title: View {
     var face: ActivityFace
     var palette: ActivityPalette
     /// The Lock Screen's short cards say Poki's state in large type.
     var large = false
+    /// The lines an approval's sentence may take, where fewer than two are left for it.
+    var lines: Int?
     private let theme = ActivityTheme.current
     var body: some View {
         if face.contentIsCode {
@@ -588,7 +790,7 @@ private struct Title: View {
             Text(face.content)
                 .font(large ? theme.status : stepLike ? theme.step : theme.title).tracking(theme.titleTracking)
                 .foregroundStyle(palette.text.opacity(face.stale ? 0.72 : 1))
-                .lineLimit(asking ? 2 : 1).minimumScaleFactor(large ? 0.65 : 0.8)
+                .lineLimit(asking ? lines ?? 2 : 1).minimumScaleFactor(large ? 0.65 : 0.8)
                 .contentTransition(.interpolate)
                 .frame(height: asking ? nil : large ? 30 : stepLike ? 24 : 25, alignment: .leading)
         }
@@ -695,17 +897,29 @@ private struct Control: View {
             HandoffDoneButton(handoffID: id, surface: surface)
                 .transition(.activityRow)
         case .openPoki:
-            Link(destination: face.link) {
-                Text(String(activity: "Open Poki"))
-                    .font(theme.button)
-                    .foregroundStyle(palette.text)
-                    .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
-                    .background(palette.buttonFill, in: .capsule)
-            }
-            .transition(.activityRow)
+            OpenPokiButton(link: face.link, surface: surface)
+                .transition(.activityRow)
         case .segments(let number, let count):
             SegmentLine(step: number, total: count, palette: palette)
                 .transition(.activityRow)
+        }
+    }
+}
+
+/// Open Poki, at the screen the face links to.
+private struct OpenPokiButton: View {
+    var link: URL
+    var surface: ActivitySurface
+    private let theme = ActivityTheme.current
+    var body: some View {
+        let palette = theme.palette(surface)
+        Link(destination: link) {
+            Text(String(activity: "Open Poki"))
+                .font(theme.button)
+                .foregroundStyle(palette.text)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
+                .background(palette.buttonFill, in: .capsule)
         }
     }
 }

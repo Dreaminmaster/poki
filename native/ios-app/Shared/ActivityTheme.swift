@@ -137,6 +137,8 @@ struct ActivityTheme {
     /// The system's secondary label on black, and its red in dark.
     static let secondary = Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6)
     static let red = Color(hex: 0xFF453A)
+    /// The fill of the tags for money, deletions and protected apps, on the island and the blue card.
+    static let warning = red
     /// The flat blue the card had before its gradient: what the app's previews lay under the card.
     var lockBackground: Color? = Site.boardBlue
     /// The card's palette on its gradient: the fade the bear rises out of takes the gradient's colour.
@@ -183,6 +185,8 @@ struct ActivityTheme {
     var narrowTimer: Font { Self.font("Geist-SemiBold", .semibold, 11).monospacedDigit() }
     var compactCode: Font { Self.font("Geist-Bold", .bold, 13).monospacedDigit() }
     /// Times and countdowns: the text face with tabular digits, as the system writes its timers.
+    /// An approval's kind tag.
+    var tag: Font { Self.font("Geist-SemiBold", .semibold, 11) }
     var value: Font { Self.font("Geist-SemiBold", .semibold, 15).monospacedDigit() }
     /// The pairing code, large.
     var code: Font { Self.font("Geist-Black", .black, 46).monospacedDigit() }

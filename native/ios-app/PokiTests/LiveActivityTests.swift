@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import Poki
 
 @MainActor
@@ -95,6 +96,67 @@ final class LiveActivityTests: XCTestCase {
         let faces = stages.map { PokiState(phase: .idle, headline: $0, thumbnailVersion: 0).face }
         XCTAssertEqual(Set(faces.map(\.content)).count, 1)
         XCTAssertEqual(faces.map(\.subtitle), stages.map { ActivityWords.local($0) })
+    }
+
+    /// A batch the rules saw as a payment and a deletion (a cart's Clear, then Check out) names both
+    /// wherever it is asked, also when the agent wrote no sentence: in the rules' sentence, the
+    /// notification's line, the alert and the tags.
+    func testABatchOfTwoKindsNamesBoth() {
+        let approval = PendingApproval(id: "a", app: "Lunch", summary: "Tap “Clear”, then tap “Check out”",
+                                       reason: "multiple sensitive actions: action 1: deleting (\"clear\"); action 2: a payment (\"check out\")",
+                                       expires: .distantFuture, ask: "In Lunch, pay and delete something", kinds: ["payment", "deleting"])
+        XCTAssertEqual(approval.sentence, "In Lunch, about to pay and delete something")
+        XCTAssertEqual(approval.kindLine, "Payment and Deletion")
+        XCTAssertEqual(approval.alertLine, "Payment and Deletion: In Lunch, about to pay and delete something")
+        XCTAssertEqual(approval.tags.map(\.word), ["Payment", "Deletion"])
+    }
+
+    /// An agent can word a payment as nothing to approve. On the island and the Lock Screen the rules'
+    /// kind stands over its sentence as a tag in the warning colour, and the sentence is only the
+    /// title, never in the kind's place.
+    func testTheRulesKindStandsOverTheAgentsSentence() {
+        var state = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
+        state.approval = PendingApproval(id: "a", app: "Lunch", summary: "Tap “Pay”", reason: "a payment (\"pay\")",
+                                         expires: .now.addingTimeInterval(60), ask: "Payment cancelled, nothing to approve",
+                                         byAgent: true, kinds: ["payment"])
+        let face = state.face
+        XCTAssertEqual(face.tags, [ApprovalTag(word: "Payment", warning: true)])
+        XCTAssertEqual(face.content, "Payment cancelled, nothing to approve")
+        XCTAssertNil(face.subtitle)
+    }
+
+    /// The review's widest pair in English, Deletion and Unchecked step (158 points on one line), where
+    /// the Lock Screen card with its screenshot leaves the tags 115: they take two lines inside the
+    /// width instead of widening the column, which pushed the screenshot and Allow off the card.
+    func testTheTagsWrapInsideTheirWidth() {
+        let tags = PendingApproval(id: "a", app: "Lunch", summary: "", reason: "", expires: .distantFuture, kinds: ["deleting", "unread"]).tags
+        XCTAssertEqual(tags.map(\.word), ["Deletion", "Unchecked step"])
+        let row = UIHostingController(rootView: ApprovalTags(tags: tags, palette: ActivityTheme.current.island))
+        let oneLine = row.sizeThatFits(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity))
+        let narrow = row.sizeThatFits(in: CGSize(width: 115, height: CGFloat.infinity))
+        XCTAssertGreaterThan(oneLine.width, 115)
+        XCTAssertLessThanOrEqual(narrow.width, 115)
+        XCTAssertGreaterThan(narrow.height, oneLine.height + 10)
+    }
+
+    /// Any text an agent can make long (here a plan's title, a hand-off's note and the approval's
+    /// sentence, each one character under 3,000 combining accents: 6 KB) is cut by bytes before an
+    /// update, so the update stays under ActivityKit's 4 KB and the island and its alert come; the
+    /// rules' kinds stay whole and their sentence stands in for the agent's.
+    func testEveryLongTextStillFitsTheLiveActivity() throws {
+        let heavy = "付" + String(repeating: "\u{0301}", count: 3000)
+        var state = PokiState(phase: .approval, headline: heavy, thumbnailVersion: 0)
+        state.plan = .init(steps: [heavy, "Pay"], current: 1, title: heavy, to: heavy)
+        state.label = heavy
+        state.event = .init(kind: .app, text: heavy)
+        state.handoff = .init(id: "h", kind: .payment, text: heavy, app: heavy, since: .now)
+        state.approval = PendingApproval(id: "a", app: "Lunch", summary: heavy, reason: heavy, expires: .distantFuture,
+                                         ask: heavy, byAgent: true, kinds: ["payment", "deleting"])
+        let fitted = state.fitted()
+        XCTAssertLessThanOrEqual(try JSONEncoder().encode(fitted).count, 3_500)
+        XCTAssertEqual(fitted.approval?.kinds, ["payment", "deleting"])
+        XCTAssertEqual(fitted.approval?.sentence, "In Lunch, about to pay and delete something")
+        XCTAssertEqual(fitted.approval?.id, "a")
     }
 
     /// ESP-467: when iOS folds an approval's island back, the compact island says Poki waits for your

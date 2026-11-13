@@ -98,6 +98,19 @@ public enum ApprovalKind: String, Sendable, Equatable, CaseIterable {
     /// The rules could not read what the press does (a screen not read yet, a point that may have moved).
     case unread
 
+    /// What the kind does, to list several in one sentence ("delete something and pay").
+    var verb: String {
+        switch self {
+        case .payment: "pay"
+        case .deleting: "delete something"
+        case .sending: "send a message"
+        case .call: "place a call"
+        case .password: "type a password"
+        case .input: "use a protected app"
+        case .unread: "take a step Poki could not check"
+        }
+    }
+
     public init(reason: String) {
         if reason.hasPrefix("a payment") { self = .payment }
         else if reason.hasPrefix("deleting") { self = .deleting }
@@ -130,6 +143,12 @@ public struct Approval: Sendable, Equatable {
     public var ask: String {
         if let purpose { return purpose }
         let place = app.isEmpty || app == "unknown" || app.contains("(") ? nil : app
+        // Several kinds in one batch: each of them, so a deletion is never hidden behind a payment.
+        if kinds.count > 1 {
+            let verbs = kinds.map(\.verb)
+            let list = verbs.count == 2 ? verbs.joined(separator: " and ") : verbs.dropLast().joined(separator: ", ") + ", and " + verbs[verbs.count - 1]
+            return place.map { "In \($0), \(list)" } ?? list.prefix(1).uppercased() + list.dropFirst()
+        }
         switch kinds.first ?? .unread {
         case .payment: return place.map { "Pay in \($0)" } ?? "Make a payment"
         case .deleting: return place.map { "Delete in \($0)" } ?? "Delete something"
@@ -141,10 +160,37 @@ public struct Approval: Sendable, Equatable {
         }
     }
 
-    /// The agent's sentence as the owner reads it: its first line, at most 120 characters; nil when empty.
+    /// At most this many UTF-8 bytes of the agent's sentence: it rides in every Live Activity update
+    /// while the approval waits, and ActivityKit refuses an update over 4 KB, island and alert with it.
+    static let purposeBytes = 360
+
+    /// The agent's sentence as the owner reads it: its first line without control or format characters
+    /// (direction overrides among them) and with at most two combining marks on a character, at most
+    /// 120 characters and `purposeBytes` bytes; nil when nothing is left.
     static func purpose(_ text: String?) -> String? {
-        guard let line = text?.split(whereSeparator: \.isNewline).first?.trimmingCharacters(in: .whitespaces), !line.isEmpty else { return nil }
-        return line.count > 120 ? String(line.prefix(119)) + "…" : line
+        guard let first = text?.split(whereSeparator: \.isNewline).first else { return nil }
+        var clean = String.UnicodeScalarView()
+        var marks = 0
+        for scalar in first.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator: continue
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                marks += 1
+                if marks > 2 { continue }
+            default: marks = 0
+            }
+            clean.append(scalar)
+        }
+        let line = String(clean).trimmingCharacters(in: .whitespaces)
+        guard !line.isEmpty else { return nil }
+        let ellipsis = "…"
+        if line.count <= 120, line.utf8.count <= purposeBytes { return line }
+        var cut = ""
+        for character in line {
+            guard cut.count < 119, cut.utf8.count + character.utf8.count + ellipsis.utf8.count <= purposeBytes else { break }
+            cut.append(character)
+        }
+        return cut.trimmingCharacters(in: .whitespaces) + ellipsis
     }
 }
 

@@ -32,17 +32,23 @@ enum ApprovalNotice {
     }
 
     static func post(_ approval: PendingApproval, caller: String? = nil) {
+        let request = UNNotificationRequest(identifier: "approval-\(approval.id)", content: content(approval, caller: caller), trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// What the notification says and carries.
+    static func content(_ approval: PendingApproval, caller: String? = nil) -> UNNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = caller.map { String(localized: "\($0) needs your OK") } ?? StatusWord.needsApproval.text
-        content.body = approval.sentence
-        if let kinds = approval.kindLine { content.subtitle = kinds }
+        // The kinds lead the body ("Payment and Deletion: …"): the banner cuts a long body at its end,
+        // and a subtitle is not shown everywhere the body is.
+        content.body = approval.alertLine
         content.categoryIdentifier = category
         content.userInfo = ["approval": approval.id]
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = "approvals"
-        let request = UNNotificationRequest(identifier: "approval-\(approval.id)", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        return content
     }
 
     static func clear(_ id: String) {

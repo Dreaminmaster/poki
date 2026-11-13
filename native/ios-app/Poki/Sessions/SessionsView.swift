@@ -466,9 +466,7 @@ struct SessionView: View {
                     if session?.live == true, let approval = model.approvals.first {
                         // A message of the handed-over task: who it goes to and the words, as in the chat.
                         let words = running?.askWords[approval.id]
-                        ApprovalAskCard(title: words?.title ?? approval.sentence, detail: words?.detail ?? approval.kindLine ?? "",
-                                        quote: words?.quote ?? "", expires: approval.expires,
-                                        answer: { approved in model.resolve(approval, approved: approved) })
+                        ApprovalAskCard(approval: approval, words: words, answer: { approved in model.resolve(approval, approved: approved) })
                     } else if session?.live == true, let text = model.handoffText {
                         TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
                     }

@@ -30663,6 +30663,23 @@
           }
         }
       }
+    },
+    "Payment cancelled, nothing to approve" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "付款已取消，无需批准"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "付款已取消，無需批准"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
