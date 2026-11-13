@@ -5,6 +5,21 @@ import XCTest
 /// last saw in front was kept, and that reading could be an app the phone had been in before.
 @MainActor
 final class TaskAppsTests: XCTestCase {
+    func testBrowserIconsStayWithTheirOwnRequest() throws {
+        let entries = [
+            ChatEntry(.you("Read a website", delivered: true)),
+            ChatEntry(.browser(BrowserVisit())), ChatEntry(.plan([])),
+            ChatEntry(.poki("First answer")),
+            ChatEntry(.request("Read another website", from: "Codex")),
+            ChatEntry(.plan([])), ChatEntry(.browser(BrowserVisit())),
+            ChatEntry(.you("Answer without tools", delivered: true)), ChatEntry(.plan([]))
+        ]
+        let restored = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(entries))
+        XCTAssertTrue(ChatEntry.taskUsedBrowser(in: restored, at: 2))
+        XCTAssertTrue(ChatEntry.taskUsedBrowser(in: restored, at: 5))
+        XCTAssertFalse(ChatEntry.taskUsedBrowser(in: restored, at: 8), "The previous task's browser does not give this card a globe")
+    }
+
     private let meituan = "com.meituan.itakeaway", notes = "com.apple.mobilenotes", settings = "com.apple.Preferences"
 
     private func task(launching launched: [String] = [], steps: [String?]) -> TaskApps {

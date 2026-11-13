@@ -22,7 +22,7 @@ struct AllStepsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(model.currentApp ?? String(localized: "History"))
+        .navigationTitle(AppName.display(model.currentApp) ?? String(localized: "History"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -50,7 +50,7 @@ struct AllStepsView: View {
         }
         for step in model.recentSteps.reversed() {
             let failure = step.failure.map { Bundle.main.localizedString(forKey: $0, value: $0, table: nil) }.map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            out.append(Row(text: step.text, detail: failure ?? step.app ?? String(localized: "Done"), failed: !step.ok, at: step.at))
+            out.append(Row(text: step.text, detail: failure ?? AppName.display(step.app) ?? String(localized: "Done"), failed: !step.ok, at: step.at))
         }
         return out
     }

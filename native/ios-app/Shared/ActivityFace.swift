@@ -180,7 +180,7 @@ extension PokiState {
     /// Where and how long a finished run took: "Done in Messages, took 1:24". Never a count of steps,
     /// which an agent changes as it goes.
     var runSummary: String? {
-        let place = app.flatMap { $0.isEmpty || $0 == "unknown" ? nil : ActivityWords.local($0) }
+        let place = AppName.display(app)
         let time = since.flatMap { since in endedAt.map { Duration.seconds(max(0, $0.timeIntervalSince(since))).formatted(.time(pattern: .minuteSecond)) } }
         switch (place, time) {
         case let (place?, time?): return String(activity: "Finished in \(place), took \(time)")
@@ -261,7 +261,7 @@ extension PokiState {
         switch phase {
         case .working:
             let inApp = app.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
-            let name = inApp.map { ActivityWords.local($0) } ?? (voice != nil ? String(activity: "Voice") : nil)
+            let name = AppName.display(inApp) ?? (voice != nil ? String(activity: "Voice") : nil)
             return ActivityFace(
                 symbol: voice != nil ? "waveform" : "hand.tap.fill",
                 bear: .phone, size: .working,
