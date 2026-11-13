@@ -3644,50 +3644,50 @@
         }
       }
     },
-    "Good afternoon. Need help?" : {
+    "Good afternoon." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下午好，要我办点什么？"
+            "value" : "下午好。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "午安，要我辦點什麼？"
+            "value" : "午安。"
           }
         }
       }
     },
-    "Good evening. Anything left?" : {
+    "Good evening." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "晚上好，还有什么要办？"
+            "value" : "晚上好。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "晚上好，還有什麼要辦？"
+            "value" : "晚上好。"
           }
         }
       }
     },
-    "Good morning. Need a hand?" : {
+    "Good morning." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "早安，今天办点什么？"
+            "value" : "早上好。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "早安，今天辦點什麼？"
+            "value" : "早安。"
           }
         }
       }
@@ -12300,18 +12300,34 @@
         }
       }
     },
-    "Up late? Leave it to me" : {
+    "Up late." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜深了，有事交给我"
+            "value" : "夜深了。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "夜深了，有事交給我"
+            "value" : "夜深了。"
+          }
+        }
+      }
+    },
+    "What should Poki do?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要 Poki 做什么？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要 Poki 做什麼？"
           }
         }
       }

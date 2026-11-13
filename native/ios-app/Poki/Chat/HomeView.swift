@@ -324,21 +324,50 @@ enum HomeIdea {
     }
 }
 
-/// The home page's one line for the time of day (ESP-474), as a chat app greets you: morning from 5,
-/// afternoon from 11, evening from 18, late from 23.
+/// The home page's greeting (ESP-474): a hello for the time of day, as a chat app greets you (morning
+/// from 5, afternoon from 11, evening from 18, late from 23), and what Poki should do under it.
 enum HomeGreeting {
-    static func line(at date: Date = .now, calendar: Calendar = .current) -> String {
+    static func hello(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
-        case 5..<11: String(localized: "Good morning. Need a hand?")
-        case 11..<18: String(localized: "Good afternoon. Need help?")
-        case 18..<23: String(localized: "Good evening. Anything left?")
-        default: String(localized: "Up late? Leave it to me")
+        case 5..<11: String(localized: "Good morning.")
+        case 11..<18: String(localized: "Good afternoon.")
+        case 18..<23: String(localized: "Good evening.")
+        default: String(localized: "Up late.")
         }
+    }
+
+    /// The line under the hello, the same at any hour.
+    static var ask: String { String(localized: "What should Poki do?") }
+}
+
+/// The greeting as the home page draws it, for the time `date` falls in: the hello in ink and the
+/// question in grey under it, centred under Poki's picture. System Semibold 28 tracked in by 0.6,
+/// with no space between the lines.
+struct HomeGreetingView: View {
+    var date: Date
+    @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .title) private var size: CGFloat = 28
+
+    var body: some View {
+        let dark = scheme == .dark
+        VStack(spacing: 0) {
+            Text(verbatim: HomeGreeting.hello(at: date))
+                .foregroundStyle(dark ? Color(hex: 0xF4F4F1) : Color(hex: 0x111110))
+            // One line at any type size: at the largest sizes two lines of it reach down to the pills.
+            Text(verbatim: HomeGreeting.ask)
+                .foregroundStyle(dark ? Color(hex: 0x8D8D87) : Color(hex: 0x6F6F69))
+                .lineLimit(1).minimumScaleFactor(0.5)
+        }
+        .font(.system(size: size, weight: .semibold))
+        .tracking(-0.6 * size / 28)
+        .multilineTextAlignment(.center)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// The home page, before your first message (board 定稿 01): under Poki's picture at the top, one
-/// line of greeting for the time of day a little above the middle, and things you could ask as two
+/// The home page, before your first message (board 定稿 01): under Poki's picture at the top, two
+/// lines of greeting a little above the middle, and things you could ask as two
 /// rows of glass pills over the message field. A pill fills the message field; nothing is sent until
 /// you send it.
 struct HomePage<Footer: View>: View {
@@ -351,15 +380,11 @@ struct HomePage<Footer: View>: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.coveredByDrawer) private var covered
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
-    @Environment(\.colorScheme) private var scheme
     private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
-    @State private var greeting = HomeGreeting.line()
+    @State private var greetedAt = Date.now
     /// A pill's Forget menu is open: both rows stand still under it.
     @State private var menuOpen = false
-    /// The board's greeting: PingFang Semibold 30 on 36, tracked in by 2 %, 184 points under the top bar.
-    @ScaledMetric(relativeTo: .title) private var greetingSize: CGFloat = 30
-    @ScaledMetric(relativeTo: .title) private var greetingLine: CGFloat = 36
 
     var body: some View {
         GeometryReader { geometry in
@@ -370,14 +395,7 @@ struct HomePage<Footer: View>: View {
                         Color.clear.frame(width: HomeMotion.homeAvatar, height: HomeMotion.homeAvatar)
                             .picturePlace(.home)
                             .padding(.bottom, 4)
-                        // One line in Chinese on the narrowest iPhone; English may take two.
-                        Text(verbatim: greeting)
-                            .font(.custom("PingFangSC-Semibold", size: greetingSize))
-                            .tracking(-0.02 * greetingSize)
-                            .lineSpacing(greetingLine - greetingSize * 1.2)
-                            .foregroundStyle(scheme == .dark ? Color(hex: 0xF2F4F7) : Color(hex: 0x16181B))
-                            .lineLimit(2).minimumScaleFactor(0.7)
-                            .accessibilityAddTraits(.isHeader)
+                        HomeGreetingView(date: greetedAt)
                         footer()
                     }
                     .multilineTextAlignment(.center)
@@ -387,7 +405,7 @@ struct HomePage<Footer: View>: View {
                     .padding(.top, writing ? 24 : max(24, min(112, geometry.size.height * 0.29 - 72)))
                     .opacity(home ? 1 : 0)
                     .animation(HomeMotion.words(home, reduceMotion), value: home)
-                    .onChange(of: home) { _, shown in if shown { greeting = HomeGreeting.line() } }
+                    .onChange(of: home) { _, shown in if shown { greetedAt = .now } }
 
                     Spacer(minLength: 24)
                     if !writing {
