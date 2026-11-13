@@ -3,7 +3,8 @@ import UIKit
 
 // Speaking to Poki from the message field. The interaction is pull request #250's: the empty field's
 // one button offers Dictate and Talk with Poki, a talk goes on in the chat with the field as its bar,
-// and Talk with Poki without an OpenAI key says what it needs. The code and the look are this app's:
+// and Talk with Poki without a voice key says so, with a button to the key's form in Settings. The
+// old Voice page no longer opens from anywhere a person can reach. The code and the look are this app's:
 // glass, Poki's blue and its brand band, the bear's own pictures, the system's type.
 
 /// What the ways-to-speak panel shows.
@@ -51,16 +52,19 @@ struct VoiceWaysPanel: View {
         }
     }
 
-    /// No OpenAI key: Talk with Poki says what it needs and goes to Settings › Model to add it.
+    /// No voice key: Talk with Poki says so and goes straight to the OpenAI key's form in Settings. With
+    /// the key there but Live Voice turned off, it says that and goes to Live Voice.
     private var needsKey: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let off = ModelKeys.hasKey(.openai) && !VoiceDirect.enabled
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "key.fill").font(.body.weight(.semibold)).foregroundStyle(.white)
                     .frame(width: 44, height: 44).background(BrandBand.diagonal, in: .circle)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Talk with Poki needs an OpenAI API key").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    Text("Add your key in Settings › Model. Dictate works without one.")
+                    Text(off ? LocalizedStringKey("Live Voice Is Off") : LocalizedStringKey("No Voice Key Set Up")).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                    Text(off ? LocalizedStringKey("Talk with Poki uses Live Voice on your OpenAI account. Turn it on in Settings. Dictate works without it.")
+                             : LocalizedStringKey("Talk with Poki needs an OpenAI API key. Add one in Settings. Dictate works without it."))
                         .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -75,7 +79,7 @@ struct VoiceWaysPanel: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("composer.speak.later")
                 Button(action: addKey) {
-                    Text("Add Key").font(.body.weight(.semibold)).foregroundStyle(.white)
+                    Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.body.weight(.semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 18).frame(height: 44)
                         .background(Tint.blue, in: .capsule)
                 }
@@ -157,6 +161,7 @@ struct TalkBar: View {
             .accessibilityIdentifier("composer.talk.end")
         }
         .frame(minHeight: 48)
+        .onAppear { MeasureProbe.reached("voice") }
     }
 }
 

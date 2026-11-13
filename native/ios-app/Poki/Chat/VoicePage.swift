@@ -31,6 +31,7 @@ struct VoicePage: View {
         }
         .background((face == .listening ? Color(hex: 0x123A9C) : Site.blue).ignoresSafeArea())
         .animation(.snappy, value: face)
+        .onAppear { MeasureProbe.reached("voice") }
     }
 
     private var currentFace: Face {

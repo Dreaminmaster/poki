@@ -666,22 +666,6 @@
         }
       }
     },
-    "Add your key in Settings › Model. Dictate works without one." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在「设置 › 模型」里添加密钥。听写不需要密钥。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在「設定 › 模型」裡新增金鑰。聽寫不需要金鑰。"
-          }
-        }
-      }
-    },
     "ADDRESSES" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4685,6 +4669,22 @@
         }
       }
     },
+    "Live Voice Is Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音已关闭"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "實時語音已關閉"
+          }
+        }
+      }
+    },
     "LOCAL CONNECTION" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5846,6 +5846,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有代理 App？請安裝專為此設計的免費迴環 App LocalDevVPN。"
+          }
+        }
+      }
+    },
+    "No Voice Key Set Up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有配置语音密钥"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有設定語音金鑰"
           }
         }
       }
@@ -10661,18 +10677,34 @@
         }
       }
     },
-    "Talk with Poki needs an OpenAI API key" : {
+    "Talk with Poki needs an OpenAI API key. Add one in Settings. Dictate works without it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "和 Poki 对话需要 OpenAI API 密钥"
+            "value" : "和 Poki 对话需要 OpenAI API 密钥，请在设置里添加。听写不需要密钥。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "和 Poki 對話需要 OpenAI API 金鑰"
+            "value" : "和 Poki 對話需要 OpenAI API 金鑰，請在設定裡新增。聽寫不需要金鑰。"
+          }
+        }
+      }
+    },
+    "Talk with Poki uses Live Voice on your OpenAI account. Turn it on in Settings. Dictate works without it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 对话用的是 OpenAI 账户的实时语音，请在设置里打开。听写不需要它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "和 Poki 對話用的是 OpenAI 帳戶的實時語音，請在設定裡開啟。聽寫不需要它。"
           }
         }
       }

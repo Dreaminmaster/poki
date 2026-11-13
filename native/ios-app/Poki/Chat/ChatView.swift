@@ -18,6 +18,8 @@ struct ChatView: View {
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
+    /// Opens where the OpenAI key for Talk with Poki goes: the key's form, or Live Voice when it is off.
+    var openVoiceKey: () -> Void = {}
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)? = nil
     /// Opens External Agents, from the home page's hint.
@@ -139,7 +141,7 @@ struct ChatView: View {
                 asks
                 BrowserPanel()
                 ComposerInputView(input: $draft, focused: $writing, running: busy, progress: progress,
-                                  send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openModel: openModel)
+                                  send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey)
             }
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
             .frame(maxWidth: 720) }
@@ -1166,8 +1168,8 @@ struct ComposerInputView: View {
     var stop: () -> Void
     /// Starts the live voice conversation.
     var openVoice: () -> Void
-    /// Settings › Model, where the OpenAI key that Talk with Poki needs is added.
-    var openModel: () -> Void = {}
+    /// Settings, where the OpenAI key that Talk with Poki needs is added (or Live Voice turned on).
+    var openVoiceKey: () -> Void = {}
     @State private var dictation = FieldDictation()
     /// The ways to speak, open over the message field.
     @State private var ways: VoiceWays?
@@ -1210,7 +1212,7 @@ struct ComposerInputView: View {
                     if voice.canTalkLive { self.ways = nil; openVoice() } else { self.ways = .needsKey }
                 }, addKey: {
                     self.ways = nil
-                    openModel()
+                    openVoiceKey()
                 }, close: { self.ways = nil })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -1251,6 +1253,13 @@ struct ComposerInputView: View {
         .animation(.snappy, value: voice.isOn)
         .animation(.snappy, value: ways)
         .onChange(of: voice.isOn, initial: true) { _, on in talkStarted = on ? Date() : nil }
+        // Asked for from a link or Poki's profile: the ways to speak, or what Talk with Poki is missing.
+        .onChange(of: voice.waysAsked, initial: true) { _, asked in
+            guard let asked else { return }
+            voice.waysAsked = nil
+            focused = false
+            ways = asked
+        }
         // Writing, a task starting, or a talk starting elsewhere puts the ways to speak away.
         .onChange(of: input) { _, text in if !text.isEmpty, !dictation.on { ways = nil } }
         .onChange(of: focused) { _, now in if now { ways = nil } }
@@ -1291,7 +1300,7 @@ struct ComposerInputView: View {
         #if DEBUG && targetEnvironment(simulator)
         .onAppear { if let item = TestAttachment.take() { attachments.append(item) } }
         // Screenshots of talking, from a simulator's development build: `-pokiTalk ways` (the two ways to
-        // speak), `needs-key` (Talk with Poki without a key), `talk` (a talk under way; with
+        // speak), `needs-key` (Talk with Poki without a key), `add-key` (where its Add Key leads), `talk` (a talk under way; with
         // `-pokiTalkRehearsal 1` it runs TalkRehearsal's turn) and `ended` (that talk, ended by End).
         .task {
             guard let shot = UserDefaults.standard.string(forKey: "pokiTalk") else { return }
@@ -1299,6 +1308,7 @@ struct ComposerInputView: View {
             switch shot {
             case "ways": ways = .choose
             case "needs-key": ways = .needsKey
+            case "add-key": openVoiceKey()
             case "talk": openVoice()
             case "ended":
                 openVoice()
