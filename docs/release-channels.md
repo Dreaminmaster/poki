@@ -7,7 +7,7 @@ releases Poki Setup installs and renews with.
 | Channel | Tag | Title | GitHub release | Who it is for |
 | --- | --- | --- | --- | --- |
 | Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release | everyone |
-| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease | testers |
+| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease, which can be made a full release marked Latest | testers |
 | Alpha | `app-X.Y.Z-alpha.N` | Poki v0.3.0 (712) Alpha | rolling `app-alpha-latest`, prerelease | early testers |
 | Pre-alpha | `app-X.Y.Z-prealpha.N` | Poki v0.3.0 (712) Pre-alpha | rolling `app-prealpha-latest`, prerelease | developers |
 
@@ -29,9 +29,10 @@ an existing user's channel.
 ## When GitHub refuses the release list
 
 Poki Setup, the checkout installer and the iPhone app read the release list from `api.github.com`
-without signing in. GitHub limits these anonymous requests per network address, 60 an hour, and
-everyone behind the same address shares that limit. Over it, GitHub answers 403 or 429, and the
-error reads `Could not read Poki's releases from GitHub` with the status. The phone shows Not Found
+without signing in. GitHub limits these anonymous requests per network address, and everyone
+behind the same address shares that limit. Over it, GitHub answers 403 or 429, and the error reads
+`Could not read Poki's releases from GitHub` with the status. The error does not say whether it was
+the limit or another refusal, but a 403 or 429 here is usually the limit. The phone shows Not Found
 as the newest version on its channel instead.
 
 Retrying at once does not help, because each attempt is another request against the same limit. Switch to

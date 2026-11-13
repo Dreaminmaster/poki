@@ -4,6 +4,8 @@ For remote access, see [Remote iPhone over LAN or Tailscale](remote-iphone.md). 
 
 Physical iPhone support has been verified only with the Chinese interface in portrait orientation. Read the [verification record and known limits](verification.md) first.
 
+This page pairs an iPhone with Poki MCP on a Mac. The Poki app on the iPhone is installed with the [install-poki skill](../skills/install-poki/SKILL.md) or Poki Setup and does not need Xcode.
+
 Run `./bin/setup` first. It needs full Xcode and the Rust toolchain, and you do not need to set any environment variables. See the [requirements](install.md#requirements).
 
 ## First-Time USB Preparation

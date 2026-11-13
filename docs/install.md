@@ -1,6 +1,6 @@
 # Install
 
-This guide installs Poki MCP from source, which needs full Xcode. To put the Poki app on an iPhone,
+This guide installs Poki MCP from source, which needs full Xcode. Poki MCP is no longer updated and stays available as it is. To put the Poki app on an iPhone,
 use the [install-poki skill](../skills/install-poki/SKILL.md) or Poki Setup instead, as the
 [README](../README.md#install-poki-on-your-iphone) describes; that path does not need Xcode.
 
@@ -42,7 +42,7 @@ Setup does **not** install Xcode, developer disk images, device profiles, or sig
 
 Keep `npm start` running while using an MCP client:
 
-- The daemon listens on `127.0.0.1:47825` by default, so it is not exposed to external networks and is not registered as a login item. `POKI_BIND_HOST` and `POKI_HOST_ALLOW` can move it onto a LAN or tailnet — see [Configuration](configuration.md).
+- The daemon listens on `127.0.0.1:47825` by default, so it is not exposed to external networks and is not registered as a login item. `POKI_BIND_HOST` and `POKI_HOST_ALLOW` can move it onto a LAN or tailnet; see [Configuration](configuration.md).
 - Its endpoint and bearer token are written to `~/Library/Application Support/PokiMCP/mcp.json` (`0600`) and removed on normal shutdown.
 - The stdio wrapper (`src/stdio.mjs`) connects to this running daemon; it does not auto-start the service.
 
