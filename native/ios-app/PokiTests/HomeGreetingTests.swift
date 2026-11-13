@@ -11,6 +11,9 @@ final class HomeGreetingTests: XCTestCase {
     }
 
     func testTheHelloFollowsTheTimeOfDay() {
+        let previous = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = previous }
         XCTAssertEqual(HomeGreeting.hello(at: at(8)), "Good morning.")
         XCTAssertEqual(HomeGreeting.hello(at: at(15)), "Good afternoon.")
         XCTAssertEqual(HomeGreeting.hello(at: at(20)), "Good evening.")
@@ -19,6 +22,9 @@ final class HomeGreetingTests: XCTestCase {
 
     /// In Chinese the hello runs on into the question with a comma, not a full stop: 「下午好，需要 Poki 做什么？」.
     func testTheChineseHelloEndsWithAComma() throws {
+        let previous = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = previous }
         for language in ["zh-Hans", "zh-Hant"] {
             let path = try XCTUnwrap(Bundle.main.path(forResource: language, ofType: "lproj"), language)
             let bundle = try XCTUnwrap(Bundle(path: path))
@@ -32,6 +38,9 @@ final class HomeGreetingTests: XCTestCase {
     /// Drawn as the home page draws it, in light and in dark: two lines of type with a gap between,
     /// the first in ink and the second in the grey.
     func testTheGreetingIsTwoLinesTheSecondInGrey() throws {
+        let previous = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = previous }
         let schemes: [(ColorScheme, ink: UInt32, grey: UInt32)] = [(.light, 0x111110, 0x6F6F69), (.dark, 0xF4F4F1, 0x8D8D87)]
         for (scheme, ink, grey) in schemes {
             let renderer = ImageRenderer(content: HomeGreetingView(date: at(15))
