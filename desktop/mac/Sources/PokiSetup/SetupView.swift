@@ -29,10 +29,7 @@ struct SetupView: View {
             if let result { resultSection(result) }
         }
         .pokiPage()
-        .task {
-            await model.refreshChannels()
-            await model.refreshPreviews()
-        }
+        .task { await model.refreshChannels() }
         .alert("Replace the Certificate?", isPresented: Binding(get: { certificateQuestion != nil }, set: { if !$0 { certificateQuestion = nil } })) {
             Button("Replace Certificate", role: .destructive) {
                 Task {
@@ -222,20 +219,6 @@ struct SetupView: View {
                 Text(installLine)
             }
             .disabled(ipa != nil)
-            // A pull request's preview build instead of the channel's release (GitHub Account,
-            // Preview Builds).
-            if model.previews.enabled {
-                Picker(selection: Binding(get: { model.previews.selected ?? 0 }, set: { pr in Task { await model.setPreview(pr == 0 ? nil : pr) } })) {
-                    Text("None").tag(0)
-                    ForEach(model.previews.builds, id: \.tag) { r in
-                        if let p = r.preview { Text(verbatim: "PR \(p.pr)   \(r.version) (\(r.build))   \(p.title)").tag(p.pr) }
-                    }
-                } label: {
-                    Text("Preview Build")
-                    Text(model.previews.builds.isEmpty ? "No pull request has a preview build" : "Not on any channel, for testing a pull request")
-                }
-                .disabled(ipa != nil)
-            }
             // Poki Setup itself.
             LabeledContent {
                 if let u = model.update, u.newer {
@@ -299,7 +282,6 @@ struct SetupView: View {
 
     /// The release Install will use; says so when the chosen channel has none and a less stable one stands in.
     private func buildLine(_ r: Release) -> String {
-        if let p = r.preview { return "Preview of PR \(p.pr), \(r.version) (\(r.build))" }
         let id = r.channel ?? model.channel?.id ?? ""
         let title = model.channels.first(where: { $0.id == id })?.title ?? id.capitalized
         if let chosen = model.channel, !id.isEmpty, chosen.id != id {

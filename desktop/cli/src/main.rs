@@ -182,15 +182,6 @@ enum Cmd {
         /// The channel to use from now on.
         set: Option<String>,
     },
-    /// Preview builds of pull requests, for maintainers: they are on no channel. With no argument,
-    /// lists them. `on` or `off` turns them on or off, a pull request number chooses its build for
-    /// installs and renewals, and `none` goes back to the channel. They need a GitHub sign-in:
-    /// `sign-in` shows a code to enter on github.com, `sign-out` forgets it (and turns previews
-    /// off), and `token` reads a token from standard input instead.
-    Preview {
-        /// sign-in, sign-out, on, off, none, token, or a pull request number.
-        set: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -647,64 +638,6 @@ async fn run() -> Result<()> {
             release::set_channel(name.parse()?)?;
             println!("Channel: {}", release::channel().title());
             Ok(())
-        }
-        Cmd::Preview { set } => {
-            match set.as_deref().map(|s| s.trim().trim_start_matches('#').to_ascii_lowercase()).as_deref() {
-                None => {}
-                Some("on") => release::set_preview_switch(true)?,
-                Some("off") => release::set_preview_switch(false)?,
-                Some("none") => release::set_preview(None)?,
-                Some("token") => {
-                    let mut line = String::new();
-                    std::io::stdin().read_line(&mut line)?;
-                    if line.trim().is_empty() {
-                        anyhow::bail!("No token on standard input.");
-                    }
-                    release::set_github_token(&line)?;
-                }
-                Some("sign-out") | Some("forget-token") => release::set_github_token("")?,
-                Some("sign-in") => {
-                    let pending = release::github_sign_in_start().await?;
-                    eprintln!("Open {} and enter the code {}", pending.verification_uri, pending.user_code);
-                    let login = release::github_sign_in_finish(&pending).await?;
-                    eprintln!("Signed in to GitHub{}.", if login.is_empty() { String::new() } else { format!(" as {login}") });
-                }
-                Some(n) => {
-                    let pr: u64 = n.parse().ok().filter(|n| *n > 0).context("use sign-in, sign-out, on, off, none, token, or a pull request number")?;
-                    if !release::previews_enabled() {
-                        anyhow::bail!("Preview builds are off. Sign in with `poki-setup preview sign-in`, then turn them on with `poki-setup preview on`.");
-                    }
-                    let state = release::previews().await?;
-                    if !state.builds.iter().any(|r| r.preview.as_ref().map(|p| p.pr) == Some(pr)) {
-                        anyhow::bail!("Pull request {pr} has no preview build. Add the preview label to it, wait for its build, then try again.");
-                    }
-                    release::set_preview(Some(pr))?;
-                }
-            }
-            let state = release::previews().await?;
-            out(cli.json, &state, |state| {
-                match (&state.github_login, state.has_token) {
-                    (Some(login), _) => println!("GitHub: signed in as {login}"),
-                    (None, true) => println!("GitHub: a token is saved"),
-                    (None, false) => println!("GitHub: not signed in. Sign in with: poki-setup preview sign-in"),
-                }
-                if !state.enabled {
-                    println!("Preview builds are off. Turn them on with: poki-setup preview on");
-                    return;
-                }
-                if state.builds.is_empty() {
-                    println!("No pull request has a preview build.");
-                }
-                for r in &state.builds {
-                    let Some(p) = &r.preview else { continue };
-                    let sha: String = p.sha.chars().take(7).collect();
-                    println!("{} PR {:<5} Poki {} ({})  {}  {}", if state.selected == Some(p.pr) { "*" } else { " " }, p.pr, r.version, r.build, sha, p.title);
-                }
-                match state.selected {
-                    Some(pr) => println!("Installs and renewals use the preview build of pull request {pr}."),
-                    None => println!("Installs and renewals use the {} channel.", release::channel().title()),
-                }
-            })
         }
     }
 }
