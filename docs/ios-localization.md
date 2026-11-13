@@ -33,7 +33,7 @@ its creation-time language. System-owned permission prompts and pickers remain c
   languages, preserving Dynamic Type and glyph coverage. Existing navigation bars update their
   fonts in place, without replacing controllers.
 
-User/model messages, task plans, app/account names, diagnostic logs and recorded conversation text
+User/model messages, task plans, user-supplied app/account names, diagnostic logs and recorded conversation text
 remain content in their original language. Only the current untouched introduction has retained
 in-memory UI identity and can be reworded on a language change; its entry IDs, timestamps and session
 ID stay intact. Opening a saved conversation does not translate its history. UI language does not

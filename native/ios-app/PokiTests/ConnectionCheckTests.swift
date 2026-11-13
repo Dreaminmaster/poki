@@ -64,6 +64,10 @@ final class ConnectionCheckTests: XCTestCase {
         let late = await check(nil)
         XCTAssertEqual(late.words, "No answer within 10 seconds. Check the address and the network, then try again.")
 
+        AppLocalization.shared.preference = "zh-Hant"
+        XCTAssertEqual(works.words, "連線正常，回應模型：house-model-2026-11")
+        XCTAssertEqual(rejected.words, "金鑰無效，請確認金鑰已完整複製。")
+
         for result in [works, rejected, noModel, late] {
             XCTAssertFalse(result.words.contains(key))
             XCTAssertFalse(result.detail?.contains(key) ?? false)

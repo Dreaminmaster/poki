@@ -174,7 +174,7 @@ struct ActivityPreview: View {
         planNext.plan?.current = 2
         planNext.failedSteps = [1]
         var planDone = done
-        planDone.plan = .init(steps: steps, current: 2, title: String(localized: "Text Mom"))
+        planDone.plan = .init(steps: steps, current: 2, title: AppLocalization.text("Text Mom"))
 
         var ready = PokiState(phase: .idle, headline: "Waiting for agent", thumbnailVersion: 0)
         var idle = PokiState(phase: .idle, headline: "Runner asleep", thumbnailVersion: 0)

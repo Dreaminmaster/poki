@@ -1,5 +1,8 @@
 import Foundation
 
+// The standalone signer fixture has no iOS App Group.
+enum SharedContainer { static let defaults = UserDefaults.standard }
+
 final class Timer: @unchecked Sendable {
     nonisolated(unsafe) static var now: TimeInterval = 0
     nonisolated(unsafe) static var pending: [Timer] = []
