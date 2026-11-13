@@ -74,8 +74,30 @@ final class LookDoTests: XCTestCase {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": [200, 900]]]])
+        XCTAssertTrue(result.isError, result.text)
         XCTAssertTrue(result.text.contains("not_hittable: [200, 900] is off the screen (390x844 points)"), result.text)
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testInvalidActionArraysAreRejectedBeforeAnyActionRuns() async {
+        let (core, wda, _) = makeCore()
+        let invalid: [JSON] = [
+            [:], ["actions": "oops"], ["actions": [7]],
+            ["actions": .array(Array(repeating: ["tap": [100, 100]], count: 21))],
+        ]
+        for args in invalid {
+            let result = await core.call("do", args)
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("nothing was sent"), result.text)
+        }
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testNegativeWaitIsAnActionError() async {
+        let (core, _, _) = makeCore()
+        let result = await core.call("do", ["actions": [["wait": -5]]])
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("wait takes nonnegative milliseconds"), result.text)
     }
 
     func testASwipeStartsInsideTheListClearOfTheReplyBarAsAQuickFlick() async {
@@ -139,6 +161,16 @@ final class LookDoTests: XCTestCase {
         wda.set("GET /screenshot") { _ in (200, ["value": .string(Data("png2".utf8).base64EncodedString())]) }
         let picture = await core.call("do", ["actions": [["tap": [200, 400]]]])
         XCTAssertTrue(picture.text.contains("screen_changed: true (only the picture changed"), picture.text)
+    }
+
+    func testCoordinatePauseExplainsWhyEvenWhenScreenDidNotChange() async {
+        let (core, wda, _) = makeCore()
+        wda.source([("Button", "Already selected")])
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["tap": [100, 120]], ["tap": [100, 120]]]])
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
+        XCTAssertTrue(result.text.contains("screen_changed: false"), result.text)
+        XCTAssertTrue(result.text.contains("not_sent from action 2: a coordinate action needs a fresh read"), result.text)
     }
 
     func testNumbersStayAndDoListsOnlyWhatChanged() async {

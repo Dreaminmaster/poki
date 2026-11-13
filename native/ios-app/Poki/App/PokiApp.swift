@@ -91,11 +91,10 @@ struct RootView: View {
         detailsOpen = true
     }
 
-    private func sessions(split: Bool) -> some View {
+    private var sessions: some View {
         SessionsView(
             openChat: { show(.chat) },
-            openSession: { show(.session($0)) },
-            openFix: { fix($0, split: split) }
+            openSession: { show(.session($0)) }
         )
     }
 
@@ -166,7 +165,7 @@ struct RootView: View {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
-                NavigationStack { sessions(split: true) }
+                NavigationStack { sessions }
                     .frame(width: 375)
                 Divider().ignoresSafeArea()
                 NavigationStack {
@@ -180,7 +179,7 @@ struct RootView: View {
                     .navigationDestination(for: HomeRoute.self) { destination($0, split: false) }
                     .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
             }
-            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions(split: false) }
+            .threadsDrawer(isOpen: $threadsOpen, enabled: home.isEmpty) { sessions }
         }
     }
 
@@ -221,7 +220,13 @@ struct RootView: View {
     }
 
     var body: some View {
-        navigation
+        Group {
+            if let message = model.signer.installMessage {
+                UpdateFinishView(message: message, needsReopen: model.signer.needsReopen)
+            } else {
+                navigation
+            }
+        }
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
@@ -232,7 +237,6 @@ struct RootView: View {
         } message: { ask in
             Text("\(ask.client) is signing in through \(ask.connector) and returns to \(ask.callback), which isn’t on Poki’s list of known agents. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone.")
         }
-        // The update's last step: Poki has to exit, and does so by itself.
         .alert("Poki Will Close to Finish the Update", isPresented: Binding(get: { model.signer.finishNotice }, set: { if !$0 { model.signer.finishNoticeAnswered() } })) {
             Button("OK") { model.signer.finishNoticeAnswered() }
         } message: {
