@@ -2,11 +2,11 @@ import SwiftUI
 
 /// A home page pill's Edit popup (long press, Edit): a small card over the page with the pill's
 /// sentence and its app, Cancel and Save. It is two rows, so it is not a page (the owner). The card is
-/// the glass of the cards that ask for an answer (`ApprovalAskCard`), and the app row opens in place to the
-/// choices, as a row of Poki's card does (`PokiStatusCard`). Beginning the sentence with an app's name
-/// picks that app; taking the app's name out of a sentence that began with it leaves no app, and the
-/// pill shows Poki's icon. Picking another app puts its name at the start of the sentence in place of
-/// the old one's.
+/// the glass of the cards that ask for an answer (`ApprovalAskCard`), Save is Poki's blue, and the app
+/// row opens in place to the choices, as a row of Poki's card does (`PokiStatusCard`). Beginning the
+/// sentence with an app's name picks that app; taking the app's name out of a sentence that began
+/// with it leaves no app, and the pill shows Poki's icon. Picking another app puts its name at the
+/// start of the sentence in place of the old one's.
 ///
 /// It is shown in a full screen cover with nothing behind it, so it lies over the message field and the
 /// top bar too, and it moves clear of the keyboard as any page does. The cover comes without the
@@ -116,7 +116,7 @@ struct ShortcutEditor: View {
                 } label: {
                     Text("Save")
                 }
-                .buttonStyle(SolidCapsuleButtonStyle())
+                .buttonStyle(SaveCapsuleButtonStyle())
                 .disabled(empty)
                 .opacity(empty ? 0.4 : 1)
                 .accessibilityIdentifier("shortcut.edit.save")
@@ -192,6 +192,21 @@ struct ShortcutEditor: View {
             still.disablesAnimations = true
             withTransaction(still) { dismiss() }
         }
+    }
+}
+
+/// Save: Poki's blue with white words, the message field's send button's colours, the same in light
+/// and dark (the owner: no black button with white words). Its size and its press are the solid
+/// capsule's (`SolidCapsuleButtonStyle`).
+private struct SaveCapsuleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(Tint.blue, in: .capsule)
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
