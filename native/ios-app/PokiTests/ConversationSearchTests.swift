@@ -71,6 +71,16 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertNil(hits.first?.entryID)
     }
 
+    func testSearchKeepsSpeakerIdentityWithoutEagerLocalization() {
+        let user = ChatEntry(.you("language switch", delivered: true))
+        let task = ChatEntry(.note(.problem("language switch")))
+        let agent = ChatEntry(.request("language switch", from: "External agent"))
+        let hits = ConversationSearchIndex.find(in: [sample(entries: [user, task, agent])], query: "language switch")
+        XCTAssertEqual(hits.first(where: { $0.entryID == user.id })?.author, .you)
+        XCTAssertEqual(hits.first(where: { $0.entryID == task.id })?.author, .task)
+        XCTAssertEqual(hits.first(where: { $0.entryID == agent.id })?.author, .agent("External agent"))
+    }
+
     func testExcerptPreservesChineseAndBoundsLongMessages() {
         let content = String(repeating: "abc", count: 110) + " 海港日落 " + String(repeating: "def", count: 100)
         let snippet = ConversationSearchIndex.excerpt(content, around: "海港")

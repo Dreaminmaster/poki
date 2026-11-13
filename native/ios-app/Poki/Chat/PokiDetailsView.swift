@@ -171,7 +171,10 @@ struct ConversationSearchHit: Identifiable {
     let session: SavedSession
     let entryID: UUID?
     let detail: String
-    let author: String?
+    enum Author: Equatable {
+        case you, task, poki, agent(String)
+    }
+    let author: Author?
     let at: Date?
     var id: String { session.id + ":" + (entryID?.uuidString ?? "title") }
 }
@@ -230,12 +233,12 @@ enum ConversationSearchIndex {
         }
     }
 
-    private static func author(_ entry: ChatEntry) -> String? {
+    private static func author(_ entry: ChatEntry) -> ConversationSearchHit.Author? {
         switch entry.kind {
-        case .you: return String(localized: "You")
-        case .request(_, let from): return from
-        case .poki: return "Poki"
-        case .plan, .step, .note: return String(localized: "Task")
+        case .you: return .you
+        case .request(_, let from): return .agent(from)
+        case .poki: return .poki
+        case .plan, .step, .note: return .task
         case .time: return nil
         }
     }
@@ -257,6 +260,17 @@ private struct ConversationsSettingsView: View {
 
     private var matches: [ConversationSearchHit] {
         ConversationSearchIndex.find(in: store.ordered, query: query)
+    }
+
+    /// A static resource key lets SwiftUI resolve the current environment locale at render time.
+    /// Do not translate an external agent's arbitrary name or resolve speakers at search time.
+    private func authorText(_ author: ConversationSearchHit.Author) -> Text {
+        switch author {
+        case .you: return Text("You", tableName: "ConversationSearch")
+        case .task: return Text("Task", tableName: "ConversationSearch")
+        case .poki: return Text(verbatim: "Poki")
+        case .agent(let name): return Text(verbatim: name)
+        }
     }
 
     var body: some View {
@@ -298,7 +312,7 @@ private struct ConversationsSettingsView: View {
                                 Text(verbatim: hit.session.name).foregroundStyle(Color(.label))
                                 if let author = hit.author, let at = hit.at {
                                     HStack(spacing: 6) {
-                                        Text(verbatim: author)
+                                        authorText(author)
                                         Text(at, style: .date)
                                     }
                                     .font(.caption2).foregroundStyle(Color(.secondaryLabel))
