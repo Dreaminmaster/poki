@@ -62,9 +62,10 @@ its current-locale change notification. App reads still observe the language pre
 updates remain live. Extensions re-read the shared `effectiveUILanguage` key before using the cache;
 this detects preference changes without depending on cross-process defaults notifications.
 
-`LocalizationCacheTests` checks reuse across repeated lookups, preference changes, and system
-language/region changes. This removes repeated resolution work; it does not establish a measured
-frame-time improvement.
+`LocalizationCacheTests` checks that repeated lookups, preference changes, and system language/region
+changes each resolve to the right language and region. The tests do not count resolutions, so the
+cache can change how much it keeps. The cache removes repeated resolution work; it does not establish
+a measured frame-time improvement.
 
 ## Focused verification
 

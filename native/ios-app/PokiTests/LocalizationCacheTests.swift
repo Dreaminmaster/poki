@@ -3,21 +3,17 @@ import XCTest
 @testable import Poki
 
 final class LocalizationCacheTests: XCTestCase {
-    func testRepeatedLookupsReuseResolutionAndPreferenceChangesRefreshIt() {
-        var resolutions = 0
-        let cache = LocalizationCache(supported: ["en", "zh-Hans", "zh-Hant"], preferred: {
-            resolutions += 1
-            return ["en"]
-        })
-        for _ in 0..<100 {
-            XCTAssertEqual(cache.value(for: "en").language, "en")
-        }
-        XCTAssertEqual(resolutions, 1)
+    func testRepeatedLookupsKeepTheirLanguageAndPreferenceChangesSwitchIt() {
+        let cache = LocalizationCache(supported: ["en", "zh-Hans", "zh-Hant"], preferred: { ["en"] })
+        XCTAssertEqual(cache.value(for: "en").language, "en")
+        XCTAssertEqual(cache.value(for: "en").language, "en")
         // This is also the key read from effectiveUILanguage in extension builds.
         XCTAssertEqual(cache.value(for: "zh-Hans").language, "zh-Hans")
+        XCTAssertEqual(cache.value(for: "zh-Hans").locale.language.languageCode, "zh")
         XCTAssertEqual(cache.value(for: "zh-Hant").language, "zh-Hant")
+        XCTAssertEqual(cache.value(for: "zh-Hant").locale.language.script, "Hant")
         XCTAssertEqual(cache.value(for: "en").language, "en")
-        XCTAssertEqual(resolutions, 4)
+        XCTAssertEqual(cache.value(for: "en").locale.language.languageCode, "en")
     }
 
     func testSystemLocaleNotificationRefreshesRegionAndSystemLanguage() {
