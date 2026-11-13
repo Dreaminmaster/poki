@@ -1,6 +1,18 @@
 import SwiftUI
 import WebKit
 
+/// The same browser mark on a visit and on the task that used it.
+struct BrowserIcon: View {
+    var body: some View {
+        Image(systemName: "globe")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 30, height: 30)
+            .background(Color.accentColor, in: Circle())
+            .accessibilityHidden(true)
+    }
+}
+
 /// Poki's browser in the conversation, where a task began using it, above the answer the task gives:
 /// the live page while it is this conversation's page in use, otherwise the site it showed.
 struct BrowserCard: View {
@@ -14,12 +26,7 @@ struct BrowserCard: View {
             BrowserPanel()
         } else {
             HStack(spacing: 10) {
-                Image(systemName: "globe")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
-                    .background(Color.accentColor, in: Circle())
-                    .accessibilityHidden(true)
+                BrowserIcon()
                 VStack(alignment: .leading, spacing: 1) {
                     Text(visit.host.isEmpty ? String(localized: "Poki’s Browser") : visit.host)
                         .font(.subheadline.weight(.semibold))
@@ -66,12 +73,7 @@ struct BrowserPanel: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "globe")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Color.accentColor, in: Circle())
-                .accessibilityHidden(true)
+            BrowserIcon()
             VStack(alignment: .leading, spacing: 1) {
                 Text(browser.host.isEmpty ? String(localized: "Poki’s Browser") : browser.host)
                     .font(.subheadline.weight(.semibold))

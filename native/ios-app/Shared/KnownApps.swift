@@ -48,6 +48,12 @@ struct KnownApp {
 }
 
 enum KnownApps {
+    /// One identity lookup for app text, icons and the file passed to the widget.
+    static func find(_ value: String) -> KnownApp? {
+        let key = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return byID[key] ?? byName[key].flatMap { byID[$0.lowercased()] }
+    }
+
     /// Apple's apps, the apps people in mainland China use every day, and the apps the English home
     /// page's pills name and their common neighbours. Icons fetched on Nov 11 to 13 2026 (AppIcons.md).
     static let all: [KnownApp] = apple + china + english
