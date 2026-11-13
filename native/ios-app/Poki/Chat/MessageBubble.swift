@@ -90,10 +90,21 @@ struct MessageBubble: View {
     }
 }
 
+@MainActor
 private enum AnswerMarkdown {
     private static let pendingLink = URL(string: "poki-pending-link:")!
+    /// Each answer is parsed once: the conversation redraws on every key typed in the message field.
+    private static var cache: [String: AttributedString] = [:]
 
     static func render(_ source: String) -> AttributedString {
+        if let done = cache[source] { return done }
+        let result = parse(source)
+        if cache.count >= 300 { cache.removeAll(keepingCapacity: true) }
+        cache[source] = result
+        return result
+    }
+
+    private static func parse(_ source: String) -> AttributedString {
         let source = stableMarkdown(source)
         guard let parsed = try? AttributedString(markdown: source, options: .init(interpretedSyntax: .full)) else {
             return AttributedString(source)
