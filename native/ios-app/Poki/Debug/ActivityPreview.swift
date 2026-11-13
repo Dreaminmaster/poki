@@ -105,6 +105,7 @@ struct ActivityPreview: View {
         case "plannext": "\(AppLocalization.text(LocalizedStringResource("Chat Plan"))) › \(AppLocalization.text(LocalizedStringResource("Next Step")))"
         case "plandone": AppLocalization.text(LocalizedStringResource("Chat Plan Done"))
         case "ready": AppLocalization.text(LocalizedStringResource("Ready"))
+        case "waking": AppLocalization.text(LocalizedStringResource("Waking"))
         case "idle": AppLocalization.text(LocalizedStringResource("Runner Asleep"))
         case "problem": AppLocalization.text(LocalizedStringResource("Problem"))
         case "pairing": AppLocalization.text(LocalizedStringResource("Pairing"))

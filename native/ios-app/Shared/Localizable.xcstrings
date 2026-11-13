@@ -14280,6 +14280,22 @@
         }
       }
     },
+    "Waking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在唤醒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在喚醒"
+          }
+        }
+      }
+    },
     "What should Poki do?" : {
       "localizations" : {
         "zh-Hans" : {
