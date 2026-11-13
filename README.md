@@ -155,7 +155,7 @@ Poki Agent uses GPT-6.1 Terra (`gpt-6.1-terra`) with low reasoning by default. W
 
 For a physical iPhone, pair it with your Mac over USB first. See [Physical iPhone setup](docs/physical-iphone.md).
 
-Update with `./bin/poki update`. The server checks once a day for a newer Poki MCP release; set `POKI_NO_UPDATE_CHECK=1` to turn that off. The check only reads Poki MCP's `vX.Y.Z` releases, so it shows no notice while an iPhone app release is marked Latest on GitHub. See [Update](AGENTS.md#update) for the request URL, restart steps, and prebuilt packages.
+Update with `./bin/poki update`. The server checks once a day for a newer Poki MCP `vX.Y.Z` release; set `POKI_NO_UPDATE_CHECK=1` to turn that off. See [Update](AGENTS.md#update) for the request URL, restart steps, and prebuilt packages.
 
 ## Try a task
 
