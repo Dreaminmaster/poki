@@ -93,7 +93,7 @@ struct BearClips {
     func length(_ move: BearMove) -> TimeInterval {
         switch move {
         case .idle: .infinity
-        case .blink: blink.upperBound - blink.lowerBound
+        case .blink: BearBlink.length
         case .hi: 2 * (hello - wave.lowerBound) / BearMove.hiPace
         }
     }
@@ -110,16 +110,53 @@ struct BearClips {
             #endif
             return idle.lowerBound
         case .blink:
-            // Whole frames only: the eyes are swapped between frames (the open pupils, the line, the
-            // smile), and between two of them neither shows, which left the eye pads blank and white.
-            // The time is a frame's number over the rate, as the modeller's renderer has it: an eye
-            // shape is there at its frame exactly, and a sum of frame lengths may fall a hair short.
-            let x = min(max(elapsed, 0), length(.blink))
-            return ((blink.lowerBound * fps).rounded() + (x * fps + 1e-6).rounded(.down)) / fps
+            // The model's blink frames at `BearBlink`'s pace. The time is a frame's number over the rate,
+            // as the modeller's renderer has it: an eye shape is there at its frame exactly.
+            return ((blink.lowerBound * fps).rounded() + BearBlink.at(elapsed).frame) / fps
         case .hi:
             let rise = hello - wave.lowerBound, x = min(max(elapsed * BearMove.hiPace, 0), 2 * rise)
             return wave.lowerBound + (x <= rise ? x : 2 * rise - x)
         }
+    }
+}
+
+/// The blink: one kind only, at one pace, never two in a row. The model's own seven frames took a
+/// quarter of a second and the closed eye's arc came in whole the frame after a thick half-shut pupil.
+/// Here the lids come down over 0.14 s to a thin line, stay shut for 0.06 s as a low arc no taller than
+/// that line, and go up over 0.2 s: 0.4 s in all, easing in and out each way. The model's frames still
+/// give the shapes (open to half shut, its first two steps; the closed eye, its middle two; half open
+/// to open, its last two), and between the pupil and the arc the eyes are swapped at a whole frame
+/// only, since between two of them neither shows and the eye pads were blank and white. Only the
+/// heights are set on top: the pupils' as they shut and open, the arcs' while shut.
+enum BearBlink {
+    static let closing: TimeInterval = 0.14, shut: TimeInterval = 0.06, opening: TimeInterval = 0.2
+    static var length: TimeInterval { closing + shut + opening }
+    /// How tall the pupils are when the arcs take their place, against open.
+    static let thin: Float = 0.12
+    /// How tall the arcs are while the eyes are shut, against the smile's: a line, not a smile.
+    static let flat: Float = 0.3
+    /// Seconds from the end of one blink to the start of the next: drawn at random in this range.
+    static let gap: ClosedRange<TimeInterval> = 4...7
+
+    /// A frame on the model's blink, from 0 (open) to 7 (open again), whole while the arcs show; and
+    /// the height the pupils, or the arcs, are drawn at, against their own.
+    struct Moment: Equatable {
+        var frame: Double
+        var pupils: Float?
+        var arcs: Float?
+    }
+
+    static func at(_ elapsed: TimeInterval) -> Moment {
+        let x = min(max(elapsed, 0), length)
+        if x < closing {
+            let down = BearIdle.ease(Float(x / closing))
+            return Moment(frame: 2 * Double(down), pupils: 1 - (1 - thin) * down, arcs: nil)
+        }
+        if x < closing + shut {
+            return Moment(frame: (x - closing) / shut < 0.5 ? 3 : 4, pupils: nil, arcs: flat)
+        }
+        let up = BearIdle.ease(Float((x - closing - shut) / opening))
+        return Moment(frame: 5 + 2 * Double(up), pupils: thin + (1 - thin) * up, arcs: nil)
     }
 }
 
@@ -131,7 +168,8 @@ enum BearMove {
 }
 
 /// What the bear is doing and since when: a move plays once, then the next one queued, then idle,
-/// which holds. Every few seconds of idle it blinks, now and then twice (as `BlinkingFace` does).
+/// which holds. Every 4 to 7 seconds of idle it blinks once, the only thing that makes it blink: not
+/// while its head is turning, but as soon as it holds still.
 struct BearPlayback {
     private(set) var move: BearMove = .idle
     private var since: TimeInterval = 0
@@ -141,6 +179,9 @@ struct BearPlayback {
     /// Nothing but idle and blinks: a tap may start a move.
     var free: Bool { move != .hi }
 
+    /// Where the blink is at `now`, while it blinks.
+    func blink(at now: TimeInterval) -> BearBlink.Moment? { move == .blink ? BearBlink.at(now - since) : nil }
+
     mutating func play(_ moves: [BearMove], at now: TimeInterval) {
         queued = Array(moves.dropFirst())
         move = moves.first ?? .idle
@@ -148,21 +189,27 @@ struct BearPlayback {
         if move == .idle { scheduleBlink(after: now) }
     }
 
-    /// The time on the model's timeline to show at `now`.
-    mutating func time(at now: TimeInterval, clips: BearClips) -> TimeInterval {
+    /// A tap's hi: after the blink, if the bear is blinking, so that its eyes do not jump open.
+    mutating func greet(at now: TimeInterval) {
+        if move == .blink { queued = [.hi] } else { play([.hi], at: now) }
+    }
+
+    /// The time on the model's timeline to show at `now`. `steady` is false while the head is turning:
+    /// a blink due then waits for it to stop.
+    mutating func time(at now: TimeInterval, clips: BearClips, steady: Bool = true) -> TimeInterval {
         while move != .idle, now - since > clips.length(move) {
             since += clips.length(move)
             move = queued.isEmpty ? .idle : queued.removeFirst()
             if move == .idle { scheduleBlink(after: since) }
         }
-        if move == .idle, now >= nextBlink {
-            play(Int.random(in: 0..<4) == 0 ? [.blink, .blink] : [.blink], at: now)
+        if move == .idle, now >= nextBlink, steady {
+            play([.blink], at: now)
         }
         return clips.time(move, after: now - since)
     }
 
     private mutating func scheduleBlink(after now: TimeInterval) {
-        nextBlink = now + .random(in: 2.5...5.5)
+        nextBlink = now + .random(in: BearBlink.gap)
     }
 }
 
@@ -388,6 +435,8 @@ private final class BearCanvas: UIView {
     private var idle = BearIdle(now: CACurrentMediaTime())
     /// The skin `BearIdle` moves, and its joints.
     private var idleSkin: (index: Int, joints: BearIdleJoints)?
+    /// The skin with the eyes, which the blink shuts.
+    private var faceSkin: (index: Int, joints: BearIdleJoints)?
     private var rate = 30
     private var pads: EyePads?
     private var playback = BearPlayback()
@@ -482,10 +531,9 @@ private final class BearCanvas: UIView {
             poses[frame] = skins.map(\.jointTransforms)
         }
         controllers.forEach { $0.stop() }
+        faceSkin = skins.indices.lazy.compactMap { i in BearIdleJoints(names: self.skins[i].jointNames).map { (i, $0) } }.first
         // `-pokiBearFrame` holds a frame to look at: the bear does not move about over it.
-        if held == clips.idle.lowerBound {
-            idleSkin = skins.indices.lazy.compactMap { i in BearIdleJoints(names: self.skins[i].jointNames).map { (i, $0) } }.first
-        }
+        if held == clips.idle.lowerBound { idleSkin = faceSkin }
     }
 
     /// The bear moves about by itself: it has the joints for it, and the phone is not running hot. Hot,
@@ -496,6 +544,8 @@ private final class BearCanvas: UIView {
 
     /// The model's pose at a frame of its timeline, between two frames a mix of the two.
     private func pose(at frame: Double) -> [[Transform]]? {
+        // A whole frame a hair off by rounding is that frame: between two, the eyes may not show.
+        let frame = abs(frame - frame.rounded()) < 1e-6 ? frame.rounded() : frame
         let below = Int(frame.rounded(.down)), x = Float(frame - Double(below))
         guard let a = poses[below] ?? poses.min(by: { abs(Double($0.key) - frame) < abs(Double($1.key) - frame) })?.value else { return nil }
         guard x > 1e-4, let b = poses[below + 1] else { return a }
@@ -517,7 +567,7 @@ private final class BearCanvas: UIView {
     fileprivate func sayHi() -> Bool {
         guard live, presented, playback.free else { return false }
         idle.attend(at: CACurrentMediaTime())
-        playback.play([.hi], at: CACurrentMediaTime())
+        playback.greet(at: CACurrentMediaTime())
         resume()
         return true
     }
@@ -534,13 +584,19 @@ private final class BearCanvas: UIView {
         link?.isPaused = false
     }
 
+    /// How long before a blink the bear is drawn at the full rate.
+    private static let lead: TimeInterval = 0.2
+
     fileprivate func tick() {
         guard live, !rendering, let renderer, let layer = layer as? CAMetalLayer else { return }
         let now = CACurrentMediaTime()
-        let time = playback.time(at: now, clips: clips)
+        let time = playback.time(at: now, clips: clips, steady: !moving || !idle.busy(at: now))
         guard var standing = pose(at: time * clips.fps) else { return }
+        if let blink = playback.blink(at: now), let (index, joints) = faceSkin, index < standing.count {
+            joints.shut(blink, in: &standing[index])
+        }
         if moving, let (index, joints) = idleSkin, index < standing.count {
-            var move = idle.pose(at: now)
+            var move = idle.pose(at: now, blinking: playback.move == .blink)
             #if DEBUG
             // `-pokiBearLook <-1…1>` holds the head turned that far toward one side, as far as a look
             // to the side goes (1), to look at the eyes there.
@@ -550,7 +606,9 @@ private final class BearCanvas: UIView {
         }
         for (skin, joints) in zip(skins, standing) { skin.jointTransforms = joints }
         // Breathing and swaying alone are slow: a third of the rate is enough, and a third of the work.
-        let wanted = playback.move == .idle && !idle.busy(at: now) ? 10 : 30
+        // A blink is drawn at the full rate from its first frame: the rate goes up a moment before it,
+        // as a blink that began on a slow frame lost its first steps and looked quicker than the next.
+        let wanted = playback.move == .idle && !idle.busy(at: now) && playback.nextBlink - now > Self.lead ? 10 : 30
         if wanted != rate {
             rate = wanted
             link?.preferredFrameRateRange = CAFrameRateRange(minimum: Float(wanted), maximum: Float(wanted), preferred: Float(wanted))
@@ -647,7 +705,7 @@ private final class BearCanvas: UIView {
     /// The pose holds: nothing to draw until the next blink.
     private func sleepUntilBlink() {
         link?.isPaused = true
-        let delay = max(0, playback.nextBlink - CACurrentMediaTime())
+        let delay = max(0, playback.nextBlink - Self.lead - CACurrentMediaTime())
         wake = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self, self.live else { return }

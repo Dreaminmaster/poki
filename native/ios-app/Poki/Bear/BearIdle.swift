@@ -62,7 +62,8 @@ struct BearIdle {
         nextGlance = max(nextGlance, t + 3)
     }
 
-    mutating func pose(at t: TimeInterval) -> Pose {
+    /// `blinking`: a look somewhere does not start while the bear blinks; it waits for the eyes to open.
+    mutating func pose(at t: TimeInterval, blinking: Bool = false) -> Pose {
         breath += (t - breathAt) / breathLength
         breathAt = t
         if breath >= 1 { breath = breath.truncatingRemainder(dividingBy: 1); breathLength = .random(in: 3.0...4.2) }
@@ -75,7 +76,7 @@ struct BearIdle {
         p.bodyRoll = 0.020 * Float(sin(t * 0.83) * 0.6 + sin(t * 0.37 + 1.3) * 0.4)
         p.bodyYaw = 0.025 * Float(sin(t * 0.29 + 0.4))
         p.headYaw = 0.03 * Float(sin(t * 0.41 + 2.1))
-        if t >= nextGlance, glance.map({ t >= $0.end }) ?? true {
+        if !blinking, t >= nextGlance, glance.map({ t >= $0.end }) ?? true {
             let g = makeGlance(at: t)
             glance = g
             nextGlance = g.end + .random(in: 1.2...4.5)
@@ -124,6 +125,16 @@ struct BearIdle {
         return p
     }
 
+    /// The farthest a look to the side goes, `side` of the way toward one side (-1 to 1), with the
+    /// sway's own turn on top, and nothing else.
+    static func farthest(_ side: Float) -> Pose {
+        var p = Pose()
+        p.headYaw = side * (0.30 + 0.03)
+        p.bodyYaw = side * (0.05 + 0.025)
+        p.gaze = SIMD2(side * 0.009, 0)
+        return p
+    }
+
     private static func scaled(_ p: Pose, _ w: Float) -> Pose {
         var q = Pose()
         q.headYaw = p.headYaw * w; q.headPitch = p.headPitch * w; q.headRoll = p.headRoll * w
@@ -138,6 +149,7 @@ struct BearIdleJoints {
     let shoulders: (right: Int, left: Int)?
     /// The pupils and the smile's arcs, which look with them.
     let eyes: [Int]
+    let pupils: [Int], arcs: [Int]
 
     init?(names: [String]) {
         func joint(_ name: String) -> Int? { names.firstIndex { $0 == name || $0.hasSuffix("/" + name) } }
@@ -145,12 +157,20 @@ struct BearIdleJoints {
         self.body = body
         self.head = head
         if let right = joint("Shoulder_R"), let left = joint("Shoulder_L") { shoulders = (right, left) } else { shoulders = nil }
-        eyes = ["Eye_R", "Eye_L", "SmileEye_R", "SmileEye_L"].compactMap(joint)
+        pupils = ["Eye_R", "Eye_L"].compactMap(joint)
+        arcs = ["SmileEye_R", "SmileEye_L"].compactMap(joint)
+        eyes = pupils + arcs
     }
 
     /// How far a pupil moves for `gaze`: across and up the face, and forward as much as across, so
     /// that it stays in front of the face's curve and its white.
     static func shift(_ gaze: SIMD2<Float>) -> SIMD3<Float> { SIMD3(gaze.x, gaze.y, abs(gaze.x)) }
+
+    /// The pupils' or the arcs' height where the blink is.
+    func shut(_ blink: BearBlink.Moment, in joints: inout [Transform]) {
+        if let height = blink.pupils { for joint in pupils where joint < joints.count { joints[joint].scale.y = height } }
+        if let height = blink.arcs { for joint in arcs where joint < joints.count { joints[joint].scale.y = height } }
+    }
 
     /// `pose` laid on the model's standing pose. In the model's joints y is up, z forward and x across.
     func apply(_ pose: BearIdle.Pose, to joints: inout [Transform]) {
