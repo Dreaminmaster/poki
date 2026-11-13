@@ -1298,7 +1298,7 @@ mod tests {
 
         // 2. Refused requests and half-open sockets at 2.9s cannot delay the 3s idle release.
         let reset_now = tokio::time::Instant::now();
-        let (media, mut media_closed) = make_media(reset_now).await;
+        let (media, _media_closed) = make_media(reset_now).await;
         session.connection.as_mut().unwrap().media = Some(media);
         let refused = session
             .request(json!({"op":"tap","x":-1,"y":200}))
@@ -1358,7 +1358,7 @@ mod tests {
         let socket_path = dir.join("session.sock");
         let socket_str = socket_path.to_str().unwrap().to_owned();
         let client_socket = socket_path.clone();
-        let client = tokio::spawn(async move {
+        let client = async move {
             while !client_socket.exists() {
                 tokio::task::yield_now().await;
             }
@@ -1404,9 +1404,9 @@ mod tests {
             assert_eq!(connected["connected"], true, "{connected}");
             let disconnected = send("{\"op\":\"disconnect\"}\n").await;
             assert_eq!(disconnected["disconnected"], true, "{disconnected}");
-        });
-        let result = serve_session(session, &socket_str).await.unwrap();
-        client.await.unwrap();
+            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let (result, ()) = tokio::try_join!(serve_session(session, &socket_str), client).unwrap();
         assert_eq!(result["closed"], true);
         assert!(
             phones.try_recv().is_err(),
