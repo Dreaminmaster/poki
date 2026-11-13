@@ -17,16 +17,30 @@ final class PiLoop {
 
     let provider: ModelProvider
     let model: Model
+    /// The persistent chat ID is passed to PiSwift as request metadata, not sent as a chat message.
+    let sessionID: String
     private let agent: Agent
     private let gate = StopGate()
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
 
-    init(provider: ModelProvider, model: Model, tools: [ToolSpec], carrying messages: [AgentMessage] = [],
+    /// Keep the real Poki name on custom-provider requests; never impersonate a supported coding client.
+    /// This does not change the selected provider, endpoint, authentication or model.
+    static func clientIdentity(version: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) -> ClientIdentity {
+        let cleanVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agent = "Poki/\(cleanVersion.flatMap { $0.isEmpty ? nil : $0 } ?? "dev")"
+        return ClientIdentity(
+            userAgent: .custom(agent),
+            attribution: .value(ClientAttribution(name: "Poki", url: "https://github.com/JosssphZhou/poki"))
+        )
+    }
+
+    init(provider: ModelProvider, model: Model, sessionID: String, tools: [ToolSpec], carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
         self.provider = provider
         self.model = model
+        self.sessionID = sessionID
         let gate = self.gate
         let agentTools = tools.map { spec in
             AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
@@ -43,6 +57,11 @@ final class PiLoop {
         // agent/pi-session.mjs: low thinking, one tool call at a time.
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low, tools: agentTools, messages: messages),
+            // The pinned PiSwift provider adds x-opencode-session only for matching OpenCode endpoints.
+            // Other providers keep their normal header handling. Reusing this ID preserves cache routing
+            // across retries, model switches, and a conversation restored from disk.
+            sessionId: sessionID,
+            identity: provider == .custom ? Self.clientIdentity() : nil,
             getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
             toolExecution: .sequential
         ))

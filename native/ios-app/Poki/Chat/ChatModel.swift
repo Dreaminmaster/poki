@@ -319,7 +319,7 @@ final class ChatModel {
         if kind == .poki, !again, entries.filter({ if case .you = $0.kind { return true }; return false }).count == 1,
            let piModel = provider.piModel(model) {
             let id = sessionID
-            Task { if let name = await SessionNamer.name(for: text, provider: provider, model: piModel) { SessionStore.shared.setAutoName(id, name) } }
+            Task { if let name = await SessionNamer.name(for: text, provider: provider, model: piModel, sessionID: id) { SessionStore.shared.setAutoName(id, name) } }
         }
         running = true
         awaitingModel = true
@@ -358,8 +358,8 @@ final class ChatModel {
             return
         }
         // Another model starts a new loop that carries the conversation over.
-        if loop?.provider != provider || loop?.model.id != piModel.id {
-            loop = PiLoop(provider: provider, model: piModel, tools: Harness.tools,
+        if loop?.provider != provider || loop?.model.id != piModel.id || loop?.sessionID != sessionID {
+            loop = PiLoop(provider: provider, model: piModel, sessionID: sessionID, tools: Harness.tools,
                           carrying: loop?.messages ?? []) { [weak self] call in
                 guard let self else { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
                 return await self.perform(call)
