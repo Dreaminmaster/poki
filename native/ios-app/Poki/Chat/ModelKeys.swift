@@ -132,11 +132,12 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// pi's model for one of `models`.
-    func piModel(_ id: String) -> Model? {
+    /// pi's model for one of `models`. `customURL` is an address not saved yet (the connection test on the
+    /// key page); without it a custom endpoint uses the saved one.
+    func piModel(_ id: String, customURL: String? = nil) -> Model? {
         guard let piProvider else { return nil }
         if self == .custom {
-            let base = ModelKeys.customURL.trimmingCharacters(in: .whitespaces)
+            let base = (customURL ?? ModelKeys.customURL).trimmingCharacters(in: .whitespaces)
             guard !base.isEmpty, !id.isEmpty else { return nil }
             return Model(id: id, name: id, api: .openAICompletions, provider: piProvider, baseUrl: base, reasoning: false,
                          input: [.text, .image], cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
