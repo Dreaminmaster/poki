@@ -16,22 +16,22 @@ enum StatusWord: CaseIterable {
 
     var text: String {
         switch self {
-        case .ready: String(localized: "Ready", table: Self.table)
-        case .thinking: String(localized: "Thinking", table: Self.table)
-        case .running: String(localized: "Running", table: Self.table)
-        case .checking: String(localized: "Checking", table: Self.table)
-        case .needsApproval: String(localized: "Needs approval", table: Self.table)
-        case .needsYourAction: String(localized: "Needs your action", table: Self.table)
-        case .done: String(localized: "Done", table: Self.table)
-        case .error: String(localized: "Error", table: Self.table)
-        case .paused: String(localized: "Paused", table: Self.table)
-        case .off: String(localized: "Off", table: Self.table)
-        case .disconnected: String(localized: "Disconnected", table: Self.table)
-        case .starting: String(localized: "Starting", table: Self.table)
-        case .notStarted: String(localized: "Not started", table: Self.table)
-        case .notSetUp: String(localized: "Not set up", table: Self.table)
-        case .listening: String(localized: "Listening", table: Self.table)
-        case .speaking: String(localized: "Speaking", table: Self.table)
+        case .ready: AppLocalization.text(LocalizedStringResource("Ready", table: "Status"))
+        case .thinking: AppLocalization.text(LocalizedStringResource("Thinking", table: "Status"))
+        case .running: AppLocalization.text(LocalizedStringResource("Running", table: "Status"))
+        case .checking: AppLocalization.text(LocalizedStringResource("Checking", table: "Status"))
+        case .needsApproval: AppLocalization.text(LocalizedStringResource("Needs approval", table: "Status"))
+        case .needsYourAction: AppLocalization.text(LocalizedStringResource("Needs your action", table: "Status"))
+        case .done: AppLocalization.text(LocalizedStringResource("Done", table: "Status"))
+        case .error: AppLocalization.text(LocalizedStringResource("Error", table: "Status"))
+        case .paused: AppLocalization.text(LocalizedStringResource("Paused", table: "Status"))
+        case .off: AppLocalization.text(LocalizedStringResource("Off", table: "Status"))
+        case .disconnected: AppLocalization.text(LocalizedStringResource("Disconnected", table: "Status"))
+        case .starting: AppLocalization.text(LocalizedStringResource("Starting", table: "Status"))
+        case .notStarted: AppLocalization.text(LocalizedStringResource("Not started", table: "Status"))
+        case .notSetUp: AppLocalization.text(LocalizedStringResource("Not set up", table: "Status"))
+        case .listening: AppLocalization.text(LocalizedStringResource("Listening", table: "Status"))
+        case .speaking: AppLocalization.text(LocalizedStringResource("Speaking", table: "Status"))
         }
     }
 }

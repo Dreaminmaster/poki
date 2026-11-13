@@ -148,9 +148,9 @@ enum ApprovalClassifier {
 extension ApprovalMode {
     var title: String {
         switch self {
-        case .reply: String(localized: "With Message Reply")
-        case .confirm: String(localized: "With Confirmation")
-        case .off: String(localized: "Never Ask")
+        case .reply: AppLocalization.text(LocalizedStringResource("With Message Reply"))
+        case .confirm: AppLocalization.text(LocalizedStringResource("With Confirmation"))
+        case .off: AppLocalization.text(LocalizedStringResource("Never Ask"))
         }
     }
 }
@@ -158,10 +158,10 @@ extension ApprovalMode {
 extension ApprovalLevel {
     var title: String {
         switch self {
-        case .strict: String(localized: "Strict")
-        case .balanced: String(localized: "Balanced")
-        case .permissive: String(localized: "Permissive")
-        case .everything: String(localized: "Ask All")
+        case .strict: AppLocalization.text(LocalizedStringResource("Strict"))
+        case .balanced: AppLocalization.text(LocalizedStringResource("Balanced"))
+        case .permissive: AppLocalization.text(LocalizedStringResource("Permissive"))
+        case .everything: AppLocalization.text(LocalizedStringResource("Ask All"))
         }
     }
     /// The saved sensitivity (`ApprovalChoice.resolve`).

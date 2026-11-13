@@ -6,7 +6,7 @@ import UIKit
 /// Chinese, and laid Chinese lines out narrower than they drew (cut off on the Live Activity), so
 /// Chinese uses the system font throughout.
 enum Prominent {
-    static let usesGeist = Bundle.main.preferredLocalizations.first?.hasPrefix("zh") != true
+    static var usesGeist: Bool { AppLocalization.language.hasPrefix("en") }
 
     private static func name(_ weight: Font.Weight) -> String {
         switch weight {

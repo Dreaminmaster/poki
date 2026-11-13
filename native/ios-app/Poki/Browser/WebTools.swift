@@ -51,14 +51,14 @@ enum WebTools {
             guard let url = address(args["url"] as? String) else {
                 return answer("web_open needs a full web address, such as https://www.example.com.", error: true)
             }
-            let step = browser.begin(String(localized: "Open \(url.host(percentEncoded: false) ?? url.absoluteString)"))
+            let step = browser.begin(AppLocalization.text(LocalizedStringResource("Open \(url.host(percentEncoded: false) ?? url.absoluteString)")))
             await browser.open(url)
             result = await page(browser, budget: 7000)
             browser.end(step, ok: !result.isError, started: started)
         case "web_read":
             let find = (args["find"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
             guard browser.isOpen else { return answer("Nothing is open in Poki's browser. Call web_open first.", error: true) }
-            let step = browser.begin(find.isEmpty ? String(localized: "Read the page") : String(localized: "Look for “\(find)”"))
+            let step = browser.begin(find.isEmpty ? AppLocalization.text(LocalizedStringResource("Read the page")) : AppLocalization.text(LocalizedStringResource("Look for “\(find)”")))
             result = await page(browser, find: find, offset: args["offset"] as? Int ?? 0, budget: 9000)
             browser.end(step, ok: !result.isError, started: started)
         case "web_click":
@@ -81,10 +81,10 @@ enum WebTools {
             let notice = banner["banner"] as? Bool == true && banner["dismiss"] as? Bool == true ? banner["kind"] as? String ?? "" : ""
             let site = browser.host, button = short(label)
             let title = switch notice {
-            case "cookie": String(localized: "Dismissed \(site)’s cookie banner: “\(button)”")
-            case "terms": String(localized: "Dismissed \(site)’s terms notice: “\(button)”")
-            case "privacy": String(localized: "Dismissed \(site)’s privacy notice: “\(button)”")
-            default: String(localized: "Tap “\(button)”")
+            case "cookie": AppLocalization.text(LocalizedStringResource("Dismissed \(site)’s cookie banner: “\(button)”"))
+            case "terms": AppLocalization.text(LocalizedStringResource("Dismissed \(site)’s terms notice: “\(button)”"))
+            case "privacy": AppLocalization.text(LocalizedStringResource("Dismissed \(site)’s privacy notice: “\(button)”"))
+            default: AppLocalization.text(LocalizedStringResource("Tap “\(button)”"))
             }
             let step = browser.begin(title)
             let tapped = await browser.act { (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any] }
@@ -95,7 +95,7 @@ enum WebTools {
                 return answer("web_type needs a ref and the text.", error: true)
             }
             let label = await label(browser, ref) ?? ref
-            let step = browser.begin(String(localized: "Type “\(short(text))” in “\(short(label))”"))
+            let step = browser.begin(AppLocalization.text(LocalizedStringResource("Type “\(short(text))” in “\(short(label))”")))
             let typed = await browser.act {
                 (try? await browser.call("return window.__pokiReader.type(ref, text, submit)", ["ref": ref, "text": text, "submit": args["submit"] as? Bool ?? false])) as? [String: Any]
             }
@@ -104,7 +104,7 @@ enum WebTools {
         case "web_handoff":
             guard browser.isOpen else { return answer("Nothing is open in Poki's browser to hand over.", error: true) }
             let reason = (args["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let step = browser.begin(String(localized: "Waiting for you: \(reason)"))
+            let step = browser.begin(AppLocalization.text(LocalizedStringResource("Waiting for you: \(reason)")))
             browser.markWaiting(step)
             browser.takeOver(reason: reason)
             guard await browser.waitForPoki() else { return answer("Task stopped while the owner had the page.", error: true) }

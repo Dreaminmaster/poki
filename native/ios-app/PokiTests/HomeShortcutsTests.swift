@@ -6,6 +6,15 @@ import XCTest
 /// every pill an app and an action.
 @MainActor
 final class HomeShortcutsTests: XCTestCase {
+    private var language = AppLocalization.system
+
+    override func setUp() async throws {
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+    }
+
+    override func tearDown() async throws { AppLocalization.shared.preference = language }
+
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private func ago(_ hours: Double) -> Date { now.addingTimeInterval(-hours * 3600) }
 

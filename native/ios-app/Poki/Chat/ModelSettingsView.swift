@@ -57,7 +57,7 @@ struct ModelSettingsView: View {
         .background { Color.clear.accessibilityHidden(true).id(version) }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)
-        .navigationTitle("Models")
+        .navigationTitle(AppLocalization.text("Models"))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
@@ -77,7 +77,7 @@ private struct InUseCard: View {
             HStack(spacing: 12) {
                 if has { ProviderTile(provider: provider, size: 44) } else { SettingsIcon(symbol: "sparkles", warns: true, size: 44) }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: has ? ModelKeys.selectedModelName : String(localized: "No Account"))
+                    Text(verbatim: has ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("No Account")))
                         .font(.title3.weight(.semibold)).foregroundStyle(Color(.label))
                     if has { Text(verbatim: provider.name).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
                 }
@@ -96,9 +96,9 @@ private struct InUseCard: View {
     }
 
     @ViewBuilder private func uses(has: Bool, provider: ModelProvider) -> some View {
-        chip("Text Chat", has ? provider.name : String(localized: "No Account"))
-        chip("Live Voice", VoiceDirect.apiKey != nil ? String(localized: "OpenAI") : String(localized: "No Account"))
-        chip("Dictation", String(localized: "On This iPhone"))
+        chip("Text Chat", has ? provider.name : AppLocalization.text(LocalizedStringResource("No Account")))
+        chip("Live Voice", VoiceDirect.apiKey != nil ? AppLocalization.text(LocalizedStringResource("OpenAI")) : AppLocalization.text(LocalizedStringResource("No Account")))
+        chip("Dictation", AppLocalization.text(LocalizedStringResource("On This iPhone")))
     }
 
     private func chip(_ title: LocalizedStringKey, _ value: String) -> some View {
@@ -133,18 +133,18 @@ enum ModelAccounts {
 
     static func method(_ provider: ModelProvider) -> String {
         switch provider {
-        case .chatgpt: String(localized: "Sign in with ChatGPT")
-        case .custom: String(localized: "OpenAI-compatible address")
-        default: String(localized: "API key")
+        case .chatgpt: AppLocalization.text(LocalizedStringResource("Sign in with ChatGPT"))
+        case .custom: AppLocalization.text(LocalizedStringResource("OpenAI-compatible address"))
+        default: AppLocalization.text(LocalizedStringResource("API key"))
         }
     }
 
     /// "Text Chat, Live Voice", "Not in use".
     static func uses(_ provider: ModelProvider) -> String {
         var out: [String] = []
-        if ModelKeys.selectedProvider == provider, ModelKeys.hasUsableKey { out.append(String(localized: "Text Chat")) }
-        if canTalkLive(provider), VoiceDirect.apiKey != nil { out.append(String(localized: "Live Voice")) }
-        return out.isEmpty ? String(localized: "Not in use") : out.joined(separator: ", ")
+        if ModelKeys.selectedProvider == provider, ModelKeys.hasUsableKey { out.append(AppLocalization.text(LocalizedStringResource("Text Chat"))) }
+        if canTalkLive(provider), VoiceDirect.apiKey != nil { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
+        return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
     }
 }
 
@@ -184,13 +184,13 @@ private struct AccountDetail: View {
             Section {
                 NavigationLink { TextChatFeature(provider: provider) } label: {
                     LabeledContent {
-                        Text(ModelKeys.selectedProvider == provider ? ModelKeys.selectedModelName : ModelAccounts.canChat(provider) ? String(localized: "Off") : String(localized: "Not Supported"))
+                        Text(ModelKeys.selectedProvider == provider ? ModelKeys.selectedModelName : ModelAccounts.canChat(provider) ? AppLocalization.text(LocalizedStringResource("Off")) : AppLocalization.text(LocalizedStringResource("Not Supported")))
                     } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
                 }
                 .disabled(!ModelAccounts.canChat(provider))
                 NavigationLink { LiveVoiceFeature() } label: {
                     LabeledContent {
-                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.enabled ? VoiceDirect.model : String(localized: "Off")) : String(localized: "Not Supported"))
+                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.enabled ? VoiceDirect.model : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
                     } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
                 }
                 .disabled(!ModelAccounts.canTalkLive(provider))
@@ -250,13 +250,13 @@ private struct TextChatFeature: View {
             } header: {
                 Text("Models to Choose From")
             } footer: {
-                Text(problem ?? String(localized: "Fast models without long thinking answer quickest on the phone. Models from \(provider.name)’s list start switched off."))
+                Text(problem ?? AppLocalization.text(LocalizedStringResource("Fast models without long thinking answer quickest on the phone. Models from \(provider.name)’s list start switched off.")))
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
         .background { Color.clear.accessibilityHidden(true).id(version) }
-        .navigationTitle("Text Chat")
+        .navigationTitle(AppLocalization.text("Text Chat"))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .task { if ModelCatalog.listed(provider).isEmpty, provider != .chatgpt { refresh() } }
@@ -266,7 +266,7 @@ private struct TextChatFeature: View {
         loading = true
         problem = nil
         Task {
-            do { _ = try await ModelCatalog.refresh(provider) } catch { problem = String(localized: "\(provider.name) didn’t return its model list. The built-in models still work.") }
+            do { _ = try await ModelCatalog.refresh(provider) } catch { problem = AppLocalization.text(LocalizedStringResource("\(provider.name) didn’t return its model list. The built-in models still work.")) }
             loading = false
         }
     }
@@ -301,7 +301,7 @@ private struct LiveVoiceFeature: View {
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
         .background { Color.clear.accessibilityHidden(true).id(version) }
-        .navigationTitle("Live Voice")
+        .navigationTitle(AppLocalization.text("Live Voice"))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
     }
@@ -335,7 +335,7 @@ struct AddAccount: View {
                     Text("Text chat works with every account. Live voice needs an OpenAI API key.")
                 }
             }
-            .navigationTitle("Add Account")
+            .navigationTitle(AppLocalization.text("Add Account"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .sheet(item: $editing, onDismiss: { if editing == nil { dismiss() } }) { provider in KeyEntry(provider: provider) }
@@ -345,9 +345,9 @@ struct AddAccount: View {
 
     private func capabilities(_ provider: ModelProvider) -> String {
         let how = ModelAccounts.method(provider)
-        if ModelAccounts.canTalkLive(provider) { return String(localized: "\(how) · Text chat and live voice") }
-        if ModelAccounts.canChat(provider) { return String(localized: "\(how) · Text chat") }
-        return String(localized: "\(how) · Coming in an update")
+        if ModelAccounts.canTalkLive(provider) { return AppLocalization.text(LocalizedStringResource("\(how) · Text chat and live voice")) }
+        if ModelAccounts.canChat(provider) { return AppLocalization.text(LocalizedStringResource("\(how) · Text chat")) }
+        return AppLocalization.text(LocalizedStringResource("\(how) · Coming in an update"))
     }
 }
 

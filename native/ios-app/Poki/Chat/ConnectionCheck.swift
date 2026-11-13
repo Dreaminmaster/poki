@@ -24,15 +24,15 @@ enum ConnectionCheck {
 
         var words: String {
             switch self {
-            case .works(let model): String(localized: "Connection works. Model: \(model)")
-            case .badKey: String(localized: "The key is not valid. Check that it was copied in full.")
-            case .unreachable: String(localized: "Poki can’t reach this address. Check the address and the network.")
-            case .noEndpoint: String(localized: "The address answers, but has no chat API there. Check that it ends in /v1.")
-            case .timedOut: String(localized: "No answer within 10 seconds. Check the address and the network, then try again.")
-            case .noModel(let model, _): String(localized: "The model \(model) doesn’t exist, or this key can’t use it.")
-            case .notAllowed: String(localized: "Not enough quota or permission. Check the account’s billing and the key’s permissions.")
-            case .failed(let status?, _): String(localized: "The server returned an error (\(status)).")
-            case .failed(nil, _): String(localized: "The test didn’t finish.")
+            case .works(let model): AppLocalization.text(LocalizedStringResource("Connection works. Model: \(model)"))
+            case .badKey: AppLocalization.text(LocalizedStringResource("The key is not valid. Check that it was copied in full."))
+            case .unreachable: AppLocalization.text(LocalizedStringResource("Poki can’t reach this address. Check the address and the network."))
+            case .noEndpoint: AppLocalization.text(LocalizedStringResource("The address answers, but has no chat API there. Check that it ends in /v1."))
+            case .timedOut: AppLocalization.text(LocalizedStringResource("No answer within 10 seconds. Check the address and the network, then try again."))
+            case .noModel(let model, _): AppLocalization.text(LocalizedStringResource("The model \(model) doesn’t exist, or this key can’t use it."))
+            case .notAllowed: AppLocalization.text(LocalizedStringResource("Not enough quota or permission. Check the account’s billing and the key’s permissions."))
+            case .failed(let status?, _): AppLocalization.text(LocalizedStringResource("The server returned an error (\(status))."))
+            case .failed(nil, _): AppLocalization.text(LocalizedStringResource("The test didn’t finish."))
             }
         }
 

@@ -32,9 +32,9 @@ enum PokiStatusCopy {
     /// can do now and what starts it.
     static func line(_ power: PowerTile) -> String {
         switch power {
-        case .turnOn: String(localized: "Poki is off. Agents can’t connect to this iPhone until you turn it on.")
-        case .resume: String(localized: "Poki is paused. It resumes automatically upon a new task or agent request.")
-        case .pause: String(localized: "Poki can tap and type on this iPhone when you send a task or an agent requests it.")
+        case .turnOn: AppLocalization.text(LocalizedStringResource("Poki is off. Agents can’t connect to this iPhone until you turn it on."))
+        case .resume: AppLocalization.text(LocalizedStringResource("Poki is paused. It resumes automatically upon a new task or agent request."))
+        case .pause: AppLocalization.text(LocalizedStringResource("Poki can tap and type on this iPhone when you send a task or an agent requests it."))
         }
     }
 }

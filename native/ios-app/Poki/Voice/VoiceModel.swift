@@ -326,10 +326,10 @@ final class VoiceModel {
 
     /// How voice runs now, for the settings screen.
     var route: String {
-        if VoiceDirect.apiKey != nil { return String(localized: "Your OpenAI key, straight from this iPhone") }
-        if let bridge { return String(localized: "Voice bridge at \(bridge.display)") }
-        if VoiceDirect.canDictate { return String(localized: "Dictation to \(ModelKeys.selectedModelName); Poki reads the answer aloud") }
-        return String(localized: "Not set up")
+        if VoiceDirect.apiKey != nil { return AppLocalization.text(LocalizedStringResource("Your OpenAI key, straight from this iPhone")) }
+        if let bridge { return AppLocalization.text(LocalizedStringResource("Voice bridge at \(bridge.display)")) }
+        if VoiceDirect.canDictate { return AppLocalization.text(LocalizedStringResource("Dictation to \(ModelKeys.selectedModelName); Poki reads the answer aloud")) }
+        return AppLocalization.text(LocalizedStringResource("Not set up"))
     }
 
     private var dictation: Dictation?
@@ -580,12 +580,12 @@ final class VoiceModel {
             guard !text.isEmpty else { phase = .listening; return }
             if lines.last?.text != text { lines.append(VoiceLine(role: .you, text: text)) }
             guard let chat = AskPoki.chat else { phase = .lost(VoiceError.noBridge.localizedDescription); return }
-            if chat.running { lines.append(VoiceLine(role: .note, text: String(localized: "Poki is still on the last task."))); phase = .listening; return }
+            if chat.running { lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Poki is still on the last task.")))); phase = .listening; return }
             let before = chat.entries.count
             chat.send(text)
             while chat.running { try? await Task.sleep(for: .milliseconds(200)) }
             let reply = chat.entries.dropFirst(before).compactMap { entry -> String? in if case .poki(let t) = entry.kind { return t }; return nil }.last
-                ?? String(localized: "Done.")
+                ?? AppLocalization.text(LocalizedStringResource("Done."))
             lines.append(VoiceLine(role: .poki, text: reply))
             guard self.dictation === dictation else { return }
             phase = .speaking
@@ -594,7 +594,7 @@ final class VoiceModel {
     }
 
     private func startDictation() async {
-        guard await Dictation.allowed() else { phase = .lost(String(localized: "Poki needs the microphone and speech recognition: allow them in Settings › Poki.")); return }
+        guard await Dictation.allowed() else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
         let dictation = Dictation()
         dictation.onHeard = { [weak self] text in
             guard let self, self.phase == .hearing else { return }
