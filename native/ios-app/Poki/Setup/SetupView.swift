@@ -313,10 +313,11 @@ private struct LoopbackPage: View {
 
         // The external app is the way (ESP-168): every app's steps can be read at any time.
         Section {
+            // The free one first: a new person usually has no proxy app.
+            NavigationLink { LocalDevVPNPage() } label: { proxyLabel("LocalDevVPN", id: "localdevvpn", installed: false, sub: "Free on the App Store") }
             ForEach(ProxyApps.all) { app in
                 NavigationLink { ProxyAppPage(app: app) } label: { proxyLabel(app.name, id: app.id, installed: app.isInstalled) }
             }
-            NavigationLink { LocalDevVPNPage() } label: { proxyLabel("LocalDevVPN", id: "localdevvpn", installed: false, sub: "Free on the App Store") }
         } header: {
             Text("Use Your Proxy App")
         } footer: {
