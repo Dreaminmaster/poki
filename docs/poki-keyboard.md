@@ -1,5 +1,7 @@
 # Poki keyboard (typing panel)
 
+> **Historical design, not available in the current app.** The app no longer includes this keyboard extension. The setup steps and implementation paths below describe the earlier design and do not apply to the current version.
+
 Poki bundles a keyboard extension that only Poki types through. It is **not a keyboard
 for people**: it has no keys. While Poki types it shows "Poki is typing…", a progress
 bar and a **Take Over** button; otherwise it shows a short note and **Switch Keyboard**.
