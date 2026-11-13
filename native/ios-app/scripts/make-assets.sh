@@ -26,6 +26,10 @@ echo '{"images":[{"filename":"icon-1024.png","idiom":"universal","platform":"ios
 mkdir -p "$APP/AccentColor.colorset"
 echo '{"colors":[{"idiom":"universal","color":{"color-space":"srgb","components":{"red":"0x20","green":"0x84","blue":"0xFD","alpha":"1.000"}}}],"info":{"version":1,"author":"poki"}}' > "$APP/AccentColor.colorset/Contents.json"
 bear "$APP"
+# The app icon as a picture for the app's own pages (the conversations' header), small: 64 points at 3x.
+mkdir -p "$APP/PokiIcon.imageset"
+sips -Z 192 "$ICON" --out "$APP/PokiIcon.imageset/icon@3x.png" >/dev/null
+echo '{"images":[{"filename":"icon@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$APP/PokiIcon.imageset/Contents.json"
 # Provider logos (Poki/ProviderIcons, see its README) as vector template images.
 logos() {
   for svg in "$HERE"/Poki/ProviderIcons/*.svg; do
