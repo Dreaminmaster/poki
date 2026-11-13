@@ -1,12 +1,7 @@
 # Quick checks on every PR, on Linux and Windows so they never take one of the 5 macOS runners the
 # builds share: Poki Setup's core tests (release picking, pairing, signing), the Rust lockfiles
 # (a stale Cargo.lock once broke a release build), and the workflows themselves. The macOS work
-# (the app, the Gym) runs on main and on promotions only, and for a pull request with the
-# `preview` label (pr-preview.yml).
-#
-# Each check runs only when the pull request touches what it checks: `changes` reads the list of
-# changed files first. A check that does not apply is skipped, which a required check counts as
-# passed, so a docs or iPhone app change no longer waits for the Windows runner.
+# (the app, the Gym) runs on main and on promotions only.
 name: PR checks
 
 on:
@@ -21,45 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  # Which parts the pull request touches. Read from the API, so nothing is checked out.
-  changes:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    outputs:
-      desktop: ${{ steps.f.outputs.desktop }}
-      windows: ${{ steps.f.outputs.windows }}
-      lockfiles: ${{ steps.f.outputs.lockfiles }}
-      workflows: ${{ steps.f.outputs.workflows }}
-    steps:
-      - id: f
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          files="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
-          count="$(printf '%s\n' "$files" | grep -c . || true)"
-          touched() { printf '%s\n' "$files" | grep -Eq "$1" && echo true || echo false; }
-          # A change to this workflow runs everything. So does a list too long to trust: the API
-          # stops at 3000 files.
-          all="$(touched '^\.github/workflows/pr-checks\.yml$')"
-          if [ "$count" -ge 3000 ]; then all=true; fi
-          out() { if [ "$all" = true ]; then echo "$1=true"; else echo "$1=$(touched "$2")"; fi; }
-          {
-            # Poki Setup's core and command line tool, on Linux.
-            out desktop '^desktop/'
-            # The Apple sign-in tests on Windows: the core and what it is built with.
-            out windows '^desktop/(core/|Cargo\.(toml|lock)$)'
-            # Cargo.lock against Cargo.toml for desktop/ and the phone's launcher, which builds the core in.
-            out lockfiles '(^|/)Cargo\.(toml|lock)$|^native/launcher/|^native/patches/'
-            # The workflows, their actions and scripts.
-            out workflows '^\.github/'
-          } | tee -a "$GITHUB_OUTPUT"
-
   desktop-core:
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -72,8 +29,6 @@ jobs:
         env: { POKI_SETUP_FILE_SECRETS: "1" }
 
   lockfiles:
-    needs: changes
-    if: needs.changes.outputs.lockfiles == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -87,8 +42,6 @@ jobs:
           cargo metadata --locked --format-version 1 --manifest-path native/launcher/Cargo.toml > /dev/null
 
   windows-auth:
-    needs: changes
-    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -101,8 +54,6 @@ jobs:
           cargo test --locked -p poki-setup-core --manifest-path desktop/Cargo.toml apple::gsa::
 
   workflows:
-    needs: changes
-    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

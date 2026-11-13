@@ -18,14 +18,6 @@ inputs:
     description: external and/or local
     required: false
     default: external
-  preview-pr:
-    description: For a preview build (pr-preview.yml), the pull request number. Written into the app's Info.plist as PokiPreviewPR, so Poki knows it is not a channel build.
-    required: false
-    default: ''
-  preview-sha:
-    description: For a preview build, the pull request's head commit (Info.plist PokiPreviewCommit)
-    required: false
-    default: ''
 
 # The caller saves the caches (actions/cache/save with these keys and the same paths) after it has
 # published, so saving never delays a release. Only caches saved on main help other runs.
@@ -94,8 +86,6 @@ runs:
         RELEASE_VERSION: ${{ inputs.version }}
         RELEASE_BUILD: ${{ inputs.build }}
         POKI_EDITIONS: ${{ inputs.editions }}
-        POKI_PREVIEW_PR: ${{ inputs.preview-pr }}
-        POKI_PREVIEW_SHA: ${{ inputs.preview-sha }}
       run: |
         set -euo pipefail
         mkdir -p build out
@@ -112,26 +102,9 @@ runs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ARCHS=arm64 \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
             2>&1 | tee "build/app-$edition.log" | grep --line-buffered -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* |^=== BUILD TARGET|^SwiftDriver |^Ld "
-          # A preview build says so in its Info.plist. The marks come off again after packaging, so
-          # the cached build folder never carries them into another build.
-          plist="build/app-$edition/Build/Products/Release-iphoneos/Poki.app/Info.plist"
-          if [ -n "${POKI_PREVIEW_PR:-}" ]; then
-            [[ "$POKI_PREVIEW_PR" =~ ^[1-9][0-9]*$ ]] || { echo "::error::preview-pr is not a pull request number"; exit 1; }
-            [[ "${POKI_PREVIEW_SHA:-}" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::preview-sha is not a commit"; exit 1; }
-            # The keys are not in a fresh build. A cached one that failed before the marks came
-            # off may still carry them, and insert refuses a key that is there.
-            plutil -remove PokiPreviewPR "$plist" 2>/dev/null || true
-            plutil -remove PokiPreviewCommit "$plist" 2>/dev/null || true
-            plutil -insert PokiPreviewPR -integer "$POKI_PREVIEW_PR" "$plist"
-            plutil -insert PokiPreviewCommit -string "$POKI_PREVIEW_SHA" "$plist"
-          fi
           native/ios-app/scripts/package-app.sh \
             "build/app-$edition/Build/Products/Release-iphoneos/Poki.app" \
             "$edition" "out/$ipa" "$VERSION" "$BUILD"
-          if [ -n "${POKI_PREVIEW_PR:-}" ]; then
-            plutil -remove PokiPreviewPR "$plist"
-            plutil -remove PokiPreviewCommit "$plist"
-          fi
           python3 native/ios-app/scripts/export-signing.py \
             "build/app-$edition/Build/Products/Release-iphoneos/Poki.app" \
             "$edition" "out/signing/$edition"

@@ -107,8 +107,7 @@ async fn signer(state: &mut State) -> std::result::Result<&mut Signer, Failure> 
 }
 
 fn channels() -> Value {
-    // Pre-alpha is offered only while GitHub is signed in.
-    Value::Array(release::offered_channels().iter().map(|c| json!({"id": c.id(), "title": c.title()})).collect())
+    Value::Array(Channel::ALL.iter().map(|c| json!({"id": c.id(), "title": c.title()})).collect())
 }
 
 /// Runs one request. `emit` gets progress events while it runs.
@@ -148,10 +147,6 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
                 "anisette": source,
                 "channel": release::channel().id(),
                 "channels": channels(),
-                "previews_enabled": release::previews_enabled(),
-                "github_signed_in": release::github_token().is_some(),
-                "github_login": release::github_login(),
-                "preview": release::preview(),
             }))
         }
         "sign_in" => {
@@ -201,40 +196,11 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
             release::set_channel(channel)?;
             Ok(json!({"channel": channel.id()}))
         }
-        // Preview builds of pull requests (the Preview Builds switch on the GitHub Account page): on or off, the
-        // chosen one, and those on offer. They are on no channel.
-        "set_preview_switch" => {
-            release::set_preview_switch(request["on"].as_bool().unwrap_or(false))?;
-            Ok(json!({}))
-        }
-        // GitHub's device sign-in, for preview builds: start answers with the code to show, finish
-        // waits until the person has entered it on github.com and keeps the token in the Keychain.
-        "github_sign_in_start" => Ok(serde_json::to_value(release::github_sign_in_start().await?).unwrap_or_default()),
-        "github_sign_in_finish" => {
-            let pending: release::GithubSignIn = serde_json::from_value(request["pending"].clone()).map_err(|e| fail(e.to_string(), "config"))?;
-            let login = release::github_sign_in_finish(&pending).await?;
-            Ok(json!({"login": login}))
-        }
-        // Cancel on the code page: the wait above ends and takes no token.
-        "github_sign_in_cancel" => {
-            release::github_sign_in_cancel();
-            Ok(json!({}))
-        }
-        // Signing out forgets the token and turns preview builds off.
-        "github_sign_out" => {
-            release::set_github_token("")?;
-            Ok(json!({}))
-        }
-        "set_preview" => {
-            release::set_preview(request["pr"].as_u64())?;
-            Ok(json!({}))
-        }
-        "previews" => {
-            let state = release::previews().await?;
-            Ok(json!({"enabled": state.enabled, "selected": state.selected, "builds": state.builds.iter().map(release_json).collect::<Vec<_>>()}))
-        }
         "import_identity" => import_identity(&request).await,
-        "check_update" => Ok(release_json(&release::latest().await?)),
+        "check_update" => {
+            let r = release::latest().await?;
+            Ok(json!({"tag": r.tag, "version": r.version, "build": r.build, "channel": r.channel.id(), "published_at": r.published_at, "notes": r.notes}))
+        }
         "udid" => {
             let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;
             let mut device = phone.open().await?;
@@ -244,17 +210,6 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "install" => install(&request, &reporter).await,
         other => Err(fail(format!("unknown request {other:?}"), "config")),
     }
-}
-
-/// A release for the app: a preview build also says its pull request, commit and title.
-fn release_json(r: &release::Release) -> Value {
-    let mut v = json!({"tag": r.tag, "version": r.version, "build": r.build, "channel": r.channel.id(), "published_at": r.published_at, "notes": r.notes});
-    if let Some(p) = &r.preview {
-        v["preview_pr"] = json!(p.pr);
-        v["sha"] = json!(p.sha);
-        v["title"] = json!(p.title);
-    }
-    v
 }
 
 async fn udid(device: &mut Device) -> std::result::Result<String, Failure> {
@@ -308,7 +263,7 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
     };
     reporter.done("phone", Some(udid.clone()));
 
-    let (ipa, signing_zip, tag, preview) = match kind {
+    let (ipa, signing_zip, tag) = match kind {
         "refresh" => {
             reporter.step("release", "Packing the installed Poki");
             let app = PathBuf::from(str_of(request, "app_path")?);
@@ -316,14 +271,14 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
             let (a, i) = (app.clone(), ipa.clone());
             tokio::task::spawn_blocking(move || sign::package_app(&a, &i)).await.map_err(|e| fail(e.to_string(), "io"))??;
             reporter.done("release", None);
-            (ipa, None, "installed".to_string(), None)
+            (ipa, None, "installed".to_string())
         }
         "update" => {
             reporter.step("release", "Getting the newest Poki");
             let rel = release::latest().await?;
             let (ipa, zip) = release::fetch(&rel, reporter).await?;
             reporter.done("release", Some(rel.tag.clone()));
-            (ipa, zip, rel.tag, rel.preview)
+            (ipa, zip, rel.tag)
         }
         other => return Err(fail(format!("unknown kind {other:?}"), "config")),
     };
@@ -346,7 +301,7 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
         std::fs::write(&path, p)?;
         profiles.push(path.to_string_lossy().to_string());
     }
-    let mut manifest = json!({
+    let manifest = json!({
         "kind": kind,
         "ipa": built.ipa.to_string_lossy(),
         "profiles": profiles,
@@ -361,36 +316,8 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
         "prepared_at": core::keeper::now(),
         "notes": built.notes,
     });
-    if let Some(p) = &preview {
-        manifest["preview_pr"] = json!(p.pr);
-        manifest["sha"] = json!(p.sha);
-    }
-    // The choice changed while this was being prepared: it is not left ready to install.
-    if let Err(stale) = still_chosen(&manifest) {
-        let _ = std::fs::remove_dir_all(&out_dir);
-        return Err(stale);
-    }
     std::fs::write(out_dir.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap_or_default())?;
     Ok(manifest)
-}
-
-/// A prepared update goes on only while it is still the build chosen: a pull request's preview
-/// while that pull request is chosen, a channel build while none is. Choosing None, turning
-/// Preview Builds off or signing out of GitHub leaves an already prepared preview on disk; this is
-/// what keeps it off the phone. A refresh re-signs what is installed, so it is always fine.
-fn still_chosen(manifest: &Value) -> std::result::Result<(), Failure> {
-    if manifest["kind"].as_str() != Some("update") {
-        return Ok(());
-    }
-    let prepared = manifest["preview_pr"].as_u64();
-    if prepared == release::preview() {
-        return Ok(());
-    }
-    let message = match prepared {
-        Some(pr) => format!("The prepared preview build of PR {pr} is no longer the one chosen, so it was not installed. Check for updates again."),
-        None => "A preview build is chosen now, so the prepared channel build was not installed. Check for updates again.".to_string(),
-    };
-    Err(fail(message, "stale"))
 }
 
 /// Installs a prepared build: its profiles through misagent, then the app as an upgrade through
@@ -399,7 +326,6 @@ async fn install(request: &Value, reporter: &Reporter) -> Out {
     let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;
     let manifest_path = PathBuf::from(str_of(request, "manifest")?);
     let manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path)?).map_err(|e| fail(e.to_string(), "config"))?;
-    still_chosen(&manifest)?;
     let ipa = PathBuf::from(str_of(&manifest, "ipa")?);
     let mut device = phone.open().await?;
 

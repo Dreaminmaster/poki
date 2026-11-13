@@ -182,37 +182,6 @@ struct Release: Decodable {
     var ipaName: String
     /// "stable", "beta", "alpha" or "pre-alpha".
     var channel: String? = nil
-    /// Set on a pull request's preview build, which is on no channel.
-    var preview: PreviewInfo? = nil
-}
-
-/// The pull request a preview build was made from.
-struct PreviewInfo: Decodable, Hashable {
-    var pr: Int
-    var sha: String
-    var title: String
-}
-
-/// The GitHub sign-in, the Preview Builds switch and the preview builds on offer (`previews`).
-struct PreviewState: Decodable {
-    var enabled = false
-    var selected: Int?
-    var hasToken = false
-    var githubLogin: String?
-    var canSignIn = false
-    var builds: [Release] = []
-}
-
-/// GitHub's device sign-in under way: the code to enter at the address (`github_sign_in_start`).
-struct GithubSignIn: Decodable, Equatable {
-    var deviceCode: String
-    var userCode: String
-    var verificationUri: String
-    var interval: Int
-    var expiresIn: Int
-
-    /// As the core takes it back in `github_sign_in_finish`.
-    var wire: [String: Any] { ["device_code": deviceCode, "user_code": userCode, "verification_uri": verificationUri, "interval": interval, "expires_in": expiresIn] }
 }
 
 /// A release channel and its newest release (`channels`, `set_channel`).
