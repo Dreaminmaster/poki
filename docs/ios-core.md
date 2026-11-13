@@ -230,7 +230,9 @@ Each answer is facts only: the app in front, numbered elements, what each action
   answer says so: a point on the picture is a point to tap.
 - **Lean lists.** Text an element around it already says (a post's text and then each of its lines),
   scroll bars, and holders that say what the button inside them says are left out; labels over 160
-  characters are cut. `full=true` lists the tree as it is.
+  characters are cut. `full=true` skips this shortening. The app or iOS accessibility snapshot
+  can still supply partial text without a marker. The default omission count only covers text Poki
+  received from the snapshot.
 - **Collapsed elements.** An element with a long label and nothing listed inside it (X shows a reply,
   its buttons included, as one cell) is marked `[collapsed]`. `full=true` adds the text Vision reads
   inside it as numbered `Text` elements (`(read from the picture)`), which can be tapped.
