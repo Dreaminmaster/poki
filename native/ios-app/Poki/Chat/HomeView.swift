@@ -486,12 +486,12 @@ struct HomePage<Footer: View>: View {
     }
 
     /// One row of pills that goes by on its own, slowly and without an end, and that a finger stops,
-    /// moves and flicks (`Marquee`). It stands still with Reduce Motion, in Low Power Mode and while
-    /// the keyboard is up, and its clock stops when the page is not in front or the drawer is open. With VoiceOver it is a plain row, each pill
+    /// moves and flicks (`Marquee`). It stands still with Reduce Motion, in Low Power Mode, while the
+    /// phone runs hot and while the keyboard is up, and its clock stops when the page is not in front or the drawer is open. With VoiceOver it is a plain row, each pill
     /// once. The two ends fade out over 32 points, glass included. The first row starts a little way
     /// along, so the two rows do not line up.
     private func row(_ ideas: [HomeShortcut], at index: Int, speed: Double, start: CGFloat) -> some View {
-        Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !DeviceStrain.shared.lowPower && !writing && !PerfSwitch.on(.pillsStill),
+        Marquee(speed: speed, spacing: 8, start: start, edgeFade: 32, running: !reduceMotion && !DeviceStrain.shared.resting && !writing && !PerfSwitch.on(.pillsStill),
                 active: home && scenePhase == .active && !covered, loops: !voiceOver, stopped: menuOpen) {
             ForEach(ideas) { idea in
                 Button { pick(idea.prompt) } label: {
