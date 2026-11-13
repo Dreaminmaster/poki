@@ -102,8 +102,8 @@ struct BearClips {
     func time(_ move: BearMove, after elapsed: TimeInterval) -> TimeInterval {
         switch move {
         case .idle:
-            // The idle clip is the bear standing still: its frames differ by less than a pixel at the
-            // picture's size, so it holds the first one and draws nothing until it blinks.
+            // The idle clip is the bear standing still, the same pose in every frame: it holds the first
+            // one, and `BearIdle` makes it breathe and look about on top of it.
             #if DEBUG
             // `-pokiBearFrame <frame>` holds that frame of the timeline instead, to look at one pose.
             if let frame = UserDefaults.standard.string(forKey: "pokiBearFrame").flatMap(Double.init) { return frame / fps }
@@ -194,6 +194,8 @@ private struct EyePads {
     private let highlight: Int
     private let shown: PhysicallyBasedMaterial
     private let hidden: PhysicallyBasedMaterial
+    /// How open each pad was last drawn: its material is made again only when that changes.
+    private var drawnOpen: [Float] = []
 
     init?(bear: ModelEntity) {
         guard var model = bear.model, let skeleton = model.mesh.contents.skeletons.first else { return nil }
@@ -256,13 +258,17 @@ private struct EyePads {
     }
 
     /// Puts each pad where its eye's joint has it at the pose just updated, and shuts it with the eye.
-    func follow() {
-        let local = bear.jointTransforms.map(\.matrix)
+    /// `gaze` is how far the pupils were moved to look somewhere: the pads stay where the eyes are.
+    mutating func follow(gaze: SIMD3<Float> = .zero) {
+        var transforms = bear.jointTransforms
+        for (_, joint) in pads where joint < transforms.count { transforms[joint].translation -= gaze }
+        let local = transforms.map(\.matrix)
         guard local.count == parents.count else { return }
         func placed(_ joint: Int) -> simd_float4x4 { parents[joint].map { placed($0) * local[joint] } ?? local[joint] }
         var allOpen = true
-        for (entity, joint) in pads {
-            let x = min(max((bear.jointTransforms[joint].scale.y - Self.shutting) / (1 - Self.shutting), 0), 1)
+        if drawnOpen.count != pads.count { drawnOpen = Array(repeating: -1, count: pads.count) }
+        for (index, (entity, joint)) in pads.enumerated() {
+            let x = min(max((transforms[joint].scale.y - Self.shutting) / (1 - Self.shutting), 0), 1)
             let open = x * x * (3 - 2 * x)
             allOpen = allOpen && open == 1
             let eye = placed(joint)
@@ -274,6 +280,8 @@ private struct EyePads {
             var lift = matrix_identity_float4x4
             lift.columns.3.z = Self.lift
             entity.transform = Transform(matrix: squeeze * eye * lift * inverseBind[joint])
+            guard open != drawnOpen[index] else { continue }
+            drawnOpen[index] = open
             var material = material
             if case .transparent(let opacity) = material.blending {
                 material.blending = .transparent(opacity: .init(scale: opacity.scale * (Self.shut + (1 - Self.shut) * open), texture: opacity.texture))
@@ -396,16 +404,27 @@ final class BearHandle {
     func sayHi() -> Bool { canvas?.sayHi() ?? false }
 }
 
-/// A transparent Metal layer the bear is rendered into, 30 times a second while it moves. Once a
-/// frame shows the same pose as the last (the idle pose holding still), it stops until the next blink.
+/// A transparent Metal layer the bear is rendered into while it is in sight: 30 times a second while it
+/// blinks, says hi or turns its head, 10 while it only breathes and sways. A pose that holds still (a model
+/// without the joints `BearIdle` moves) stops it until the next blink.
+///
+/// The model's poses are read once from its timeline, for the frames the bear plays, and then set on
+/// its joints directly, with `BearIdle` on top: the timeline's own playback would set them back.
 private final class BearCanvas: UIView {
     override class var layerClass: AnyClass { CAMetalLayer.self }
 
     private let renderer: RealityRenderer?
     private let clips: BearClips
     private let drawn: () -> Void
-    private var controllers: [AnimationPlaybackController] = []
     private var skins: [ModelEntity] = []
+    /// The model's pose at each frame the bear plays, a pose for each skin.
+    private var poses: [Int: [[Transform]]] = [:]
+    private var idle = BearIdle(now: CACurrentMediaTime())
+    /// The skin `BearIdle` moves, and its joints.
+    private var idleSkin: (index: Int, joints: BearIdleJoints)?
+    /// How far the pupils were last moved to look somewhere.
+    private var gaze = SIMD3<Float>.zero
+    private var rate = 30
     private var pads: EyePads?
     private var playback = BearPlayback()
     private var link: CADisplayLink?
@@ -476,6 +495,7 @@ private final class BearCanvas: UIView {
         renderer.cameraSettings.antialiasing = .multisample4X
         renderer.cameraSettings.colorBackground = .color(CGColor(gray: 0, alpha: 0))
 
+        var controllers: [AnimationPlaybackController] = []
         func walk(_ e: Entity) {
             for animation in e.availableAnimations {
                 controllers.append(e.playAnimation(animation, transitionDuration: 0, startsPaused: true))
@@ -484,6 +504,44 @@ private final class BearCanvas: UIView {
             e.children.forEach(walk)
         }
         walk(entity)
+        var frames = Set<Int>()
+        func add(_ span: ClosedRange<TimeInterval>) {
+            frames.formUnion(Int((span.lowerBound * clips.fps).rounded(.down))...Int((span.upperBound * clips.fps).rounded(.up)))
+        }
+        add(clips.idle.lowerBound...clips.idle.lowerBound)
+        add(clips.blink)
+        add(clips.wave.lowerBound...clips.hello)
+        let held = clips.time(.idle, after: 0)
+        add(held...held)
+        for frame in frames.sorted() {
+            controllers.forEach { $0.time = Double(frame) / clips.fps }
+            try? renderer.update(0)
+            poses[frame] = skins.map(\.jointTransforms)
+        }
+        controllers.forEach { $0.stop() }
+        // `-pokiBearFrame` holds a frame to look at: the bear does not move about over it.
+        if held == clips.idle.lowerBound {
+            idleSkin = skins.indices.lazy.compactMap { i in BearIdleJoints(names: self.skins[i].jointNames).map { (i, $0) } }.first
+        }
+    }
+
+    /// The bear moves about by itself: it has the joints for it, and the phone is not running hot. Hot,
+    /// it only blinks, and draws nothing in between.
+    private var moving: Bool {
+        idleSkin != nil && ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+    }
+
+    /// The model's pose at a frame of its timeline, between two frames a mix of the two.
+    private func pose(at frame: Double) -> [[Transform]]? {
+        let below = Int(frame.rounded(.down)), x = Float(frame - Double(below))
+        guard let a = poses[below] ?? poses.min(by: { abs(Double($0.key) - frame) < abs(Double($1.key) - frame) })?.value else { return nil }
+        guard x > 1e-4, let b = poses[below + 1] else { return a }
+        return zip(a, b).map { a, b in
+            zip(a, b).map { a, b in
+                Transform(scale: simd_mix(a.scale, b.scale, SIMD3(repeating: x)), rotation: simd_slerp(a.rotation, b.rotation, x),
+                          translation: simd_mix(a.translation, b.translation, SIMD3(repeating: x)))
+            }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -495,6 +553,7 @@ private final class BearCanvas: UIView {
 
     fileprivate func sayHi() -> Bool {
         guard live, presented, playback.free else { return false }
+        idle.attend(at: CACurrentMediaTime())
         playback.play([.hi], at: CACurrentMediaTime())
         resume()
         return true
@@ -505,7 +564,7 @@ private final class BearCanvas: UIView {
         if link == nil {
             let link = CADisplayLink(target: Ticker(self), selector: #selector(Ticker.tick))
             // The gestures are drawn at 30 frames a second: so they move at the rate they were made.
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: Float(rate), maximum: Float(rate), preferred: Float(rate))
             link.add(to: .main, forMode: .common)
             self.link = link
         }
@@ -516,18 +575,31 @@ private final class BearCanvas: UIView {
         guard live, !rendering, let renderer, let layer = layer as? CAMetalLayer else { return }
         let now = CACurrentMediaTime()
         let time = playback.time(at: now, clips: clips)
-        controllers.forEach { $0.time = time }
+        guard var standing = pose(at: time * clips.fps) else { return }
+        if moving, let (index, joints) = idleSkin, index < standing.count {
+            let move = idle.pose(at: now)
+            joints.apply(move, to: &standing[index])
+            gaze = BearIdleJoints.shift(move.gaze)
+        }
+        for (skin, joints) in zip(skins, standing) { skin.jointTransforms = joints }
+        // Breathing and swaying alone are slow: a third of the rate is enough, and a third of the work.
+        let wanted = playback.move == .idle && !idle.busy(at: now) ? 10 : 30
+        if wanted != rate {
+            rate = wanted
+            link?.preferredFrameRateRange = CAFrameRateRange(minimum: Float(wanted), maximum: Float(wanted), preferred: Float(wanted))
+        }
         do {
-            try renderer.update(0)
             if !presented {
                 // As the check renderer does: a few passes at the first frame let the skinning settle.
+                try renderer.update(0)
                 try renderer.update(0)
                 try renderer.update(0)
             }
             let pose = skins.flatMap { $0.jointTransforms.map(\.matrix) }
             if presented, Self.same(pose, lastPose) {
                 if settling == 0 {
-                    if playback.move == .idle { sleepUntilBlink() }
+                    // A bear that moves about by itself is only between two breaths: it goes on.
+                    if playback.move == .idle, !moving { sleepUntilBlink() }
                     return
                 }
                 settling -= 1
@@ -535,7 +607,7 @@ private final class BearCanvas: UIView {
                 settling = 3
             }
             guard let drawable = layer.nextDrawable() else { return }
-            pads?.follow()
+            pads?.follow(gaze: gaze)
             BearLog.note(now, playback.move, time * clips.fps)
             lastPose = pose
             rendering = true
@@ -544,7 +616,9 @@ private final class BearCanvas: UIView {
             // drawn once, the frame after the blink's line was the white of the eye pads with neither
             // the line nor the smile. One pass into a texture never shown, finished before the picture
             // is drawn, as the modeller's renderer draws three for one picture.
-            if let spare = spare(like: drawable.texture) {
+            // Standing, the eyes keep their shape and the pass is not needed: a head that turns a frame
+            // late does not show.
+            if playback.move != .idle, let spare = spare(like: drawable.texture) {
                 let warm = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: spare))
                 try renderer.updateAndRender(deltaTime: 0, cameraOutput: warm, onComplete: { [weak self] _ in
                     DispatchQueue.main.async { self?.draw(into: shown) }
