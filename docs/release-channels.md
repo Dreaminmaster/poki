@@ -106,7 +106,8 @@ script does not make that one yet.
 Before publishing, `node scripts/release/first-hop-check.mjs <plan> --build N` prints what Poki 0.3.1
 and Poki Setup 0.2.2 (661) pick on each channel after every step of a plan in
 `scripts/release/plans/`, and fails when a channel ends on another build or on an update it cannot
-install. `--live` reads today's releases from GitHub in place of the saved copy.
+install. `--live` reads today's releases from GitHub in place of the saved copy; with
+`plans/as-published.json` it shows where a release stands after each real publish.
 `scripts/release/oracle.sh` runs the picker cut from the `app-0.3.1-alpha.752` source over the same
 releases and fails when the script's port of it answers differently.
 

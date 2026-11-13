@@ -9,7 +9,8 @@
 //   node scripts/release/first-hop-check.mjs <plan.json> --build <N> [--entitlements <digest>] [--live]
 //
 // N is the candidate's build number, `git rev-list --count <candidate commit>`. --live reads the
-// releases from GitHub (read only, through gh) in place of the plan's saved copy. Exit 1 when a
+// releases from GitHub (read only, through gh) in place of the plan's saved copy; with
+// plans/as-published.json it shows where a release stands after each real publish. Exit 1 when a
 // client ends up without the candidate or stuck on an update it cannot install; exit 2 when this
 // port no longer matches the old picker. scripts/release/oracle.sh runs the old picker itself.
 //
@@ -229,22 +230,28 @@ const SUPPORT_FILES = ['Poki-signing.zip', 'SHA256SUMS', 'poki-relay-worker.js']
 function loadPlan(file, { build, entitlements, live }) {
   const text = readFileSync(file, 'utf8').replaceAll('{N+1}', String(build + 1)).replaceAll('{N}', String(build));
   const plan = JSON.parse(text);
+  const saved = JSON.parse(readFileSync(resolve(dirname(file), plan.base), 'utf8'));
   const base = live
-    ? JSON.parse(execFileSync('gh', ['api', '--paginate', `repos/${plan.repo}/releases?per_page=100`, '--jq', '[.[] | {tag_name, prerelease, draft, published_at, assets: [.assets[] | {name}]}]'], { encoding: 'utf8' }))
-    : JSON.parse(readFileSync(resolve(dirname(file), plan.base), 'utf8'));
+    ? JSON.parse(execFileSync('gh', ['api', '--paginate', `repos/${plan.repo}/releases?per_page=100`, '--jq', '[.[] | {tag_name, prerelease, draft, published_at, assets: [.assets[] | {name, digest}]}]'], { encoding: 'utf8' }))
+    : saved;
+  const candidate = { ...plan.candidate, entitlements: entitlements ?? plan.publishedEntitlements };
   // A rolling build is published under its own version and build (publish-rolling.sh), so the
-  // name of a file that is already out says what is inside it.
+  // name of a file that is already out says what is inside it. A file under another name is the
+  // candidate when GitHub reports the same sha256 for it.
+  const candidateDigest = base.flatMap(r => r.assets).find(a => a.name === `Poki-external-${candidate.version}-${candidate.build}.ipa`)?.digest;
   const releases = base.map(r => {
     const found = installable(r);
-    return { ...r, content: found ? { version: found.version, build: found.build, entitlements: plan.publishedEntitlements } : null };
+    const digest = found && r.assets.find(a => a.name === found.ipa_name).digest;
+    const content = !found ? null : digest && digest === candidateDigest ? candidate : { version: found.version, build: found.build, entitlements: plan.publishedEntitlements };
+    return { ...r, content };
   });
-  const candidate = { ...plan.candidate, entitlements: entitlements ?? plan.publishedEntitlements };
   const published = releases.map(r => Number(r.content?.build)).filter(Number.isFinite);
-  if (published.some(b => b >= build)) {
-    console.error(`--build ${build} is not above every published build (${Math.max(...published)}); a candidate is always a newer commit of main.`);
+  if (plan.steps.length && published.some(b => b >= build)) {
+    console.error(`--build ${build} is not above every published build (${Math.max(...published)}); a candidate is always a newer commit of main. To look at releases that are already out, use plans/as-published.json --live.`);
     process.exit(64);
   }
-  return { plan, releases, candidate, alreadyThere: new Set(releases.filter(r => r.assets.some(a => a.name === 'Poki-signing.zip')).map(r => r.tag_name)) };
+  // Tags an installed client may hold a Poki-signing.zip for: the ones that were out before this release.
+  return { plan, releases, candidate, alreadyThere: new Set(saved.filter(r => r.assets.some(a => a.name === 'Poki-signing.zip')).map(r => r.tag_name)) };
 }
 
 function applyStep(releases, step, candidate, clock) {
