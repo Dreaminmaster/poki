@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, failureText, type Account, type AppInfo, type ChannelInfo, type UpdateInfo } from "../api";
 import { setLang, t, useLang } from "../i18n";
+import { PreviewPicker } from "./GitHub";
 import { Capsule, Card, Copy, displayVersion, ErrorBox, Field } from "../ui";
 
 export default function Settings({ info }: { info: AppInfo | null }) {
@@ -34,13 +35,15 @@ export default function Settings({ info }: { info: AppInfo | null }) {
       </Card>
       <Card>
         <h2>{t("Updates")}</h2>
-        <p className="muted small">{t("Stable has tested releases only. Beta adds test builds. Alpha adds early builds. Pre-alpha adds every snapshot, which can break. Poki Setup installs and renews Poki from this channel and checks it for its own updates.")}</p>
+        {/* Pre-alpha is offered, and so named, only to people signed in to GitHub. */}
+        <p className="muted small">{channels.some((c) => c.id === "pre-alpha") ? t("Stable has tested releases only. Beta adds test builds. Alpha adds early builds. Pre-alpha adds every snapshot, which can break. Poki Setup installs and renews Poki from this channel and checks it for its own updates.") : t("Stable has tested releases only. Beta adds test builds. Alpha adds early builds. Poki Setup installs and renews Poki from this channel and checks it for its own updates.")}</p>
         <div className="row" style={{ alignItems: "center" }}>
           <div className="seg" role="radiogroup" aria-label={t("Channel")}>
             {channels.map((c) => <button key={c.id} role="radio" aria-checked={c.selected} className={c.selected ? "on" : ""} onClick={() => api.setChannel(c.id).then((l) => { setChannels(l); setUpdate(null); }).catch((e) => setError(failureText(e)))}>{t(c.title)}</button>)}
           </div>
           <span className="muted small">{chosen?.latest ? `${t("Newest Poki")}: ${chosen.latest.version} (${chosen.latest.build})` : t("None published")}</span>
         </div>
+        <PreviewPicker onChange={() => setUpdate(null)} onError={setError} />
       </Card>
       <Card>
         <h2>{t("Use an agent")}</h2>

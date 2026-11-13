@@ -385,6 +385,36 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
             release::set_channel(channel.parse()?)?;
             ok(release::channels().await?)
         }
+        // Preview builds of pull requests: the hidden switch, the chosen one, and those on offer.
+        "previews" => ok(release::previews().await?),
+        "set_preview_switch" => {
+            release::set_preview_switch(arg(a, "on")?)?;
+            ok(release::previews().await?)
+        }
+        // GitHub's device sign-in: start answers with the code to show, finish waits until the
+        // person has entered it on github.com.
+        "github_sign_in_start" => ok(release::github_sign_in_start().await?),
+        "github_sign_in_finish" => {
+            let pending: release::GithubSignIn = arg(a, "pending")?;
+            release::github_sign_in_finish(&pending).await?;
+            ok(release::previews().await?)
+        }
+        "github_sign_in_cancel" => {
+            release::github_sign_in_cancel();
+            ok(release::previews().await?)
+        }
+        "github_sign_out" => {
+            release::set_github_token("")?;
+            ok(release::previews().await?)
+        }
+        "set_github_token" => {
+            release::set_github_token(&arg::<String>(a, "token")?)?;
+            ok(release::previews().await?)
+        }
+        "set_preview" => {
+            release::set_preview(a.get("pr").and_then(|v| v.as_u64()))?;
+            ok(release::previews().await?)
+        }
         "relay_state" => ok(relay::remembered()?),
         "relay_worker" => ok(relay::worker_status().await?),
         "relay_token_saved" => ok(relay::saved_token().is_some()),
