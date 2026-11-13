@@ -304,6 +304,9 @@ final class AppModel {
         // Voice taps get the same rules and approval card as an agent's `do`.
         voice = VoiceModel(clearTap: { text, bundle, name in await core.clearTap(on: text, inApp: bundle, named: name, waiting: VoiceModel.approvalWait) },
                            phoneTool: { name, arguments in
+                               #if DEBUG && targetEnvironment(simulator)
+                               if TalkRehearsal.asked { return await TalkRehearsal.step() }
+                               #endif
                                let result = await core.tool(name, arguments: arguments)
                                return (result.text, result.isError)
                            },
