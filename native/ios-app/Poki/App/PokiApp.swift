@@ -198,6 +198,8 @@ struct RootView: View {
             .sheet(isPresented: Binding(get: { detailsOpen && width == .regular }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
+            .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
+            .onChange(of: scenePhase) { takeEntry() }
     }
 
     private var profilePage: some View {
@@ -317,6 +319,21 @@ struct RootView: View {
             ApprovalNotice.requestPermission()
             Task { await model.voice.start() }
         }
+    }
+
+    /// The Action Button, Control Center, Shortcuts or Spotlight (PokiEntry), once Poki is in front. A task
+    /// under way is shown, not interrupted: Talk starts only when Poki is free. Pairing stays on its step,
+    /// and the first run stays up: its record is asked, not `welcoming`, because at a cold launch the
+    /// request can be here before the cover is.
+    private func takeEntry() {
+        guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay, !FirstRun.isDue() else { return }
+        detailsOpen = false
+        statusOpen = false
+        if let handoff = AskPoki.liveSessionID { show(.session(handoff)); return }
+        show(.chat)
+        guard request == .talk, !chat.running, !model.voice.isOn else { return }
+        // Without a live voice (no OpenAI key, no voice bridge) Talk opens the message field instead.
+        if model.voice.canTalkLive { openLiveVoice() } else { MessageFieldAsk.shared.ask() }
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.

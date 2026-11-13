@@ -1513,10 +1513,23 @@ final class AppModel {
                 guard state.phase == .working, state.stepCount == 0, state.approval == nil, state.handoff == nil else { return }
                 state.phase = .idle; state.headline = "Waiting for agent"; state.since = nil
             }
+            // The owner's own reply still reaches them when they are elsewhere (a task sent from a shortcut).
+            if !inFront, let reply, session == AskPoki.chat?.sessionID { postReply(reply) }
             return
         }
         finishTask()
         activity.finishNow(alert: true)
+    }
+
+    /// A reply that touched no phone, while Poki is not in front (Send Task to Poki from a shortcut): the
+    /// notification is where the owner reads it. A tap opens Poki.
+    private func postReply(_ reply: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Poki"
+        content.body = reply
+        content.sound = .default
+        content.threadIdentifier = "chat"
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "poki-reply", content: content, trigger: nil))
     }
 
     func runTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
