@@ -207,8 +207,8 @@ struct PokiHead: View {
 /// the sides, the conversations on the left and a new conversation on the right, and between them
 /// in the conversation Poki's picture and name (on the home page the picture is over the greeting,
 /// and the middle is empty). A tap on Poki opens its card. There is no bar behind them: the conversation passes under them through the system's scroll
-/// edge effect. On the home page the new-conversation button is grey and does nothing (the page
-/// already is a new conversation).
+/// edge effect. The new-conversation button looks the same on the home page: there, the page already
+/// being a new conversation, a tap starts the message instead (`newConversation` decides what).
 struct ChatTopBar: View {
     var status: PokiStatus
     var home: Bool
@@ -220,6 +220,8 @@ struct ChatTopBar: View {
     /// A tap on Poki: the bear says hi while its card opens.
     var openDetails: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Taps on New Conversation on the home page, for a light tap in the hand.
+    @State private var homeTaps = 0
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -232,14 +234,17 @@ struct ChatTopBar: View {
                         .accessibilityIdentifier("chat.threads")
                 }
                 Spacer(minLength: 8)
-                Button(action: newConversation) {
-                    glyph("square.and.pencil", dim: home || busy).animation(HomeMotion.landing(home, reduceMotion), value: home)
+                Button {
+                    if home { homeTaps += 1 }
+                    newConversation()
+                } label: {
+                    glyph("square.and.pencil", dim: busy)
                 }
                 .buttonStyle(.plain)
-                .glassSurface(in: Circle(), interactive: !home && !busy)
-                .allowsHitTesting(!home && !busy)
+                .glassSurface(in: Circle(), interactive: !busy)
+                .allowsHitTesting(!busy)
+                .sensoryFeedback(.impact(weight: .light), trigger: homeTaps)
                 .accessibilityLabel(Text("New Conversation"))
-                .accessibilityHidden(home)
                 .accessibilityIdentifier("home.newChat")
             }
             .padding(.top, (HomeMotion.avatar - HomeMotion.button) / 2)
