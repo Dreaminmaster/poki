@@ -24,6 +24,39 @@ enum ActivityBear: String, Hashable {
         case .checking: (0.4669, 0.5192)
         }
     }
+
+    /// Where the picture's top-left corner stands in the compact island's left block, the picture
+    /// 27.2 points a side (`ActivityMetrics.compactBear`), so the whole bear, ears and outline, stays
+    /// inside the 4.33 points the system cuts off the island's edge. Measured per pose in ESP-503's
+    /// design (the island 36.67 tall, 393-point class): each pose's head sits elsewhere in its square.
+    /// The design has no thinking bear; it stands where the ready one does.
+    var compactOrigin: CGPoint {
+        switch self {
+        case .phone: CGPoint(x: 17.43, y: 3.84)
+        case .needs: CGPoint(x: 17.73, y: 2.44)
+        case .turn: CGPoint(x: 17.73, y: 2.23)
+        case .done: CGPoint(x: 17.73, y: 2.94)
+        case .tripped: CGPoint(x: 18.43, y: 2.54)
+        case .ready, .thinking: CGPoint(x: 17.03, y: 3.34)
+        case .paused: CGPoint(x: 16.83, y: 2.74)
+        case .checking: CGPoint(x: 17.13, y: 3.64)
+        }
+    }
+
+    /// The same in a circle 28 points across, the picture 22.6 a side (`ActivityMetrics.circleBear`):
+    /// the circle where the island is short of room, and the minimal circle's visible part.
+    var circleOrigin: CGPoint {
+        switch self {
+        case .phone: CGPoint(x: 3.29, y: 1.96)
+        case .needs: CGPoint(x: 3.54, y: 0.79)
+        case .turn: CGPoint(x: 3.54, y: 0.63)
+        case .done: CGPoint(x: 3.54, y: 1.21)
+        case .tripped: CGPoint(x: 4.12, y: 0.88)
+        case .ready, .thinking: CGPoint(x: 2.95, y: 1.54)
+        case .paused: CGPoint(x: 2.79, y: 1.04)
+        case .checking: CGPoint(x: 3.04, y: 1.79)
+        }
+    }
 }
 
 /// What the Live Activity shows for a state, worked out once per phase. The Lock Screen, the expanded
