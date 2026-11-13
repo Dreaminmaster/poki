@@ -244,9 +244,11 @@ En caso de ambigüedad, prevalece la versión en inglés.
 
 ## Licencia
 
-Poki es código abierto bajo la [licencia AGPL-3.0-only](LICENSE).
+El código de Poki es código abierto bajo la [licencia AGPL-3.0-only](LICENSE).
 
-Copyright (c) 2026 Joseph Zhou and contributors. Las dependencias de código abierto conservan sus respectivas licencias; consulta [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Para contribuir, consulta [CONTRIBUTING.md](CONTRIBUTING.md).
+El oso de Poki, el icono de la app y el resto de las ilustraciones de Poki no están cubiertos por esa licencia. Puedes usar capturas de pantalla para hablar de Poki; un fork necesita su propio nombre y sus propias ilustraciones. Consulta [BRAND.md](BRAND.md).
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Las dependencias de código abierto y los recursos de terceros conservan sus respectivas licencias; consulta [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Para contribuir, consulta [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Agradecimientos
 
