@@ -325,10 +325,10 @@ final class VoiceModel {
     /// Without one, voice is dictation into the message field, turn by turn.
     var canTalkLive: Bool { VoiceDirect.apiKey != nil || bridge != nil || rehearsing }
 
-    /// The ways to speak, asked for from outside the message field: `poki://voice` (the two ways, never
-    /// the microphone by itself), or Talk with Poki from Poki's profile with no live voice (what is
-    /// missing). The message field opens them and sets this back.
-    var waysAsked: VoiceWays?
+    /// Talk with Poki was asked for with no live voice (no OpenAI key, no voice bridge), from the message
+    /// field's button, Poki's profile or `poki://voice`: the message field says what is missing, with
+    /// the way to the key, and sets this back.
+    var keyAsked = false
 
     /// A simulator's development build that asked for TalkRehearsal: talks connect to it, with no key.
     var rehearsing: Bool {
@@ -403,7 +403,7 @@ final class VoiceModel {
     /// and taps Talk to Poki in the app.
     func open(_ url: URL) {
         let asked = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map(\.name)
-        if !asked.isEmpty { log.add("voice", "a link asked for \(asked.joined(separator: ", ")); links only open the ways to speak") }
+        if !asked.isEmpty { log.add("voice", "a link asked for \(asked.joined(separator: ", ")); links only bring the chat to the front") }
     }
 
     #if DEBUG

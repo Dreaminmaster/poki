@@ -1,65 +1,24 @@
 import SwiftUI
 import UIKit
 
-// Speaking to Poki from the message field. The interaction is pull request #250's: the empty field's
-// one button offers Dictate and Talk with Poki, a talk goes on in the chat with the field as its bar,
-// and Talk with Poki without a voice key says so, with a button to the key's form in Settings. The
+// Speaking to Poki from the message field. The empty field's main button starts a talk with Poki at
+// once (the owner, 2026-11-13: one tap, no menu); dictation has its own microphone beside it. The talk
+// goes on in the chat with the field as its bar (pull request #250's interaction), and Talk with Poki
+// without a voice key says so in the field's place, with a button to the key's form in Settings. The
 // old Voice page no longer opens from anywhere a person can reach. The code and the look are this app's:
 // glass, Poki's blue and its brand band, the system's type. The bars in the talk's mark are LiveKit's
 // (TalkBars.swift) and the light along the bottom edge is Jacob Mobin's (TalkEdgeGlow.swift).
 
-/// What the ways-to-speak panel shows.
-enum VoiceWays: Equatable {
-    /// Dictate and Talk with Poki.
-    case choose
-    /// Talk with Poki was chosen with no OpenAI key and no voice bridge: what it needs, and where.
-    case needsKey
-}
-
-/// Over the message field, from its main button: Dictate (Apple's speech recognition, words into the
-/// field) and Talk with Poki (a live conversation through OpenAI's Realtime voice). On the same glass
-/// as the field.
-struct VoiceWaysPanel: View {
-    var step: VoiceWays
-    var dictate: () -> Void
-    var talk: () -> Void
+/// In the message field's place, on its glass: Talk with Poki was asked for with no OpenAI key and no
+/// voice bridge. It says what is missing and goes straight to the OpenAI key's form in Settings. With
+/// the key there but Live Voice turned off, it says that and goes to Live Voice.
+struct VoiceKeyNotice: View {
     var addKey: () -> Void
     var close: () -> Void
 
     var body: some View {
-        Group {
-            switch step {
-            case .choose: choices
-            case .needsKey: needsKey
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassSurface(in: RoundedRectangle(cornerRadius: 28, style: .continuous), fallback: .bar)
-        // Over the message field there is room for the first accessibility size, not for the largest.
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-    }
-
-    private var choices: some View {
-        VStack(spacing: 2) {
-            WayRow(title: "Dictate", detail: "Your words appear in the message field", identifier: "composer.speak.dictate",
-                   action: dictate) {
-                Image(systemName: "mic.fill").foregroundStyle(Color(.label))
-                    .frame(width: 44, height: 44).background(Color(.label).opacity(0.1), in: .circle)
-            }
-            WayRow(title: "Talk with Poki", detail: "Speak live; Poki answers and acts", identifier: "composer.speak.talk",
-                   action: talk) {
-                Image(systemName: "waveform").foregroundStyle(.white)
-                    .frame(width: 44, height: 44).background(BrandBand.diagonal, in: .circle)
-            }
-        }
-    }
-
-    /// No voice key: Talk with Poki says so and goes straight to the OpenAI key's form in Settings. With
-    /// the key there but Live Voice turned off, it says that and goes to Live Voice.
-    private var needsKey: some View {
         let off = ModelKeys.hasKey(.openai) && !VoiceDirect.enabled
-        return VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "key.fill").font(.body.weight(.semibold)).foregroundStyle(.white)
                     .frame(width: 44, height: 44).background(BrandBand.diagonal, in: .circle)
@@ -71,6 +30,8 @@ struct VoiceWaysPanel: View {
                         .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("composer.speak.needs-key")
             }
             // Side by side at the trailing edge; one above the other when large text leaves no room.
             ViewThatFits(in: .horizontal) {
@@ -79,6 +40,7 @@ struct VoiceWaysPanel: View {
             }
         }
         .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var later: some View {
@@ -99,32 +61,6 @@ struct VoiceWaysPanel: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("composer.speak.add-key")
-    }
-}
-
-/// One way to speak: its mark, its name and a line on what it does.
-private struct WayRow<Mark: View>: View {
-    var title: LocalizedStringKey
-    var detail: LocalizedStringKey
-    var identifier: String
-    var action: () -> Void
-    @ViewBuilder var mark: Mark
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                mark.font(.body.weight(.semibold)).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    Text(detail).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(6)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(identifier)
     }
 }
 

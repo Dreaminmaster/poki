@@ -233,7 +233,7 @@ struct RootView: View {
             if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
-        // the setup step, or the Activity Log for a problem; `poki://voice` opens the ways to speak.
+        // the setup step, or the Activity Log for a problem; `poki://voice` brings the chat to the front.
         .onOpenURL { url in open(link: url) }
         .onAppear(perform: openLaunchScreen)
         .task {
@@ -265,9 +265,9 @@ struct RootView: View {
             detailsOpen = false
             model.voice.open(url)
             show(.chat)
-            // A link never turns on the microphone by itself: it opens the ways to speak, or, during a
-            // talk, only brings the chat with it to the front.
-            if !model.voice.isOn { model.voice.waysAsked = model.voice.canTalkLive ? .choose : .needsKey }
+            // A link never turns on the microphone: it brings the chat to the front, where the message
+            // field's button starts a talk, and says what Talk with Poki is missing when it has no key.
+            if !model.voice.isOn, !model.voice.canTalkLive { model.voice.keyAsked = true }
         } else {
             detailsOpen = false
             show(.chat)
@@ -279,7 +279,7 @@ struct RootView: View {
     /// way to the key in Settings.
     private func openLiveVoice() {
         show(.chat)
-        guard model.voice.canTalkLive else { model.voice.waysAsked = .needsKey; return }
+        guard model.voice.canTalkLive else { model.voice.keyAsked = true; return }
         if !model.voice.isOn {
             ApprovalNotice.requestPermission()
             Task { await model.voice.start() }

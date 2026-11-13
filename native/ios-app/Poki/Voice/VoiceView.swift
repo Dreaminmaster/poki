@@ -13,7 +13,7 @@ struct VoiceView: View {
     @State private var bridgeRejected = false
     @State private var removingBridge = false
     @State private var micDenied = false
-    @AppStorage(FieldDictation.buttonKey) private var dictationButton = false
+    @AppStorage(FieldDictation.buttonKey) private var dictationButton = FieldDictation.buttonShown
 
     private var voice: VoiceModel { app.voice }
 
@@ -25,7 +25,7 @@ struct VoiceView: View {
         @Bindable var voice = voice
         return Form {
                 // Voice runs in the chat (the waveform button for a live conversation, the microphone
-                // for dictation). This page only says how it runs and keeps its options.
+                // beside it for dictation). This page only says how it runs and keeps its options.
                 Section {
                     LabeledContent("Live Voice") {
                         Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? String(localized: "OpenAI key") : String(localized: "Voice bridge")) : String(localized: "Not Available"))
