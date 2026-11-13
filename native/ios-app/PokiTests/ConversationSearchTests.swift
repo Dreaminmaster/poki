@@ -81,6 +81,30 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertEqual(hits.first(where: { $0.entryID == agent.id })?.author, .agent("External agent"))
     }
 
+    func testNewBrowserVisitsAndApprovalDetailsRemainSearchable() {
+        var visit = BrowserVisit()
+        visit.host = "sydney.edu.au"
+        visit.title = "Campus events"
+        let browser = ChatEntry(.browser(visit))
+        let approval = ApprovalNote(id: "approval-1", summary: "Send course email",
+                                    app: "Mail", why: "sending a message",
+                                    byModel: false, state: .asking, reason: "",
+                                    reply: false, answered: nil)
+        let note = ChatEntry(.note(.approval(approval)))
+        let session = sample(entries: [browser, note])
+
+        let pageMatches = ConversationSearchIndex.find(in: [session], query: "sydney.edu.au")
+        XCTAssertEqual(pageMatches.first?.entryID, browser.id)
+        XCTAssertEqual(pageMatches.first?.author, .browser)
+        XCTAssertTrue(pageMatches.first?.detail.contains("Campus events") == true)
+
+        let approvalMatches = ConversationSearchIndex.find(in: [session], query: "course email")
+        XCTAssertEqual(approvalMatches.first?.entryID, note.id)
+        XCTAssertEqual(approvalMatches.first?.author, .task)
+        XCTAssertEqual(ConversationSearchIndex.find(in: [session], query: "sending a message").first?.entryID,
+                       note.id)
+    }
+
     func testExcerptPreservesChineseAndBoundsLongMessages() {
         let content = String(repeating: "abc", count: 110) + " 海港日落 " + String(repeating: "def", count: 100)
         let snippet = ConversationSearchIndex.excerpt(content, around: "海港")

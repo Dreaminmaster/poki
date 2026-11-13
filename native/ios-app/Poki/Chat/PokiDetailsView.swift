@@ -172,7 +172,7 @@ struct ConversationSearchHit: Identifiable {
     let entryID: UUID?
     let detail: String
     enum Author: Equatable {
-        case you, task, poki, agent(String)
+        case you, task, poki, browser, agent(String)
     }
     let author: Author?
     let at: Date?
@@ -227,7 +227,10 @@ enum ConversationSearchIndex {
         case .note(.problem(let text)), .note(.modelApproved(let text)), .note(.modelDeclined(let text)):
             return text
         case .note(.approval(let approval)):
-            return [approval.ask, approval.summary, approval.reason].compactMap { $0 }.joined(separator: " ")
+            return [approval.summary, approval.app, approval.why, approval.reason]
+                .filter { !$0.isEmpty }.joined(separator: " ")
+        case .browser(let visit):
+            return [visit.title, visit.host].filter { !$0.isEmpty }.joined(separator: " ")
         case .time, .note:
             return nil
         }
@@ -239,6 +242,7 @@ enum ConversationSearchIndex {
         case .request(_, let from): return .agent(from)
         case .poki: return .poki
         case .plan, .step, .note: return .task
+        case .browser: return .browser
         case .time: return nil
         }
     }
@@ -269,6 +273,7 @@ private struct ConversationsSettingsView: View {
         case .you: return Text("You", tableName: "ConversationSearch")
         case .task: return Text("Task", tableName: "ConversationSearch")
         case .poki: return Text(verbatim: "Poki")
+        case .browser: return Text("Browser", tableName: "ConversationSearch")
         case .agent(let name): return Text(verbatim: name)
         }
     }
