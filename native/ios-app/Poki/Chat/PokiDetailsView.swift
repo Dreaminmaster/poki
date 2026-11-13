@@ -6,10 +6,12 @@ import SwiftUI
 // person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute,
 // Approvals, Agents, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance), and
 // what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
-// approval method is changed on Poki's card in the chat only. The rows and the card are PokiSettingsKit's.
+// approval method is changed on Poki's card in the chat only. The rows are PokiSettingsKit's.
 
-/// Settings: Poki's card with where it stands and what it has done; any problem that keeps it from
-/// working; then the parts of Poki in three groups, each a row into its own page.
+/// Settings: any problem that keeps Poki from working; then the parts of Poki in three groups of rows.
+/// The first group opens with where Poki stands (a row that only shows it) and the Activity Log. There
+/// is no card on top (the owner, 2026-11-13: with only the status and the log on it, it had no reason
+/// to be a card).
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -30,10 +32,6 @@ struct PokiDetailsView: View {
         NavigationStack(path: $path) {
             ScrollViewReader { scroll in
             List {
-                Section {
-                    PokiSettingsCard(status: status, openActivity: { path.append(DetailsRoute.history) })
-                }
-
                 if !isSample {
                     let issues = Issue.current(model)
                     if !issues.isEmpty {
@@ -46,8 +44,16 @@ struct PokiDetailsView: View {
                     }
                 }
 
-                // What Poki works with.
+                // Where Poki stands and what it has done, then what it works with.
                 Section {
+                    // Shows only: Connection's Automation switch turns Poki on and pauses it.
+                    SettingsRow(title: "Poki", symbol: "pawprint", value: PokiStatusCopy.word(status), dot: status.mood.dot)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("details.status")
+                    NavigationLink(value: DetailsRoute.history) {
+                        SettingsRow(title: "Activity Log", symbol: "clock")
+                    }
+                    .accessibilityIdentifier("details.activity")
                     NavigationLink(value: DetailsRoute.connection) {
                         SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue, warns: !setupDone)
                     }
@@ -282,55 +288,6 @@ private struct ConversationsSettingsView: View {
         .navigationTitle("Archived Conversations")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search"))
-    }
-}
-
-// MARK: The card
-
-/// Poki on the settings home (ESP-469 board "01 设置首页"): the bear's face, the name and where Poki
-/// stands, then what is only here: the Activity Log. The approval method is changed on Poki's card in the
-/// chat and nowhere else (the owner, 2026-11-13), Voice is started from the chat, and Pause is not on it:
-/// it ended the task, which the message field's Stop does, and left iOS's automation banner up
-/// (Connection has the Automation switch).
-private struct PokiSettingsCard: View {
-    var status: PokiStatus
-    var openActivity: () -> Void
-    @ScaledMetric(relativeTo: .title2) private var face = 64.0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            SettingsPill(title: "Activity", symbol: "clock", chevron: true, action: openActivity)
-                .accessibilityIdentifier("details.activity")
-        }
-        .padding(.vertical, 10)
-        .animation(.easeInOut(duration: 0.3), value: status.mood)
-    }
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            Group {
-                if let image = PokiMood.cutout(status.mood, small: true) {
-                    Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
-                }
-            }
-            .frame(width: face, height: face)
-            .background(status.mood == .paused ? Tint.night : Tint.portrait, in: .circle)
-            .clipShape(.circle)
-            .overlay(Circle().strokeBorder(Tint.ring, lineWidth: 1))
-            .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "Poki").font(Prominent.font(.title2, .bold)).foregroundStyle(Color(.label))
-                    .accessibilityAddTraits(.isHeader)
-                HStack(spacing: 6) {
-                    Circle().fill(status.mood.dot).frame(width: 7, height: 7)
-                    Text(verbatim: PokiStatusCopy.word(status)).lineLimit(1)
-                }
-                .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .accessibilityIdentifier("details.status")
     }
 }
 
