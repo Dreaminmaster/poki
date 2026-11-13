@@ -1589,6 +1589,10 @@ final class FieldDictation {
 /// still hearing them), Poki's answers, and its steps as grey lines.
 struct LiveVoiceTranscript: View {
     var voice: VoiceModel
+    @Environment(\.colorScheme) private var scheme
+    /// Words still being heard are lighter than words said. On the light page a bubble much lighter
+    /// than that all but disappears into the ground.
+    private var hearing: Double { scheme == .dark ? 0.6 : 0.85 }
 
     var body: some View {
         if voice.isOn || !voice.lines.isEmpty {
@@ -1601,7 +1605,7 @@ struct LiveVoiceTranscript: View {
                     let pending = i == lines.count - 1 && line.role == .you && voice.phase == .hearing
                     switch line.role {
                     case .you:
-                        MessageBubble(direction: .outgoing, text: line.text, tail: true).opacity(pending ? 0.55 : 1)
+                        MessageBubble(direction: .outgoing, text: line.text, tail: true).opacity(pending ? hearing : 1)
                     case .poki:
                         MessageBubble(direction: .incoming, text: line.text, tail: true)
                     case .tool, .note:
@@ -1609,7 +1613,7 @@ struct LiveVoiceTranscript: View {
                     }
                 }
                 if voice.phase == .hearing, lines.last?.role != .you {
-                    MessageBubble(direction: .outgoing, text: String(localized: "Listening…"), tail: true).opacity(0.55)
+                    MessageBubble(direction: .outgoing, text: String(localized: "Listening…"), tail: true).opacity(hearing)
                 }
             }
             .animation(PlanMotion.enter, value: voice.lines)
