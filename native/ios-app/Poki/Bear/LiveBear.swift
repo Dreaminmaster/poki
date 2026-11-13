@@ -303,9 +303,10 @@ extension EnvironmentValues {
 }
 
 /// The bear for a face the model has, over the flat picture that stands in for it. The flat picture
-/// shows when the face is not the model's, with Reduce Motion or Low Power Mode, when the model failed
-/// to load, and when it is not drawn within 0.3 seconds; the model then fades in once it is. The square
-/// is never empty past those 0.3 seconds, and a change of face is just there, with no fade.
+/// shows when the face is not the model's, with Reduce Motion or Low Power Mode, while the phone runs
+/// hot (back to the model once it cools down), when the model failed to load, and when it is not drawn
+/// within 0.3 seconds; the model then fades in once it is. The square is never empty past those 0.3
+/// seconds, and a change of face is just there, with no fade.
 ///
 /// A poke makes it say hi (`BearMove.hi`), with a small hop and a tap you feel; a poke while it still
 /// does only gets the feel, so moves never pile up. The flat picture hops.
@@ -324,7 +325,6 @@ struct ModelBear<Flat: View>: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.bearCovered) private var covered
-    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     @State private var shown = false
     @State private var drawn = false
     @State private var waited = false
@@ -333,7 +333,7 @@ struct ModelBear<Flat: View>: View {
     @State private var hopped = Date.distantPast
     private var store: BearModel { BearModel.shared }
 
-    private var usable: Bool { !reduceMotion && !lowPower && !store.failed }
+    private var usable: Bool { !reduceMotion && !DeviceStrain.shared.resting && !store.failed }
     private var showsModel: Bool { modelled && usable && drawn }
 
     var body: some View {
@@ -368,11 +368,11 @@ struct ModelBear<Flat: View>: View {
             try? await Task.sleep(for: .milliseconds(300))
             waited = true
         }
+        // The renderer goes with the model; the one made when the model is usable again shows only once
+        // it has drawn, over the flat picture until then.
+        .onChange(of: usable) { _, usable in if !usable { drawn = false } }
         .onAppear { shown = true }
         .onDisappear { shown = false }
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
-            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        }
     }
 }
 

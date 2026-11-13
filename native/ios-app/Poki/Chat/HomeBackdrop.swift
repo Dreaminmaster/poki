@@ -17,9 +17,9 @@ import SwiftUI
 /// stack takes the width of its widest layer and stretches the meshes to it, which is how the bright
 /// edge, laid in the stack at its own 797 points, once showed only the middle half of the light.
 ///
-/// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on, and its
-/// clock stops while the app is not active, another page covers this one or the drawer is open. With Reduce Motion nothing
-/// sinks either; the change between the two layers is a fade.
+/// The light stands still in the shape of the table with Reduce Motion or Low Power Mode on or the phone
+/// running hot, and its clock stops while the app is not active, another page covers this one or the
+/// drawer is open. With Reduce Motion nothing sinks either; the change between the two layers is a fade.
 struct HomeBackdrop: View {
     /// The home page is in front.
     var home: Bool
@@ -33,7 +33,6 @@ struct HomeBackdrop: View {
     @Environment(\.coveredByDrawer) private var covered
     /// False while another page is pushed over this one.
     @State private var shown = false
-    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     /// How strongly the home's light shows behind the conversation in dark: as much as keeps the system's
     /// secondary text above 4.5 to 1 right down to the message field, where the light is brightest. At
     /// half it measured 4.4 there.
@@ -41,7 +40,8 @@ struct HomeBackdrop: View {
 
     var body: some View {
         let dark = scheme == .dark
-        let resting = reduceMotion || frozen || lowPower || PerfSwitch.on(.backdropStill)
+        let strained = DeviceStrain.shared.resting
+        let resting = reduceMotion || frozen || strained || PerfSwitch.on(.backdropStill)
         let seen = shown && scenePhase == .active && !covered
         let breathing = home && !resting && seen ? 1.0 : 0
         ZStack(alignment: .bottom) {
@@ -57,16 +57,13 @@ struct HomeBackdrop: View {
         }
         // Coming back to the page, the light takes a second to start breathing again rather than
         // jumping to where its clock has got to.
-        .animation(.easeInOut(duration: 1), value: seen && !lowPower)
+        .animation(.easeInOut(duration: 1), value: seen && !strained)
         .overlay { Grain.image.resizable(resizingMode: .tile).opacity(0.03).blendMode(.overlay) }
         .compositingGroup()
         .ignoresSafeArea()
         .accessibilityHidden(true)
         .onAppear { shown = true }
         .onDisappear { shown = false }
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
-            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        }
     }
 }
 
