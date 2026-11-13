@@ -9,7 +9,8 @@ import { version } from './build-info.mjs';
 
 const day = 24 * 60 * 60 * 1000;
 const stateFile = join(stateDir, 'update-check.json');
-const endpoint = 'https://api.github.com/repos/JosssphZhou/poki/releases/latest';
+// GitHub's Latest can be an app release, so the newest vX.Y.Z tag names Poki MCP's newest release.
+const api = 'https://api.github.com/repos/JosssphZhou/poki';
 let pending;
 let state;
 
@@ -28,17 +29,24 @@ function notice(release) {
   return { version: latest.numbers.join('.'), summary: summary.slice(0, 300), url: `https://github.com/JosssphZhou/poki/releases/tag/${encodeURIComponent(release.tag_name)}`, command: 'poki update' };
 }
 
+async function github(path) {
+  const response = await fetch(`${api}${path}`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'poki-update-check' },
+    signal: AbortSignal.timeout(1500), redirect: 'error',
+  });
+  if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+  return response.json();
+}
+
 async function checkForUpdate() {
   state ??= await readFile(stateFile, 'utf8').then(JSON.parse).catch(() => null);
   const age = Date.now() - state?.checkedAt;
   if (Number.isFinite(age) && age >= 0 && age < day) return notice(state.release);
   let release = null;
   try {
-    const response = await fetch(endpoint, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'poki-update-check' },
-      signal: AbortSignal.timeout(1500), redirect: 'error',
-    });
-    if (response.ok) release = await response.json();
+    const tags = (await github('/git/matching-refs/tags/v')).map(ref => ref.ref?.replace(/^refs\/tags\//, '')).filter(tag => versionParts(tag) && !versionParts(tag).prerelease);
+    const newest = tags.sort((a, b) => versionParts(a).numbers.map((n, i) => n - versionParts(b).numbers[i]).find(n => n !== 0) ?? 0).at(-1);
+    if (newest) release = notice({ tag_name: newest }) ? await github(`/releases/tags/${encodeURIComponent(newest)}`) : { tag_name: newest, draft: false, prerelease: false };
   } catch {}
   state = { checkedAt: Date.now(), release };
   try {

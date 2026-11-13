@@ -13,7 +13,7 @@
 //   - the release and IPA Poki Setup's helper installs, from scripts/release/first-hop-check.mjs,
 //     the port of desktop/core/src/release.rs (unchanged between Poki Setup 661 and main);
 //   - the files the installer's own fallback (downloadIpa) fetches when the helper cannot download;
-//   - which release GitHub's releases/latest then names, and what Poki MCP's update notice makes of it.
+//   - which release GitHub's releases/latest then names, and what Poki MCP's update notice offers.
 // Then it resolves every github.com/JosssphZhou/poki/releases link in the install entry points and
 // docs against the last step, and runs the real installer against a GitHub that answers 403.
 // Exit 1 when the default channel installs a Pre-alpha or nothing, a channel finds no Poki Setup,
@@ -88,6 +88,7 @@ function serve(releases, requests) {
     const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
     if (url.startsWith(`https://api.github.com/repos/${REPO}/releases?`)) return json(releases.map(api));
     if (url === `https://api.github.com/repos/${REPO}/releases/latest`) { const l = latestOf(releases); return l ? json(api(l)) : new Response('{"message":"Not Found"}', { status: 404 }); }
+    if (url === `https://api.github.com/repos/${REPO}/git/matching-refs/tags/v`) return json(releases.filter(r => r.tag_name.startsWith('v')).map(r => ({ ref: `refs/tags/${r.tag_name}` })));
     const byTag = url.match(/\/releases\/tags\/(.+)$/);
     if (byTag) { const r = releases.find(x => x.tag_name === decodeURIComponent(byTag[1])); return r ? json(api(r)) : new Response('{"message":"Not Found"}', { status: 404 }); }
     const file = url.match(/\/releases\/(?:download|assets)\/([^/]+)\/([^/]+)$/);
@@ -162,7 +163,7 @@ for (const [index, name] of states.entries()) {
   globalThis.fetch = serve(releases, []);
   const { updateNotice } = await import(`../src/update-check.mjs?step=${index}`);
   const notice = await updateNotice();
-  console.log(`GitHub Latest: ${latest ? `${latest.tag_name} (${latest.assets.join(', ') || 'no files'})` : 'none'}. Poki MCP ${mcpVersion}'s update notice: ${notice ? `offers ${notice.version}` : 'none'}${latest && !isMcp(latest.tag_name) ? ', and stays silent while Latest is not a vX.Y.Z release' : ''}.\n`);
+  console.log(`GitHub Latest: ${latest ? `${latest.tag_name} (${latest.assets.join(', ') || 'no files'})` : 'none'}. Poki MCP ${mcpVersion}'s update notice: ${notice ? `offers ${notice.version}` : `none (newest Poki MCP release ${releases.filter(r => isMcp(r.tag_name)).map(r => r.tag_name).sort().at(-1) ?? 'missing'})`}.\n`);
   if (isLast) {
     const app = picks[DEFAULT_CHANNEL];
     console.log(`Answer: a new user on the default channel gets ${app ? `${app.file} from ${app.tag}, Poki ${app.version} (${app.build})` : 'nothing'}${app && /prealpha/.test(app.tag) ? ', a Pre-alpha' : ', not a Pre-alpha'}.\n`);
@@ -189,7 +190,7 @@ for (const line of grep) {
   const tag = link.match(/\/releases\/(?:tag|download)\/([^/]+)/)?.[1];
   if (/\/releases\/latest$/.test(link)) {
     target = latestFinal ? `${latestFinal.tag_name}: ${kinds(latestFinal)}` : 'nothing';
-    if (!latestFinal || !isMcp(latestFinal.tag_name)) result = link.startsWith('api.') ? 'quiet: no notice while Latest is an app release' : fail('Latest is not a Poki MCP release');
+    if (!latestFinal || !isMcp(latestFinal.tag_name)) result = link.startsWith('api.') ? 'note: Latest is an app release' : fail('Latest is not a Poki MCP release');
   } else if (tag) {
     const r = finalReleases.find(x => x.tag_name === tag);
     target = r ? `${tag}: ${kinds(r)}` : `${tag}: missing`;
