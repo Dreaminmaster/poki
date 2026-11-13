@@ -86,6 +86,9 @@ enum PokiHandoff {
         var hello: [String: Any] = ["schema": "poki.hello/1", "model_key": offer, "loopback": loopback]
         hello["version"] = info?["CFBundleShortVersionString"] as? String ?? "?"
         hello["build"] = info?["CFBundleVersion"] as? String ?? "?"
+        if let update = PokiUpdateInfo.read(app: .main, channelFile: AppFiles.support.appendingPathComponent("signer/state/channel.json"), requestFile: folder.appendingPathComponent("update-request.json")) {
+            hello["update"] = update
+        }
         if let imported, let data = try? JSONEncoder().encode(imported), let object = try? JSONSerialization.jsonObject(with: data) { hello["imported"] = object }
         guard let content = try? JSONSerialization.data(withJSONObject: hello, options: [.sortedKeys]), content != lastWritten else { return }
         hello["at"] = ISO8601DateFormatter().string(from: Date())

@@ -72,6 +72,7 @@ struct Shared {
     handoff: Mutex<Option<pairshare::Server>>,
     logs: Mutex<Option<tokio::task::JoinHandle<()>>>,
     busy: Mutex<bool>,
+    update: Mutex<Option<poki_setup_core::update::Prepared>>,
 }
 
 #[derive(Clone)]
@@ -164,6 +165,7 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
     match cmd {
         "app_info" => ok(json!({
             "version": poki_setup_core::full_version(),
+            "update_only": 1,
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "data_dir": poki_setup_core::paths::data_dir().display().to_string(),
@@ -318,10 +320,29 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
             ok(json!({ "ipa": built.ipa, "bundle_id": built.bundle_id, "version": built.version, "build": built.build, "profile_expires_at": built.profile_expires_at }))
         }
         "records" => ok(keeper::all()?),
+        "update_inspect" => {
+            let udid: Option<String> = arg(a, "udid")?;
+            let reporter = Reporter::silent();
+            let plan = with_signer(state, async |s| poki_setup_core::update::prepare(s, udid.as_deref(), &reporter).await).await?;
+            let summary = plan.summary();
+            *state.update.lock().await = Some(plan);
+            ok(summary)
+        }
+        "update_readback" => {
+            let udid: String = arg(a, "udid")?;
+            let app = poki_setup_core::update::readback(&udid).await?;
+            ok(json!({"version": app.version, "build": app.build}))
+        }
         "renew" => {
             let udid: String = arg(a, "udid")?;
             let r = out.reporter("renew");
-            ok(with_signer(state, async |s| setup::renew(s, &udid, &r).await).await?)
+            if arg::<Option<bool>>(a, "update_only")?.unwrap_or(false) {
+                let expected = arg(a, "expected")?;
+                let plan = state.update.lock().await.take().ok_or_else(|| Error::UpdateCheck("No verified update is prepared; rerun update-only before installation."))?;
+                ok(with_signer(state, async |s| plan.renew(s, &udid, &expected, &r).await).await?)
+            } else {
+                ok(with_signer(state, async |s| setup::renew(s, &udid, &r).await).await?)
+            }
         }
         "renew_due" => {
             let r = out.reporter("renew");

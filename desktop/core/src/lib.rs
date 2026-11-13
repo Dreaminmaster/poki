@@ -37,6 +37,8 @@ pub mod sign;
 #[cfg(feature = "device")]
 pub mod support;
 pub mod vault;
+#[cfg(feature = "device")]
+pub mod update;
 
 pub use error::{Error, Result};
 pub use progress::{Progress, Reporter};
