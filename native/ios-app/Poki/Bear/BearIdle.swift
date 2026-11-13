@@ -125,16 +125,6 @@ struct BearIdle {
         return p
     }
 
-    /// The farthest a look to the side goes, `side` of the way toward one side (-1 to 1), with the
-    /// sway's own turn on top, and nothing else.
-    static func farthest(_ side: Float) -> Pose {
-        var p = Pose()
-        p.headYaw = side * (0.30 + 0.03)
-        p.bodyYaw = side * (0.05 + 0.025)
-        p.gaze = SIMD2(side * 0.009, 0)
-        return p
-    }
-
     private static func scaled(_ p: Pose, _ w: Float) -> Pose {
         var q = Pose()
         q.headYaw = p.headYaw * w; q.headPitch = p.headPitch * w; q.headRoll = p.headRoll * w
