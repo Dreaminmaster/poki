@@ -235,8 +235,7 @@ struct RootView: View {
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` opens the ways to speak.
         .onOpenURL { url in open(link: url) }
-        .onAppear { MeasureProbe.launched(); openLaunchScreen() }
-        .task { await MeasureProbe.drive(voice: { openLiveVoice() }) }
+        .onAppear(perform: openLaunchScreen)
         .task {
             #if DEBUG
             // Development builds: `-pokiVoiceLink "poki://voice?…"` at launch starts a silent test run.

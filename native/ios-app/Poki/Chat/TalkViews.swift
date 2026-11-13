@@ -161,7 +161,6 @@ struct TalkBar: View {
             .accessibilityIdentifier("composer.talk.end")
         }
         .frame(minHeight: 48)
-        .onAppear { MeasureProbe.reached("voice") }
     }
 }
 
