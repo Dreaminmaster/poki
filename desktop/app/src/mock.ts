@@ -21,7 +21,6 @@ const answers: Record<string, unknown> = {
     { id: "alpha", title: "Alpha", selected: false, latest: { tag: "ios-alpha-0.2.7-110", version: "0.2.7", build: "110", published_at: "", ipa_name: "Poki-external-0.2.7-110.ipa", channel: "alpha" } },
     { id: "pre-alpha", title: "Pre-alpha", selected: false, latest: { tag: "ios-prealpha-0.2.7-252", version: "0.2.7", build: "252", published_at: "", ipa_name: "Poki-external-0.2.7-252.ipa", channel: "pre-alpha" } },
   ],
-  previews: { enabled: true, selected: null, has_token: true, github_login: "octocat", can_sign_in: true, builds: [{ tag: "preview-pr-180", version: "0.3.0", build: "701", published_at: "", ipa_name: "Poki-external-unsigned.ipa", preview: { pr: 180, sha: "0123456789ab", title: "Preview builds of pull requests", artifact_id: 1 } }] },
   qr_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#fff"/><rect x="1" y="1" width="3" height="3"/><rect x="6" y="1" width="3" height="3"/><rect x="1" y="6" width="3" height="3"/></svg>',
 };
 (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
