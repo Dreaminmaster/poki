@@ -33,7 +33,6 @@ struct HomeBackdrop: View {
     @Environment(\.coveredByDrawer) private var covered
     /// False while another page is pushed over this one.
     @State private var shown = false
-    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     /// How strongly the home's light shows behind the conversation in dark: as much as keeps the system's
     /// secondary text above 4.5 to 1 right down to the message field, where the light is brightest. At
     /// half it measured 4.4 there.
@@ -41,6 +40,7 @@ struct HomeBackdrop: View {
 
     var body: some View {
         let dark = scheme == .dark
+        let lowPower = DeviceStrain.shared.lowPower
         let resting = reduceMotion || frozen || lowPower || PerfSwitch.on(.backdropStill)
         let seen = shown && scenePhase == .active && !covered
         let breathing = home && !resting && seen ? 1.0 : 0
@@ -64,9 +64,6 @@ struct HomeBackdrop: View {
         .accessibilityHidden(true)
         .onAppear { shown = true }
         .onDisappear { shown = false }
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
-            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        }
     }
 }
 

@@ -29,7 +29,8 @@ struct Marquee<Content: View>: UIViewRepresentable {
     var start: CGFloat = 0
     /// Points over which each end of the row fades out; 0 cuts it at its edges.
     var edgeFade: CGFloat = 0
-    /// Goes by itself. False (Reduce Motion, the keyboard up) lets it come to rest; a finger still moves it.
+    /// Goes by itself. False (Reduce Motion, Low Power Mode, the keyboard up) lets it come to rest; a
+    /// finger still moves it.
     var running = true
     /// The page is in front. Otherwise the clock stops.
     var active = true

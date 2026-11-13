@@ -324,7 +324,6 @@ struct ModelBear<Flat: View>: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.bearCovered) private var covered
-    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
     @State private var shown = false
     @State private var drawn = false
     @State private var waited = false
@@ -333,7 +332,7 @@ struct ModelBear<Flat: View>: View {
     @State private var hopped = Date.distantPast
     private var store: BearModel { BearModel.shared }
 
-    private var usable: Bool { !reduceMotion && !lowPower && !store.failed }
+    private var usable: Bool { !reduceMotion && !DeviceStrain.shared.lowPower && !store.failed }
     private var showsModel: Bool { modelled && usable && drawn }
 
     var body: some View {
@@ -370,9 +369,6 @@ struct ModelBear<Flat: View>: View {
         }
         .onAppear { shown = true }
         .onDisappear { shown = false }
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in
-            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        }
     }
 }
 
