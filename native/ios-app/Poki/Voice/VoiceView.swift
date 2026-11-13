@@ -42,7 +42,7 @@ struct VoiceView: View {
                     }
                 }
             }
-            .navigationTitle("Voice")
+            .navigationTitle("Dictation & Mute")
             .navigationBarTitleDisplayMode(.inline)
     }
 

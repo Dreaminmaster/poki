@@ -14839,6 +14839,22 @@
         }
       }
     },
+    "Dictation & Mute" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写与静音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聽寫與靜音"
+          }
+        }
+      }
+    },
     "On this iPhone" : {
       "localizations" : {
         "zh-Hans" : {

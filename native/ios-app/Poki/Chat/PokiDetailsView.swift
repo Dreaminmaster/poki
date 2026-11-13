@@ -3,9 +3,10 @@ import SwiftUI
 
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
 // conversations. It replaced ESP-174's details screen and its "More Settings" layer. Every part of Poki a
-// person looks for by name is a row of its own on this page (Connection, Models, Voice, Approvals, Agents,
-// Memory, Conversations, Signing & Updates, Notifications, Appearance), and what only a few need is on one
-// page, Advanced, by where it came from. Nothing has two ways in. The rows and the card are PokiSettingsKit's.
+// person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute, Agents,
+// Memory, Archived Conversations, Signing & Updates, Notifications, Appearance), and what only a few need
+// is on one page, Advanced, by where it came from. Approvals opens from Poki's card, where the method is
+// chosen. Nothing has two ways in. The rows and the card are PokiSettingsKit's.
 
 /// Settings: Poki's card with what it is doing, how it asks before a sensitive step and what it has done;
 /// any problem that keeps it from working; then the parts of Poki in three groups, each a row into its own page.
@@ -28,7 +29,8 @@ struct PokiDetailsView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
-                    PokiSettingsCard(status: status, openActivity: { path.append(DetailsRoute.history) })
+                    PokiSettingsCard(status: status, openApprovals: { path.append(DetailsRoute.approvals) },
+                                     openActivity: { path.append(DetailsRoute.history) })
                 }
 
                 if !isSample {
@@ -54,14 +56,11 @@ struct PokiDetailsView: View {
                             .id(modelVersion)
                     }
                     .accessibilityIdentifier("details.accountsAndModels")
+                    // Named for what is on it: the dictation button and Poki's voice. Live voice starts in the chat.
                     NavigationLink(value: DetailsRoute.voice) {
-                        SettingsRow(title: "Voice", symbol: "waveform")
+                        SettingsRow(title: "Dictation & Mute", symbol: "mic")
                     }
                     .accessibilityIdentifier("details.voice")
-                    NavigationLink(value: DetailsRoute.approvals) {
-                        SettingsRow(title: "Approvals", symbol: "checkmark.shield", value: approvalsValue)
-                    }
-                    .accessibilityIdentifier("moreSettings.approvals")
                 }
 
                 // Who else uses it, and what it keeps.
@@ -173,11 +172,6 @@ struct PokiDetailsView: View {
         return model.ownerPaused ? String(localized: "Paused") : String(localized: "On")
     }
 
-    /// How much the chat model may approve by itself; the way of asking is on the card above.
-    private var approvalsValue: String? {
-        model.approvalMode == .off ? nil : model.classifierLevel.title
-    }
-
     private var agentsValue: String {
         if isSample { return String(localized: "\(2) Connected") }
         if model.relayAddress == nil || !model.relayEnabled { return String(localized: "Off") }
@@ -192,9 +186,8 @@ struct PokiDetailsView: View {
     }
 
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
-    private var updatesValue: String {
-        updateWaits ? String(localized: "Update Available") : "\(model.signer.installedVersion) (\(model.signer.installedBuild))"
-    }
+    /// The version is the page's last line, so the row only speaks up when an update waits.
+    private var updatesValue: String? { updateWaits ? String(localized: "Update Available") : nil }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
@@ -278,12 +271,14 @@ private struct ConversationsSettingsView: View {
 // MARK: The card
 
 /// Poki on the settings home (ESP-469 board "01 设置首页"): the bear's face, the name and where Poki
-/// stands, then what is only here: how Poki asks before a sensitive step, chosen in place, and the
-/// Activity Log. Voice is started from the chat, and Pause is not on it: it ended the task, which the
-/// message field's Stop does, and left iOS's automation banner up (Connection has the Automation switch).
+/// stands, then what is only here: how Poki asks before a sensitive step, chosen in place, with the way
+/// into Approvals under the choices (Settings has no other row for it), and the Activity Log. Voice is
+/// started from the chat, and Pause is not on it: it ended the task, which the message field's Stop does,
+/// and left iOS's automation banner up (Connection has the Automation switch).
 private struct PokiSettingsCard: View {
     @Environment(AppModel.self) private var model
     var status: PokiStatus
+    var openApprovals: () -> Void
     var openActivity: () -> Void
     @ScaledMetric(relativeTo: .title2) private var face = 64.0
 
@@ -337,6 +332,10 @@ private struct PokiSettingsCard: View {
             } header: {
                 Text("Payments, deletions and actions in Wallet always need your confirmation.")
             }
+            // The Approvals page: what each method does, and how much the chat model approves by itself
+            // (its sensitivity).
+            Button("Approvals", systemImage: "slider.horizontal.3", action: openApprovals)
+                .accessibilityIdentifier("moreSettings.approvals")
         } label: {
             SettingsPillLabel(title: Text(verbatim: model.approvalMode.title), symbol: "checkmark.shield", trailing: "chevron.up.chevron.down")
         }
