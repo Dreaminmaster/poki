@@ -17,22 +17,6 @@
         }
       }
     },
-    "One press opens Poki and starts talking. To type a task instead, choose Shortcut there, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按一下就打开 Poki 并开始说话。想改成输入任务，就在那里选「快捷指令」，再选「发任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按一下就打開 Poki 並開始說話。想改成輸入任務，就在那裡選「捷徑」，再選「發任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
-          }
-        }
-      }
-    },
     "Opens Poki and starts talking." : {
       "localizations" : {
         "zh-Hans" : {
@@ -157,6 +141,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 還沒準備好，請稍後再試。"
+          }
+        }
+      }
+    },
+    "Press and hold the Action button to open Poki and start talking. To type a task instead, choose Shortcut there, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住操作按钮，就会打开 Poki 并开始说话。想改成输入任务，就在那里选「快捷指令」，再选「发任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住動作按鈕，就會打開 Poki 並開始說話。想改成輸入任務，就在那裡選「捷徑」，再選「發任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
           }
         }
       }

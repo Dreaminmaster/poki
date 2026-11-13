@@ -12,7 +12,7 @@ struct ActionButtonSection: View {
         } header: {
             Text("Action Button", tableName: "Entry")
         } footer: {
-            Text("One press opens Poki and starts talking. To type a task instead, choose Shortcut there, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too.", tableName: "Entry")
+            Text("Press and hold the Action button to open Poki and start talking. To type a task instead, choose Shortcut there, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too.", tableName: "Entry")
         }
     }
 }
