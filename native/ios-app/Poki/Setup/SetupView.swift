@@ -177,7 +177,17 @@ extension SetupStep {
 /// Opens Settings with the step in the Live Activity.
 @MainActor func openSettings(_ model: AppModel, for step: SetupStep?) {
     if let step { model.guide(step) }
-    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+    if let url = settingsURL(for: step) { UIApplication.shared.open(url) }
+}
+
+func settingsURL(for step: SetupStep?) -> URL? {
+    // 系统配置步骤打开设置首页；后台权限等步骤仍打开 Poki 的 App 权限页。
+    switch step {
+    case .runner?, .developerMode?, .pairing?, .automation?:
+        return URL(string: "App-prefs:")
+    default:
+        return URL(string: UIApplication.openSettingsURLString)
+    }
 }
 
 private struct InstructionsCard: View {
@@ -558,7 +568,7 @@ private struct PairingPage: View {
             } else if SetupStep.onDevicePairing {
                 Section("How To") {
                     Label("Connect to Wi‑Fi and tap **Start Pairing**. Allow local network access when prompted.", systemImage: "1.circle")
-                    Label("Poki will open Settings. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle")
+                    Label("Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle")
                     Label("Enter the code shown here and on the Lock Screen.", systemImage: "3.circle")
                 }
             } else {

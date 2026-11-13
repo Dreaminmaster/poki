@@ -2173,7 +2173,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置 › 隐私与安全性 › 开发者模式”中开启开发者模式，并确认系统为 iOS 17.4 或更高版本。"
+            "value" : "请在“设置 › 隐私与安全 › 开发者模式”中开启开发者模式，并确认系统为 iOS 17.4 或更高版本。"
           }
         },
         "zh-Hant" : {
@@ -8304,7 +8304,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请依次检查：“配置 › 回环”（LocalDevVPN 或代理已连接且配好 10.7.0.1）、“配置 › 配对”（开启回环后重配）、“设置 › 隐私与安全性”中的开发者模式。Poki 无法连接此 iPhone。"
+            "value" : "请依次检查：“配置 › 回环”（LocalDevVPN 或代理已连接且配好 10.7.0.1）、“配置 › 配对”（开启回环后重配）、“设置 › 隐私与安全”中的开发者模式。Poki 无法连接此 iPhone。"
           }
         },
         "zh-Hant" : {
@@ -8326,7 +8326,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置 › 隐私与安全性 › 麦克风”中允许访问麦克风。"
+            "value" : "请在“设置 › 隐私与安全 › 麦克风”中允许访问麦克风。"
           }
         },
         "zh-Hant" : {
@@ -8884,7 +8884,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将打开“设置”。请前往“**隐私与安全性 › 开发者模式**”，轻点“**与 Poki 配对**”。"
+            "value" : "即将打开系统“设置”首页。请前往“**隐私与安全 › 开发者模式**”，轻点“**与 Poki 配对**”。"
           }
         },
         "zh-Hant" : {
@@ -8896,7 +8896,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Settings will open. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**."
+            "value" : "Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**."
           }
         }
       }
@@ -9103,7 +9103,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“隐私与安全性”›“开发者模式”›“与 Poki 配对”。"
+            "value" : "“隐私与安全”›“开发者模式”›“与 Poki 配对”。"
           }
         },
         "en" : {
@@ -9125,7 +9125,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“隐私与安全性”›“开发者模式”，然后重启。"
+            "value" : "“隐私与安全”›“开发者模式”，然后重启。"
           }
         },
         "en" : {
@@ -9147,7 +9147,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“隐私与安全性”›“开发者模式”。重启后轻点“打开”。"
+            "value" : "“隐私与安全”›“开发者模式”。重启后轻点“打开”。"
           }
         },
         "en" : {
@@ -30279,7 +30279,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 将打开“设置”。前往“**隐私与安全性 › 开发者模式**”并轻点“**与 Poki 配对**”。"
+            "value" : "Poki 将打开“设置”。前往“**隐私与安全 › 开发者模式**”并轻点“**与 Poki 配对**”。"
           }
         },
         "zh-Hant" : {
@@ -31416,7 +31416,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "前往“设置 › 隐私与安全性 › 开发者模式”，开启后重启手机并轻点“打开”。"
+            "value" : "前往“设置 › 隐私与安全 › 开发者模式”，开启后重启手机并轻点“打开”。"
           }
         },
         "zh-Hant" : {
@@ -31439,7 +31439,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "前往“设置 › 隐私与安全性 › 开发者模式 › 与 Poki 配对”，输入此处显示的配对码。"
+            "value" : "前往“设置 › 隐私与安全 › 开发者模式 › 与 Poki 配对”，输入此处显示的配对码。"
           }
         },
         "zh-Hant" : {
@@ -31812,7 +31812,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "回环已开启。iOS 把配对服务换到了另一个端口，Poki 会通过本地网络找到它。请保持无线局域网开启，并在“设置 › 隐私与安全性 › 本地网络”中允许 Poki。如果仍未恢复，请重新启动 iPhone。"
+            "value" : "回环已开启。iOS 把配对服务换到了另一个端口，Poki 会通过本地网络找到它。请保持无线局域网开启，并在“设置 › 隐私与安全 › 本地网络”中允许 Poki。如果仍未恢复，请重新启动 iPhone。"
           }
         },
         "zh-Hant" : {
