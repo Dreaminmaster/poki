@@ -94,26 +94,62 @@ struct VoiceBridge: Equatable {
     private static func check(_ response: URLResponse, _ data: Data) throws {
         guard let http = response as? HTTPURLResponse, http.statusCode != 200 else { return }
         let reason = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-        throw VoiceError.bridge(http.statusCode, reason ?? "no reason given")
+        throw VoiceError.bridge(http.statusCode, reason)
     }
 }
 
 enum VoiceError: LocalizedError {
-    case bridge(Int, String)
+    /// The bridge's status and the reason it gave, if any.
+    case bridge(Int, String?)
     case realtime(Int, String)
     case noBridge
     case timeout(String)
     /// The connection was set up but no network path to OpenAI opened (the ICE state at the end).
     case noPath(String)
+    /// WebRTC on this iPhone could not make a connection, or could not offer one.
+    case noWebRTC, noOffer
 
+    /// In English, for the log and for the model when a step's outcome is unknown.
     var errorDescription: String? {
         switch self {
         case .bridge(404, _): "The voice bridge doesn't know this address. Copy it again from the Mac."
-        case .bridge(let code, let reason): "The voice bridge answered \(code): \(reason)"
+        case .bridge(let code, let reason): "The voice bridge answered \(code): \(reason ?? "no reason given")"
         case .realtime(let code, let reason): "OpenAI answered \(code): \(reason)"
         case .noBridge: "Set up Poki's model first (an OpenAI key talks fastest), or enter a voice bridge address from your Mac."
         case .timeout(let what): "\(what) took too long."
         case .noPath: "The voice connection could not reach OpenAI over this network. Check Wi-Fi or cellular, or a VPN or proxy app that blocks calls, then try again."
+        case .noWebRTC: "WebRTC could not start"
+        case .noOffer: "WebRTC made no connection offer."
+        }
+    }
+
+    /// For the talk bar, in Poki's language. A reason the bridge or OpenAI sent stays in their words.
+    var words: String {
+        switch self {
+        case .bridge(404, _): AppLocalization.text(LocalizedStringResource("The voice bridge doesn't know this address. Copy it again from the Mac."))
+        case .bridge(let code, let reason):
+            AppLocalization.text(LocalizedStringResource("The voice bridge answered \(code): \(reason ?? AppLocalization.text(LocalizedStringResource("no reason given")))"))
+        case .realtime(let code, let reason): AppLocalization.text(LocalizedStringResource("OpenAI answered \(code): \(reason)"))
+        case .noBridge: AppLocalization.text(LocalizedStringResource("Set up Poki's model first (an OpenAI key talks fastest), or enter a voice bridge address from your Mac."))
+        case .timeout(let what): AppLocalization.text(LocalizedStringResource("\(what) took too long."))
+        case .noPath: AppLocalization.text(LocalizedStringResource("The voice connection could not reach OpenAI over this network. Check Wi-Fi or cellular, or a VPN or proxy app that blocks calls, then try again."))
+        case .noWebRTC: AppLocalization.text(LocalizedStringResource("WebRTC could not start"))
+        case .noOffer: AppLocalization.text(LocalizedStringResource("WebRTC made no connection offer."))
+        }
+    }
+
+    /// Why a talk could not start or listen, for the talk bar: Poki's own reasons and the network
+    /// failures it can name in Poki's language, anything else as iOS words it.
+    static func reason(for error: Error) -> String {
+        if let error = error as? VoiceError { return error.words }
+        switch (error as? URLError)?.code {
+        case .timedOut?:
+            return AppLocalization.text(LocalizedStringResource("The voice connection took too long. Check the network, then try again."))
+        case .notConnectedToInternet?, .networkConnectionLost?, .cannotConnectToHost?, .cannotFindHost?, .dnsLookupFailed?,
+             .internationalRoamingOff?, .dataNotAllowed?:
+            return AppLocalization.text(LocalizedStringResource("Poki could not reach the voice service. Check the network, then try again."))
+        default:
+            return error.localizedDescription
         }
     }
 }
@@ -441,7 +477,7 @@ final class VoiceModel {
         // The OpenAI key on this iPhone first (no Mac needed), then the bridge, then dictation.
         let key = VoiceDirect.apiKey
         if key == nil, bridge == nil, !rehearsing {
-            if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.localizedDescription) }
+            if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.words) }
             return
         }
         phase = .connecting
@@ -485,7 +521,7 @@ final class VoiceModel {
             link?.close()
             link = nil
             holdingMicrophone = false
-            phase = .lost(error.localizedDescription)
+            phase = .lost(VoiceError.reason(for: error))
             log.add("voice", "could not connect: \(error.localizedDescription)")
         }
     }
@@ -634,7 +670,7 @@ final class VoiceModel {
     func press() async {
         if let dictation {
             guard phase != .hearing, phase != .thinking else { return }
-            do { try dictation.listen(); phase = .hearing } catch { phase = .lost(error.localizedDescription) }
+            do { try dictation.listen(); phase = .hearing } catch { phase = .lost(VoiceError.reason(for: error)) }
             return
         }
         if !isOn, canTalk { await start() }
@@ -649,7 +685,7 @@ final class VoiceModel {
             if lines.last?.role == .you, lines.last?.text != text { lines.removeLast() }
             guard !text.isEmpty else { phase = .listening; return }
             if lines.last?.text != text { lines.append(VoiceLine(role: .you, text: text)) }
-            guard let chat = AskPoki.chat else { phase = .lost(VoiceError.noBridge.localizedDescription); return }
+            guard let chat = AskPoki.chat else { phase = .lost(VoiceError.noBridge.words); return }
             if chat.running { lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Poki is still on the last task.")))); phase = .listening; return }
             let before = chat.entries.count
             chat.send(text)
@@ -681,7 +717,7 @@ final class VoiceModel {
         } catch {
             self.dictation = nil
             holdingMicrophone = false
-            phase = .lost(error.localizedDescription)
+            phase = .lost(VoiceError.reason(for: error))
         }
     }
 
@@ -907,7 +943,7 @@ final class VoiceModel {
     /// over the data channel (no microphone, Poki's voice muted), waits for the spoken result and reports
     /// the turn to the bridge.
     func runTest(_ numbers: ClosedRange<Int>) async {
-        guard let bridge else { phase = .lost(VoiceError.noBridge.localizedDescription); return }
+        guard let bridge else { phase = .lost(VoiceError.noBridge.words); return }
         muted = true
         // Test runs have no microphone, so no voice-chat audio session keeps Poki running while a step
         // brings another app to the front; a silent one does, as for a Poki session.

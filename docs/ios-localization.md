@@ -37,7 +37,9 @@ User/model messages, task plans, user-supplied app/account names, diagnostic log
 remain content in their original language. Only the current untouched introduction has retained
 in-memory UI identity and can be reworded on a language change; its entry IDs, timestamps and session
 ID stay intact. Opening a saved conversation does not translate its history. A talk's step lines and notes are
-worded in the chosen language when they are listed and keep those words afterwards. UI language does not
+worded in the chosen language when they are listed and keep those words afterwards. The reason a talk
+could not start is in the chosen language too; a reason the voice bridge or OpenAI sends stays in its
+own words, and the log and the model keep the English one. UI language does not
 alter speech recognition, model prompts, provider routing, credentials or approval decisions.
 
 ## Adding a language
@@ -77,6 +79,8 @@ state, untouched introduction identity, and language changes during a local scri
 `GreetingTests` and `LiveActivityTests` provide nearby regressions; no live model account is needed.
 `VoiceModelTests.testATalksWordsFollowTheLanguageChosenInPoki` drives a scripted talk and reads the
 talk bar's words, step lines and connection-lost note in each language;
+`VoiceModelTests.testWhyATalkCouldNotStartFollowsTheLanguageChosenInPoki` reads the reason under the
+talk bar with no model, with a bridge that no longer knows the address and with one that times out;
 `HomeShortcutsTests.testTheEditorsNoneChoiceFollowsTheLanguageChosenInPoki` reads the shortcut
 editor's None choice. Run them under an English and a Chinese simulator language.
 
