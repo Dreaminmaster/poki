@@ -51,8 +51,9 @@ enum HomeMotion {
 // MARK: Poki's picture
 
 extension PokiMood {
-    /// The faces the three-dimensional bear has so far: ready, and at work. The others stay flat.
-    var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking].contains(self) }
+    /// The faces the three-dimensional bear has so far: ready, at work, and done, where it waves (its
+    /// one happy gesture). The others stay flat.
+    var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking, .done].contains(self) }
 }
 
 /// Poki's round picture: the bear's face for its state, on a pale blue ground. Ready
@@ -70,7 +71,7 @@ struct PokiPortrait: View {
             Circle().fill(Tint.portrait)
             // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
             // cuts it at the chest.
-            ModelBear(modelled: mood.modelled, side: side * 50 / 56, pokes: pokes) {
+            ModelBear(modelled: mood.modelled, side: side * 50 / 56, pokes: pokes, cheer: mood == .done) {
                 BlinkingFace(mood: mood, side: side * 50 / 56)
             }
             .frame(width: side * 50 / 56, height: side * 50 / 56)
