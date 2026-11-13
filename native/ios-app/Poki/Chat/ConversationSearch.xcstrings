@@ -80,6 +80,22 @@
           }
         }
       }
+    },
+    "Searching messages…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在搜索消息…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在搜尋訊息…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

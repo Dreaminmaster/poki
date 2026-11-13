@@ -18,6 +18,8 @@ struct PokiDetailsView: View {
     var openSetup: () -> Void
     /// Opens a run in the chat (from the Activity Log).
     var openSession: (String, UUID?) -> Void = { _, _ in }
+    var searchJump: ConversationSearchJump? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     @Binding var path: NavigationPath
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
@@ -97,9 +99,9 @@ struct PokiDetailsView: View {
                 case .model:
                     ModelSettingsView()
                 case .history:
-                    ActionLogView(openSession: { id in dismiss(); openSession(id, nil) })
+                    ActionLogView(openSession: { id in openSession(id, nil) })
                 case .conversations:
-                    ConversationsSettingsView(openSession: { id, entryID in dismiss(); openSession(id, entryID) })
+                    ConversationsSettingsView(openSession: { id, entryID in openSession(id, entryID) })
                 case .voice:
                     VoiceView(embedded: true)
                 case .connection:
@@ -116,6 +118,11 @@ struct PokiDetailsView: View {
                     ApprovalsSettingsView()
                 case .appearance:
                     AppearanceView()
+                case .sessionPreview(let id):
+                    SessionView(id: id,
+                                back: { if !path.isEmpty { path.removeLast() } },
+                                searchJump: searchJump?.sessionID == id ? searchJump : nil,
+                                onSearchJumpApplied: onSearchJumpApplied)
                 } }
                 .settingsPage()
             }
@@ -162,6 +169,7 @@ struct PokiDetailsView: View {
 
 enum DetailsRoute: Hashable {
     case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance
+    case sessionPreview(String)
 }
 
 /// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring
@@ -171,7 +179,7 @@ struct ConversationSearchHit: Identifiable {
     let session: SavedSession
     let entryID: UUID?
     let detail: String
-    enum Author: Equatable {
+    enum Author: Equatable, Sendable {
         case you, task, poki, browser, agent(String)
     }
     let author: Author?
@@ -184,38 +192,99 @@ struct ConversationSearchHit: Identifiable {
 enum ConversationSearchIndex {
     static let displayLimit = 150
 
-    static func find(in sessions: [SavedSession], query: String, limit: Int = displayLimit) -> [ConversationSearchHit] {
+    /// Immutable, Sendable search data: sessions and SwiftUI view state never cross actor boundaries.
+    struct IndexedMessage: Sendable {
+        let id: UUID
+        let text: String
+        let author: ConversationSearchHit.Author?
+        let at: Date
+    }
+
+    struct IndexedSession: Sendable {
+        let sessionID: String
+        let metadata: [String]
+        let lastLine: String
+        let messages: [IndexedMessage]
+    }
+
+    struct Match: Sendable {
+        let sessionID: String
+        let entryID: UUID?
+        let detail: String
+        let author: ConversationSearchHit.Author?
+        let at: Date?
+    }
+
+    /// Build only when session data changes, not on each character or body evaluation.
+    static func snapshot(in sessions: [SavedSession]) -> [IndexedSession] {
+        sessions.map { session in
+            IndexedSession(
+                sessionID: session.id,
+                metadata: [session.name, session.title, session.client ?? "",
+                           session.customName ?? "", session.autoName ?? ""],
+                lastLine: session.lastLine,
+                messages: session.entries.reversed().compactMap { entry in
+                    guard let text = searchableText(entry) else { return nil }
+                    return IndexedMessage(id: entry.id, text: text, author: author(entry), at: entry.at)
+                }
+            )
+        }
+    }
+
+    /// The actual full-text filtering runs from a cancellable detached task in the UI.
+    static func search(_ snapshot: [IndexedSession], query: String,
+                       limit: Int = displayLimit) -> [Match] {
         guard limit > 0 else { return [] }
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if needle.isEmpty {
-            return Array(sessions.prefix(limit)).map { session in
-                ConversationSearchHit(session: session, entryID: nil, detail: session.lastLine, author: nil, at: nil)
+            return Array(snapshot.prefix(limit)).map { session in
+                Match(sessionID: session.sessionID, entryID: nil,
+                      detail: session.lastLine, author: nil, at: nil)
             }
         }
-        var found: [ConversationSearchHit] = []
-        for session in sessions {
-            let metadata = [session.name, session.title, session.client ?? "", session.customName ?? "", session.autoName ?? ""]
-            if metadata.contains(where: { $0.localizedStandardContains(needle) }) {
-                found.append(.init(session: session, entryID: nil, detail: session.lastLine, author: nil, at: nil))
+
+        var found: [Match] = []
+        for session in snapshot {
+            if Task.isCancelled { return [] }
+            let metadataMatches = session.metadata.contains { $0.localizedStandardContains(needle) }
+            if metadataMatches {
+                found.append(Match(sessionID: session.sessionID, entryID: nil,
+                                   detail: session.lastLine, author: nil, at: nil))
                 if found.count == limit { break }
             }
-            let beforeMessages = found.count
-            // Newest matching messages in each conversation come first.
-            for entry in session.entries.reversed() {
-                guard let text = searchableText(entry), text.localizedStandardContains(needle) else { continue }
-                found.append(.init(session: session, entryID: entry.id,
-                                   detail: excerpt(text, around: needle), author: author(entry), at: entry.at))
+
+            var messageMatches = false
+            for entry in session.messages {
+                if Task.isCancelled { return [] }
+                guard entry.text.localizedStandardContains(needle) else { continue }
+                messageMatches = true
+                found.append(Match(sessionID: session.sessionID, entryID: entry.id,
+                                   detail: excerpt(entry.text, around: needle),
+                                   author: entry.author, at: entry.at))
                 if found.count == limit { break }
             }
             if found.count == limit { break }
-            // Older versions also searched lastLine; retain that for computed status text
-            // without duplicating a match already found in the original message.
-            if found.count == beforeMessages && session.lastLine.localizedStandardContains(needle) {
-                found.append(.init(session: session, entryID: nil, detail: session.lastLine, author: nil, at: nil))
+
+            // A metadata result already uses the same sessionID:title identity.
+            if !metadataMatches && !messageMatches && session.lastLine.localizedStandardContains(needle) {
+                found.append(Match(sessionID: session.sessionID, entryID: nil,
+                                   detail: session.lastLine, author: nil, at: nil))
                 if found.count == limit { break }
             }
         }
         return found
+    }
+
+    /// Synchronous convenience for focused unit tests, using the same snapshot/search algorithm.
+    static func find(in sessions: [SavedSession], query: String,
+                     limit: Int = displayLimit) -> [ConversationSearchHit] {
+        let documents = snapshot(in: sessions)
+        let saved = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { current, _ in current })
+        return search(documents, query: query, limit: limit).compactMap { match in
+            guard let session = saved[match.sessionID] else { return nil }
+            return ConversationSearchHit(session: session, entryID: match.entryID,
+                                         detail: match.detail, author: match.author, at: match.at)
+        }
     }
 
     static func searchableText(_ entry: ChatEntry) -> String? {
@@ -260,10 +329,82 @@ enum ConversationSearchIndex {
 private struct ConversationsSettingsView: View {
     var openSession: (String, UUID?) -> Void
     @State private var query = ""
+    @Environment(\.locale) private var viewLocale
     private var store: SessionStore { SessionStore.shared }
 
-    private var matches: [ConversationSearchHit] {
-        ConversationSearchIndex.find(in: store.ordered, query: query)
+    @State private var matches: [ConversationSearchHit] = []
+    @State private var cachedSnapshot: [ConversationSearchIndex.IndexedSession] = []
+    @State private var cachedRevision: Int?
+    @State private var cachedLocale: String?
+    @State private var searching = false
+
+    private struct SearchKey: Equatable {
+        let query: String
+        let revision: Int
+        let locale: String
+    }
+
+    /// Observing just a cheap fingerprint also notices archive/rename/new-message changes.
+    /// Do not read all message bodies every time SwiftUI evaluates the list.
+    private var historyRevision: Int {
+        var hasher = Hasher()
+        for session in store.sessions {
+            hasher.combine(session.id)
+            hasher.combine(session.updated)
+            hasher.combine(session.entries.count)
+            hasher.combine(session.entries.last?.id)
+            hasher.combine(session.name)
+            hasher.combine(session.archived)
+            hasher.combine(session.unarchived)
+        }
+        return hasher.finalize()
+    }
+
+    @MainActor private func refreshMatches() async {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            matches = []
+            searching = false
+            return
+        }
+        searching = true
+        matches = []
+        let revision = historyRevision
+        if cachedRevision != revision || cachedLocale != viewLocale.identifier {
+            // Chunk the one-time main-actor snapshot across run-loop turns.
+            var updated: [ConversationSearchIndex.IndexedSession] = []
+            for (index, session) in store.ordered.enumerated() {
+                if Task.isCancelled { return }
+                updated.append(contentsOf: ConversationSearchIndex.snapshot(in: [session]))
+                if index % 8 == 7 { await Task.yield() }
+            }
+            guard !Task.isCancelled else { return }
+            cachedSnapshot = updated
+            cachedRevision = revision
+            cachedLocale = viewLocale.identifier
+        }
+        let source = cachedSnapshot
+        do { try await Task.sleep(for: .milliseconds(180)) }
+        catch { return }
+        guard !Task.isCancelled else { return }
+
+        let work = Task.detached(priority: .userInitiated) {
+            ConversationSearchIndex.search(source, query: text)
+        }
+        let hits = await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        guard !Task.isCancelled else { return }
+        let sessions = Dictionary(store.ordered.map { ($0.id, $0) },
+                                  uniquingKeysWith: { current, _ in current })
+        matches = hits.compactMap { hit in
+            guard let session = sessions[hit.sessionID] else { return nil }
+            return ConversationSearchHit(session: session, entryID: hit.entryID,
+                                         detail: hit.detail, author: hit.author, at: hit.at)
+        }
+        searching = false
     }
 
     /// A static resource key lets SwiftUI resolve the current environment locale at render time.
@@ -338,10 +479,15 @@ private struct ConversationsSettingsView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier(hit.entryID == nil ? "search.session" : "search.message")
                 }
-                if matches.isEmpty {
+                if searching {
+                    ProgressView {
+                        Text("Searching messages…", tableName: "ConversationSearch")
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                } else if matches.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
-                if matches.count == ConversationSearchIndex.displayLimit {
+                if !searching && matches.count == ConversationSearchIndex.displayLimit {
                     Text("Showing the first 150 results. Refine the search to see more.",
                          tableName: "ConversationSearch")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -351,6 +497,9 @@ private struct ConversationsSettingsView: View {
         .navigationTitle("Conversations")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search all messages", tableName: "ConversationSearch"))
+        .task(id: SearchKey(query: query, revision: historyRevision, locale: viewLocale.identifier)) {
+            await refreshMatches()
+        }
     }
 }
 

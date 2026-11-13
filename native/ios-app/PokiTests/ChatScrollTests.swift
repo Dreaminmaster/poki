@@ -41,9 +41,11 @@ final class ChatScrollTests: XCTestCase {
         let (scroll, feed) = try transcript()
         XCTAssertLessThan(gap(scroll), 2)
         let target = feed.entries[8].id
-        feed.jump = ConversationSearchJump(sessionID: "search-fixture", entryID: target)
-        settle { self.gap(scroll) > 200 }
+        let jump = ConversationSearchJump(sessionID: "search-fixture", entryID: target)
+        feed.jump = jump
+        settle { self.gap(scroll) > 200 && feed.appliedJump == jump.requestID }
         XCTAssertGreaterThan(gap(scroll), 200, "A matching saved message should be in view, not the newest message")
+        XCTAssertEqual(feed.appliedJump, jump.requestID, "Navigation must acknowledge the exact request")
     }
 
     /// The owner's case, on the chat page itself with its demo conversation: a new conversation, the
@@ -135,6 +137,7 @@ final class ChatScrollTests: XCTestCase {
 
     private final class Feed: ObservableObject {
         @Published var jump: ConversationSearchJump?
+        @Published var appliedJump: UUID?
         @Published var entries: [ChatEntry] = (0..<30).flatMap { i in
             [ChatEntry(.you("Question \(i): what is on my calendar this afternoon?", delivered: true)),
              ChatEntry(.poki("Answer \(i): a design review at three and a call with the bank at five."))]
@@ -144,7 +147,8 @@ final class ChatScrollTests: XCTestCase {
     private struct Host: View {
         @ObservedObject var feed: Feed
         var body: some View {
-            ChatTranscript(entries: feed.entries, jump: feed.jump) { EmptyView() }
+            ChatTranscript(entries: feed.entries, jump: feed.jump,
+                           onSearchJumpApplied: { feed.appliedJump = $0 }) { EmptyView() }
                 .topBar { Color.clear.frame(height: 110) }
                 .bottomBar { Color.clear.frame(height: 80) }
         }

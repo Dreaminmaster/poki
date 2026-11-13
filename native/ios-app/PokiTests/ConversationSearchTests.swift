@@ -105,6 +105,25 @@ final class ConversationSearchTests: XCTestCase {
                        note.id)
     }
 
+    func testMetadataAndLastLineMatchHaveOneStableResultID() {
+        let session = sample("waiting", name: "Waiting", entries: [ChatEntry(.note(.waiting))])
+        XCTAssertTrue(session.lastLine.localizedStandardContains("waiting"))
+        let hits = ConversationSearchIndex.find(in: [session], query: "waiting")
+        XCTAssertEqual(hits.count, 1)
+        XCTAssertEqual(hits.first?.id, "waiting:title")
+        XCTAssertNil(hits.first?.entryID)
+    }
+
+    func testSameImmutableIndexSupportsDifferentQueries() {
+        let first = ChatEntry(.you("alpha note", delivered: true))
+        let second = ChatEntry(.poki("beta answer"))
+        let session = sample(entries: [first, second])
+        let index = ConversationSearchIndex.snapshot(in: [session])
+        XCTAssertEqual(ConversationSearchIndex.search(index, query: "alpha").first?.entryID, first.id)
+        XCTAssertEqual(ConversationSearchIndex.search(index, query: "beta").first?.entryID, second.id)
+        XCTAssertTrue(ConversationSearchIndex.search(index, query: "not present").isEmpty)
+    }
+
     func testExcerptPreservesChineseAndBoundsLongMessages() {
         let content = String(repeating: "abc", count: 110) + " 海港日落 " + String(repeating: "def", count: 100)
         let snippet = ConversationSearchIndex.excerpt(content, around: "海港")

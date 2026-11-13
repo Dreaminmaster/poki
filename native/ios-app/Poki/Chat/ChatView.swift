@@ -26,6 +26,7 @@ struct ChatView: View {
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
     var searchJump: ConversationSearchJump? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)? = nil
     /// Opens External Agents, from the home page's hint.
@@ -118,7 +119,8 @@ struct ChatView: View {
         let status = PokiStatus.current(model: model, chat: chat)
         let home = isGreeting
         ZStack {
-            ChatTranscript(entries: shown, jump: searchJump, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
+            ChatTranscript(entries: shown, jump: searchJump,
+                           onSearchJumpApplied: onSearchJumpApplied, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
@@ -536,6 +538,7 @@ private struct RiseIn: ViewModifier {
 struct ChatTranscript<Footer: View>: View {
     var entries: [ChatEntry]
     var jump: ConversationSearchJump? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     var typing = false
     var canRetry = false
     var retry: () -> Void = {}
@@ -594,6 +597,7 @@ struct ChatTranscript<Footer: View>: View {
                 }
                 footer()
             }
+            .scrollTargetLayout()
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)
             .frame(maxWidth: 720)
             .frame(maxWidth: .infinity)
@@ -626,6 +630,7 @@ struct ChatTranscript<Footer: View>: View {
             guard !Task.isCancelled else { return }
             follow = .reading
             position.scrollTo(id: jump.entryID, anchor: .center)
+            onSearchJumpApplied(jump.requestID)
         }
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
