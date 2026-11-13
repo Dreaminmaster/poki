@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Observation
 import PokiCore
 import XCTest
 @testable import Poki
@@ -71,6 +72,98 @@ final class BrowserGuardTests: XCTestCase {
             }
             let page = await WebTools.perform("web_read", arguments: "{}")
             XCTAssertFalse(page.text.contains("Tapped:"), "\(path): nothing on the page was tapped: \(page.text)")
+        }
+    }
+
+    func testOwnerFieldValuesStayOutOfModelSessionsAndLogs() async throws {
+        let fields = [
+            ("<input autocomplete='one-time-code' inputmode='numeric'>", "739281"),
+            ("<input type='tel' autocomplete='section-pay billing cc-number'>", "4111222233334444"),
+            ("<input type='password'>", "fake-password-739"),
+            ("<input autocomplete='current-password'>", "fake-current-392"),
+            ("<input autocomplete='new-password'>", "fake-new-824"),
+            ("<input type='number' autocomplete='cc-csc'>", "937482"),
+            ("<input autocomplete='cc-exp'>", "12/2039"),
+            ("<input autocomplete='cc-exp-month'>", "fake-month-09"),
+            ("<input autocomplete='cc-exp-year'>", "2038"),
+            ("<input name='passportNumber'>", "FAKE-PASSPORT-821"),
+            ("<input aria-label='身份证号码'>", "FAKE-ID-624"),
+            ("<input name='verificationCode'>", "842617"),
+            ("<input name='cardNumber'>", "5555666677778888"),
+            ("<input name='expiryDate'>", "11/2037"),
+            ("<input name='securityCode'>", "826491"),
+            ("<input inputmode='numeric'>", "318642"),
+            ("<input>", "private-unknown-952"),
+            ("<textarea name='passport'></textarea>", "FAKE-TEXTAREA-739"),
+            ("<div contenteditable='true' aria-label='Identity document'></div>", "FAKE-EDITABLE-521"),
+            ("<select autocomplete='cc-exp-year'><option value=''>Choose</option><option>2036</option></select>", "2036"),
+        ]
+        let controls = fields.map(\.0).joined(separator: "<br>")
+        let page = "<html><head><title>Local privacy fixture</title></head><body><input type='search' aria-label='Search' value='ordinary search'><button>Refresh</button>" + controls + "</body></html>"
+        let values = fields.map(\.1)
+        let fill = "for (const [i, el] of [...document.querySelectorAll('input:not([type=search]), textarea, select, [contenteditable]')].entries()) { if (el.isContentEditable) el.textContent = values[i]; else el.value = values[i]; }"
+        let pages = try PageServer(pages: ["/": page, "/filled": page.replacingOccurrences(of: "</body>", with: "<script>const values = \(Self.json(values)); \(fill)</script></body>")])
+        let address = "http://127.0.0.1:\(pages.port)"
+        let opened = await WebTools.perform("web_open", arguments: Self.json(["url": address]))
+        XCTAssertFalse(opened.isError)
+        let refresh = try Self.ref("Refresh", in: opened.text)
+        let search = try Self.ref("Search", in: opened.text)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("web_handoff", ["reason": "Enter the local test fields"]),
+            FakeCompletions.tool("web_read", [:]),
+            FakeCompletions.tool("web_click", ["ref": refresh]),
+            FakeCompletions.tool("web_type", ["ref": search, "text": "ordinary updated search"]),
+            FakeCompletions.tool("web_open", ["url": address + "/filled"]),
+            FakeCompletions.text("Local privacy check finished."),
+        ])
+        let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let previous = settings.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(settings, previous) { UserDefaults.standard.set(value, forKey: key) } }
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        app.inProcessReadyForProbe()
+        let chat = ChatModel(app: app, kind: .handoff, requester: "Local privacy test")
+        defer { chat.stop() }
+        let handedOver = expectation(description: "browser handed to owner")
+        withObservationTracking { _ = PokiBrowser.shared.owner } onChange: { handedOver.fulfill() }
+        chat.send("Inspect the local fixture after the owner hands it back.")
+        await fulfillment(of: [handedOver], timeout: 20)
+        XCTAssertTrue(PokiBrowser.shared.ownerHasIt)
+        _ = try await PokiBrowser.shared.webView.callAsyncJavaScript(fill, arguments: ["values": values], in: nil, contentWorld: .page)
+        let finished = expectation(description: "chat finished after handback")
+        withObservationTracking { _ = chat.running } onChange: { finished.fulfill() }
+        PokiBrowser.shared.handBack()
+        await fulfillment(of: [finished], timeout: 30)
+
+        let calls = SessionStore.shared.record(chat.sessionID)
+        XCTAssertEqual(calls.map(\.name), ["web_handoff", "web_read", "web_click", "web_type", "web_open"])
+        XCTAssertTrue(calls.allSatisfy(\.ok))
+        XCTAssertTrue(calls.first?.answer.contains("ordinary search") == true)
+        XCTAssertTrue(calls.first?.answer.contains("(filled)") == true)
+        XCTAssertTrue(calls.first?.answer.contains("one-time code") == true)
+        XCTAssertTrue(calls.first?.answer.contains("payment card") == true)
+        XCTAssertTrue(calls.first?.answer.contains("identity document") == true)
+        XCTAssertTrue(calls.first { $0.name == "web_type" }?.answer.contains("ordinary updated search") == true)
+        XCTAssertTrue(opened.text.contains("(empty)"))
+        let requests = Self.json(server.requests)
+        XCTAssertTrue(requests.contains("The owner handed the page back."))
+        XCTAssertTrue(requests.contains("ordinary updated search"))
+        let session = try XCTUnwrap(SessionStore.shared.session(chat.sessionID))
+        let exported = String(decoding: try JSONEncoder().encode(session), as: UTF8.self)
+        let support = try XCTUnwrap(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first)
+        let stored = try String(contentsOf: support.appendingPathComponent("Poki/Sessions/\(chat.sessionID).json"), encoding: .utf8)
+        XCTAssertTrue(stored.contains("web_handoff"))
+        let cache = try XCTUnwrap(FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
+        let log = try String(contentsOf: cache.appendingPathComponent("poki-log.txt"), encoding: .utf8)
+        let rawRead = try await PokiBrowser.shared.call("return window.__pokiReader.read({budget: 20000})")
+        let debug = Self.json(try XCTUnwrap(rawRead))
+        for (index, value) in values.enumerated() {
+            for (surface, text) in [("model requests", requests), ("session export", exported), ("session file", stored),
+                                    ("app log", AppLog.shared.text), ("log file", log), ("reader debug result", debug)] {
+                XCTAssertFalse(text.replacingOccurrences(of: "\\/", with: "/").contains(value), "Field \(index) leaked into \(surface)")
+            }
         }
     }
 
@@ -156,13 +249,13 @@ final class BrowserGuardTests: XCTestCase {
     """
 
     private static func ref(_ label: String, in text: String) throws -> String {
-        let pattern = "\\[(e\\d+)\\] (?:button|link) \"" + NSRegularExpression.escapedPattern(for: label) + "\""
+        let pattern = "\\[(e\\d+)\\] (?:button|link|textbox|searchbox) \"" + NSRegularExpression.escapedPattern(for: label) + "\""
         let match = try XCTUnwrap(try NSRegularExpression(pattern: pattern).firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
                                   "“\(label)” is on the page read: \(text)")
         return String(text[Range(match.range(at: 1), in: text)!])
     }
 
-    private static func json(_ object: [String: Any]) -> String {
+    private static func json(_ object: Any) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 }

@@ -4,7 +4,7 @@
 /// its ref. Refs live as long as the page: after a navigation the agent reads again.
 ///
 /// What it leaves out: hidden elements, scripts and styles, the text inside a link or button (it is the
-/// element's name), password values, and the inside of frames from other sites (named as unreadable).
+/// element's name), private field values, and the inside of frames from other sites (named as unreadable).
 enum PageReader {
     static let source = #"""
 (() => {
@@ -48,8 +48,25 @@ enum PageReader {
     if (el.isContentEditable && el.parentElement && !el.parentElement.isContentEditable) return 'textbox';
     return null;
   };
+  const privateField = (el) => {
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const editable = el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable ||
+      el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'range', 'color', 'hidden'].includes(type);
+    if (!editable) return null;
+    const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
+    const clues = ['name', 'id', 'aria-label', 'placeholder', 'title'].map((attr) => el.getAttribute(attr) || '').join(' ');
+    if (type === 'password' || autocomplete.some((token) => /^(current|new)-password$/.test(token)) || /passw(or)?d|passphrase|密码|密碼/i.test(clues)) return 'password';
+    if (autocomplete.includes('one-time-code') || /one.?time|otp|verification.?code|security.?token|验证码|驗證碼/i.test(clues)) return 'one-time code';
+    if (autocomplete.some((token) => token.startsWith('cc-')) || /card|credit|debit|cvc|cvv|csc|expir|expiry|security.?code|银行卡|銀行卡|有效期|安全码|安全碼/i.test(clues)) return 'payment card';
+    if (/passport|identity|national.?id|id.?number|document|social.?security|ssn|tax.?id|证件|證件|身份证|身分證|护照|護照/i.test(clues)) return 'identity document';
+    const inputmode = quieted.has(el) ? quieted.get(el) : el.getAttribute('inputmode');
+    if (/^(numeric|decimal|tel)$/i.test(inputmode || '') || ['number', 'tel', 'email', 'file'].includes(type)) return 'private field';
+    if (type === 'search' || el.getAttribute('role') === 'searchbox' || /\b(search|query|q|keywords?)\b|搜索|搜尋|查询|查詢/i.test(clues)) return null;
+    return 'private field';
+  };
   const textOf = (id, doc) => squash(doc.getElementById(id)?.innerText || doc.getElementById(id)?.textContent);
-  const name = (el) => {
+  const name = (el, privacy = privateField(el)) => {
+    if (privacy) return privacy;
     const doc = el.ownerDocument;
     const labelledby = el.getAttribute('aria-labelledby');
     if (labelledby) { const t = squash(labelledby.split(/\s+/).map((id) => textOf(id, doc)).join(' ')); if (t) return t; }
@@ -85,7 +102,6 @@ enum PageReader {
       if (SKIP.has(el.tagName.toUpperCase())) return;
       const s = styleOf(el);
       if (s.display === 'none' || s.visibility === 'hidden' || s.visibility === 'collapse') return;
-      if (s.display === 'contents') { visit(el.shadowRoot || el, block); return; }
       const r = el.getBoundingClientRect();
       if (r.width * r.height === 0 && (s.overflow === 'hidden' || s.clipPath !== 'none')) return;
       if (Number(s.opacity) === 0 && !role(el)) return;
@@ -101,13 +117,19 @@ enum PageReader {
       const elRole = role(el);
       if (elRole) {
         interactive++;
-        const item = { kind: 'item', node: el, ref: refFor(el), role: elRole, name: cut(name(el), 120) };
+        const privacy = privateField(el);
+        const item = { kind: 'item', node: el, ref: refFor(el), role: elRole, name: cut(name(el, privacy), 120) };
+        if (privacy) {
+          item.value = (el.isContentEditable ? el.textContent : el.value) ? '(filled)' : '(empty)';
+          lines.push(item);
+          return;
+        }
         if (el.tagName === 'A' && el.hasAttribute('href')) item.href = cut(href(el), 100);
         if (el.tagName === 'SELECT') {
           item.value = squash(el.selectedOptions[0]?.text);
           item.options = [...el.options].slice(0, 12).map((o) => squash(o.text)).filter(Boolean);
         } else if ('value' in el && elRole !== 'button' && el.type !== 'checkbox' && el.type !== 'radio') {
-          item.value = el.type === 'password' ? (el.value ? '(hidden)' : '') : cut(String(el.value || ''), 80);
+          item.value = cut(String(el.value || ''), 80);
         }
         const control = el.tagName === 'LABEL' ? el.control : el;
         if (control && typeof control.checked === 'boolean' && (control.type === 'checkbox' || control.type === 'radio')) item.checked = control.checked;
@@ -121,6 +143,7 @@ enum PageReader {
         if (el.shadowRoot) visit(el, inItem);
         return;
       }
+      if (s.display === 'contents') { visit(el.shadowRoot || el, block); return; }
       const inline = block === inItem || s.display.startsWith('inline') && !/^H[1-6]$/.test(el.tagName);
       if (inline && block) {
         visit(el.shadowRoot || el, block);
@@ -336,7 +359,7 @@ enum PageReader {
     if (!on) [...quieted.keys()].forEach(unquiet);
   }
 
-  const describe = (el) => squash(el.getAttribute('aria-label') || el.innerText || el.tagName.toLowerCase()).slice(0, 60);
+  const describe = (el) => privateField(el) || squash(el.getAttribute('aria-label') || el.innerText || el.tagName.toLowerCase()).slice(0, 60);
 
   function click(ref) {
     const el = element(ref);
@@ -365,9 +388,7 @@ enum PageReader {
     const el = element(ref);
     if (!el) return { ok: false, error: 'stale' };
     const view = el.ownerDocument.defaultView;
-    const kind = (el.getAttribute('type') || '').toLowerCase();
-    const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
-    if (kind === 'password' || autocomplete.startsWith('cc-') || autocomplete === 'one-time-code') return { ok: false, error: 'owner', name: name(el) };
+    if (privateField(el)) return { ok: false, error: 'owner', name: name(el) };
     if (el.disabled || el.readOnly) return { ok: false, error: 'disabled', name: name(el) };
     el.scrollIntoView({ block: 'center', behavior: 'instant' });
     flash(el);
