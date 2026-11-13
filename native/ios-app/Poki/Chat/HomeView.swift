@@ -338,12 +338,15 @@ enum HomeIdea {
     /// Starring Poki on GitHub, second on the home page from the first open, for a new owner and one
     /// who updates alike: the list is worked out again at each launch, so nothing is stored for it.
     /// Like every pill it reads as an icon, a name in bold and an action (GitHub's mark, GitHub,
-    /// starring Poki), but it has no app this iPhone opens: the task runs in Poki's own browser, which
-    /// hands the page over when GitHub asks to sign in. Its key does not change with the language, so
-    /// Forget holds after the iPhone's language changes.
+    /// starring Poki), but it has no app this iPhone opens: the task runs in Poki's own browser. Signed
+    /// out, the owner is handed GitHub's sign-in page itself, not the repository with a note to find
+    /// it. Its key does not change with the language, so Forget holds after the iPhone's language changes.
     static var star: HomeShortcut {
         HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: String(localized: "Star Poki"),
-                     prompt: String(localized: "Open https://github.com/JosssphZhou/poki in the built-in browser and star it"), icon: "github")
+                     prompt: String(localized: """
+                     Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to \
+                     GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me
+                     """), icon: "github")
     }
 
     static func examples(for language: AppLanguage) -> [HomeShortcut] {
