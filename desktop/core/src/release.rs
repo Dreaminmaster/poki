@@ -22,6 +22,24 @@ pub struct Release {
     pub signing_url: Option<String>,
     pub sums_url: Option<String>,
     pub notes: String,
+    /// Set on a preview build of a pull request (a GitHub Actions artifact), which is on no channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<PreviewInfo>,
+}
+
+/// The pull request a preview build was made from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewInfo {
+    pub pr: u64,
+    /// The pull request's head commit that was built.
+    #[serde(default)]
+    pub sha: String,
+    /// The pull request's title.
+    #[serde(default)]
+    pub title: String,
+    /// The GitHub Actions artifact that holds the build.
+    #[serde(default)]
+    pub artifact_id: u64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -95,7 +113,12 @@ impl Channel {
     }
 
     /// This channel, then each less stable one in turn: where to look when this one has nothing yet.
-    pub fn fallbacks(self) -> impl Iterator<Item = Channel> { Channel::ALL.into_iter().filter(move |c| *c >= self) }
+    pub fn fallbacks(self) -> impl Iterator<Item = Channel> {
+        // Pre-alpha is for signed-in GitHub accounts: nobody else reaches it, not even by a
+        // channel with no release yet stepping down.
+        let pre_alpha = self == Channel::PreAlpha || github_token().is_some();
+        Channel::ALL.into_iter().filter(move |c| *c >= self && (*c != Channel::PreAlpha || pre_alpha))
+    }
 
     /// Whether a release of channel `of` is offered to someone on this channel.
     pub fn includes(self, of: Channel) -> bool { of <= self }
@@ -155,29 +178,82 @@ impl std::str::FromStr for Channel {
 #[derive(Serialize, Deserialize, Default)]
 struct ChannelFile {
     channel: Channel,
+    /// The Preview Builds switch on the GitHub Account page.
+    #[serde(default)]
+    previews: bool,
+    /// The pull request whose preview build is installed instead of the channel's release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview: Option<u64>,
+    /// The GitHub account signed in for preview builds (its token is kept with the secrets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    github_login: Option<String>,
 }
 
 fn channel_file() -> Result<PathBuf> { Ok(paths::state_dir()?.join("channel.json")) }
 
+fn read_choice() -> ChannelFile {
+    channel_file().ok().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<ChannelFile>(&b).ok()).unwrap_or_default()
+}
+
+fn write_choice(choice: &ChannelFile) -> Result<()> {
+    let p = channel_file()?;
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(choice)?)?;
+    std::fs::rename(tmp, p)?;
+    Ok(())
+}
+
 /// The chosen channel: `POKI_RELEASE_CHANNEL` when set, else the saved choice, else Stable.
+/// Pre-alpha is for people signed in to GitHub: without the sign-in a saved Pre-alpha choice
+/// acts as Alpha, and is Pre-alpha again once GitHub is signed in.
 pub fn channel() -> Channel {
-    if let Some(c) = std::env::var("POKI_RELEASE_CHANNEL").ok().and_then(|v| Channel::parse(&v)) {
-        return c;
+    let chosen = std::env::var("POKI_RELEASE_CHANNEL").ok().and_then(|v| Channel::parse(&v)).unwrap_or_else(|| read_choice().channel);
+    match chosen {
+        Channel::PreAlpha if github_token().is_none() => Channel::Alpha,
+        c => c,
     }
-    channel_file()
-        .ok()
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice::<ChannelFile>(&b).ok())
-        .map(|f| f.channel)
-        .unwrap_or_default()
+}
+
+/// The channels the pickers offer: Pre-alpha only while GitHub is signed in.
+pub fn offered_channels() -> Vec<Channel> {
+    let signed_in = github_token().is_some();
+    Channel::ALL.into_iter().filter(|c| *c != Channel::PreAlpha || signed_in).collect()
 }
 
 pub fn set_channel(channel: Channel) -> Result<()> {
-    let p = channel_file()?;
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(&ChannelFile { channel })?)?;
-    std::fs::rename(tmp, p)?;
-    Ok(())
+    if channel == Channel::PreAlpha && github_token().is_none() {
+        return Err(Error::msg("The Pre-alpha channel is for signed-in GitHub accounts. Sign in to GitHub first."));
+    }
+    write_choice(&ChannelFile { channel, ..read_choice() })
+}
+
+/// Whether preview builds are offered: the Preview Builds switch on the GitHub Account page is
+/// on. It can only be turned on while GitHub is signed in (preview builds cannot be downloaded
+/// without a sign-in), and signing out turns it off.
+pub fn previews_enabled() -> bool { read_choice().previews && github_token().is_some() }
+
+/// Turns the Preview Builds switch on or off. Off also drops the chosen preview, so installs and
+/// updates follow the channel again.
+pub fn set_preview_switch(on: bool) -> Result<()> {
+    if on && github_token().is_none() {
+        return Err(Error::msg("Sign in to GitHub first. Preview builds are for signed-in GitHub accounts."));
+    }
+    let old = read_choice();
+    write_choice(&ChannelFile { previews: on, preview: if on { old.preview } else { None }, ..old })
+}
+
+/// The pull request whose preview build is chosen, when the switch is on and one is chosen.
+pub fn preview() -> Option<u64> {
+    if previews_enabled() { read_choice().preview } else { None }
+}
+
+/// Chooses a pull request's preview build, or None to follow the channel again.
+pub fn set_preview(pr: Option<u64>) -> Result<()> {
+    let old = read_choice();
+    if pr.is_some() && !previews_enabled() {
+        return Err(Error::msg("Preview builds are off. Sign in to GitHub and turn them on first."));
+    }
+    write_choice(&ChannelFile { preview: pr, ..old })
 }
 
 fn client() -> Result<reqwest::Client> {
@@ -225,8 +301,571 @@ fn installable(r: &GhRelease) -> Option<(Channel, Release)> {
             signing_url: r.assets.iter().find(|a| a.name == "Poki-signing.zip").map(|a| a.browser_download_url.clone()),
             sums_url: r.assets.iter().find(|a| a.name == "SHA256SUMS").map(|a| a.browser_download_url.clone()),
             notes: r.body.clone().unwrap_or_default(),
+            preview: None,
         },
     ))
+}
+
+/// A pull request's preview build is a GitHub Actions artifact of the `PR preview` workflow, named
+/// `Poki-preview-pr<N>-<version>-<build>-<commit>`. It is never a release, so no channel (and no
+/// Poki Setup or Poki from before previews existed) offers it. GitHub lists artifacts to anyone
+/// but hands the files only to a signed-in account, so downloading one needs a GitHub token.
+pub const PREVIEW_ARTIFACT_PREFIX: &str = "Poki-preview-pr";
+
+#[derive(Deserialize)]
+struct GhArtifacts {
+    artifacts: Vec<GhArtifact>,
+}
+#[derive(Deserialize)]
+struct GhArtifact {
+    id: u64,
+    name: String,
+    #[serde(default)]
+    expired: bool,
+    #[serde(default)]
+    created_at: Option<String>,
+    archive_download_url: String,
+    #[serde(default)]
+    workflow_run: Option<GhRun>,
+}
+#[derive(Deserialize)]
+struct GhRun {
+    /// The run that uploaded the artifact.
+    #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
+    repository_id: Option<u64>,
+    #[serde(default)]
+    head_repository_id: Option<u64>,
+    /// The branch the run built: for a pull request's run, the pull request's own branch.
+    #[serde(default)]
+    head_branch: Option<String>,
+    /// The commit the run built: for a pull request's run, the pull request's head commit.
+    #[serde(default)]
+    head_sha: Option<String>,
+}
+/// What `GET /repos/{repo}/actions/runs/{id}` says about the run that made an artifact.
+#[derive(Deserialize, Clone)]
+struct GhRunDetail {
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    event: String,
+}
+/// The workflow that builds previews. Only its pull request runs make an artifact a preview.
+const PREVIEW_WORKFLOW: &str = ".github/workflows/pr-preview.yml";
+
+fn run_is_preview(d: &GhRunDetail) -> bool { d.path == PREVIEW_WORKFLOW && d.event == "pull_request" }
+
+/// How many of a pull request's builds are checked, newest first, before it is taken to offer none.
+const PREVIEW_TRIES: usize = 3;
+/// How many runs are read from GitHub at once, and at most in one listing.
+const RUN_READS_AT_ONCE: usize = 8;
+const RUN_READS_PER_LISTING: usize = 40;
+
+/// Splits the runs a listing still needs into those to read now and those taken as unreadable,
+/// given how many reads it has left (none once GitHub said the request limit is reached). The runs
+/// in `first` (the chosen pull request's builds) are read before the others, so the build that
+/// installs and updates depend on is never the one left unread.
+fn runs_to_read(needed: Vec<u64>, reads_left: usize, first: &[u64]) -> (Vec<u64>, Vec<u64>) {
+    let (mut ask, rest): (Vec<u64>, Vec<u64>) = needed.into_iter().partition(|id| first.contains(id));
+    ask.extend(rest);
+    let skip = ask.split_off(reads_left.min(ask.len()));
+    (ask, skip)
+}
+/// The runs read so far in this process. A run's workflow and event never change, so each is read
+/// once; a run that could not be read is not kept, and is asked again next time.
+static RUN_DETAILS: std::sync::Mutex<Option<std::collections::HashMap<u64, GhRunDetail>>> = std::sync::Mutex::new(None);
+#[derive(Deserialize)]
+struct GhPull {
+    number: u64,
+    #[serde(default)]
+    title: String,
+    head: GhPullHead,
+}
+#[derive(Deserialize)]
+struct GhPullHead {
+    #[serde(rename = "ref")]
+    branch: String,
+}
+
+/// The pull request, version, build and commit in a preview artifact's name.
+fn preview_name(name: &str) -> Option<(u64, String, String, String)> {
+    let mut parts = name.strip_prefix(PREVIEW_ARTIFACT_PREFIX)?.split('-');
+    let (pr, version, build, sha) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let ok = digits(pr) && digits(build) && version.split('.').count() == 3 && version.split('.').all(digits) && sha.len() >= 7 && sha.bytes().all(|b| b.is_ascii_hexdigit());
+    ok.then(|| Some((pr.parse().ok()?, version.to_string(), build.to_string(), sha.to_string()))).flatten()
+}
+
+/// An installable preview build from one artifact. Only a run from a branch of the repository
+/// itself counts: a fork's pull request can upload an artifact with any name, but its run's head
+/// repository is the fork, and the people who can push a branch here are the ones who can merge.
+/// The run must also have built the commit the name carries.
+fn preview_release(a: &GhArtifact) -> Option<Release> {
+    let (pr, version, build, sha) = preview_name(&a.name)?;
+    let run = a.workflow_run.as_ref()?;
+    if a.expired || run.repository_id.is_none() || run.repository_id != run.head_repository_id {
+        return None;
+    }
+    if !run.head_sha.as_deref().is_some_and(|h| h.to_ascii_lowercase().starts_with(&sha.to_ascii_lowercase())) {
+        return None;
+    }
+    Some(Release {
+        tag: format!("preview-pr-{pr}"),
+        ipa_name: format!("Poki-external-{version}-{build}.ipa"),
+        version,
+        build,
+        published_at: a.created_at.clone().unwrap_or_default(),
+        prerelease: true,
+        channel: Channel::PreAlpha,
+        ipa_url: a.archive_download_url.clone(),
+        signing_url: None,
+        sums_url: None,
+        notes: String::new(),
+        preview: Some(PreviewInfo { pr, sha, title: String::new(), artifact_id: a.id }),
+    })
+}
+
+/// Every build that could be each open pull request's preview: newest pull request first, and
+/// within one its builds newest first, each with the run that made it. The pull request number in
+/// an artifact's name is believed only when the run that made the artifact built that pull
+/// request's own branch, so a build cannot pass as another pull request's preview. A closed pull
+/// request's artifact, which may outlive it for a moment, is not offered.
+fn preview_candidates(artifacts: &[GhArtifact], open: &[GhPull]) -> Vec<Vec<(u64, Release)>> {
+    let mut by_pr: std::collections::BTreeMap<u64, Vec<(u64, u64, Release)>> = Default::default();
+    for a in artifacts {
+        let Some(r) = preview_release(a) else { continue };
+        let Some(p) = r.preview.clone() else { continue };
+        let Some(pull) = open.iter().find(|q| q.number == p.pr) else { continue };
+        let Some(run) = a.workflow_run.as_ref() else { continue };
+        let Some(run_id) = run.id else { continue };
+        if run.head_branch.as_deref() != Some(pull.head.branch.as_str()) {
+            continue;
+        }
+        let r = Release { preview: Some(PreviewInfo { title: pull.title.clone(), ..p.clone() }), ..r };
+        by_pr.entry(p.pr).or_default().push((p.artifact_id, run_id, r));
+    }
+    by_pr
+        .into_values()
+        .rev()
+        .map(|mut v| {
+            v.sort_by(|a, b| b.0.cmp(&a.0));
+            v.into_iter().map(|(_, run, r)| (run, r)).collect()
+        })
+        .collect()
+}
+
+/// The preview each pull request offers: its newest build whose run is a pull request run of the
+/// preview workflow, among its newest PREVIEW_TRIES builds. `runs` holds the runs read so far
+/// (None: it could not be read, so its build is not offered). The second list is the runs still to
+/// read before the answer is complete; while it is not empty the first is not final. Each round of
+/// reads moves every pull request on by at most one build, so there are at most PREVIEW_TRIES.
+fn pick_previews(candidates: &[Vec<(u64, Release)>], runs: &std::collections::HashMap<u64, Option<GhRunDetail>>) -> (Vec<Release>, Vec<u64>) {
+    let (mut found, mut needed) = (vec![], vec![]);
+    for builds in candidates {
+        for (run, r) in builds.iter().take(PREVIEW_TRIES) {
+            match runs.get(run) {
+                None => {
+                    needed.push(*run);
+                    break;
+                }
+                Some(Some(d)) if run_is_preview(d) => {
+                    found.push(r.clone());
+                    break;
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    needed.sort_unstable();
+    needed.dedup();
+    (found, needed)
+}
+
+/// The pull requests that offer no preview only because a run of theirs could not be read (a
+/// timeout, a GitHub error, the request limit, or the reads a listing allows running out). Not
+/// knowing is not the same as gone: a pull request here may still have a good build.
+fn unchecked_previews(candidates: &[Vec<(u64, Release)>], runs: &std::collections::HashMap<u64, Option<GhRunDetail>>) -> Vec<u64> {
+    candidates
+        .iter()
+        .filter(|builds| {
+            let tried = || builds.iter().take(PREVIEW_TRIES).map(|(run, _)| runs.get(run));
+            !tried().any(|d| matches!(d, Some(Some(d)) if run_is_preview(d))) && tried().any(|d| !matches!(d, Some(Some(_))))
+        })
+        .filter_map(|builds| builds.first().and_then(|(_, r)| r.preview.as_ref()).map(|p| p.pr))
+        .collect()
+}
+
+/// The preview builds on offer, and the pull requests GitHub could not answer for this time.
+#[derive(Default)]
+struct PreviewListing {
+    builds: Vec<Release>,
+    unchecked: Vec<u64>,
+}
+
+/// The chosen pull request's preview against a listing: its build while it is on offer. When it is
+/// confirmed gone (its pull request was closed or merged, the label came off, or the build
+/// expired) the choice is dropped and the answer is None, so the channel takes over. When GitHub
+/// could not answer for it, the choice stays and nothing is offered in its place: going to the
+/// channel then would install another build than the one chosen.
+fn settle_preview(listing: &PreviewListing, pr: u64) -> Result<Option<Release>> {
+    if let Some(r) = listing.builds.iter().find(|r| r.preview.as_ref().map(|p| p.pr) == Some(pr)) {
+        return Ok(Some(r.clone()));
+    }
+    if listing.unchecked.contains(&pr) {
+        return Err(Error::msg(format!(
+            "GitHub could not confirm the preview build of PR {pr} just now. Your choice is kept and nothing was installed. Try again in a few minutes."
+        )));
+    }
+    set_preview(None)?;
+    Ok(None)
+}
+
+const GITHUB_TOKEN: &str = "github-token";
+
+/// The GitHub token preview builds are downloaded with, if one is saved.
+pub fn github_token() -> Option<String> { crate::apple::store::secret_get(GITHUB_TOKEN) }
+
+/// The GitHub account signed in for preview builds, when there is one.
+pub fn github_login() -> Option<String> { github_token().and(read_choice().github_login) }
+
+/// Saves the token (in the Keychain or the system's credential store), or forgets it when empty:
+/// signing out of GitHub. The sign-in below saves it by itself; this is for a token made by hand.
+pub fn set_github_token(token: &str) -> Result<()> {
+    let token = token.trim();
+    let old = read_choice();
+    if token.is_empty() {
+        // Signed out: preview builds go off with it, and the channel takes over again.
+        write_choice(&ChannelFile { github_login: None, previews: false, preview: None, ..old })?;
+        return crate::apple::store::secret_delete(GITHUB_TOKEN);
+    }
+    write_choice(&ChannelFile { github_login: None, ..old })?;
+    if token.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(Error::msg("That does not look like a GitHub token."));
+    }
+    crate::apple::store::secret_set(GITHUB_TOKEN, token)
+}
+
+/// The client ID of Poki Preview Sign-in, the GitHub App that the preview sign-in runs under, on
+/// Poki Setup and on the iPhone (the launcher takes it from here). The app is the repository
+/// owner's, with repository permissions Actions read and Pull requests read and nothing else,
+/// "Enable Device Flow" on and user tokens that do not expire, and it is installed only on this
+/// repository. A user token can do what both the app and the person can do, so it must never be
+/// the release bot's app, which can write code, pull requests and workflows. The ID is public and
+/// needs no client secret. `POKI_GITHUB_CLIENT_ID` overrides it for development.
+pub const PREVIEW_SIGN_IN_APP_CLIENT_ID: &str = "Iv23lizFeswRVZtONUKT";
+
+fn github_client_id() -> Result<String> {
+    std::env::var("POKI_GITHUB_CLIENT_ID").ok().filter(|v| !v.trim().is_empty()).or_else(|| (!PREVIEW_SIGN_IN_APP_CLIENT_ID.is_empty()).then(|| PREVIEW_SIGN_IN_APP_CLIENT_ID.to_string()))
+        .ok_or_else(|| Error::msg("This build of Poki has no GitHub sign-in set up."))
+}
+
+/// A GitHub device sign-in under way: the person opens `verification_uri` and enters `user_code`,
+/// while [`github_sign_in_finish`] waits for GitHub to say they did.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GithubSignIn {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    #[serde(default = "five")]
+    pub interval: u64,
+    #[serde(default)]
+    pub expires_in: u64,
+}
+fn five() -> u64 { 5 }
+
+/// Starts GitHub's device sign-in. No scope is asked for, so the sign-in can read public data
+/// only, which is all a preview build's download needs.
+/// The device code of the GitHub sign-in now under way. Starting another sign-in or cancelling
+/// replaces it, and a wait for any other code then ends without saving or forgetting a token.
+static GITHUB_SIGN_IN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn github_sign_in_is(device_code: &str) -> bool {
+    GITHUB_SIGN_IN.lock().map(|c| c.as_deref() == Some(device_code)).unwrap_or(false)
+}
+
+/// Cancels the GitHub sign-in under way, if any: its wait ends and takes no token. A sign-in that
+/// already finished is not undone.
+pub fn github_sign_in_cancel() {
+    if let Ok(mut c) = GITHUB_SIGN_IN.lock() {
+        *c = None;
+    }
+}
+
+const GITHUB_SIGN_IN_CANCELLED: &str = "The GitHub sign-in was cancelled.";
+
+pub async fn github_sign_in_start() -> Result<GithubSignIn> {
+    let res = client()?
+        .post("https://github.com/login/device/code")
+        .header("Accept", "application/json")
+        .form(&[("client_id", github_client_id()?.as_str()), ("scope", "")])
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(|e| Error::msg(format!("GitHub did not start the sign-in ({e}). Try again.")))?;
+    let pending: GithubSignIn = res.json().await?;
+    if let Ok(mut c) = GITHUB_SIGN_IN.lock() {
+        *c = Some(pending.device_code.clone());
+    }
+    Ok(pending)
+}
+
+#[derive(Deserialize)]
+struct GithubTokenAnswer {
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// What one answer to the token request means: the token, keep waiting (with the seconds to add
+/// to the interval), or the reason the sign-in ended.
+fn github_poll_step(answer: &GithubTokenAnswer) -> std::result::Result<Option<String>, std::result::Result<u64, &'static str>> {
+    if let Some(t) = answer.access_token.as_deref().filter(|t| !t.is_empty()) {
+        return Ok(Some(t.to_string()));
+    }
+    match answer.error.as_deref() {
+        Some("authorization_pending") => Err(Ok(0)),
+        Some("slow_down") => Err(Ok(5)),
+        Some("access_denied") => Err(Err(GITHUB_SIGN_IN_CANCELLED)),
+        Some("expired_token") => Err(Err("The GitHub code expired. Start the sign-in again.")),
+        _ => Err(Err("GitHub did not finish the sign-in. Start it again.")),
+    }
+}
+
+/// Waits until the person has entered the code on GitHub, then keeps the token with the secrets
+/// and remembers the account's name. Returns that name.
+pub async fn github_sign_in_finish(pending: &GithubSignIn) -> Result<String> {
+    let id = github_client_id()?;
+    let mut interval = pending.interval.clamp(1, 60);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(pending.expires_in.clamp(60, 900));
+    let token = loop {
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        if !github_sign_in_is(&pending.device_code) {
+            return Err(Error::msg(GITHUB_SIGN_IN_CANCELLED));
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(Error::msg("The GitHub code expired. Start the sign-in again."));
+        }
+        let res = client()?
+            .post("https://github.com/login/oauth/access_token")
+            .header("Accept", "application/json")
+            .form(&[("client_id", id.as_str()), ("device_code", pending.device_code.as_str()), ("grant_type", "urn:ietf:params:oauth:grant-type:device_code")])
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await;
+        // A request that did not get through is tried again at the next turn.
+        let Ok(res) = res else { continue };
+        let Ok(answer) = res.json::<GithubTokenAnswer>().await else { continue };
+        match github_poll_step(&answer) {
+            Ok(Some(t)) => break t,
+            Ok(None) => continue,
+            Err(Ok(more)) => interval += more,
+            Err(Err(why)) => return Err(Error::msg(why)),
+        }
+    };
+    // Taken only if this sign-in is still the one under way: checked and saved under the lock, so
+    // a cancel or a newer sign-in cannot fall between the two.
+    {
+        let mut current = GITHUB_SIGN_IN.lock().map_err(|_| Error::msg(GITHUB_SIGN_IN_CANCELLED))?;
+        if current.as_deref() != Some(pending.device_code.as_str()) {
+            return Err(Error::msg(GITHUB_SIGN_IN_CANCELLED));
+        }
+        set_github_token(&token)?;
+        *current = None;
+    }
+    #[derive(Deserialize)]
+    struct User {
+        login: String,
+    }
+    let login = match github("https://api.github.com/user".into())?.timeout(std::time::Duration::from_secs(30)).send().await {
+        Ok(res) => res.json::<User>().await.map(|u| u.login).unwrap_or_default(),
+        Err(_) => String::new(),
+    };
+    write_choice(&ChannelFile { github_login: (!login.is_empty()).then(|| login.clone()), ..read_choice() })?;
+    Ok(login)
+}
+
+fn github(url: String) -> Result<reqwest::RequestBuilder> {
+    let req = client()?.get(url).header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28");
+    Ok(match github_token() {
+        Some(t) => req.bearer_auth(t),
+        None => req,
+    })
+}
+
+/// Every preview build on offer (a few GitHub requests; the token is used when there is one, for
+/// its higher request limit, but listing works without), and the pull requests GitHub could not
+/// answer for. The runs of `chosen`'s builds are read first.
+async fn list_previews(chosen: Option<u64>) -> Result<PreviewListing> {
+    use futures_util::StreamExt;
+    let mut artifacts = vec![];
+    for page in 1..=10 {
+        let got: GhArtifacts = github(format!("https://api.github.com/repos/{}/actions/artifacts?per_page=100&page={page}", repo()))?
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(|e| Error::msg(format!("Could not read the preview builds from GitHub ({e}). Check the connection and the GitHub token, then try again.")))?
+            .json()
+            .await?;
+        let last = got.artifacts.len() < 100;
+        artifacts.extend(got.artifacts);
+        if last {
+            break;
+        }
+    }
+    // Without the open pull requests no artifact can be matched to one, so none is offered.
+    let mut pulls: Vec<GhPull> = vec![];
+    for page in 1..=5 {
+        let got: Vec<GhPull> = github(format!("https://api.github.com/repos/{}/pulls?state=open&per_page=100&page={page}", repo()))?
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(|e| Error::msg(format!("Could not read the open pull requests from GitHub ({e}). Check the connection, then try again.")))?
+            .json()
+            .await?;
+        let last = got.len() < 100;
+        pulls.extend(got);
+        if last {
+            break;
+        }
+    }
+    // Each build on offer is checked against its run: made by the preview workflow, for a pull
+    // request. A run that cannot be read is not believed, and the pull request's next build is
+    // tried. The runs are read a few at once and kept for next time. After RUN_READS_PER_LISTING
+    // reads, or once GitHub says the request limit is reached, no more are asked: the builds still
+    // unchecked are not offered, and the listing has the ones that were.
+    let candidates = preview_candidates(&artifacts, &pulls);
+    let first: Vec<u64> = candidates
+        .iter()
+        .filter(|builds| builds.first().and_then(|(_, r)| r.preview.as_ref()).map(|p| p.pr) == chosen && chosen.is_some())
+        .flat_map(|builds| builds.iter().map(|(run, _)| *run))
+        .collect();
+    let mut runs: std::collections::HashMap<u64, Option<GhRunDetail>> =
+        RUN_DETAILS.lock().ok().and_then(|c| c.clone()).unwrap_or_default().into_iter().map(|(id, d)| (id, Some(d))).collect();
+    let mut reads_left = RUN_READS_PER_LISTING;
+    loop {
+        let (found, needed) = pick_previews(&candidates, &runs);
+        if needed.is_empty() {
+            if let Ok(mut cache) = RUN_DETAILS.lock() {
+                let cache = cache.get_or_insert_with(Default::default);
+                cache.extend(runs.iter().filter_map(|(id, d)| d.clone().map(|d| (*id, d))));
+            }
+            return Ok(PreviewListing { builds: found, unchecked: unchecked_previews(&candidates, &runs) });
+        }
+        let (ask, skip) = runs_to_read(needed, reads_left, &first);
+        runs.extend(skip.into_iter().map(|id| (id, None)));
+        reads_left -= ask.len();
+        let read = futures_util::stream::iter(ask)
+            .map(|id| async move {
+                let res = match github(format!("https://api.github.com/repos/{}/actions/runs/{id}", repo())) {
+                    Ok(req) => req.timeout(std::time::Duration::from_secs(15)).send().await,
+                    Err(_) => return (id, None, false),
+                };
+                match res {
+                    Ok(res) if res.status().is_success() => (id, res.json::<GhRunDetail>().await.ok(), false),
+                    Ok(res) => (id, None, matches!(res.status().as_u16(), 403 | 429)),
+                    Err(_) => (id, None, false),
+                }
+            })
+            .buffer_unordered(RUN_READS_AT_ONCE)
+            .collect::<Vec<_>>()
+            .await;
+        for (id, detail, limit) in read {
+            if limit {
+                reads_left = 0;
+            }
+            runs.insert(id, detail);
+        }
+    }
+}
+
+/// Downloads a preview build's artifact (a zip of the IPA, Poki-signing.zip and SHA256SUMS) with
+/// the saved GitHub token, unpacks it into the cache and checks the IPA against the SHA256SUMS.
+async fn fetch_preview(release: &Release, info: &PreviewInfo, reporter: &Reporter) -> Result<(PathBuf, Option<PathBuf>)> {
+    let dir = paths::cache_dir()?.join(format!("preview-pr-{}-{}", info.pr, info.artifact_id));
+    let ipa = dir.join("Poki-external-unsigned.ipa");
+    let signing = dir.join("Poki-signing.zip");
+    if !(ipa.is_file() && dir.join(".complete").is_file()) {
+        let token = github_token().ok_or_else(|| Error::msg("Downloading a preview build needs a GitHub sign-in. Sign in to GitHub where the preview build is chosen, then try again."))?;
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+        let zip_path = dir.join("artifact.zip");
+        let res = client()?.get(&release.ipa_url).bearer_auth(token).header("Accept", "application/vnd.github+json").send().await?;
+        let res = match res.status().as_u16() {
+            401 | 403 => return Err(Error::msg("GitHub did not accept the sign-in for this preview build. Sign in to GitHub again.")),
+            404 | 410 => return Err(Error::msg("This preview build is gone. Its pull request may have a newer build, or it was closed.")),
+            _ => res.error_for_status()?,
+        };
+        save_stream(res, &zip_path, reporter, "release").await?;
+        let (z, d) = (zip_path.clone(), dir.clone());
+        tokio::task::spawn_blocking(move || unpack_preview(&z, &d)).await.map_err(|e| Error::msg(e.to_string()))??;
+        let _ = std::fs::remove_file(&zip_path);
+        if !ipa.is_file() {
+            return Err(Error::msg("The preview build has no Poki IPA in it."));
+        }
+        let sums = std::fs::read_to_string(dir.join("SHA256SUMS")).unwrap_or_default();
+        match sum_for(&sums, "Poki-external-unsigned.ipa") {
+            Some(expected) if expected == sha256_file(&ipa)? => {}
+            _ => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(Error::msg("The preview build's IPA does not match its SHA256SUMS. Try again."));
+            }
+        }
+        std::fs::write(dir.join(".complete"), b"")?;
+    }
+    Ok((ipa, signing.is_file().then_some(signing)))
+}
+
+/// Takes the three files Poki Setup needs out of the artifact, by exact name.
+fn unpack_preview(zip_path: &std::path::Path, dir: &std::path::Path) -> Result<()> {
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(zip_path)?).map_err(|e| Error::msg(format!("The preview build did not unpack ({e}).")))?;
+    for name in ["Poki-external-unsigned.ipa", "Poki-signing.zip", "SHA256SUMS"] {
+        let Ok(mut entry) = archive.by_name(name) else { continue };
+        let mut out = std::fs::File::create(dir.join(name))?;
+        std::io::copy(&mut entry, &mut out)?;
+    }
+    Ok(())
+}
+
+/// The Preview Builds switch, the GitHub sign-in, the chosen pull request and the preview builds on
+/// offer, for the pickers.
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewState {
+    /// The Preview Builds switch is on (it needs the GitHub sign-in): show the preview builds.
+    pub enabled: bool,
+    pub selected: Option<u64>,
+    /// GitHub is signed in (or a token is saved), so a preview build can be downloaded.
+    pub has_token: bool,
+    /// The GitHub account's name, when the sign-in told it.
+    pub github_login: Option<String>,
+    /// This build can run the GitHub sign-in.
+    pub can_sign_in: bool,
+    pub builds: Vec<Release>,
+}
+
+/// The preview picker's state. With the switch off nothing is listed and GitHub is not asked.
+pub async fn previews() -> Result<PreviewState> {
+    if !previews_enabled() {
+        return Ok(PreviewState { enabled: false, selected: None, has_token: github_token().is_some(), github_login: github_login(), can_sign_in: github_client_id().is_ok(), builds: vec![] });
+    }
+    let mut selected = preview();
+    let listing = list_previews(selected).await?;
+    // A chosen build that is gone: back to the channel, as latest() does. One GitHub could not
+    // answer for stays chosen, and the picker says to try again.
+    if let Some(pr) = selected {
+        if settle_preview(&listing, pr)?.is_none() {
+            selected = None;
+        }
+    }
+    Ok(PreviewState { enabled: true, selected, has_token: github_token().is_some(), github_login: github_login(), can_sign_in: github_client_id().is_ok(), builds: listing.builds })
 }
 
 /// The highest version and build the channel offers, whatever order GitHub lists releases in
@@ -253,8 +892,22 @@ fn none_in(channel: Channel) -> Error {
     Error::msg(format!("No Poki release with an installable IPA is published on the {} channel at github.com/{}. Pick another channel, or choose an IPA file.", channel.title(), repo()))
 }
 
-/// The newest installable release on the chosen channel.
-pub async fn latest() -> Result<Release> { latest_in(channel()).await }
+/// What Poki Setup and Poki install and update with: the chosen preview build when preview builds
+/// are on and one is chosen, else the newest installable release on the chosen channel. When the
+/// chosen preview is gone the choice is dropped and the channel takes over again. When GitHub
+/// could not say whether it is there, this fails and keeps the choice, rather than hand over the
+/// channel's build in its place.
+pub async fn latest() -> Result<Release> {
+    let channel = channel();
+    let chosen = match preview() {
+        Some(pr) => settle_preview(&list_previews(Some(pr)).await?, pr)?,
+        None => None,
+    };
+    match chosen {
+        Some(r) => Ok(r),
+        None => pick(&list().await?, channel).ok_or_else(|| none_in(channel)),
+    }
+}
 
 /// The newest installable release that a channel offers.
 pub async fn latest_in(channel: Channel) -> Result<Release> { pick(&list().await?, channel).ok_or_else(|| none_in(channel)) }
@@ -272,7 +925,7 @@ pub struct ChannelInfo {
 pub async fn channels() -> Result<Vec<ChannelInfo>> {
     let chosen = channel();
     let list = list().await.ok();
-    Ok(Channel::ALL
+    Ok(offered_channels()
         .iter()
         .map(|&c| ChannelInfo { id: c, title: c.title(), selected: c == chosen, latest: list.as_deref().and_then(|l| pick(l, c)) })
         .collect())
@@ -518,6 +1171,9 @@ fn full(version: &str, build: &str) -> String {
 
 /// Downloads the IPA (and the signing zip) into the cache, checks SHA-256 against SHA256SUMS.
 pub async fn fetch(release: &Release, reporter: &Reporter) -> Result<(PathBuf, Option<PathBuf>)> {
+    if let Some(info) = &release.preview {
+        return fetch_preview(release, info, reporter).await;
+    }
     let dir = paths::cache_dir()?.join(&release.tag);
     std::fs::create_dir_all(&dir)?;
     let ipa = dir.join(&release.ipa_name);
@@ -594,8 +1250,12 @@ pub async fn relay_worker(want: &RelayFor) -> Result<Option<(String, String, Str
 }
 
 pub async fn download(url: &str, to: &std::path::Path, reporter: &Reporter, step: &str) -> Result<()> {
-    use futures_util::StreamExt;
     let res = client()?.get(url).send().await?.error_for_status()?;
+    save_stream(res, to, reporter, step).await
+}
+
+async fn save_stream(res: reqwest::Response, to: &std::path::Path, reporter: &Reporter, step: &str) -> Result<()> {
+    use futures_util::StreamExt;
     let total = res.content_length();
     let tmp = to.with_extension("part");
     let mut file = tokio::fs::File::create(&tmp).await?;
@@ -674,6 +1334,11 @@ mod tests {
         // Sorted: v0.1.1, prealpha, v0.2.7 (beta), v0.2.6. Without a Stable release, Stable steps
         // down to Beta; with only a Pre-alpha one it takes that; with no ios-* release, nothing.
         assert_eq!(pick(&list[..3], Channel::Stable).unwrap().tag, "ios-v0.2.7");
+        // Pre-alpha is reached only with a GitHub sign-in, by choice or by stepping down.
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        assert!(pick(&list[..2], Channel::Stable).is_none());
+        set_github_token("gho_test").unwrap();
         assert_eq!(pick(&list[..2], Channel::Stable).unwrap().tag, "ios-prealpha-0.2.8-260");
         assert!(pick(&list[..1], Channel::Stable).is_none());
         assert_eq!(Channel::default(), Channel::Stable);
@@ -703,9 +1368,260 @@ mod tests {
     fn choice_is_saved() {
         let (_g, _d) = paths::test_home();
         unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
         assert_eq!(channel(), Channel::Stable);
+        set_channel(Channel::Beta).unwrap();
+        assert_eq!(channel(), Channel::Beta);
+        // Pre-alpha needs a GitHub sign-in, to choose it and to stay on it.
+        assert!(set_channel(Channel::PreAlpha).is_err());
+        assert!(!offered_channels().contains(&Channel::PreAlpha));
+        set_github_token("gho_test").unwrap();
         set_channel(Channel::PreAlpha).unwrap();
         assert_eq!(channel(), Channel::PreAlpha);
+        assert_eq!(offered_channels(), Channel::ALL.to_vec());
+        set_github_token("").unwrap();
+        assert_eq!(channel(), Channel::Alpha);
+        set_github_token("gho_test").unwrap();
+        assert_eq!(channel(), Channel::PreAlpha);
+        // The environment's channel is held to the same rule.
+        set_channel(Channel::Stable).unwrap();
+        unsafe { std::env::set_var("POKI_RELEASE_CHANNEL", "pre-alpha") };
+        assert_eq!(channel(), Channel::PreAlpha);
+        set_github_token("").unwrap();
+        assert_eq!(channel(), Channel::Alpha);
+        unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
+        assert_eq!(channel(), Channel::Stable);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_github_sign_in_takes_no_token() {
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        let pending = GithubSignIn { device_code: "old".into(), user_code: "AAAA-BBBB".into(), verification_uri: "https://github.com/login/device".into(), interval: 1, expires_in: 900 };
+        // A newer sign-in is the one under way: the older wait ends by itself, before it asks
+        // GitHub anything, and neither saves a token nor forgets one.
+        *GITHUB_SIGN_IN.lock().unwrap() = Some("new".into());
+        set_github_token("gho_newer").unwrap();
+        unsafe { std::env::set_var("POKI_GITHUB_CLIENT_ID", "test") };
+        assert!(github_sign_in_finish(&pending).await.is_err());
+        assert_eq!(github_token().as_deref(), Some("gho_newer"));
+        assert!(github_sign_in_is("new"));
+        github_sign_in_cancel();
+        assert!(!github_sign_in_is("new"));
+        unsafe { std::env::remove_var("POKI_GITHUB_CLIENT_ID") };
+    }
+
+    /// An artifact uploaded by run `id * 10`, which built the commit in its name on branch dev/pr<N>.
+    fn art(id: u64, name: &str, repo: u64, head: u64) -> GhArtifact {
+        let rest = name.trim_start_matches("Poki-preview-pr");
+        let pr = rest.split('-').next().unwrap_or("");
+        let sha = rest.rsplit('-').next().unwrap_or("");
+        GhArtifact { id, name: name.into(), expired: false, created_at: Some("2026-11-12T05:00:00Z".into()), archive_download_url: format!("https://x/artifacts/{id}/zip"), workflow_run: Some(GhRun { id: Some(id * 10), repository_id: Some(repo), head_repository_id: Some(head), head_branch: Some(format!("dev/pr{pr}")), head_sha: Some(format!("{sha}0123456789abcdef0123456789")) }) }
+    }
+
+    fn preview_run(path: &str, event: &str) -> Option<GhRunDetail> { Some(GhRunDetail { path: path.into(), event: event.into() }) }
+
+    /// The previews offered when every run is known: `runs` maps a run to its detail, and any run
+    /// not in it reads as a pull request run of the preview workflow.
+    fn previews_with(artifacts: &[GhArtifact], open: &[GhPull], runs: Vec<(u64, Option<GhRunDetail>)>) -> Vec<Release> {
+        let candidates = preview_candidates(artifacts, open);
+        let mut known: std::collections::HashMap<u64, Option<GhRunDetail>> = runs.into_iter().collect();
+        loop {
+            let (found, needed) = pick_previews(&candidates, &known);
+            if needed.is_empty() {
+                return found;
+            }
+            for id in needed {
+                known.insert(id, preview_run(PREVIEW_WORKFLOW, "pull_request"));
+            }
+        }
+    }
+
+    #[test]
+    fn run_reads_are_capped() {
+        let needed: Vec<u64> = (1..=50).collect();
+        let (ask, skip) = runs_to_read(needed.clone(), RUN_READS_PER_LISTING, &[]);
+        assert_eq!((ask.len(), skip.len()), (40, 10));
+        assert_eq!((ask[0], skip[0]), (1, 41));
+        assert_eq!(runs_to_read(needed.clone(), 0, &[]), (vec![], needed.clone()));
+        assert_eq!(runs_to_read(vec![7, 8], 5, &[]), (vec![7, 8], vec![]));
+        // The chosen pull request's runs go first, so running out of reads never leaves its build
+        // unchecked while others are read.
+        assert_eq!(runs_to_read(needed.clone(), 2, &[49, 50]), (vec![49, 50], (1..=48).collect::<Vec<u64>>()));
+        // Runs taken as unreadable leave their pull request without a preview, and a pull request
+        // whose newest builds all fail stops after PREVIEW_TRIES of them.
+        let builds = |pr: u64, n: u64| (0..n).map(|i| art(pr * 100 + 50 - i, &format!("Poki-preview-pr{pr}-0.3.1-{}-aaaaaaaaaaaa", 800 - i), 1, 1)).collect::<Vec<_>>();
+        let pull = |number: u64| GhPull { number, title: String::new(), head: GhPullHead { branch: format!("dev/pr{number}") } };
+        let candidates = preview_candidates(&builds(5, 6), &[pull(5)]);
+        let bad: std::collections::HashMap<u64, Option<GhRunDetail>> = candidates[0].iter().map(|(run, _)| (*run, None)).collect();
+        let (found, needed) = pick_previews(&candidates, &bad);
+        assert!(found.is_empty() && needed.is_empty());
+        let mut runs = std::collections::HashMap::new();
+        let mut asked = 0;
+        loop {
+            let (found, needed) = pick_previews(&candidates, &runs);
+            if needed.is_empty() {
+                assert!(found.is_empty());
+                break;
+            }
+            asked += needed.len();
+            runs.extend(needed.into_iter().map(|id| (id, None)));
+        }
+        assert_eq!(asked, PREVIEW_TRIES);
+    }
+
+    #[test]
+    fn preview_artifact_names() {
+        assert_eq!(preview_name("Poki-preview-pr177-0.3.1-783-24a45bb8bb04"), Some((177, "0.3.1".into(), "783".into(), "24a45bb8bb04".into())));
+        for bad in ["Poki-unsigned", "Poki-preview-pr-0.3.1-783-24a45bb", "Poki-preview-pr177-0.3-783-24a45bb", "Poki-preview-pr177-0.3.1-x-24a45bb", "Poki-preview-pr177-0.3.1-783-zzzzzzz", "Poki-preview-pr177-0.3.1-783-24a45bb-more", "Poki-preview-pr177-0.3.1-783"] {
+            assert_eq!(preview_name(bad), None, "{bad}");
+        }
+        // Nothing about a preview is a release, so no channel can offer one.
+        assert_eq!(Channel::of_app_release("preview-pr-177", true), None);
+    }
+
+    #[test]
+    fn preview_builds_are_listed_and_chosen() {
+        let mut expired = art(50, "Poki-preview-pr200-0.3.1-800-aaaaaaaaaaaa", 1, 1);
+        expired.expired = true;
+        let artifacts = vec![
+            art(40, "Poki-preview-pr177-0.3.1-785-bbbbbbbbbbbb", 1, 1),
+            art(30, "Poki-preview-pr177-0.3.1-783-24a45bb8bb04", 1, 1),
+            art(35, "Poki-preview-pr12-0.3.1-770-cccccccccccc", 1, 1),
+            // Uploaded by a fork's pull request under a preview's name: not believed.
+            art(60, "Poki-preview-pr180-0.3.1-790-dddddddddddd", 1, 2),
+            art(61, "Poki-unsigned", 1, 1),
+            expired,
+        ];
+        let pull = |number: u64, title: &str, branch: &str| GhPull { number, title: title.into(), head: GhPullHead { branch: branch.into() } };
+        let open = vec![pull(177, "Fix a > b", "dev/pr177"), pull(12, "", "dev/pr12"), pull(180, "", "dev/pr180"), pull(200, "", "dev/pr200")];
+        let found = previews_with(&artifacts, &open, vec![]);
+        assert_eq!(found.iter().map(|r| r.preview.as_ref().unwrap().pr).collect::<Vec<_>>(), vec![177, 12]);
+        let p = &found[0];
+        assert_eq!((p.version.as_str(), p.build.as_str(), p.tag.as_str(), p.ipa_url.as_str()), ("0.3.1", "785", "preview-pr-177", "https://x/artifacts/40/zip"));
+        assert_eq!(p.preview, Some(PreviewInfo { pr: 177, sha: "bbbbbbbbbbbb".into(), title: "Fix a > b".into(), artifact_id: 40 }));
+        // A build of another branch under pull request 177's name is not believed.
+        let mut forged = art(70, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
+        forged.workflow_run.as_mut().unwrap().head_branch = Some("dev/other".into());
+        assert_eq!(previews_with(&[forged], &open, vec![]).len(), 0);
+        // A closed pull request's leftover build is not offered, and with no pull requests nothing is.
+        assert_eq!(previews_with(&artifacts, &open[..1], vec![]).len(), 1);
+        assert!(previews_with(&artifacts, &[], vec![]).is_empty());
+        // The run built another commit than the one the name carries: not believed.
+        let mut moved = art(71, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
+        moved.workflow_run.as_mut().unwrap().head_sha = Some("ffffffffffff0123456789".into());
+        assert_eq!(previews_with(&[moved], &open, vec![]).len(), 0);
+        let mut no_sha = art(72, "Poki-preview-pr177-0.3.1-799-eeeeeeeeeeee", 1, 1);
+        no_sha.workflow_run.as_mut().unwrap().head_sha = None;
+        assert_eq!(previews_with(&[no_sha], &open, vec![]).len(), 0);
+        // The newest build of 177 came from another workflow, or from a run that was not a pull
+        // request's, or its run could not be read: the build before it is offered instead.
+        for bad in [preview_run(".github/workflows/other.yml", "pull_request"), preview_run(PREVIEW_WORKFLOW, "push"), preview_run(PREVIEW_WORKFLOW, "workflow_dispatch"), None] {
+            let found = previews_with(&artifacts, &open, vec![(400, bad)]);
+            let p = found[0].preview.as_ref().unwrap();
+            assert_eq!((p.pr, p.artifact_id), (177, 30));
+        }
+        // When no build of a pull request passes, it offers none.
+        let found = previews_with(&artifacts, &open, vec![(400, None), (300, preview_run(PREVIEW_WORKFLOW, "push"))]);
+        assert_eq!(found.iter().map(|r| r.preview.as_ref().unwrap().pr).collect::<Vec<_>>(), vec![12]);
+
+        let (_g, _d) = paths::test_home();
+        let listing = PreviewListing { builds: previews_with(&artifacts, &open[..1], vec![]), unchecked: vec![] };
+        assert_eq!(settle_preview(&listing, 177).unwrap().unwrap().build, "785");
+        // The pull request was merged or closed: its build is gone, so latest() uses the channel's.
+        assert!(settle_preview(&listing, 12).unwrap().is_none());
+    }
+
+    #[test]
+    fn preview_artifact_unpacks_only_its_three_files() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = dir.path().join("a.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in [("Poki-external-unsigned.ipa", "ipa"), ("Poki-signing.zip", "zip"), ("SHA256SUMS", "sums"), ("signing/external/x.plist", "p"), ("../evil", "e")] {
+            w.start_file(name, opts).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        }
+        w.finish().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        unpack_preview(&zip_path, &out).unwrap();
+        let mut names: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        names.sort();
+        assert_eq!(names, vec!["Poki-external-unsigned.ipa", "Poki-signing.zip", "SHA256SUMS"]);
+        assert!(!dir.path().join("evil").exists());
+    }
+
+    #[test]
+    fn github_sign_in_answers() {
+        let a = |token: Option<&str>, error: Option<&str>| GithubTokenAnswer { access_token: token.map(String::from), error: error.map(String::from) };
+        assert_eq!(github_poll_step(&a(Some("gho_x"), None)), Ok(Some("gho_x".into())));
+        assert_eq!(github_poll_step(&a(None, Some("authorization_pending"))), Err(Ok(0)));
+        assert_eq!(github_poll_step(&a(None, Some("slow_down"))), Err(Ok(5)));
+        assert!(matches!(github_poll_step(&a(None, Some("access_denied"))), Err(Err(_))));
+        assert!(matches!(github_poll_step(&a(None, Some("expired_token"))), Err(Err(_))));
+        assert!(matches!(github_poll_step(&a(Some(""), None)), Err(Err(_))));
+    }
+
+    /// GitHub listed the pull request and its builds but did not answer for their runs (a timeout,
+    /// a 503, the request limit, or the listing's reads running out). The chosen preview is not
+    /// known to be gone, so the choice stays and nothing is handed out in its place.
+    #[test]
+    fn a_preview_github_could_not_check_stays_chosen() {
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        set_github_token("gho_test").unwrap();
+        set_preview_switch(true).unwrap();
+        set_preview(Some(177)).unwrap();
+        let artifacts = vec![art(40, "Poki-preview-pr177-0.3.1-785-bbbbbbbbbbbb", 1, 1), art(30, "Poki-preview-pr177-0.3.1-783-24a45bb8bb04", 1, 1)];
+        let open = vec![GhPull { number: 177, title: String::new(), head: GhPullHead { branch: "dev/pr177".into() } }];
+        let candidates = preview_candidates(&artifacts, &open);
+        let unread: std::collections::HashMap<u64, Option<GhRunDetail>> = candidates[0].iter().map(|(run, _)| (*run, None)).collect();
+        let (builds, needed) = pick_previews(&candidates, &unread);
+        assert!(builds.is_empty() && needed.is_empty());
+        let listing = PreviewListing { builds, unchecked: unchecked_previews(&candidates, &unread) };
+        assert!(settle_preview(&listing, 177).is_err());
+        assert_eq!(preview(), Some(177));
+        // GitHub answered, and neither build came from the preview workflow: that pull request
+        // offers no preview, so the choice goes and the channel takes over.
+        let other: std::collections::HashMap<u64, Option<GhRunDetail>> = candidates[0].iter().map(|(run, _)| (*run, preview_run(".github/workflows/other.yml", "pull_request"))).collect();
+        let (builds, _) = pick_previews(&candidates, &other);
+        let listing = PreviewListing { builds, unchecked: unchecked_previews(&candidates, &other) };
+        assert!(settle_preview(&listing, 177).unwrap().is_none());
+        assert_eq!(preview(), None);
+    }
+
+    #[test]
+    fn preview_choice_needs_the_switch() {
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::remove_var("POKI_RELEASE_CHANNEL") };
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        assert!(!previews_enabled());
+        assert!(set_preview(Some(177)).is_err());
+        assert_eq!(preview(), None);
+        // The switch needs a GitHub sign-in.
+        assert!(set_preview_switch(true).is_err());
+        set_github_token("gho_test").unwrap();
+        assert!(!previews_enabled());
+        set_preview_switch(true).unwrap();
+        set_preview(Some(177)).unwrap();
+        assert_eq!(preview(), Some(177));
+        // Changing the channel keeps the preview choice, and the other way round.
+        set_channel(Channel::Alpha).unwrap();
+        assert_eq!((channel(), preview()), (Channel::Alpha, Some(177)));
+        // Off: the choice is dropped, and stays dropped when the switch comes back on.
+        set_preview_switch(false).unwrap();
+        assert_eq!(preview(), None);
+        set_preview_switch(true).unwrap();
+        assert_eq!((channel(), preview()), (Channel::Alpha, None));
+        // Signing out of GitHub turns preview builds off and drops the choice.
+        set_preview(Some(177)).unwrap();
+        set_github_token("").unwrap();
+        assert_eq!((previews_enabled(), preview(), github_login()), (false, None, None));
+        set_github_token("gho_test").unwrap();
+        assert!(!previews_enabled());
     }
 
     #[test]
@@ -714,6 +1630,10 @@ mod tests {
         ios.assets.push(GhAsset { name: "PokiSetup-0.2.1-300-macos.dmg".into(), browser_download_url: "https://x/dmg".into() });
         ios.assets.push(GhAsset { name: "PokiSetup-0.2.1-300-windows-x64-setup.exe".into(), browser_download_url: "https://x/exe".into() });
         let list = vec![ios];
+        let (_g, _d) = paths::test_home();
+        unsafe { std::env::set_var("POKI_SETUP_FILE_SECRETS", "1") };
+        assert!(pick_desktop(&list, Channel::Stable, "-macos.dmg").is_none());
+        set_github_token("gho_test").unwrap();
         let (_, a, v) = pick_desktop(&list, Channel::Stable, "-macos.dmg").unwrap();
         assert_eq!((a.name.as_str(), v.as_str()), ("PokiSetup-0.2.1-300-macos.dmg", "0.2.1-300"));
         assert_eq!(pick_desktop(&list, Channel::Beta, "-windows-x64-setup.exe").unwrap().2, "0.2.1-300");
