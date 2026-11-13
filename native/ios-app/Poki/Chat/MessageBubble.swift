@@ -23,7 +23,7 @@ struct MessageBubble: View {
                 Spacer(minLength: .messageInsetPadding)
             }
             if direction == .incoming {
-                Text(rendered)
+                answer
                     .font(.body)
                     .tint(Tint.blueText)
                     .foregroundStyle(Color(.label))
@@ -32,6 +32,9 @@ struct MessageBubble: View {
                     .padding(.horizontal, .messageHorizontalPadding)
                     .pokiBubble(tail: tail)
                     .contextMenu { copyButton { UIPasteboard.general.string = text } }
+                    // A table takes the row's width before the space beside it, so it scrolls sideways
+                    // only when it is wider than the bubble can be.
+                    .layoutPriority(blocks.contains { if case .table = $0 { true } else { false } } ? 1 : 0)
                 Spacer(minLength: .messageInsetPadding)
             } else {
                 (direction == .outgoing ? withCapsules : Text(rendered))
@@ -53,6 +56,25 @@ struct MessageBubble: View {
             }
         }
         .transaction { if direction == .incoming { $0.animation = nil } }
+    }
+
+    private var blocks: [AnswerBlocks.Block] { AnswerBlocks.blocks(text) }
+
+    /// Poki's words: one text, or the text around the answer's tables.
+    @ViewBuilder private var answer: some View {
+        let parts = blocks
+        if parts.count == 1, case .text(let words) = parts[0] {
+            Text(words)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(parts.indices, id: \.self) { i in
+                    switch parts[i] {
+                    case .text(let words): Text(words)
+                    case .table(let alignments, let rows): AnswerTable(alignments: alignments, rows: rows)
+                    }
+                }
+            }
+        }
     }
 
     private var rendered: AttributedString {
@@ -271,6 +293,217 @@ private enum AnswerMarkdown {
         if let code { result += String(repeating: "`", count: code) }
         for delimiter in open.reversed() { result += delimiter.text }
         return result
+    }
+
+    /// One table cell: its words with their inline styles, completed as a line of text is while it streams.
+    static func cell(_ source: String) -> AttributedString {
+        let source = stableInline(source)
+        guard let parsed = try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
+            return AttributedString(source)
+        }
+        var result = AttributedString()
+        for run in parsed.runs {
+            var piece = AttributedString(parsed[run.range])
+            if run.inlinePresentationIntent?.contains(.code) == true { piece.font = .subheadline.monospaced() }
+            if run.link == pendingLink {
+                piece.link = nil
+                piece.foregroundColor = Tint.blueText
+            }
+            result.append(piece)
+        }
+        return result
+    }
+}
+
+/// An answer cut into its text and its tables. A run of lines that start with `|`, outside code, is a
+/// table once its second line is a delimiter row (`| --- | :---: |`). While the answer streams, the
+/// table it is becoming shows as soon as its first line does, and a row being written shows the words
+/// it has so far: a pipe never shows, and nothing jumps from text into a table. A finished answer
+/// whose last row has no closing pipe or newline still shows that whole row.
+@MainActor
+private enum AnswerBlocks {
+    enum Block {
+        case text(AttributedString)
+        case table([RawTableColumnAlignment], [RawTableRow])
+    }
+
+    /// Each answer is cut once: the conversation redraws on every key typed in the message field.
+    private static var cache: [String: [Block]] = [:]
+
+    static func blocks(_ source: String) -> [Block] {
+        if let done = cache[source] { return done }
+        let result = split(source)
+        if cache.count >= 300 { cache.removeAll(keepingCapacity: true) }
+        cache[source] = result
+        return result
+    }
+
+    private static func split(_ source: String) -> [Block] {
+        guard source.contains("|") else { return [.text(AnswerMarkdown.render(source))] }
+        let lines = source.components(separatedBy: "\n")
+        var blocks: [Block] = []
+        var words: [String] = []
+        func endWords() {
+            let text = words.joined(separator: "\n")
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { blocks.append(.text(AnswerMarkdown.render(text))) }
+            words = []
+        }
+        var fence: String?
+        var i = 0
+        while i < lines.count {
+            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+            if let open = fence {
+                if trimmed.hasPrefix(open), trimmed.dropFirst(open.count).allSatisfy(\.isWhitespace) { fence = nil }
+            } else if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                fence = String(trimmed.prefix(while: { $0 == trimmed.first }))
+            } else if trimmed.hasPrefix("|") {
+                var end = i
+                while end < lines.count, lines[end].trimmingCharacters(in: .whitespaces).hasPrefix("|") { end += 1 }
+                let run = lines[i..<end].map { $0.trimmingCharacters(in: .whitespaces) }
+                // The source's last line may still be being written; a run followed only by the newline
+                // that ended its last line may still get its delimiter row.
+                let writing = end == lines.count
+                let last = writing || (end == lines.count - 1 && lines[end].isEmpty)
+                switch table(run, writing: writing, last: last) {
+                case .table(let alignments, let rows):
+                    endWords()
+                    blocks.append(.table(alignments, rows))
+                    i = end
+                    continue
+                case .notYet:
+                    endWords()
+                    i = end
+                    continue
+                case .text:
+                    break
+                }
+                words += lines[i..<end]
+                i = end
+                continue
+            }
+            words.append(lines[i])
+            i += 1
+        }
+        endWords()
+        return blocks
+    }
+
+    private enum Run {
+        case table([RawTableColumnAlignment], [RawTableRow])
+        /// The first cell has no words yet.
+        case notYet
+        /// Not a table: the lines stay text.
+        case text
+    }
+
+    private static func table(_ run: [String], writing: Bool, last: Bool) -> Run {
+        let header = cells(run[0])
+        if run.count >= 2, let alignments = delimiter(run[1], columns: header.count) {
+            var rows = [header]
+            for (offset, line) in run.dropFirst(2).enumerated() {
+                let row = cells(line)
+                if writing, offset == run.count - 3, row.allSatisfy(\.isEmpty) { continue }
+                rows.append(row)
+            }
+            return .table(inferred(alignments, rows: rows, writing: writing), rows.map { row in
+                RawTableRow(cells: (0..<header.count).map { RawTableCell(content: AnswerMarkdown.cell($0 < row.count ? row[$0] : "")) })
+            })
+        }
+        // A header row, perhaps still being written, waiting for its delimiter row.
+        guard last, run.count == 1 || (writing && run.count == 2 && run[1].allSatisfy({ "|:- ".contains($0) })) else { return .text }
+        guard header.contains(where: { !$0.isEmpty }) else { return .notYet }
+        return .table(Array(repeating: .none, count: header.count),
+                      [RawTableRow(cells: header.map { RawTableCell(content: AnswerMarkdown.cell($0)) })])
+    }
+
+    /// A line's cells, without the outer pipes. `\|` stays in its cell.
+    private static func cells(_ line: String) -> [String] {
+        var body = Substring(line)
+        if body.hasPrefix("|") { body = body.dropFirst() }
+        if body.hasSuffix("|"), !body.hasSuffix("\\|") { body = body.dropLast() }
+        var cells: [String] = []
+        var cell = ""
+        var escaped = false
+        for char in body {
+            if char == "|", !escaped {
+                cells.append(cell)
+                cell = ""
+            } else {
+                cell.append(char)
+            }
+            escaped = char == "\\" && !escaped
+        }
+        cells.append(cell)
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// The columns' alignments from a delimiter row with one `---` per header cell; nil for any other line.
+    private static func delimiter(_ line: String, columns: Int) -> [RawTableColumnAlignment]? {
+        let parts = cells(line)
+        guard parts.count == columns else { return nil }
+        var alignments: [RawTableColumnAlignment] = []
+        for part in parts {
+            let dashes = part.drop { $0 == ":" }.reversed().drop { $0 == ":" }
+            guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
+            switch (part.hasPrefix(":"), part.hasSuffix(":")) {
+            case (true, true): alignments.append(.center)
+            case (false, true): alignments.append(.right)
+            case (true, false): alignments.append(.left)
+            case (false, false): alignments.append(.none)
+            }
+        }
+        return alignments
+    }
+
+    /// A column the delimiter row leaves unaligned is right-aligned when every value in it is a number:
+    /// a price, an amount with its unit, a time. A dash or N/A says nothing either way, and neither does
+    /// a cell still being written that has no digit yet.
+    private static func inferred(_ alignments: [RawTableColumnAlignment], rows: [[String]], writing: Bool) -> [RawTableColumnAlignment] {
+        alignments.enumerated().map { column, alignment in
+            guard alignment == .none else { return alignment }
+            var values: [String] = []
+            for (r, row) in rows.enumerated().dropFirst() where column < row.count {
+                let value = row[column]
+                if ["", "-", "–", "—", "N/A", "n/a", "NA", "?"].contains(value) { continue }
+                let open = writing && r == rows.count - 1 && column == row.count - 1
+                if open && !value.contains(where: \.isNumber) { continue }
+                values.append(value)
+            }
+            return !values.isEmpty && values.allSatisfy(isNumber) ? .right : .none
+        }
+    }
+
+    private static func isNumber(_ value: String) -> Bool {
+        let plain = value.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        guard plain.contains(where: \.isNumber) else { return false }
+        let rest = plain.filter { !$0.isNumber && !$0.isWhitespace && !"$€£¥￥₩₹.,%+-−–~≈/:()×*".contains($0) }
+        return rest.count <= 3
+    }
+}
+
+/// A table in Poki's answer, in the GitHub theme's table style (Theme+GitHub.swift) on the system's
+/// colours: as wide as its columns, or as wide as the bubble and scrolled sideways when it is wider.
+private struct AnswerTable: View {
+    var alignments: [RawTableColumnAlignment]
+    var rows: [RawTableRow]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            table.fixedSize(horizontal: true, vertical: false)
+            ScrollView(.horizontal, showsIndicators: false) { table }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .scrollsSideways()
+        }
+    }
+
+    private var table: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return TableView(columnAlignments: alignments, rows: rows)
+            .font(.subheadline)
+            .markdownTableBorderStyle(.init(.insideBorders, color: Color(.separator)))
+            .markdownTableBackgroundStyle(.alternatingRows(Color.clear, Color(.quaternarySystemFill), header: Color(.tertiarySystemFill)))
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color(.separator), lineWidth: 1))
     }
 }
 
