@@ -1414,7 +1414,7 @@ struct ComposerInputView: View {
     /// as a ring around it.
     private var mainButton: some View {
         Button {
-            if running { stop() } else if canSend { submit() } else { ways = ways == nil ? .choose : nil }
+            if running { stop() } else if canSend { submit() } else { ways = ways == nil ? VoiceWays.choose : nil }
         } label: {
             Image(systemName: running ? "stop.fill" : canSend ? "arrow.up" : ways != nil ? "xmark" : "waveform")
                 .font(.body.weight(.semibold))
