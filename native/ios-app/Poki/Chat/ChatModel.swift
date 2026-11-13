@@ -113,22 +113,6 @@ final class ChatModel {
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
     private var modelPlan: [String]?
 
-    /// What an approval's card says for a message this chat's own task is about to send: who it goes
-    /// to and the words themselves, in place of the tap that sends them.
-    struct AskWords: Equatable {
-        var title: String
-        var detail: String
-        var quote: String
-    }
-    /// By approval id, while the step waits for its answer.
-    private(set) var askWords: [String: AskWords] = [:]
-    /// Who the task's message goes to, as the model's plan names them (`to`). The model's word, not
-    /// read off the screen.
-    private var sendTo: String?
-    /// The text the task last typed, and in which of its `do` calls.
-    private var lastTyped: String?
-    private var typedAtDo = 0
-    private var doCalls = 0
     /// The app this task is for (`TaskApps`), for its card and its conversation's row. A task that has
     /// opened or acted in no app has none: its card never shows the app the task before it ended in.
     private(set) var taskApp: String?
@@ -314,7 +298,7 @@ final class ChatModel {
         awaitingModel = true
         stopAsked = false
         planID = nil; noteID = nil; modelPlan = nil
-        sendTo = nil; lastTyped = nil; typedAtDo = 0; doCalls = 0; askWords = [:]; taskApp = nil
+        taskApp = nil
         taskApps = TaskApps(); taskRequest = text
         let instructions = Harness.instructions(for: text)
         let images = lastImages
@@ -556,7 +540,6 @@ final class ChatModel {
             let title = Self.shortTitle(args["title"]), to = Self.shortTitle(args["to"])
             showPlan(steps, current: current, title: title, to: to)
             if let title { nameTask(title) }
-            if let to { sendTo = to }
             return PokiCore.ToolAnswer(text: Harness.planPublished, jpeg: nil, isError: false)
         case "finish_task":
             guard let result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
@@ -570,7 +553,6 @@ final class ChatModel {
         case let name where WebTools.names.contains(name):
             return await WebTools.perform(name, arguments: call.arguments)
         default:
-            if call.name == "do" { noteTyping(args) }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             return await app.runTool(call.name, arguments: call.arguments)
@@ -605,40 +587,12 @@ final class ChatModel {
         return title.isEmpty || title.count > 40 ? nil : title
     }
 
-    /// Remembers what a `do` call types, for the card of the send that follows it.
-    private func noteTyping(_ args: [String: Any]) {
-        doCalls += 1
-        let typed = (args["actions"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String }
-        if let text = typed.last, !text.isEmpty { lastTyped = text; typedAtDo = doCalls }
-    }
-
-    /// The card for a message about to be sent: the words typed in this `do` call or the one before
-    /// it (an older text, typed somewhere else, is never shown as the message) and who the plan says
-    /// they go to. nil for any other step: its card names the step itself.
-    private func sendingWords(_ approval: PendingApproval) -> AskWords? {
-        // Another session's step (an agent on the phone itself) is not this chat's message.
-        let active = SessionStore.shared.activeSessionID
-        guard active == nil || active == sessionID else { return nil }
-        guard approval.reason.hasPrefix("sending"), let text = lastTyped, doCalls - typedAtDo <= 1 else { return nil }
-        return Self.sendingWords(approval, typed: text, to: sendTo)
-    }
-
-    nonisolated static func sendingWords(_ approval: PendingApproval, typed: String, to: String?) -> AskWords {
-        let place = approval.app.isEmpty || approval.app == "unknown" || approval.app.contains("(") ? nil : ActivityWords.local(approval.app)
-        return AskWords(title: to.map { String(localized: "Send this to \($0)?") } ?? approval.question,
-                        detail: place.map { String(localized: "\($0), sent as you") } ?? approval.reasonLine,
-                        quote: typed)
-    }
-
     // MARK: Steps and approvals from PokiCore
 
     private func observe(_ event: ShellEvent) {
         guard running else { return }
         switch event {
         case .toolStarted(let name, let summary, let session):
-            // Typed into a password field (PokiCore's label hides it): not words for any card,
-            // whichever session typed it.
-            if name == "do", summary.contains("hidden characters") { lastTyped = nil }
             guard session == nil else { return }
             guard name == "do", modelPlan == nil else { return }
             updatePlan { steps in
@@ -671,12 +625,10 @@ final class ChatModel {
             guard route != .allow else { break }
             // Each approval has its own card: it stays in the conversation with its answer.
             noteID = nil
-            if let words = sendingWords(approval) { askWords[approval.id] = words }
             asked = ApprovalNote(id: approval.id, summary: approval.summary, app: approval.app, why: approval.reason,
                                  byModel: route != .owner, state: .asking)
             setNote(.approval(asked!))
         case .approvalEnded(let id, let approved):
-            askWords[id] = nil
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .waiting { steps[i].state = approved == true ? .current : .failed }
             }
@@ -784,13 +736,6 @@ final class ChatModel {
             PendingApproval(id: "demo", app: "Messages", summary: String(localized: "Send “On my way!” to Mom"),
                             reason: "sending a message (\"send\")", expires: Date().addingTimeInterval(48))
         }
-        /// The card's words for the scenes' and the demo's approval, made as for a real one.
-        static var approvalWords: AskWords {
-            ChatModel.sendingWords(approval, typed: String(localized: "Running 10 min late. Save me a seat!"), to: String(localized: "Mom"))
-        }
-        static var demoWords: AskWords {
-            ChatModel.sendingWords(demoApproval, typed: String(localized: "On my way!"), to: String(localized: "Mom"))
-        }
         /// The app the scene's task is in, for the task card.
         static func app(_ scene: String?) -> String {
             switch scene {
@@ -799,11 +744,13 @@ final class ChatModel {
             default: "WhatsApp"
             }
         }
-        /// The step a scene's approval card asks about.
+        /// The step a scene's approval card asks about. `-pokiApprovalReason 'a payment ("pay")'` gives
+        /// it another of PokiCore's reasons, for the screenshots of each kind's question.
         static var approval: PendingApproval {
             PendingApproval(id: "sample", app: "WhatsApp", summary: String(localized: "Send “Running 10 min late. Save me a seat!” to Mom"),
-                            reason: "sending a message (\"send\")", expires: Date().addingTimeInterval(48))
+                            reason: reason, expires: Date().addingTimeInterval(48))
         }
+        static var reason: String { UserDefaults.standard.string(forKey: "pokiApprovalReason") ?? "sending a message (\"send\")" }
     }
 
     /// `-pokiChat empty|working|approval|handoff|failed|approved|rested|demo`: the boards' conversations, for

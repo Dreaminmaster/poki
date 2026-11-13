@@ -255,7 +255,6 @@ extension PokiState {
                     bear: allowed ? .phone : .needs, size: .asking,
                     meta: .none,
                     content: question,
-                    subtitle: approval.reasonLine,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
@@ -265,7 +264,6 @@ extension PokiState {
                 bear: .needs, size: .asking,
                 meta: .countdown(approval.expires),
                 content: question,
-                subtitle: approval.reasonLine,
                 bottom: .approval(id: approval.id),
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))

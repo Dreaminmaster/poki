@@ -21,6 +21,9 @@ import WidgetKit
 /// 376 wide there and at most 160 tall (the system's limit for a Live Activity). Every view here
 /// draws one `ActivityFace`, so the four presentations always say the same thing.
 enum ActivityMetrics {
+    /// The largest text size the Live Activity draws: above it the one question and the two answers
+    /// no longer fit the Lock Screen card or the island, so they stay at this size.
+    static let largestType: DynamicTypeSize = .large
     /// The card's corner as iOS draws it, and the expanded island's.
     static let lockCorner: CGFloat = 24
     static let islandCorner: CGFloat = 46
