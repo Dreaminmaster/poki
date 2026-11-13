@@ -88,10 +88,14 @@ struct SavedSession: Codable, Identifiable, Equatable {
 @MainActor
 @Observable
 final class SessionStore {
-    static let shared: SessionStore = {
+    /// Where the conversations are saved, one file each.
+    nonisolated static var defaultFolder: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return base.appendingPathComponent("Poki/Sessions", isDirectory: true)
+    }
+    static let shared: SessionStore = {
         let sample = UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil
-        return SessionStore(folder: base.appendingPathComponent("Poki/Sessions", isDirectory: true), defaults: .standard, samples: sample)
+        return SessionStore(folder: defaultFolder, defaults: .standard, samples: sample)
     }()
     /// The most conversations the list keeps; archived ones are not counted.
     static let limit = 200
