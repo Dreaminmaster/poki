@@ -35,32 +35,6 @@ enum ActivityWords {
         "Finished": .done,
     ]
 
-    /// The content line: at most four words, or eight Chinese characters, ending in "…" when cut.
-    /// A word is a run of letters and digits ("1:24" and "don’t" are one); each Chinese character
-    /// counts on its own, punctuation not at all.
-    static func brief(_ text: String) -> String {
-        let limit = text.unicodeScalars.contains(where: isHan) ? 8 : 4
-        var units = 0
-        var inWord = false
-        for index in text.indices {
-            let c = text[index]
-            let han = c.unicodeScalars.contains(where: isHan)
-            let wordy = !han && (c.isLetter || c.isNumber || inWord && "’'-:./".contains(c))
-            if han || wordy && !inWord {
-                units += 1
-                if units > limit { return cut(text[..<index]) }
-            }
-            inWord = wordy
-        }
-        return text
-    }
-
-    /// A step label from PokiCore as the content line: the first of several actions ("Tap “Search”,
-    /// then type “cats”" is "Tap “Search”"), in the system's language, at most four words.
-    static func step(_ label: String) -> String {
-        brief(translate(label.components(separatedBy: ", then ").first ?? label))
-    }
-
     /// The lines Poki itself puts on a run ("Thinking", "Carrying on"), as against a step label from
     /// PokiCore ("Tap “Send”"): with no plan to say what the task is doing, only these are shown.
     static let statusLines: Set<String> = [
@@ -102,18 +76,6 @@ enum ActivityWords {
         }
         if !current.isEmpty { parts.append(current) }
         return parts
-    }
-
-    private static func isHan(_ scalar: Unicode.Scalar) -> Bool {
-        (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value)
-    }
-
-    private static func cut(_ text: Substring) -> String {
-        var line = text.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ",，、:：")))
-        line += "…"
-        // A name cut inside its quotes keeps the closing one.
-        if line.filter({ $0 == "“" }).count > line.filter({ $0 == "”" }).count { line += "”" }
-        return line
     }
 
     /// The labels PokiCore writes (Computer.label in PokiCore's StepLabels.swift). Those with a name

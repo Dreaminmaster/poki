@@ -173,6 +173,7 @@ final class ActivityController {
         change(&state)
         ActivityUpdatePolicy.settle(&state, over: old)
         let alert = transition(from: old)
+        if state.phase == .working, let app = state.app { keepIcon(app) }
         // No idle activity where iOS's background task stands in: it comes with the work and goes with it.
         if activity == nil, let wanted, state.phase != .idle, canStart() {
             start(deviceName: wanted)
@@ -190,6 +191,17 @@ final class ActivityController {
     }
     /// The hand-off or problem this change pops up for (`update` posts a banner when no activity runs).
     private var attention: (title: String, body: String)?
+
+    /// Puts the icon of the app the run is in where the widget reads it, before the update that shows
+    /// it goes out. An icon only the App Store has is fetched for the next update; none is sent for it.
+    private func keepIcon(_ app: String) {
+        guard let url = AppIconFile.url(app), !FileManager.default.fileExists(atPath: url.path) else { return }
+        if let icon = AppIconStore.shared.icon(app) {
+            AppIconFile.write(icon, for: app)
+        } else {
+            Task { await AppIconStore.shared.load(app) }
+        }
+    }
 
     /// Writes a thumbnail, at most about 160 points wide, to the App Group container for the widget.
     func setThumbnail(_ jpeg: Data?) {
@@ -340,7 +352,7 @@ final class ActivityController {
         state.previous = nil
         state.headline = "Finished"
         setEvent(.finished, "Run finished")
-        let summary = state.runSummary
+        let summary = state.runSummary ?? state.doneTitle
         send(alert: alert ? ordinary(StatusWord.done.text, summary) : nil, critical: true)
         armFold()
     }
