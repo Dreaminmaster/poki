@@ -4,8 +4,11 @@ import SwiftUI
 /// The conversation's ground is always there: a clean pale page with a faint brand-blue glow behind
 /// the message field, under a quarter of the screen high, still unless Poki is at work. Over it, on the
 /// home page, lies the home's light: paper white above, blue rising from the bottom edge, breathing
-/// slowly (ESP-470). Your first message makes the home's light sink 260 points and fade, so it seems
-/// to draw back to the glow and stop there.
+/// slowly (ESP-470). In light, your first message makes the home's light sink 260 points and fade, so
+/// it seems to draw back to the glow and stop there. In dark it stays where it is, stops breathing and
+/// dims to a little under half: under the dark ground's plain top three quarters the conversation read
+/// as black after the home's blue, so it keeps the same light, only quieter, and going in is a dimming
+/// rather than a change of ground.
 ///
 /// Points, colours, grain and bright edge are the design's final table (定稿-首页渐变和玻璃参数,
 /// sections 1 to 4, 9 and 10). The system's mesh was laid beside the design's own rendering of the same
@@ -31,6 +34,10 @@ struct HomeBackdrop: View {
     /// False while another page is pushed over this one.
     @State private var shown = false
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    /// How strongly the home's light shows behind the conversation in dark: as much as keeps the system's
+    /// secondary text above 4.5 to 1 right down to the message field, where the light is brightest. At
+    /// half it measured 4.4 there.
+    static let darkChatLight = 0.45
 
     var body: some View {
         let dark = scheme == .dark
@@ -44,8 +51,8 @@ struct HomeBackdrop: View {
                 .animation(.easeInOut(duration: 0.6), value: working)
             DriftingMesh(mesh: .home, dark: dark, drift: breathing)
                 .overlay(alignment: .bottom) { EdgeLight(dark: dark) }
-                .offset(y: home || reduceMotion ? 0 : 260)
-                .opacity(home ? 1 : 0)
+                .offset(y: home || reduceMotion || dark ? 0 : 260)
+                .opacity(home ? 1 : dark ? Self.darkChatLight : 0)
                 .animation(HomeMotion.ground(reduceMotion), value: home)
         }
         // Coming back to the page, the light takes a second to start breathing again rather than
