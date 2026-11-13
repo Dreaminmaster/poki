@@ -47,15 +47,11 @@ struct MessageBubble: View {
                     .frame(maxWidth: 320, alignment: .trailing)
             }
         }
+        .transaction { if direction == .incoming { $0.animation = nil } }
     }
 
-    /// Poki's words as Markdown (bold, italics, code, links), as models write them; the owner's as typed.
     private var rendered: AttributedString {
-        guard direction == .incoming, text.contains(where: { "*_`[".contains($0) }),
-              let markdown = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
-            return AttributedString(text)
-        }
-        return markdown
+        direction == .incoming ? AnswerMarkdown.render(text) : AttributedString(text)
     }
 
     private var shape: UnevenRoundedRectangle {
@@ -68,6 +64,190 @@ struct MessageBubble: View {
         Button(action: copy) {
             Label("Copy", systemImage: "doc.on.doc")
         }
+    }
+}
+
+private enum AnswerMarkdown {
+    private static let pendingLink = URL(string: "poki-pending-link:")!
+
+    static func render(_ source: String) -> AttributedString {
+        let source = stableMarkdown(source)
+        guard let parsed = try? AttributedString(markdown: source, options: .init(interpretedSyntax: .full)) else {
+            return AttributedString(source)
+        }
+        var result = AttributedString()
+        var block: Int?
+        var lastItem: Int?
+        for run in parsed.runs {
+            let components = run.presentationIntent?.components ?? []
+            let identity = components.first?.identity
+            var piece = AttributedString(parsed[run.range])
+            piece.presentationIntent = nil
+            if identity != block {
+                if !result.characters.isEmpty { result.append(AttributedString("\n")) }
+                block = identity
+                let lists = components.filter {
+                    switch $0.kind { case .orderedList, .unorderedList: true; default: false }
+                }
+                if let item = components.first(where: { if case .listItem = $0.kind { true } else { false } }) {
+                    result.append(AttributedString(String(repeating: "  ", count: max(0, lists.count - 1))))
+                    if item.identity != lastItem, case .listItem(let ordinal) = item.kind {
+                        let ordered = lists.first.map { if case .orderedList = $0.kind { true } else { false } } ?? false
+                        result.append(AttributedString(ordered ? "\(ordinal). " : "• "))
+                    }
+                    lastItem = item.identity
+                } else {
+                    lastItem = nil
+                }
+                if components.contains(where: { if case .blockQuote = $0.kind { true } else { false } }) {
+                    result.append(AttributedString("▎ "))
+                }
+            }
+            for component in components {
+                switch component.kind {
+                case .header:
+                    piece.font = .body.weight(.semibold)
+                case .codeBlock:
+                    piece.font = .body.monospaced()
+                case .blockQuote:
+                    piece.foregroundColor = .secondary
+                case .thematicBreak:
+                    piece = AttributedString("────────")
+                    piece.foregroundColor = .secondary
+                default: break
+                }
+            }
+            if run.inlinePresentationIntent?.contains(.code) == true { piece.font = .body.monospaced() }
+            if run.link == pendingLink {
+                piece.link = nil
+                piece.foregroundColor = Tint.blueText
+            }
+            result.append(piece)
+        }
+        return result
+    }
+
+    private static func stableMarkdown(_ source: String) -> String {
+        var fence: String?
+        return source.components(separatedBy: "\n").map { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let open = fence {
+                if trimmed.hasPrefix(open), trimmed.dropFirst(open.count).allSatisfy(\.isWhitespace) {
+                    fence = nil
+                } else if !trimmed.isEmpty, trimmed.count < open.count, trimmed.allSatisfy({ $0 == open.first }) {
+                    return ""
+                }
+                return line
+            }
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                fence = String(trimmed.prefix(while: { $0 == trimmed.first }))
+                return line
+            }
+            if trimmed.hasPrefix("|") {
+                let cells = trimmed.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+                if cells.allSatisfy({ $0.allSatisfy { "-: ".contains($0) } }) { return "" }
+                return cells.filter { !$0.isEmpty }.map(stableInline).joined(separator: "  ·  ") + "  "
+            }
+            if ["-", "--", "+", "`", "``", "~", "~~"].contains(trimmed) { return "" }
+            if trimmed.count >= 3, trimmed.allSatisfy({ $0 == "*" || $0 == "_" || $0 == " " }) {
+                return line
+            }
+            return stableInline(line)
+        }.joined(separator: "\n")
+    }
+
+    private struct Delimiter {
+        var character: Character
+        var count: Int
+        var text: String { String(repeating: String(character), count: count) }
+    }
+
+    // Complete only the display copy. The next token must not turn literal markers into styled words.
+    private static func stableInline(_ source: String) -> String {
+        let chars = Array(source)
+        var result = ""
+        var open: [Delimiter] = []
+        var code: Int?
+        var i = 0
+        while i < chars.count {
+            let char = chars[i]
+            if let count = code {
+                if char == "`" {
+                    let end = chars[i...].prefix(while: { $0 == char }).count + i
+                    if end - i == count { code = nil }
+                    if end == chars.count, end - i < count { break }
+                    result += String(chars[i..<end])
+                    i = end
+                } else {
+                    result.append(char)
+                    i += 1
+                }
+                continue
+            }
+            if char == "\\" {
+                if i + 1 < chars.count { result += String(chars[i...i + 1]); i += 2 } else { i += 1 }
+                continue
+            }
+            if char == "[" || (char == "!" && i + 1 < chars.count && chars[i + 1] == "[") {
+                let start = i + (char == "!" ? 2 : 1)
+                let close = chars[start...].firstIndex(of: "]")
+                let label = String(chars[start..<(close ?? chars.count)])
+                if let close, close + 1 < chars.count, chars[close + 1] == "(" {
+                    var depth = 1
+                    var end = close + 2
+                    while end < chars.count, depth > 0 {
+                        if chars[end] == "(" { depth += 1 }
+                        if chars[end] == ")" { depth -= 1 }
+                        end += 1
+                    }
+                    if depth == 0 {
+                        result += "[" + stableInline(label) + String(chars[close..<end])
+                        i = end
+                        continue
+                    }
+                }
+                if !label.isEmpty { result += "[" + stableInline(label) + "](\(pendingLink.absoluteString))" }
+                i = close.map { $0 + 1 } ?? chars.count
+                if i < chars.count, chars[i] == "(" { i = chars.count }
+                continue
+            }
+            if char == "`" || char == "*" || char == "_" {
+                let end = chars[i...].prefix(while: { $0 == char }).count + i
+                let count = end - i
+                if char == "_", i > 0, chars[i - 1].isLetter || chars[i - 1].isNumber,
+                   end < chars.count, chars[end].isLetter || chars[end].isNumber {
+                    result += String(chars[i..<end]); i = end; continue
+                }
+                if char == "`" {
+                    if end < chars.count { code = count; result += String(chars[i..<end]) }
+                } else if let last = open.last, last.character == char, i > 0, !chars[i - 1].isWhitespace {
+                    if count >= last.count {
+                        result += last.text
+                        open.removeLast()
+                        if count > last.count, end < chars.count {
+                            let extra = Delimiter(character: char, count: count - last.count)
+                            result += extra.text
+                            open.append(extra)
+                        }
+                    } else if end < chars.count {
+                        result += String(chars[i..<end])
+                    }
+                } else if end < chars.count, !chars[end].isWhitespace {
+                    let delimiter = Delimiter(character: char, count: count)
+                    result += delimiter.text
+                    open.append(delimiter)
+                } else if end < chars.count {
+                    result += String(chars[i..<end])
+                }
+                i = end
+                continue
+            }
+            result.append(char)
+            i += 1
+        }
+        if let code { result += String(repeating: "`", count: code) }
+        for delimiter in open.reversed() { result += delimiter.text }
+        return result
     }
 }
 

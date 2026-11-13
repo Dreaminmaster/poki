@@ -55,7 +55,7 @@ final class MessageMarkdownTests: XCTestCase {
             await show("# Heading one\n## Heading two\n### Dune: Part Two Reissue\nBody text stays the same size.")
             let source = try await screen()
             try source.write(to: output.appendingPathComponent("headings-\(name).xml"), atomically: true, encoding: .utf8)
-            try capture("headings-\(name)")
+            try await capture("headings-\(name)")
             XCTAssertTrue(source.contains("Dune: Part Two Reissue"), "The answer must actually be on screen")
             XCTAssertFalse(source.contains("# Heading") || source.contains("### Dune"), "Heading markers reached the conversation: \(source)")
         }
@@ -97,7 +97,7 @@ final class MessageMarkdownTests: XCTestCase {
                     previous = (wanted, labels.frames[wanted] ?? "")
                 }
                 if UserDefaults.standard.bool(forKey: "markdownEvidence") {
-                    try capture("stream-\(samples.firstIndex(where: { $0.0 == sample })!)-\(length)")
+                    try await capture("stream-\(samples.firstIndex(where: { $0.0 == sample })!)-\(length)")
                 }
             }
         }
@@ -131,11 +131,12 @@ final class MessageMarkdownTests: XCTestCase {
                       userInfo: [NSLocalizedDescriptionKey: "The test conversation did not become accessible"])
     }
 
-    private func capture(_ name: String) throws {
-        let window = try XCTUnwrap(window)
-        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-        }
+    private func capture(_ name: String) async throws {
+        let data = await Task.detached {
+            var code: NSString?
+            return PKInProcess.shared().screenshot(&code)
+        }.value
+        let image = try XCTUnwrap(UIImage(data: try XCTUnwrap(data)))
         try XCTUnwrap(image.pngData()).write(to: output.appendingPathComponent("\(name).png"))
     }
 
@@ -149,7 +150,7 @@ final class MessageMarkdownTests: XCTestCase {
         for (name, text) in formats {
             await show(text)
             try await screen().write(to: output.appendingPathComponent("\(name).xml"), atomically: true, encoding: .utf8)
-            try capture(name)
+            try await capture(name)
         }
         let paragraph = "这是一段用于检查长回答显示和滚动的文字。每一项内容都应该清晰可读，阅读时可以随时返回上一段。"
         let long = String(repeating: paragraph, count: 43) + "\n\n- First item\n- Second item\n\n```swift\nlet answer = 42\nprint(answer)\n```"
@@ -188,6 +189,6 @@ private final class Labels: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String]) {
         guard elementName == "XCUIElementTypeStaticText", let label = attributes["label"] else { return }
         text.append(label)
-        frames[label] = ["x", "y", "width", "height"].map { attributes[$0] ?? "" }.joined(separator: ",")
+        frames[label.trimmingCharacters(in: .whitespacesAndNewlines)] = ["x", "y", "width", "height"].map { attributes[$0] ?? "" }.joined(separator: ",")
     }
 }
