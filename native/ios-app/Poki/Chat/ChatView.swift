@@ -155,6 +155,17 @@ struct ChatView: View {
                 }
             }
         }
+        // While you talk with Poki: its light along the bottom edge, over the page, following the talk.
+        .overlay {
+            ZStack {
+                if let talk = voice.talkState, !talk.isFailed {
+                    TalkEdgeGlow(strength: talk.glow).transition(.opacity)
+                }
+            }
+            .animation(TalkMotion.glow, value: voice.talkState)
+        }
+        // The bear says hi as a talk begins.
+        .onChange(of: voice.isOn) { _, on in if on { pokes += 1 } }
         .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { pageHeight = $0 }
         .animation(.snappy, value: voice.isOn)
         .animation(.snappy, value: model.approvals.first?.id)
@@ -1199,7 +1210,7 @@ struct ComposerInputView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let problem = problem ?? (dictation.on ? nil : dictation.problem) ?? talkProblem {
+            if let problem = problem ?? (dictation.on ? nil : dictation.problem) {
                 Text(problem).font(.footnote).foregroundStyle(Tint.red)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
                     .transition(.opacity)
@@ -1224,7 +1235,13 @@ struct ComposerInputView: View {
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             HStack(alignment: .bottom, spacing: 10) {
-                if voice.isOn { TalkBar(voice: voice, since: talkStarted) } else {
+                if let talk = voice.talkState {
+                    TalkBar(state: talk, since: talkStarted, muted: voice.muted, toggleMute: { voice.muted.toggle() },
+                            interrupt: voice.stopTalking, end: voice.stop,
+                            retry: { voice.dismissProblem(); openVoice() }, dismiss: voice.dismissProblem)
+                        .transition(.blurReplace)
+                } else {
+                Group {
                 plus
                 // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                 CapsuleField(text: $input, focused: $focused, maxLines: 6, scroll: fieldScroll,
@@ -1240,17 +1257,19 @@ struct ComposerInputView: View {
                 if dictation.on { dictating } else if dictationButton, !running { microphone }
                 mainButton
                 }
+                .transition(.blurReplace)
+                }
             }
             .padding(8)
             .contentShape(.rect)
-            .onTapGesture { focused = true }
+            .onTapGesture { if voice.talkState == nil { focused = true } }
             .simultaneousGesture(swipe)
             .glassSurface(in: RoundedRectangle(cornerRadius: 32, style: .continuous), fallback: .bar)
             // Controls in a bar stop growing where the system's bars do; the message itself grows freely.
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .animation(.snappy, value: dictation.on)
-        .animation(.snappy, value: voice.isOn)
+        .animation(TalkMotion.enter, value: voice.talkState != nil)
         .animation(.snappy, value: ways)
         .onChange(of: voice.isOn, initial: true) { _, on in talkStarted = on ? Date() : nil }
         // Asked for from a link or Poki's profile: the ways to speak, or what Talk with Poki is missing.
@@ -1309,7 +1328,14 @@ struct ComposerInputView: View {
             case "ways": ways = .choose
             case "needs-key": ways = .needsKey
             case "add-key": openVoiceKey()
-            case "talk": openVoice()
+            case "talk":
+                openVoice()
+                // `-pokiTalkHold <state>`: once the rehearsal has brought the talk there, it stays.
+                guard let hold = TalkRehearsal.hold else { break }
+                for _ in 0..<600 where voice.talkState != hold { try? await Task.sleep(for: .milliseconds(50)) }
+                voice.staged = hold
+                // The screenshot script waits for this line.
+                FileHandle.standardError.write(Data("POKI-TALK held\n".utf8))
             case "ended":
                 openVoice()
                 try? await Task.sleep(for: .seconds(9))
@@ -1457,13 +1483,6 @@ struct ComposerInputView: View {
         }
     }
 
-    /// Why the last talk ended without being asked to (no connection, no microphone), over the field
-    /// until the next one starts.
-    private var talkProblem: String? {
-        if case .lost(let why) = voice.phase { return why }
-        return nil
-    }
-
     private func submit() {
         guard !running, canSend else { return }
         dictation.cancel(model)
@@ -1575,13 +1594,9 @@ struct LiveVoiceTranscript: View {
         if voice.isOn || !voice.lines.isEmpty {
             let lines = voice.lines
             VStack(spacing: 4) {
-                if voice.isOn {
-                    TalkHeader(voice: voice).padding(.top, 10).padding(.bottom, 6)
-                } else if !lines.isEmpty {
-                    Label("Voice conversation", systemImage: "waveform")
-                        .font(.system(size: 12, weight: .medium)).foregroundStyle(ChatColor.secondary)
-                        .padding(.top, 12).padding(.bottom, 4).frame(maxWidth: .infinity)
-                }
+                Label(voice.isOn ? LocalizedStringKey("Talk with Poki") : LocalizedStringKey("Voice conversation"), systemImage: "waveform")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(ChatColor.secondary)
+                    .padding(.top, 12).padding(.bottom, 4).frame(maxWidth: .infinity)
                 ForEach(Array(lines.enumerated()), id: \.element.id) { i, line in
                     let pending = i == lines.count - 1 && line.role == .you && voice.phase == .hearing
                     switch line.role {

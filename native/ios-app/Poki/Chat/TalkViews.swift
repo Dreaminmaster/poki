@@ -5,7 +5,8 @@ import UIKit
 // one button offers Dictate and Talk with Poki, a talk goes on in the chat with the field as its bar,
 // and Talk with Poki without a voice key says so, with a button to the key's form in Settings. The
 // old Voice page no longer opens from anywhere a person can reach. The code and the look are this app's:
-// glass, Poki's blue and its brand band, the bear's own pictures, the system's type.
+// glass, Poki's blue and its brand band, the system's type. The bars in the talk's mark are LiveKit's
+// (TalkBars.swift) and the light along the bottom edge is Jacob Mobin's (TalkEdgeGlow.swift).
 
 /// What the ways-to-speak panel shows.
 enum VoiceWays: Equatable {
@@ -35,6 +36,8 @@ struct VoiceWaysPanel: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassSurface(in: RoundedRectangle(cornerRadius: 28, style: .continuous), fallback: .bar)
+        // Over the message field there is room for the first accessibility size, not for the largest.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     private var choices: some View {
@@ -69,25 +72,33 @@ struct VoiceWaysPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                Button(action: close) {
-                    Text("Not Now").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                        .padding(.horizontal, 18).frame(height: 44)
-                        .background(Color(.label).opacity(0.1), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("composer.speak.later")
-                Button(action: addKey) {
-                    Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.body.weight(.semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(height: 44)
-                        .background(Tint.blue, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("composer.speak.add-key")
+            // Side by side at the trailing edge; one above the other when large text leaves no room.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { Spacer(minLength: 0); later; add(off) }
+                VStack(spacing: 8) { add(off).frame(maxWidth: .infinity); later.frame(maxWidth: .infinity) }
             }
         }
         .padding(8)
+    }
+
+    private var later: some View {
+        Button(action: close) {
+            Text("Not Now").font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
+                .padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Color(.label).opacity(0.1), in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("composer.speak.later")
+    }
+
+    private func add(_ off: Bool) -> some View {
+        Button(action: addKey) {
+            Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.body.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+                .padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Tint.blue, in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("composer.speak.add-key")
     }
 }
 
@@ -117,101 +128,174 @@ private struct WayRow<Mark: View>: View {
     }
 }
 
-/// The message field while you talk with Poki: what the talk is doing and for how long, Poki's voice
-/// on or off, and End. End here and End on the Live Activity end the same talk.
+/// The message field while you talk with Poki: what the talk is doing and for how long, a way to stop
+/// Poki's answer while it speaks, Poki's voice on or off, and End. End here and End on the Live Activity
+/// end the same talk. A talk that ended by itself says why here, with Try Again and Close.
+///
+/// It draws a `TalkState` and nothing else, so each state can be put on screen by itself.
 struct TalkBar: View {
-    var voice: VoiceModel
+    var state: TalkState
     var since: Date?
+    var muted: Bool
+    var toggleMute: () -> Void
+    var interrupt: () -> Void
+    var end: () -> Void
+    var retry: () -> Void
+    var dismiss: () -> Void
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            row
+            // What went wrong, in full, under the row: a system's reason can run to several lines.
+            if let reason = state.reason {
+                Text(verbatim: reason).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                    .lineLimit(5).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6).padding(.bottom, 4)
+                    .accessibilityIdentifier("composer.talk.reason")
+                    .transition(.opacity)
+            }
+        }
+        .frame(minHeight: 48)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .animation(TalkMotion.state, value: state)
+        // A tap you feel where the talk turns: it starts to listen, it is cut off, it breaks.
+        .sensoryFeedback(trigger: state) { old, new -> SensoryFeedback? in
+            switch new {
+            case .interrupted: return .impact(weight: .medium)
+            case .failed: return .error
+            case .listening where old == .connecting: return .start
+            default: return nil
+            }
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 10) {
-            Image(systemName: "waveform").font(.body.weight(.semibold)).foregroundStyle(.white)
-                .symbolEffect(.variableColor.iterative.dimInactiveLayers, isActive: TalkWord.moving(voice.phase))
-                .frame(width: 48, height: 48)
-                .background(BrandBand.diagonal, in: .circle)
-                .accessibilityHidden(true)
+            TalkOrb(state: state)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: TalkWord.text(voice.phase)).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    .lineLimit(1).contentTransition(.interpolate)
-                if let since {
+                Text(verbatim: state.word).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                    .lineLimit(1).minimumScaleFactor(0.8).contentTransition(.interpolate)
+                if let since, !state.isFailed {
                     Text(since, style: .timer).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                        .transition(.opacity)
                 }
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 4)
-            Button { voice.muted.toggle() } label: {
-                Image(systemName: voice.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .font(.body.weight(.medium)).foregroundStyle(Color(.label))
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 44, height: 44)
-                    .background(Color(.label).opacity(scheme == .dark ? 0.16 : 0.1), in: .circle)
-                    .contentShape(.circle)
+            if state.isFailed {
+                round("xmark", label: "Close", identifier: "composer.talk.close", action: dismiss)
+                capsule("Try Again", fill: Tint.blue, ink: .white, identifier: "composer.talk.retry", action: retry)
+            } else {
+                if state == .speaking {
+                    round("hand.raised.fill", label: "Interrupt", identifier: "composer.talk.interrupt", action: interrupt)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
+                round(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", label: muted ? "Unmute Poki’s Voice" : "Mute Poki’s Voice",
+                      identifier: "composer.talk.mute", action: toggleMute)
+                capsule("End", fill: Tint.solid, ink: Tint.onSolid, identifier: "composer.talk.end", action: end)
+                    .accessibilityLabel(Text("End Talk"))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(voice.muted ? "Unmute Poki’s Voice" : "Mute Poki’s Voice"))
-            Button { voice.stop() } label: {
-                Text("End").font(.body.weight(.semibold)).foregroundStyle(Tint.onSolid)
-                    .padding(.horizontal, 20).frame(height: 48)
-                    .background(Tint.solid, in: .capsule)
-                    .contentShape(.capsule)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("End Talk"))
-            .accessibilityIdentifier("composer.talk.end")
         }
-        .frame(minHeight: 48)
+    }
+
+    private func round(_ symbol: String, label: LocalizedStringKey, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.body.weight(.medium)).foregroundStyle(Color(.label))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 44, height: 44)
+                .background(Color(.label).opacity(scheme == .dark ? 0.16 : 0.1), in: .circle)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func capsule(_ title: LocalizedStringKey, fill: Color, ink: Color, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.body.weight(.semibold)).foregroundStyle(ink).lineLimit(1)
+                .padding(.horizontal, 20).frame(height: 48)
+                .background(fill, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 }
 
-/// The head of a talk under way, at the bottom of the chat: Poki's brand band with the bear for the
-/// moment, and what the talk is doing. What is said goes under it as the chat's own bubbles.
-struct TalkHeader: View {
-    var voice: VoiceModel
+/// The talk's mark at the head of its bar: the brand band in a circle, and in it the bars for what the
+/// talk is doing (`TalkBars`), a phone while a step runs on it, or an exclamation mark for a problem.
+/// It dips when the talk is interrupted.
+struct TalkOrb: View {
+    var state: TalkState
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let bear = PokiMood.cutout(mood, small: true) {
-                Image(uiImage: bear).resizable().interpolation(.high).scaledToFit()
-                    .frame(width: 52, height: 52).offset(y: 5)
-                    .accessibilityHidden(true)
+        ZStack {
+            switch state {
+            case .acting:
+                Image(systemName: "iphone").font(.title3.weight(.semibold))
+                    .symbolEffect(.pulse, options: .repeating)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            case .failed:
+                Image(systemName: "exclamationmark").font(.title3.weight(.bold))
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+            default:
+                TalkBars(mode: bars, barColor: .white, barSpacingFactor: 0.09, barMinOpacity: 0.4, loudness: state == .hearing ? 0.7 : 1)
+                    .frame(width: 26, height: 22)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Talk with Poki").font(.subheadline.weight(.semibold))
-                Text(verbatim: TalkWord.text(voice.phase)).font(.footnote).opacity(0.85).contentTransition(.interpolate)
-            }
-            Spacer(minLength: 0)
         }
         .foregroundStyle(.white)
-        .padding(.leading, 10).padding(.trailing, 16).frame(height: 60)
-        .background(BrandBand.diagonal, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .accessibilityElement(children: .combine)
+        .frame(width: 48, height: 48)
+        .background {
+            if state.isFailed { Circle().fill(Tint.red) } else { Circle().fill(BrandBand.diagonal) }
+        }
+        .scaleEffect(state == .interrupted ? 0.86 : 1)
+        .animation(TalkMotion.dip, value: state == .interrupted)
+        .accessibilityHidden(true)
     }
 
-    private var mood: PokiMood {
-        switch voice.phase {
-        case .thinking: .thinking
-        case .speaking: .speaking
-        default: .listening
+    private var bars: TalkBars.Mode {
+        switch state {
+        case .connecting: .initializing
+        case .listening: .listening
+        case .thinking, .acting: .thinking
+        case .hearing, .speaking: .speaking
+        case .interrupted, .failed: .quiet
         }
     }
 }
 
-/// A talk's state in the status words of the app and the Live Activity (Status.xcstrings).
-enum TalkWord {
-    static func text(_ phase: VoicePhase) -> String {
-        switch phase {
-        case .off, .connecting: String(localized: "Connecting")
-        case .listening, .hearing: StatusWord.listening.text
-        case .thinking: StatusWord.thinking.text
-        case .speaking: StatusWord.speaking.text
-        case .lost(let why): why
+/// How a talk's screens move.
+enum TalkMotion {
+    /// From one state to the next: the word, the buttons that come and go, the mark.
+    static let state = Animation.snappy(duration: 0.28)
+    /// The mark's dip when the talk is interrupted, and its way back.
+    static let dip = Animation.spring(duration: 0.32, bounce: 0.45)
+    /// The message field turning into the talk's bar and back.
+    static let enter = Animation.smooth(duration: 0.36)
+    /// The light along the bottom edge following the talk.
+    static let glow = Animation.easeInOut(duration: 0.5)
+}
+
+extension TalkState {
+    /// How much of the light along the bottom edge shows: most while Poki speaks, least when it was
+    /// cut off, none for a talk that broke.
+    var glow: Double {
+        switch self {
+        case .connecting: 0.35
+        case .listening: 0.6
+        case .hearing: 0.85
+        case .thinking: 0.55
+        case .acting: 0.5
+        case .speaking: 1
+        case .interrupted: 0.25
+        case .failed: 0
         }
     }
-
-    /// Someone is speaking: the waveform moves.
-    static func moving(_ phase: VoicePhase) -> Bool { phase == .hearing || phase == .speaking }
 }
 
 /// The brand band in the app: the Live Activity card's blues (BrandBand.colours), corner to corner.
