@@ -46,7 +46,7 @@ jobs:
           # The pre-alpha run that built this commit; its artifact is the file to promote.
           run="$(gh run list --workflow prealpha.yml --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')"
           [ -n "$run" ] || { echo "::error::no successful Pre-alpha run built $sha (artifacts are kept 90 days)"; exit 1; }
-          if gh api "repos/$GH_REPO/git/refs/tags/app-$version-alpha.$build" >/dev/null 2>&1; then
+          if gh api "repos/$GH_REPO/git/ref/tags/app-$version-alpha.$build" >/dev/null 2>&1; then
             echo "::error::app-$version-alpha.$build already exists"; exit 1
           fi
           echo "Promoting $WANT ($sha), Pre-alpha run $run"

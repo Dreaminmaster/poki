@@ -52,7 +52,7 @@ def tag_sha(tag):
 
 
 def tag_exists(tag):
-    r = subprocess.run(["gh", "api", f"repos/{os.environ['GH_REPO']}/git/refs/tags/{tag}"], capture_output=True)
+    r = subprocess.run(["gh", "api", f"repos/{os.environ['GH_REPO']}/git/ref/tags/{tag}"], capture_output=True)
     return r.returncode == 0
 
 
