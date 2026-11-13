@@ -46,6 +46,16 @@ final class FakePairing: DevicePairing {
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    private var language = AppLocalization.system
+
+    /// The loopback's words follow Poki's language; these tests read the English ones.
+    override func setUp() async throws {
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+    }
+
+    override func tearDown() async throws { AppLocalization.shared.preference = language }
+
     private func model() -> (AppModel, FakeLauncher) {
         let launcher = FakeLauncher()
         let model = AppModel(launcher: launcher, pairer: FakePairing())
