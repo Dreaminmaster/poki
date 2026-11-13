@@ -26,8 +26,8 @@ struct ShortcutEditor: View {
     @State private var choosing = false
     @State private var shown = false
     @FocusState private var writing: Bool
-    /// Every app Poki knows by name, by its name on this iPhone.
-    private let apps: [(id: String, name: String)]
+    /// What the app row offers: None (an empty ID), then every app Poki knows, by its name.
+    let choices: [(id: String, name: String)]
 
     init(shortcut: HomeShortcut, typing: @escaping (Bool) -> Void = { _ in },
          save: @escaping (_ sentence: String, _ app: String?) -> Void) {
@@ -36,7 +36,7 @@ struct ShortcutEditor: View {
         self.save = save
         _sentence = State(initialValue: shortcut.prompt)
         _app = State(initialValue: shortcut.app)
-        apps = KnownApps.all.map { app -> (id: String, name: String) in (app.id, app.name(in: .current)) }
+        choices = [("", String(localized: "None"))] + KnownApps.all.map { app -> (id: String, name: String) in (app.id, app.name(in: .current)) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -131,7 +131,7 @@ struct ShortcutEditor: View {
         .accessibilityIdentifier("shortcut.edit")
     }
 
-    private var appName: String { apps.first { $0.id == app }?.name ?? String(localized: "None") }
+    private var appName: String { choices.first { $0.id == app }?.name ?? choices[0].name }
 
     /// The app row: its name, the app chosen with its icon, and the arrow that opens the choices under it.
     private var appRow: some View {
@@ -150,8 +150,7 @@ struct ShortcutEditor: View {
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    choice("", name: String(localized: "None"))
-                    ForEach(apps, id: \.id) { choice($0.id, name: $0.name) }
+                    ForEach(choices, id: \.id) { choice($0.id, name: $0.name) }
                 }
             }
             .frame(height: 220)

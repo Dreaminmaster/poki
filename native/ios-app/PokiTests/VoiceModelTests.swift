@@ -541,4 +541,46 @@ extension VoiceModelTests {
         h.voice.dismissProblem()
         XCTAssertNil(h.voice.talkState)
     }
+    /// A talk speaks Poki's chosen language, whatever the iPhone's: the state on the talk bar, the
+    /// reason under it, the step lines and the note when the connection drops. A step line already
+    /// listed keeps its words when the language changes.
+    func testATalksWordsFollowTheLanguageChosenInPoki() async {
+        let saved = AppLocalization.shared.preference
+        defer { AppLocalization.shared.preference = saved }
+        let expected: [(language: String, connecting: String, step: String, interrupted: String, reason: String, lost: String)] = [
+            ("en", "Connecting", "Using the phone", "Interrupted", "Check the network, then try again.",
+             "Connection lost. Nothing is sent again. Talk again to hear how running steps ended."),
+            ("zh-Hans", "正在连接", "正在操作手机", "已打断", "请检查网络后重试。",
+             "连接中断。已发出的内容不会重发，重新对话可以了解步骤的结果。"),
+            ("zh-Hant", "正在連線", "正在操作手機", "已打斷", "請檢查網路後再試。",
+             "連線中斷。已送出的內容不會重送，重新對話可以了解步驟的結果。"),
+        ]
+        for words in expected {
+            AppLocalization.shared.preference = words.language
+            let h = Harness(phoneTool: { _, _ in ("done", false) })
+            var said: [VoiceLine] = []
+            h.voice.onConversationEnded = { lines, _ in said = lines }
+            await h.connect()
+            XCTAssertEqual(h.voice.talkState?.word, words.connecting, words.language)
+
+            h.link.play(["type": "session.created"],
+                        ["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
+                        ["type": "response.created", "response": ["id": "r1"]],
+                        ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]],
+                        ["type": "response.done", "response": ["id": "r1"]])
+            await h.time.settle()
+            AppLocalization.shared.preference = words.language == "en" ? "zh-Hans" : "en"
+            XCTAssertEqual(h.voice.lines.last { $0.role == .tool }?.text, words.step, words.language)
+            AppLocalization.shared.preference = words.language
+
+            h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
+                        ["type": "input_audio_buffer.speech_started"], ["type": "output_audio_buffer.cleared"])
+            XCTAssertEqual(h.voice.talkState?.word, words.interrupted, words.language)
+
+            h.link.onClosed?("gone")
+            XCTAssertEqual(h.voice.talkState?.reason, words.reason, words.language)
+            XCTAssertEqual(said.last?.text, words.lost, words.language)
+            h.voice.dismissProblem()
+        }
+    }
 }
