@@ -10,6 +10,13 @@ import { fixture, value } from './fixture.mjs';
 
 const exec = promisify(execFile);
 const release = { tag_name: 'v0.2.0', body: 'Updates are now available. More details follow.', html_url: 'https://github.com/JosssphZhou/poki/releases/tag/v0.2.0', draft: false, prerelease: false };
+// GitHub's Latest can be an app release; Poki MCP's own releases are the vX.Y.Z tags.
+const api = 'https://api.github.com/repos/JosssphZhou/poki';
+const github = {
+  [`${api}/releases/latest`]: { tag_name: 'app-0.4.0-beta.1', body: 'Poki app Beta.', draft: false, prerelease: false },
+  [`${api}/git/matching-refs/tags/v`]: ['v0.1.0', 'v0.2.0', 'v0.2.1-rc.1'].map(tag => ({ ref: `refs/tags/${tag}` })),
+  [`${api}/releases/tags/v0.2.0`]: release,
+};
 async function cli(dir, args, env = {}) {
   try { return { code: 0, ...await exec(join(dir, 'bin/poki'), args, { cwd: dir, env: { ...process.env, POKI_MCP_STATE_DIR: join(dir, 'state'), ...env } }) }; }
   catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
@@ -30,7 +37,7 @@ test('MCP and CLI expose releases, honor opt-out and stay quiet offline', async 
       await mkdir(join(dir, 'state'));
       if (scenario === 'cached') await writeFile(join(dir, 'state/update-check.json'), JSON.stringify({ checkedAt: Date.now(), release }));
       const daemon = join(dir, 'src/daemon.mjs');
-      await writeFile(daemon, `${scenario === 'default' ? '' : `process.env.POKI_NO_UPDATE_CHECK = '${scenario === 'disabled' ? '1' : ''}';\n`}const originalFetch = globalThis.fetch;\nglobalThis.fetch = async (url, options) => {\n if (String(url) !== 'https://api.github.com/repos/JosssphZhou/poki/releases/latest') return originalFetch(url, options);\n await (await import('node:fs/promises')).appendFile(${JSON.stringify(join(dir, 'release-requests'))}, 'request\\n');\n if (options.headers.Authorization || options.headers.authorization) throw Error('Release request must be anonymous');\n ${['offline', 'cached', 'disabled'].includes(scenario) ? "throw Error('Synthetic offline network');" : `return new Response(JSON.stringify(${JSON.stringify(release)}), { status: 200 });`}\n};\n` + await readFile(daemon, 'utf8'));
+      await writeFile(daemon, `${scenario === 'default' ? '' : `process.env.POKI_NO_UPDATE_CHECK = '${scenario === 'disabled' ? '1' : ''}';\n`}const originalFetch = globalThis.fetch;\nglobalThis.fetch = async (url, options) => {\n const answers = ${JSON.stringify(github)};\n if (!(String(url) in answers)) return originalFetch(url, options);\n await (await import('node:fs/promises')).appendFile(${JSON.stringify(join(dir, 'release-requests'))}, 'request\\n');\n if (options.headers.Authorization || options.headers.authorization) throw Error('Release request must be anonymous');\n ${['offline', 'cached', 'disabled'].includes(scenario) ? "throw Error('Synthetic offline network');" : 'return new Response(JSON.stringify(answers[String(url)]), { status: 200 });'}\n};\n` + await readFile(daemon, 'utf8'));
       await copyCLI(dir);
     } });
     const result = value(await f.call('poki_mcp_status'));
