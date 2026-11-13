@@ -72,6 +72,44 @@ Every publish creates a draft first, checks its file count, then publishes. Rele
 `Poki-external-<name>.ipa`, `Poki-signing.zip`, `poki-relay-worker.js` (the relay Worker Poki Setup
 deploys) and `SHA256SUMS`, plus Poki Setup's `PokiSetup-*` installers and `SHA256SUMS-desktop.txt`.
 
+## Installed clients
+
+A Poki or Poki Setup that is already installed picks its update with the code it shipped with, so a
+release has to suit that code as published. Two of its rules decide the layout. Both are in every
+Poki published so far and in Poki Setup 0.2.2 (661).
+
+- **The file name is the build.** The picker reads the version and build from the IPA's name
+  (`installable` in `desktop/core/src/release.rs`). Poki on the iPhone installs an update only once
+  the copy it signed reports that same version and build (`updateNotReady` in
+  `native/ios-app/Poki/Signing/SelfSigner.swift`). A Beta's `Poki-external-0.4.0-beta.1.ipa` is
+  offered as build `beta.1`, the signed copy reports its number, and Install never starts. Poki
+  Setup's Renew has no such check and installs the file.
+- **One `Poki-signing.zip` per tag.** `fetch` keeps downloads in a folder named after the release
+  tag and uses a `Poki-signing.zip` that is already there. On a rolling tag, a new build is signed
+  with the entitlements cached from an earlier one. This is harmless while the entitlements do not
+  change; `publish-compat.sh` prints a digest to compare.
+
+Until people have a Poki without these rules, a Beta gets two more releases, made by hand from the
+same Pre-alpha files:
+
+| Release | Tag | Made | Picked by |
+| --- | --- | --- | --- |
+| The Alpha, on its own | `app-X.Y.Z-alpha.N`, the tag Promote to Alpha made | after Promote to Alpha | Alpha users, in place of the rolling release (same build, published later) |
+| The Beta, under its build number | `ios-beta-X.Y.Z-N` | public just before the Beta is approved | Stable and Beta users, in place of `app-X.Y.Z-beta.K` (a build number sorts above `beta.K`) |
+
+Both carry `Poki-external-X.Y.Z-N.ipa`, `Poki-signing.zip`, `poki-relay-worker.js` and `SHA256SUMS`.
+`scripts/release/publish-compat.sh` checks the files and makes the draft; publishing it is the
+owner's call, like any release upload. Releases of a later version sort above both. A Stable's
+`Poki-external-X.Y.Z.ipa` is offered with an empty build and will need the same second release; the
+script does not make that one yet.
+
+Before publishing, `node scripts/release/first-hop-check.mjs <plan> --build N` prints what Poki 0.3.1
+and Poki Setup 0.2.2 (661) pick on each channel after every step of a plan in
+`scripts/release/plans/`, and fails when a channel ends on another build or on an update it cannot
+install. `--live` reads today's releases from GitHub in place of the saved copy.
+`scripts/release/oracle.sh` runs the picker cut from the `app-0.3.1-alpha.752` source over the same
+releases and fails when the script's port of it answers differently.
+
 ## Branches
 
 - `main`: protected trunk; PRs only. Every merge is a pre-alpha.
