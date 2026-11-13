@@ -42,6 +42,8 @@ struct ChatView: View {
     @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
     /// The message field has the keyboard.
     @State private var writing = false
+    /// Taps on New Conversation on the home page, for the message field (`ComposerInputView.restarts`).
+    @State private var restarts = 0
     /// The page's height, for how far your first words rise.
     @State private var pageHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -136,14 +138,14 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: chat.newConversation, openDetails: tapPoki)
+                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: tapPoki)
             }
         }
         .bottomBar {
             if !bare { VStack(spacing: 8) {
                 asks
                 BrowserPanel()
-                ComposerInputView(input: $draft, focused: $writing, running: busy, progress: progress,
+                ComposerInputView(input: $draft, focused: $writing, running: busy, progress: progress, restarts: restarts,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice)
             }
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
@@ -1163,6 +1165,10 @@ struct ComposerInputView: View {
     var running: Bool
     /// How far the running task is, 0 to 1, for the ring around Stop; nil when unknown.
     var progress: Double? = nil
+    /// Goes up with each tap on New Conversation on the home page: a message under way (words or
+    /// pictures) is cleared and the keyboard goes down, as the page first was; an empty field takes
+    /// the keyboard.
+    var restarts = 0
     var send: (String, [ChatAttachment]) -> Void
     var stop: () -> Void
     /// Starts the live voice conversation.
@@ -1261,6 +1267,15 @@ struct ComposerInputView: View {
                 if let image { add { try AttachmentReader.photo(image) } }
             }
             .ignoresSafeArea()
+        }
+        .onChange(of: restarts) {
+            if !input.isEmpty || !attachments.isEmpty {
+                input = ""
+                withAnimation(.snappy) { attachments = [] }
+                focused = false
+            } else {
+                focused = true
+            }
         }
         #if DEBUG && targetEnvironment(simulator)
         .onAppear { if let item = TestAttachment.take() { attachments.append(item) } }
