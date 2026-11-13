@@ -4,6 +4,28 @@ import XCTest
 /// The runner misbehaving in the ways a phone does, and text entry. Every call must answer in time
 /// and say what was sent and what is on screen.
 final class FaultTests: XCTestCase {
+    func testAnUnreadableScreenDoesNotReportThePreviousApp() async {
+        let (core, wda, _) = makeCore()
+        wda.source([("Button", "New note")], app: "Notes")
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobilenotes", "name": "Notes"]]) }
+        let events = LockedBox<[CoreEvent]>([])
+        let observer = Task { for await event in core.events { events.update { $0.append(event) } } }
+        defer { observer.cancel() }
+        _ = await core.call("look", [:])
+        let first = await eventually { events.value.contains { if case .toolFinished(_, _, let facts) = $0 { return facts.app == "Notes" }; return false } }
+        XCTAssertTrue(first, "The first task read Notes")
+        events.value = []
+        for route in ["GET /source", "GET /screenshot", "GET /wda/activeAppInfo"] {
+            wda.set(route) { _ in (500, ["value": ["error": "unknown error", "message": "read failed"]]) }
+        }
+        let answer = await core.call("look", [:])
+        XCTAssertTrue(answer.isError, answer.text)
+        let finished = await eventually { events.value.contains { if case .toolFinished = $0 { return true }; return false } }
+        XCTAssertTrue(finished)
+        guard case .toolFinished(_, _, let facts)? = events.value.last else { return XCTFail("Missing completion event") }
+        XCTAssertNil(facts.app, "A failed read must not attribute the new task to Notes")
+    }
+
     /// A focused field that keeps what /wda/keys and the paste menu put in it.
     final class Field: @unchecked Sendable {
         let value = LockedBox("")

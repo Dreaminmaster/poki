@@ -32,7 +32,7 @@ final class MessageMarkdownTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: {}, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(app).environment(chat)
             .accessibilityElement(children: .contain).accessibilityIdentifier("markdown.conversation"))
         window.makeKeyAndVisible()
