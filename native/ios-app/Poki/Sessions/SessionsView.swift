@@ -43,6 +43,9 @@ struct SessionsView: View {
         .listStyle(.plain)
         .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden)
+        // No scroll bar: the drawer's list lies under the chat, and a drag that slid the drawer and
+        // scrolled the list left its bar showing on the chat.
+        .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.immediately)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { controls }

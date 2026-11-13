@@ -7,7 +7,10 @@ import WidgetKit
 
 @main
 struct PokiWidgetsBundle: WidgetBundle {
-    var body: some Widget { PokiLiveActivity() }
+    var body: some Widget {
+        PokiLiveActivity()
+        TalkToPokiControl()
+    }
 }
 
 /// Poki's Live Activity: what the agent is doing on the phone, or what it needs from you. The pairing

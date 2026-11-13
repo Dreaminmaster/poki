@@ -2,19 +2,19 @@ import PokiCore
 import SwiftUI
 
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
-// conversations and from the status card on Poki's picture. It replaced ESP-174's details screen and its
-// "More Settings" layer. It now has the hierarchy of the redesign proposed in pull request 250,
-// drawn with Poki's own rows: the card, then one row each for Connection, Models, Agents, Memory and
-// Appearance, Language, and every other setting on a page under one of them (signing, approvals and the advanced
-// pages under Connection, voice under Models). The rows and the card are PokiSettingsKit's.
+// conversations. It replaced the earlier details screen and its "More Settings" layer. Every part of Poki a
+// person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute,
+// Approvals, Agents, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance), and
+// what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
+// approval method is changed on Poki's card in the chat only. The rows are PokiSettingsKit's.
 
-/// Settings: Poki's card with what it is doing and Pause, Voice and Activity; any problem that keeps it
-/// from working; then the main settings, each a row into its own page.
+/// Settings: Poki on top, as a group of rows like the groups under it (the owner, 2026-11-13: not a
+/// card of its own): the bear and its name, where Poki stands, and the Activity Log. Then any problem
+/// that keeps Poki from working, and the parts of Poki in three groups of rows.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @Environment(\.dismiss) private var dismiss
-    var openVoice: () -> Void
     var openSetup: () -> Void
     /// Opens a run in the chat (from the Activity Log).
     var openSession: (String) -> Void = { _ in }
@@ -23,18 +23,24 @@ struct PokiDetailsView: View {
     @State private var modelVersion = 0
 
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiDetailsSample") }
+    private static let lastRow = "details.lastRow"
 
     var body: some View {
         let power = isSample ? PowerTile.pause : PowerTile.card(model: model)
         let status = isSample ? PokiStatus(.ready) : PokiStatusCopy.card(PokiStatus.current(model: model, chat: chat), power: power)
         NavigationStack(path: $path) {
+            ScrollViewReader { scroll in
             List {
                 Section {
-                    PokiSettingsCard(status: status, power: power,
-                                     act: { $0.act(model: model, chat: chat) },
-                                     openConnection: { path.append(DetailsRoute.connection) },
-                                     openVoice: { dismiss(); openVoice() },
-                                     openActivity: { path.append(DetailsRoute.history) })
+                    // The first two rows only show: Connection's Automation switch turns Poki on and pauses it.
+                    PokiNameRow(mood: status.mood)
+                    SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: PokiStatusCopy.word(status), dot: status.mood.dot)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("details.status")
+                    NavigationLink(value: DetailsRoute.history) {
+                        SettingsRow(title: "Activity Log", symbol: "clock")
+                    }
+                    .accessibilityIdentifier("details.activity")
                 }
 
                 if !isSample {
@@ -49,10 +55,10 @@ struct PokiDetailsView: View {
                     }
                 }
 
-                // One row for each part of Poki; every other setting is a page under one of them.
+                // What Poki works with.
                 Section {
                     NavigationLink(value: DetailsRoute.connection) {
-                        SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue, warns: !setupDone || updateWaits)
+                        SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue, warns: !setupDone)
                     }
                     .accessibilityIdentifier("details.hands")
                     NavigationLink(value: DetailsRoute.model) {
@@ -60,6 +66,21 @@ struct PokiDetailsView: View {
                             .id(modelVersion)
                     }
                     .accessibilityIdentifier("details.accountsAndModels")
+                    // Named for what is on it: the dictation button and Poki's voice. Live voice starts in the chat.
+                    NavigationLink(value: DetailsRoute.voice) {
+                        SettingsRow(title: "Dictation & Mute", symbol: "mic")
+                    }
+                    .accessibilityIdentifier("details.voice")
+                    // What always asks, what each method does and the sensitivity. The method in use shows
+                    // here; it is changed on Poki's card in the chat.
+                    NavigationLink(value: DetailsRoute.approvals) {
+                        SettingsRow(title: "Approvals", symbol: "checkmark.shield", value: model.approvalMode.title)
+                    }
+                    .accessibilityIdentifier("moreSettings.approvals")
+                }
+
+                // Who else uses it, and what it keeps.
+                Section {
                     NavigationLink(value: DetailsRoute.agents) {
                         SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right", value: agentsValue)
                     }
@@ -68,6 +89,26 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
+                    NavigationLink(value: DetailsRoute.conversations) {
+                        SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
+                    }
+                    .accessibilityIdentifier("details.searchConversations")
+                }
+
+                // The app itself.
+                Section {
+                    NavigationLink(value: DetailsRoute.updates) {
+                        SettingsRow(title: "Signing & Updates", symbol: "signature", value: updatesValue, warns: updateWaits)
+                    }
+                    .accessibilityIdentifier("moreSettings.updates")
+                    Button {
+                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        SettingsRow(title: "Notifications", symbol: "bell.badge", accessory: .leaves)
+                    }
+                    .accessibilityIdentifier("moreSettings.notifications")
                     NavigationLink(value: DetailsRoute.appearance) {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: AppLocalization.text(appearance.title))
                     }
@@ -76,6 +117,11 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Language", symbol: "globe", value: LanguageSettingsView.selectionTitle)
                     }
                     .accessibilityIdentifier("details.language")
+                    NavigationLink(value: DetailsRoute.advanced) {
+                        SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
+                    }
+                    .accessibilityIdentifier("details.health")
+                    .id(Self.lastRow)
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         .monospacedDigit()
@@ -83,10 +129,15 @@ struct PokiDetailsView: View {
                         .padding(.top, 12)
                 }
             }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(16)
-            .contentMargins(.top, 4, for: .scrollContent)
             .settingsPage()
+            // `-pokiSettingsEnd YES` opens the page at its end, for the build's screenshot of the rows
+            // below the first screen.
+            .task {
+                guard UserDefaults.standard.bool(forKey: "pokiSettingsEnd") else { return }
+                try? await Task.sleep(for: .seconds(0.6))
+                scroll.scrollTo(Self.lastRow, anchor: .center)
+            }
+            }
             .navigationTitle(AppLocalization.text("Settings"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -100,6 +151,8 @@ struct PokiDetailsView: View {
                 Group { switch route {
                 case .model:
                     ModelSettingsView()
+                case .voiceKey:
+                    ModelSettingsView(opensVoiceKey: true)
                 case .history:
                     ActionLogView(openSession: { id in dismiss(); openSession(id) })
                 case .conversations:
@@ -109,7 +162,7 @@ struct PokiDetailsView: View {
                 case .connection:
                     ConnectionView()
                 case .advanced:
-                    ConnectionAdvancedView()
+                    AdvancedSettingsView()
                 case .agents:
                     AgentsAndRelayView(path: $path)
                 case .updates:
@@ -141,15 +194,13 @@ struct PokiDetailsView: View {
     }
 
     private var setupDone: Bool { isSample || model.setupComplete }
-    private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
-    /// Setup first, then a waiting update (both under Connection), then whether Poki is on.
+    /// Setup first, then whether Poki is on.
     private var connectionValue: String {
         if isSample { return AppLocalization.text(LocalizedStringResource("On")) }
         if !model.setupComplete {
             let steps = SetupStep.shown
             return AppLocalization.text(LocalizedStringResource("\(steps.filter(model.isDone).count) of \(steps.count)"))
         }
-        if updateWaits { return AppLocalization.text(LocalizedStringResource("Update Available")) }
         if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Off")) }
         return model.ownerPaused ? AppLocalization.text(LocalizedStringResource("Paused")) : AppLocalization.text(LocalizedStringResource("On"))
     }
@@ -162,15 +213,28 @@ struct PokiDetailsView: View {
         return count == 0 ? AppLocalization.text(LocalizedStringResource("None yet")) : AppLocalization.text(LocalizedStringResource("\(count) Connected"))
     }
 
+    private var archivedValue: String? {
+        let count = SessionStore.shared.archivedSessions.count
+        return count == 0 ? nil : "\(count)"
+    }
+
+    private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
+    /// The version is the page's last line, so the row only speaks up when an update waits.
+    private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
+
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance, language
+    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance
+    /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
+    /// where Talk with Poki without a key leads.
+    case voiceKey
+    case language
 }
 
-/// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring
+/// Settings > Archived Conversations: the archived conversations, each one line as in the drawer, to open, bring
 /// back or delete; and a search through every conversation, archived or not.
 private struct ConversationsSettingsView: View {
     var openSession: (String) -> Void
@@ -235,75 +299,37 @@ private struct ConversationsSettingsView: View {
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Conversations"))
+        .navigationTitle(AppLocalization.text("Archived Conversations"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search"))
     }
 }
 
-// MARK: The card
-
-/// Poki on the settings home (ESP-469 board "01 设置首页"): the bear's face, the name and where Poki
-/// stands, which opens Connection, then Pause (or Resume, or Turn On), Voice and Activity, what you
-/// reach for most.
-private struct PokiSettingsCard: View {
-    var status: PokiStatus
-    var power: PowerTile
-    var act: (PowerTile) -> Void
-    var openConnection: () -> Void
-    var openVoice: () -> Void
-    var openActivity: () -> Void
-    @ScaledMetric(relativeTo: .title2) private var face = 64.0
+/// The first row of Settings: the bear's face where the rows under it have their icon, and Poki's name.
+private struct PokiNameRow: View {
+    var mood: PokiMood
+    @ScaledMetric(relativeTo: .body) private var face = 34.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Button(action: openConnection) { header }
-                .buttonStyle(PressedDimStyle())
-                .accessibilityIdentifier("details.status")
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { pills }
-                VStack(spacing: 8) { pills }
-            }
-        }
-        .padding(.vertical, 10)
-        .animation(.easeInOut(duration: 0.3), value: status.mood)
-    }
-
-    private var header: some View {
         HStack(spacing: 14) {
             Group {
-                if let image = PokiMood.cutout(status.mood, small: true) {
+                if let image = PokiMood.cutout(mood, small: true) {
                     Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
                 }
             }
             .frame(width: face, height: face)
-            .background(status.mood == .paused ? Tint.night : Tint.portrait, in: .circle)
+            .background(mood == .paused ? Tint.night : Tint.portrait, in: .circle)
             .clipShape(.circle)
             .overlay(Circle().strokeBorder(Tint.ring, lineWidth: 1))
+            // As the rows' icons: the face does not make the row taller.
+            .padding(.vertical, -4)
             .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "Poki").font(Prominent.font(.title2, .bold)).foregroundStyle(Color(.label))
-                    .accessibilityAddTraits(.isHeader)
-                HStack(spacing: 6) {
-                    Circle().fill(status.mood.dot).frame(width: 7, height: 7)
-                    Text(verbatim: PokiStatusCopy.word(status)).lineLimit(1)
-                }
-                .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                .accessibilityElement(children: .combine)
-            }
+            Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
-                .accessibilityHidden(true)
         }
-        .contentShape(.rect)
-    }
-
-    @ViewBuilder private var pills: some View {
-        SettingsPill(title: power.title, symbol: power.symbol, prominent: true) { act(power) }
-            .accessibilityIdentifier("details.\(power.name)")
-        SettingsPill(title: "Voice", symbol: "waveform", action: openVoice)
-        SettingsPill(title: "Activity", symbol: "clock", action: openActivity)
-            .accessibilityIdentifier("details.activity")
+        .padding(.vertical, 6)
+        .animation(.easeInOut(duration: 0.3), value: mood)
     }
 }
 
@@ -318,22 +344,20 @@ struct PressedDimStyle: ButtonStyle {
 
 // MARK: Connection
 
-/// Connection: whether Poki may act on this iPhone, each thing the phone needs for it (the setup items,
-/// each opening its own page), what Poki asks about first, signing and updates, the advanced pages, and
-/// turning Poki off altogether.
+/// Connection: whether Poki may act on this iPhone and each thing the phone needs for it (the setup
+/// items, each opening its own page), with the guide that walks through them and the first run.
 struct ConnectionView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @State private var guiding = false
 
     private var on: Bool { model.sessionOn && !model.ownerPaused }
-    private var updateWaits: Bool { model.signer.updateNotReady || model.signer.next?.kind == "update" }
 
     var body: some View {
         List {
             Section {
                 Toggle(isOn: Binding(get: { on }, set: set)) {
-                    SettingsLabel("Automation", systemImage: "hand.tap")
+                    SettingsRow(title: "Automation", symbol: "hand.tap")
                 }
                 .accessibilityIdentifier("hands.on")
             } footer: {
@@ -345,64 +369,23 @@ struct ConnectionView: View {
 
             Section {
                 ForEach(SetupStep.shown) { step in
+                    let done = model.isDone(step)
                     NavigationLink(value: step) {
-                        LabeledContent {
-                            if model.isDone(step) {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(ChatColor.green)
-                                    .accessibilityLabel(Text("Done"))
-                            } else {
-                                Text("Turn On").foregroundStyle(Tint.amberInk)
-                            }
-                        } label: {
-                            SettingsLabel(step.rowTitle, systemImage: step.symbol)
-                        }
+                        SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : AppLocalization.text(LocalizedStringResource("Turn On")),
+                                    warns: !done, accessory: done ? .done : nil)
                     }
                 }
-                Button(model.setupComplete ? "Set Up Again" : "Continue Setup") { guiding = true }
-                    .foregroundStyle(Tint.blueText)
-                    .accessibilityIdentifier("moreSettings.setup")
-                FirstRunAgain()
+                Button { guiding = true } label: {
+                    SettingsRow(title: model.setupComplete ? "Set Up Again" : "Continue Setup", symbol: "checklist")
+                }
+                .accessibilityIdentifier("moreSettings.setup")
+                FirstRunAgain(row: true)
             } header: {
-                Text("This iPhone")
+                SettingsHeader("This iPhone")
             } footer: {
                 Text("Poki uses Apple’s developer tools on this iPhone. Keep all of these on.")
             }
-
-            Section {
-                NavigationLink(value: DetailsRoute.approvals) {
-                    LabeledContent(content: { Text(model.approvalMode.title) }, label: { SettingsLabel("Approvals", systemImage: "checkmark.shield") })
-                }
-                .accessibilityIdentifier("moreSettings.approvals")
-                NavigationLink(value: DetailsRoute.updates) {
-                    LabeledContent {
-                        if updateWaits {
-                            Text("Update Available").foregroundStyle(Tint.amberInk)
-                        } else {
-                            Text(verbatim: "\(model.signer.installedVersion) (\(model.signer.installedBuild))")
-                        }
-                    } label: {
-                        SettingsLabel("Signing & Updates", systemImage: "signature")
-                    }
-                }
-                .accessibilityIdentifier("moreSettings.updates")
-                NavigationLink(value: DetailsRoute.advanced) {
-                    SettingsLabel("Advanced", systemImage: "slider.horizontal.3")
-                }
-                .accessibilityIdentifier("details.health")
-            }
-
-            // The off side of main's Poki switch: resting only stands by, this ends the session and the relay.
-            if model.sessionOn {
-                Section {
-                    Button("Turn Off Poki", role: .destructive) { chat.stop(); model.stopSession() }
-                        .accessibilityIdentifier("details.turnOff")
-                } footer: {
-                    Text("Ends the session and disconnects agents until you turn Poki on again.")
-                }
-            }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Connection"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume() }
@@ -425,19 +408,22 @@ struct ConnectionView: View {
 
 // MARK: Advanced
 
-/// Connection › Advanced: how the automation banner or the runner behaves, notifications, and the tools
-/// under the hood (diagnostics, the log, testing options).
-struct ConnectionAdvancedView: View {
+/// Advanced, the one page of it: what only a few need, by the page it came from. Connection's automation
+/// banner or runner, Voice's bridge on a Mac, Memory's run log for the maintainers, and the tools under
+/// the hood (diagnostics, the log, testing options).
+struct AdvancedSettingsView: View {
     @Environment(AppModel.self) private var model
+    @State private var runLog: URL?
 
     var body: some View {
         @Bindable var model = model
+        let voice = model.voice
         List {
             if model.automationPath == .inProcess {
                 Section {
-                    Toggle(isOn: $model.closeSessionWhenIdle) { SettingsLabel("Hide Banner When Idle", systemImage: "rectangle.on.rectangle.slash") }
+                    Toggle(isOn: $model.closeSessionWhenIdle) { SettingsRow(title: "Hide Banner When Idle", symbol: "rectangle.on.rectangle.slash") }
                 } header: {
-                    Text("Automation Banner")
+                    SettingsHeader("Connection")
                 } footer: {
                     Text("Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again.")
                 }
@@ -455,51 +441,57 @@ struct ConnectionAdvancedView: View {
                         Button("Stop Runner", role: .destructive) { model.pauseRunner() }.disabled(!model.approvals.isEmpty)
                     }
                 } header: {
-                    Text("Runner")
+                    SettingsHeader("Connection")
                 } footer: {
                     Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
                 }
             }
 
-            Section {
-                Button {
-                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    LabeledContent {
-                        Image(systemName: "arrow.up.forward").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
-                    } label: {
-                        SettingsLabel("Notifications", systemImage: "bell.badge")
-                    }
+            // Shown as Voice's own Advanced was: with a bridge set, an answer timed, or no OpenAI key.
+            if voice.lastTurnMS != nil || voice.bridge != nil || VoiceDirect.apiKey == nil {
+                Section {
+                    VoiceAdvancedRows()
+                } header: {
+                    SettingsHeader("Voice")
                 }
-                .foregroundStyle(Color(.label))
-                .accessibilityIdentifier("moreSettings.notifications")
+            }
+
+            Section {
+                if let runLog {
+                    ShareLink(item: runLog) { SettingsRow(title: "Share Run Log for Maintainers", symbol: "square.and.arrow.up") }
+                }
+            } header: {
+                SettingsHeader("Memory")
+            } footer: {
+                Text("The run log lists each routine run, where it stopped and how long it took, with no typed text. It helps the Poki maintainers make routines more reliable.")
             }
 
             Section {
                 NavigationLink(value: SettingsRoute.diagnostics) {
-                    SettingsLabel("Diagnostics", systemImage: "stethoscope")
+                    SettingsRow(title: "Diagnostics", symbol: "stethoscope")
                 }
                 .accessibilityIdentifier("moreSettings.diagnostics")
 
                 NavigationLink(value: SettingsRoute.log) {
-                    SettingsLabel("Log", systemImage: "doc.text")
+                    SettingsRow(title: "Log", symbol: "doc.text")
                 }
                 .accessibilityIdentifier("moreSettings.log")
 
                 NavigationLink { TestingOptionsView().settingsPage() } label: {
-                    SettingsLabel("Testing Options", systemImage: "testtube.2")
+                    SettingsRow(title: "Testing Options", symbol: "testtube.2")
                 }
                 .accessibilityIdentifier("moreSettings.testingOptions")
             } header: {
-                Text("Debugging")
+                SettingsHeader("Debugging")
             }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Advanced"))
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // The run log is written to tmp for the share sheet, as Memory did it.
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("poki-agent-debug.json")
+            if (try? RoutineStore.shared.debugBundle().write(to: file, options: .atomic)) != nil { runLog = file }
+        }
     }
 }
 
@@ -669,8 +661,6 @@ struct ApprovalsSettingsView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Approvals"))
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -698,7 +688,7 @@ struct AgentsAndRelayView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("MCP Relay")
                             Text(relayLine)
-                                .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                                .font(.footnote.weight(.regular)).foregroundStyle(Color(.secondaryLabel))
                         }
                     } icon: {
                         Image(systemName: "antenna.radiowaves.left.and.right")
@@ -715,7 +705,7 @@ struct AgentsAndRelayView: View {
                     }
                 }
             } header: {
-                Text("MCP Relay")
+                SettingsHeader("MCP Relay")
             } footer: {
                 Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
             }
@@ -747,14 +737,13 @@ struct AgentsAndRelayView: View {
                 }
                 .disabled(model.relayAddress == nil)
             } header: {
-                Text("Agents")
+                SettingsHeader("Agents")
             } footer: {
                 Text(model.relayAddress == nil
                      ? "Set your relay first. Each agent gets its own MCP address on it."
                      : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
             }
         }
-        .listStyle(.insetGrouped)
         .navigationTitle(AppLocalization.text("Agents"))
         .navigationBarTitleDisplayMode(.inline)
     }

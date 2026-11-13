@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Parts of the home page and the chat that can be turned off one at a time, to measure
-/// on a phone what each costs to draw: `-pokiPerf pillsStill` or `-pokiPerf pillsStill,chatNoFade`.
+/// on a phone what each costs to draw: `-pokiPerf pillsStill` or `-pokiPerf pillsStill,pillsNoGlass`.
 /// Debug builds only. A release build reads no argument and has every switch off, so it always draws
 /// the app as designed.
 enum PerfSwitch: String, CaseIterable {
@@ -11,8 +11,6 @@ enum PerfSwitch: String, CaseIterable {
     case pillsStill
     /// The suggestion pills have no glass at all.
     case pillsNoGlass
-    /// The conversation does not fade out under the top bar.
-    case chatNoFade
     /// Every app icon is the placeholder tile, with no lookup.
     case iconsPlaceholder
 

@@ -352,7 +352,7 @@ on the phone; the next first `look` of a task in that app names the saved routin
   `poki.agent-backup/1`); `import {data}` merges one in (newer wins). The app keeps a copy at
   `Documents/AgentBackup/poki-agent-backup.json`, which Poki Setup copies off and puts back; a copy put
   back is merged in at launch. Maintainers get `debugBundle()` (schema `poki.agent-debug/1`, with the
-  run log) from Settings › Memory › Advanced.
+  run log) from Settings › Advanced.
 
 ### Deadlines (no hangs)
 

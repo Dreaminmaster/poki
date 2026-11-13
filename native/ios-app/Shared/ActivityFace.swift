@@ -149,6 +149,10 @@ struct ActivityFace: Hashable {
     var stale = false
     /// Who is calling: the outside agent whose badge sits beside the meta value.
     var caller: String?
+    /// A talk with Poki is on: the card and the island carry End, which ends the talk (EndTalkIntent).
+    var endsTalk = false
+    /// A talk with Poki is on: the expanded island draws the brand band along its lower edge.
+    var talkGlow = false
 }
 
 /// Where a tap on the Live Activity goes, handled by RootView's onOpenURL.
@@ -176,6 +180,10 @@ extension PokiActivityAttributes.Event {
 
 extension PokiState {
     var hasThumbnail: Bool { thumbnailVersion > 0 }
+
+    /// Nothing to say: no work, nobody needed, no talk with Poki. Where something else already says
+    /// Poki is on, the Live Activity steps aside then.
+    var isQuiet: Bool { phase == .idle && voice == nil }
 
     /// Where and how long a finished run took: "Done in Messages, took 1:24". Never a count of steps,
     /// which an agent changes as it goes.
@@ -235,6 +243,11 @@ extension PokiState {
     func face(stale: Bool) -> ActivityFace {
         var face = baseFace
         face.caller = caller
+        // During a talk the card and the island carry End, while Poki listens, speaks or works on a step
+        // of the talk. Anything that needs the person (an approval, a hand-off) or tells of a problem
+        // keeps them to itself.
+        face.endsTalk = voice != nil && (phase == .idle || phase == .working) && !stale
+        face.talkGlow = voice != nil && !stale
         // A fresh event ("Started", "Allowed") shows beside the app's name for a few seconds. An app
         // switch is the app's name itself, already there.
         if let event, !phase.holdsApproval, event.kind != .app {
@@ -361,13 +374,13 @@ extension PokiState {
         case .idle:
             if let voice {
                 let (line, hint, bear): (String, String, ActivityBear) = switch voice {
-                case .listening: (StatusWord.listening.text, String(activity: "Speak to Poki, or tap to open Voice."), .ready)
+                case .listening: (StatusWord.listening.text, String(activity: "Talk with Poki"), .ready)
                 case .thinking: (StatusWord.thinking.text, String(activity: "Working out the next step."), .thinking)
-                case .speaking: (StatusWord.speaking.text, String(activity: "Tap to return to Voice."), .ready)
+                case .speaking: (StatusWord.speaking.text, String(activity: "Talk with Poki"), .ready)
                 }
                 return ActivityFace(
                     symbol: "waveform",
-                    bear: bear, size: .low,
+                    bear: bear, size: .working,
                     meta: .none,
                     content: line,
                     subtitle: hint,

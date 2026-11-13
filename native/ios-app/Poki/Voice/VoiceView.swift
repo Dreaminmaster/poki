@@ -8,11 +8,8 @@ struct VoiceView: View {
     var close: (() -> Void)?
     /// Pushed in the Poki tab: no navigation stack or Done of its own.
     var embedded = false
-    @State private var bridgeText = ""
-    @State private var editingBridge = false
-    @State private var bridgeRejected = false
     @State private var micDenied = false
-    @AppStorage(FieldDictation.buttonKey) private var dictationButton = false
+    @AppStorage(FieldDictation.buttonKey) private var dictationButton = FieldDictation.buttonShown
 
     private var voice: VoiceModel { app.voice }
 
@@ -24,56 +21,33 @@ struct VoiceView: View {
         @Bindable var voice = voice
         return Form {
                 // Voice runs in the chat (the waveform button for a live conversation, the microphone
-                // for dictation). This page only says how it runs and keeps its options.
+                // beside it for dictation). This page only says how it runs and keeps its options.
                 Section {
-                    LabeledContent("Live Voice") {
+                    LabeledContent {
                         Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
                             .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
+                    } label: {
+                        SettingsLabel("Live Voice", systemImage: "waveform")
                     }
                     // Dictation runs on this iPhone with every model; its microphone sits beside Send.
-                    Toggle("Show Dictation Button in Message Field", isOn: $dictationButton)
+                    Toggle(isOn: $dictationButton) { SettingsLabel("Show Dictation Button in Message Field", systemImage: "mic") }
                         .accessibilityIdentifier("voice.dictationButton")
-                    Toggle("Mute Poki’s Voice", isOn: $voice.muted)
+                    Toggle(isOn: $voice.muted) { SettingsLabel("Mute Poki’s Voice", systemImage: "speaker.slash") }
                 } footer: {
                     if micDenied { Text("Poki can't use the microphone. Allow it in Settings, Privacy, Microphone.").foregroundStyle(.orange) }
                     else if voice.canTalkLive {
-                        Text("In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud. It ends by itself 8 seconds after an answer if nobody speaks, and when Poki goes to the background (once a running step is done). Tap End to stop sooner. The microphone in the message field only dictates.")
+                        Text("In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud, also while you are in another app. It ends by itself 8 seconds after an answer if nobody speaks. Tap End to stop sooner. The microphone in the message field only dictates.")
                     } else {
                         Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Settings › Models. Dictation in the message field works with every model.")
                     }
                 }
-                if voice.lastTurnMS != nil || voice.bridge != nil || VoiceDirect.apiKey == nil {
-                    DisclosureGroup("Advanced") {
-                        if let ms = voice.lastTurnMS { LabeledContent("Last Answer", value: "\(ms) ms") }
-                        bridgeRows
-                    }
-                }
+                ActionButtonSection()
             }
-            .navigationTitle(AppLocalization.text("Voice"))
+            .navigationTitle(AppLocalization.text("Dictation & Mute"))
             .navigationBarTitleDisplayMode(.inline)
     }
 
     @Environment(\.dismiss) private var dismiss
-
-    @ViewBuilder private var bridgeRows: some View {
-        if let bridge = voice.bridge, !editingBridge {
-            LabeledContent("Mac Voice Bridge") { Text(bridge.display).font(.footnote.monospaced()) }
-            Button("Change Address") { bridgeText = bridge.base.absoluteString; bridgeRejected = false; editingBridge = true }
-        } else {
-            TextField("Mac voice bridge address", text: $bridgeText)
-                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                .font(.body.monospaced())
-                .onSubmit(saveBridge)
-            Button("Save Address", action: saveBridge).disabled(bridgeText.trimmingCharacters(in: .whitespaces).isEmpty)
-            Text(bridgeRejected ? "That is not a voice bridge address. It looks like http://192.168.1.10:47830/voice/ followed by a long code." : "Optional, for live voice without an OpenAI key on this iPhone: run bin/voice-bridge.mjs on your Mac and enter the address it gives.")
-                .font(.footnote).foregroundStyle(bridgeRejected ? Color.orange : Color.secondary)
-        }
-    }
-
-    private func saveBridge() {
-        bridgeRejected = !voice.setBridge(bridgeText)
-        if !bridgeRejected { editingBridge = false }
-    }
 
     private var symbol: String {
         switch voice.phase {
@@ -93,6 +67,60 @@ struct VoiceView: View {
         case .tool: "hand.tap"
         case .note: "info.circle"
         }
+    }
+}
+
+/// Voice's rows on Settings › Advanced: how long the last answer took, and the voice bridge on a Mac
+/// (live voice without an OpenAI key on this iPhone). They were Voice's own Advanced.
+struct VoiceAdvancedRows: View {
+    @Environment(AppModel.self) private var app
+    @State private var bridgeText = ""
+    @State private var editingBridge = false
+    @State private var bridgeRejected = false
+    @State private var removingBridge = false
+
+    private var voice: VoiceModel { app.voice }
+
+    var body: some View {
+        if let ms = voice.lastTurnMS {
+            LabeledContent { Text(verbatim: "\(ms) ms") } label: { SettingsLabel("Last Answer", systemImage: "timer") }
+        }
+        if let bridge = voice.bridge, !editingBridge {
+            LabeledContent { Text(bridge.display).font(.footnote.monospaced()) } label: { SettingsLabel("Mac Voice Bridge", systemImage: "macbook") }
+            Button { bridgeText = bridge.base.absoluteString; bridgeRejected = false; editingBridge = true } label: {
+                SettingsRow(title: "Change Address", symbol: "pencil")
+            }
+            // The address carries the bridge's secret and is kept through a reinstall (SettingsVault):
+            // removing it here is the only way to take it off the iPhone.
+            Button(role: .destructive) { removingBridge = true } label: {
+                SettingsRow(title: "Remove Address", symbol: "trash")
+            }
+            .accessibilityIdentifier("voice.bridge.remove")
+            .confirmationDialog("Remove the Mac voice bridge address?", isPresented: $removingBridge, titleVisibility: .visible) {
+                Button("Remove Address", role: .destructive) {
+                    voice.removeBridge()
+                    bridgeText = ""
+                    // Now, not a second later: Poki closed in between would get the address back at its next launch.
+                    SettingsVault.save()
+                }
+            } message: {
+                Text("Talk with Poki then needs an OpenAI API key, or the address entered again.")
+            }
+        } else {
+            TextField("Mac voice bridge address", text: $bridgeText)
+                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .font(.body.monospaced())
+                .onSubmit(saveBridge)
+            Button(action: saveBridge) { SettingsRow(title: "Save Address", symbol: "checkmark") }
+                .disabled(bridgeText.trimmingCharacters(in: .whitespaces).isEmpty)
+            Text(bridgeRejected ? "That is not a voice bridge address. It looks like http://192.168.1.10:47830/voice/ followed by a long code." : "Optional, for live voice without an OpenAI key on this iPhone. Run bin/voice-bridge.mjs on your Mac and enter the address it gives.")
+                .font(.footnote).foregroundStyle(bridgeRejected ? Color.orange : Color.secondary)
+        }
+    }
+
+    private func saveBridge() {
+        bridgeRejected = !voice.setBridge(bridgeText)
+        if !bridgeRejected { editingBridge = false }
     }
 }
 

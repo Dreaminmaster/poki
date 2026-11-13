@@ -344,17 +344,23 @@ struct FirstRunGuide: View {
 
 /// Settings' way back into the first run: a blue text button that opens the pages over everything.
 /// It carries its own cover, so whichever settings page lists the setup items places it with one line.
-/// `wide` stretches it to the page width with a 44-point row, for pages that are not a List.
+/// `wide` stretches it to the page width with a 44-point row, for pages that are not a List; `row`
+/// draws it as a settings row, with the icon the rows beside it have.
 struct FirstRunAgain: View {
     var wide = false
+    var row = false
     @State private var welcoming = false
 
     var body: some View {
         Button { welcoming = true } label: {
-            Text("Show Welcome Pages Again")
-                .foregroundStyle(Tint.blueText)
-                .frame(maxWidth: wide ? .infinity : nil, minHeight: wide ? 44 : nil)
-                .contentShape(.rect)
+            if row {
+                SettingsRow(title: "Show Welcome Pages Again", symbol: "hand.wave").contentShape(.rect)
+            } else {
+                Text("Show Welcome Pages Again")
+                    .foregroundStyle(Tint.blueText)
+                    .frame(maxWidth: wide ? .infinity : nil, minHeight: wide ? 44 : nil)
+                    .contentShape(.rect)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("setup.firstRun")
