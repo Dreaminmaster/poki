@@ -105,6 +105,66 @@ final class MessageMarkdownTests: XCTestCase {
             .write(to: output.appendingPathComponent("stream.json"))
     }
 
+    private static let priceTable = """
+    | Phone | Storage | Price |
+    | --- | --- | --- |
+    | iPhone 17 | 128 GB | $799 |
+    | iPhone 17 Pro | 256 GB | $1,099 |
+    | iPhone Air | 512 GB | $999 |
+    """
+    private static let priceAnswer = "Prices on the Apple Store today:\n\n" + priceTable + "\n\nPrices include tax."
+    private static let priceRows = [["Phone", "Storage", "Price"], ["iPhone 17", "128 GB", "$799"],
+                                    ["iPhone 17 Pro", "256 GB", "$1,099"], ["iPhone Air", "512 GB", "$999"]]
+
+    func testATableInAnAnswerShowsAsRowsAndColumns() async throws {
+        for (name, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
+            window?.overrideUserInterfaceStyle = style
+            await show(Self.priceAnswer)
+            let source = try await screen()
+            try source.write(to: output.appendingPathComponent("price-table-\(name).xml"), atomically: true, encoding: .utf8)
+            try await capture("price-table-\(name)")
+            let labels = try Labels(source)
+            XCTAssertFalse(labels.text.contains { $0.contains("|") || $0.contains("·") }, "Table markers reached the conversation: \(labels.text)")
+            XCTAssertTrue(labels.rect("Prices on the Apple Store today:") != nil && labels.rect("Prices include tax.") != nil, "The words around the table must stay: \(labels.text)")
+            let frames = try Self.priceRows.map { row in try row.map { cell in try XCTUnwrap(labels.rect(cell), "\(cell) is not its own cell: \(labels.text)") } }
+            for row in frames {
+                XCTAssertTrue(Self.lineUp(row.map(\.midY)), "A row's cells must sit on one line: \(row)")
+                XCTAssertTrue(zip(row, row.dropFirst()).allSatisfy { $0.maxX < $1.minX }, "A row's cells must run left to right: \(row)")
+            }
+            XCTAssertTrue(zip(frames, frames.dropFirst()).allSatisfy { $0[0].maxY <= $1[0].minY }, "Rows must stack top to bottom")
+            XCTAssertTrue(Self.lineUp(frames.map { $0[0].minX }), "The first column must line up on its left edge")
+            XCTAssertTrue(Self.lineUp(frames.map { $0[2].maxX }), "The price column must line up on its right edge")
+        }
+    }
+
+    /// Equal to within the point the accessibility frames are rounded to.
+    private static func lineUp(_ values: [CGFloat]) -> Bool { (values.max() ?? 0) - (values.min() ?? 0) <= 1 }
+
+    func testAStreamingTableNeverShowsMarkersOrDropsFinishedCells() async throws {
+        let sample = Self.priceAnswer
+        var header: CGRect?
+        for length in 1...sample.count {
+            let prefix = String(sample.prefix(length))
+            await show(prefix)
+            let labels = try Labels(try await screen())
+            XCTAssertFalse(labels.text.contains { $0.contains("|") || $0.contains("·") || $0.contains("--") }, "Markers at prefix \(prefix.debugDescription): \(labels.text)")
+            // Each row's cells stay on screen from the moment its line ends.
+            for (i, row) in Self.priceRows.enumerated() {
+                let line = Self.priceTable.components(separatedBy: "\n")[i == 0 ? 0 : i + 1]
+                guard let end = sample.range(of: line).map({ sample.distance(from: sample.startIndex, to: $0.upperBound) }), length > end else { continue }
+                for cell in row { XCTAssertNotNil(labels.rect(cell), "\(cell) left the screen at prefix \(prefix.debugDescription): \(labels.text)") }
+            }
+            if let shown = labels.rect("Phone") {
+                if let header { XCTAssertEqual(shown.origin, header.origin, "The header moved at prefix \(prefix.debugDescription)") }
+                header = shown
+            }
+            if UserDefaults.standard.bool(forKey: "markdownEvidence"), [80, 120, 150].contains(length) {
+                try await capture("stream-table-\(length)")
+            }
+        }
+        XCTAssertNotNil(header, "The table's header never appeared")
+    }
+
     private func show(_ text: String) async {
         guard var session else { return }
         session.entries[1].kind = .poki(text)
@@ -152,13 +212,36 @@ final class MessageMarkdownTests: XCTestCase {
             try await screen().write(to: output.appendingPathComponent("\(name).xml"), atomically: true, encoding: .utf8)
             try await capture(name)
         }
+        let wide = """
+        | Phone | Price | Storage | Screen | Battery | Weight | Colors |
+        | :--- | ---: | ---: | :---: | --- | --- | --- |
+        | iPhone 17 | $799 | 256 GB | 6.3 in | 30 hours video | 177 g | Black, White, Mist Blue, Sage, Lavender |
+        | iPhone 17 Pro | $1,099 | 256 GB | 6.3 in | 33 hours video | 204 g | Silver, Cosmic Orange, Deep Blue |
+        | iPhone Air | $999 | 256 GB | 6.5 in | 27 hours video | 165 g | Space Black, Cloud White, Light Gold, Sky Blue |
+        """
+        for (name, style) in [("light", UIUserInterfaceStyle.light), ("dark", .dark)] {
+            window?.overrideUserInterfaceStyle = style
+            await show("Here is how they compare:\n\n" + wide)
+            try await capture("wide-table-\(name)")
+            if let table = try XCTUnwrap(window).allSubviews.compactMap({ $0 as? UIScrollView }).first(where: { $0.contentSize.width > $0.bounds.width + 1 }) {
+                table.setContentOffset(CGPoint(x: table.contentSize.width - table.bounds.width, y: 0), animated: false)
+                try await capture("wide-table-scrolled-\(name)")
+            }
+        }
+        window?.overrideUserInterfaceStyle = .light
+        window?.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        await show(Self.priceAnswer)
+        try await capture("price-table-largest-text")
+        window?.traitOverrides.remove(UITraitPreferredContentSizeCategory.self)
         let paragraph = "这是一段用于检查长回答显示和滚动的文字。每一项内容都应该清晰可读，阅读时可以随时返回上一段。"
         let long = String(repeating: paragraph, count: 43) + "\n\n- First item\n- Second item\n\n```swift\nlet answer = 42\nprint(answer)\n```"
+        let tables = (0..<4).map { "\n\n" + String(repeating: paragraph, count: 4) + "\n\n" + ($0.isMultiple(of: 2) ? Self.priceTable : wide) }.joined()
         var rows: [[String: Double]] = []
-        for run in 0..<6 {
+        for run in 0..<12 {
+            let withTables = run >= 6
             await show("Ready")
             let start = CACurrentMediaTime()
-            await show(long)
+            await show(withTables ? long + tables : long)
             let render = (CACurrentMediaTime() - start) * 1000
             let scroll = try XCTUnwrap(findScroll(in: try XCTUnwrap(window)))
             XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
@@ -169,7 +252,7 @@ final class MessageMarkdownTests: XCTestCase {
                 scroll.layoutIfNeeded()
                 CATransaction.flush()
             }
-            rows.append(["run": Double(run), "characters": Double(long.count), "render_ms": render,
+            rows.append(["run": Double(run), "tables": withTables ? 4 : 0, "characters": Double((withTables ? long + tables : long).count), "render_ms": render,
                          "scroll_120_steps_ms": (CACurrentMediaTime() - scrolling) * 1000,
                          "content_height": scroll.contentSize.height, "end_offset": scroll.contentOffset.y])
         }
@@ -183,9 +266,29 @@ final class MessageMarkdownTests: XCTestCase {
     }
 }
 
+private extension UIView {
+    var allSubviews: [UIView] { subviews + subviews.flatMap(\.allSubviews) }
+}
+
 private final class Labels: NSObject, XMLParserDelegate {
     var text: [String] = []
     var frames: [String: String] = [:]
+
+    override init() {}
+
+    convenience init(_ source: String) throws {
+        self.init()
+        let parser = XMLParser(data: Data(source.utf8))
+        parser.delegate = self
+        guard parser.parse() else { throw parser.parserError ?? NSError(domain: "MessageMarkdownTests", code: 2) }
+    }
+
+    /// Where the label that reads exactly `label` is on screen.
+    func rect(_ label: String) -> CGRect? {
+        guard text.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == label }), let frame = frames[label] else { return nil }
+        let n = frame.split(separator: ",").compactMap { Double($0) }
+        return n.count == 4 ? CGRect(x: n[0], y: n[1], width: n[2], height: n[3]) : nil
+    }
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String]) {
         guard elementName == "XCUIElementTypeStaticText", let label = attributes["label"] else { return }
         text.append(label)
