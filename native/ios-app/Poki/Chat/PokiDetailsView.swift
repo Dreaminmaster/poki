@@ -5,11 +5,11 @@ import SwiftUI
 // conversations and from the status card on Poki's picture. It replaced ESP-174's details screen and its
 // "More Settings" layer. It now has the hierarchy of the redesign proposed in pull request 250,
 // drawn with Poki's own rows: the card, then one row each for Connection, Models, Agents, Memory and
-// Appearance, and every other setting on a page under one of them (signing, approvals and the advanced
+// Appearance, Language, and every other setting on a page under one of them (signing, approvals and the advanced
 // pages under Connection, voice under Models). The rows and the card are PokiSettingsKit's.
 
 /// Settings: Poki's card with what it is doing and Pause, Voice and Activity; any problem that keeps it
-/// from working; then the five parts of Poki, each a row into its own page.
+/// from working; then the main settings, each a row into its own page.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -72,6 +72,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: AppLocalization.text(appearance.title))
                     }
                     .accessibilityIdentifier("details.appearance")
+                    NavigationLink(value: DetailsRoute.language) {
+                        SettingsRow(title: "Language", symbol: "globe", value: LanguageSettingsView.selectionTitle)
+                    }
+                    .accessibilityIdentifier("details.language")
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         .monospacedDigit()
@@ -116,6 +120,8 @@ struct PokiDetailsView: View {
                     ApprovalsSettingsView()
                 case .appearance:
                     AppearanceView()
+                case .language:
+                    LanguageSettingsView()
                 } }
                 .settingsPage()
             }
@@ -161,7 +167,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance
+    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance, language
 }
 
 /// Settings > Conversations: the archived conversations, each one line as in the drawer, to open, bring
@@ -528,21 +534,6 @@ struct AppearanceView: View {
     var body: some View {
         List {
             Section {
-                Picker(selection: Binding(
-                    get: { AppLocalization.shared.preference },
-                    set: { AppLocalization.shared.preference = $0 }
-                )) {
-                    Text("Follow System").tag(AppLocalization.system)
-                    ForEach(AppLocalization.languages, id: \.self) { language in
-                        Text(verbatim: Locale(identifier: language).localizedString(forIdentifier: language) ?? language)
-                            .tag(language)
-                    }
-                } label: {
-                    SettingsLabel("Language", systemImage: "globe")
-                }
-                .accessibilityIdentifier("general.language")
-            }
-            Section {
                 ForEach(Appearance.allCases) { option in
                     Button { choice = option.rawValue } label: {
                         HStack {
@@ -563,6 +554,43 @@ struct AppearanceView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle(AppLocalization.text("Appearance"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Settings › Language: the effective iOS app language or one of Poki’s bundled translations.
+private struct LanguageSettingsView: View {
+    @Bindable private var localization = AppLocalization.shared
+
+    static var selectionTitle: String { title(for: AppLocalization.shared.preference) }
+
+    private static func title(for language: String) -> String {
+        if language == AppLocalization.system { return AppLocalization.text("Follow System") }
+        return Locale(identifier: language).localizedString(forIdentifier: language) ?? language
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach([AppLocalization.system] + AppLocalization.languages, id: \.self) { language in
+                    let selected = localization.preference == language
+                    Button { localization.preference = language } label: {
+                        HStack {
+                            Text(verbatim: Self.title(for: language)).foregroundStyle(Color(.label))
+                            Spacer()
+                            if selected {
+                                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                            }
+                        }
+                        .contentShape(.rect)
+                    }
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("language.\(language)")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(AppLocalization.text("Language"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }

@@ -58,6 +58,15 @@ final class LanguageTests: XCTestCase {
         }
     }
 
+    func testKnownAppNamesFollowTheSelectedLanguage() {
+        for (language, expected) in [("en", "Notes"), ("zh-Hans", "备忘录"), ("zh-Hant", "備忘錄")] {
+            AppLocalization.shared.preference = language
+            XCTAssertEqual(AppName.display("com.apple.mobilenotes"), expected)
+            XCTAssertEqual(AppName.display("My Reader"), "My Reader")
+            XCTAssertNil(AppName.display("org.example.unlisted"))
+        }
+    }
+
     func testDefaultShortcutCacheRefreshesWithoutChangingStoredRequests() {
         let store = HomeShortcutStore()
         AppLocalization.shared.preference = "en"

@@ -1,6 +1,6 @@
 # iOS UI language
 
-Settings › Appearance offers **Follow System** (the default) and the localizations bundled with
+Settings › Language offers **Follow System** (the default) and the localizations bundled with
 this build. The initial translations are English, Simplified Chinese and Traditional Chinese.
 Follow System uses `Bundle.main.preferredLocalizations`, so iOS's per-app language setting takes
 precedence over the first language in the device's global list. An unsupported saved selection
@@ -45,7 +45,7 @@ alter speech recognition, model prompts, provider routing, credentials or approv
    `Shared/LiveActivity.xcstrings`, `Poki/Chat/Chat.xcstrings` and `Poki/InfoPlist.xcstrings` catalogs.
    English source keys are the fallback; a missing explicit English value is not a missing translation.
 2. Declare the shipped language in `CFBundleLocalizations` in `project-base.yml`. XcodeGen compiles
-   the same shared catalogs into the app and widget. The language picker discovers the resulting bundle
+   the same shared catalogs into the app and widget. The Language page discovers the resulting bundle
    localizations; no new preference enum, settings row or translation engine is needed.
 3. Review machine-assisted drafts, especially permission, approval, deletion and payment wording.
    Review plural/interpolation variants and accessibility labels. Adding a locale does not translate
@@ -74,7 +74,7 @@ system/unsupported language matching, region preservation, shared preferences, a
 state, untouched introduction identity, and language changes during a local scripted model request.
 `GreetingTests` and `LiveActivityTests` provide nearby regressions; no live model account is needed.
 
-In Settings › Appearance, switch English → 简体中文 → 繁體中文 → Follow System. Check the active navigation title,
+In Settings › Language, switch English → 简体中文 → 繁體中文 → Follow System. Check the active navigation title,
 section labels, Settings back navigation, Home greeting/suggestions/status, and the message field's
 accessibility label. Relaunch with an explicit choice, then with Follow System under another iOS app
 language. Keep a draft while opening Settings and verify it remains when closing Settings. Separately
