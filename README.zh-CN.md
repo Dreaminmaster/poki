@@ -26,7 +26,7 @@
 
 ## 快速开始
 
-**在 iPhone 上安装 Poki App。** 从 [Alpha 发布页](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)下载 Poki Setup，按安装窗口操作。详见 [iPhone 安装说明](README.md#poki-on-your-iphone)。
+**在 iPhone 上安装 Poki App。** 从 [Alpha 发布页](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)下载 Poki Setup，按安装窗口操作。详见 [iPhone 安装说明](README.md#poki-on-your-iphone)。iPhone 上还需要一个能把 10.7.0.1 连回本机的 VPN 应用，App Store 上免费的 LocalDevVPN 就可以。模型账号需要自己准备：用 ChatGPT Plus 或 Pro 套餐登录最省事，也可以填入 Anthropic、OpenAI、Gemini、DeepSeek 或 OpenRouter 的 API 密钥，或者接入自己的 OpenAI 兼容服务。Claude 订阅不能直接登录，请改用 Anthropic API 密钥。
 
 **让 agent 帮你安装。** 把这段发给你的 agent：
 
@@ -239,9 +239,11 @@ Poki 按「原样」提供，不附带任何担保，具体以 AGPL-3.0 许可�
 
 ## 开源许可
 
-Poki 基于 [AGPL-3.0-only 许可证](LICENSE)开源。
+Poki 的代码基于 [AGPL-3.0-only 许可证](LICENSE)开源。
 
-Copyright (c) 2026 Joseph Zhou and contributors。开源依赖项保留各自的许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。如需参与贡献，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+Poki 小熊、应用图标和 Poki 的其他美术作品不在这一许可证范围内。你可以用截图介绍 Poki；分叉版本需要使用自己的名称和美术。详见 [BRAND.md](BRAND.md)。
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors。开源依赖项和第三方素材保留各自的许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。如需参与贡献，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 致谢
 

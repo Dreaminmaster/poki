@@ -56,6 +56,13 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
 - (NSDictionary<NSString *, id> *)readProbe;
 /// A picture of the main screen (a JPEG through XCTest's quality API where it exists, else a PNG), or nil and why.
 - (nullable NSData *)screenshot:(NSString *_Nullable *_Nullable)code;
+/// The same; with `refreshViewport` NO the picture and nothing more: no lookup of the app in front for
+/// the viewport (the one noted last stands), as that lookup would wait behind a request testmanagerd is
+/// still serving.
+- (nullable NSData *)screenshot:(NSString *_Nullable *_Nullable)code refreshViewport:(BOOL)refreshViewport;
+/// The latest accessibility request this process gave up on that testmanagerd is still serving: keys
+/// pid (0: the accessibility server, -1: a lookup of the app in front) and seconds. nil when none is.
+- (nullable NSDictionary<NSString *, id> *)unanswered;
 /// The app in front: bundleId, name, pid. Empty when accessibility gives none.
 - (NSDictionary<NSString *, id> *)frontApp;
 /// The front app's frame when it does not fill the screen (its half of the iPhone Duo's inner

@@ -15,51 +15,70 @@ import Foundation
 enum ActivityWords {
     static let table = "LiveActivity"
 
-    /// A word the app keeps in English, in the system's language. A text the table does not have (an
+    /// A word the app keeps in English, in the system's language. A state the app names in English
+    /// ("Runner asleep") is said in Poki's one set of status words; a text the table does not have (an
     /// error from the pairing) stays as it is.
     static func local(_ key: String) -> String {
-        Bundle.main.localizedString(forKey: key, value: key, table: table)
+        if let word = states[key] { return word.text }
+        return Bundle.main.localizedString(forKey: key, value: key, table: table)
     }
 
-    /// The content line: at most four words, or eight Chinese characters, ending in "…" when cut.
-    /// A word is a run of letters and digits ("1:24" and "don’t" are one); each Chinese character
-    /// counts on its own, punctuation not at all.
-    static func brief(_ text: String) -> String {
-        let limit = text.unicodeScalars.contains(where: isHan) ? 8 : 4
-        var units = 0
-        var inWord = false
-        for index in text.indices {
-            let c = text[index]
-            let han = c.unicodeScalars.contains(where: isHan)
-            let wordy = !han && (c.isLetter || c.isNumber || inWord && "’'-:./".contains(c))
-            if han || wordy && !inWord {
-                units += 1
-                if units > limit { return cut(text[..<index]) }
-            }
-            inWord = wordy
-        }
-        return text
-    }
+    /// The app's English names of a state (the activity's `headline`, `RunnerStatus.title`) that are
+    /// said as a status word. The names stay as they are: the app and the face compare them.
+    static let states: [String: StatusWord] = [
+        "Ready for the agent": .ready, "Waiting for agent": .ready,
+        // Standing by takes the next request by itself: Ready, as in the app (the owner, 2026-11-13).
+        "Runner asleep": .ready, "Sleeping": .ready,
+        "Not started": .notStarted,
+        "Starting the runner": .starting, "Starting native services": .starting,
+        "Thinking": .thinking, "Listening": .listening, "Speaking": .speaking,
+        "Finished": .done,
+    ]
 
-    /// A step label from PokiCore as the content line: the first of several actions ("Tap “Search”,
-    /// then type “cats”" is "Tap “Search”"), in the system's language, at most four words.
-    static func step(_ label: String) -> String {
-        brief(translate(label.components(separatedBy: ", then ").first ?? label))
-    }
+    /// The lines Poki itself puts on a run ("Thinking", "Carrying on"), as against a step label from
+    /// PokiCore ("Tap “Send”"): with no plan to say what the task is doing, only these are shown.
+    static let statusLines: Set<String> = [
+        "Thinking", "Starting the runner", "Starting native services", "Continuing", "Step skipped",
+        "Carrying on", "The agent carried on by itself",
+    ]
 
     /// A step label from PokiCore in the system's language, whole, for the app's own screens.
-    static func label(_ label: String) -> String { translate(label) }
-
-    private static func isHan(_ scalar: Unicode.Scalar) -> Bool {
-        (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value)
+    /// Several actions ("Tap “Search”, then type “cats”") are worded one by one and joined in that
+    /// language's own way.
+    static func label(_ label: String) -> String {
+        let parts = actions(label)
+        guard parts.count > 1 else { return translate(label) }
+        let words = parts.enumerated().map { index, part in
+            // PokiCore lowercases every action after the first; the table has them capitalised.
+            translate(index == 0 ? part : part.prefix(1).uppercased() + part.dropFirst())
+        }
+        return words.dropFirst().reduce(words[0]) { String(activity: "\($0), then \($1)") }
     }
 
-    private static func cut(_ text: Substring) -> String {
-        var line = text.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ",，、:：")))
-        line += "…"
-        // A name cut inside its quotes keeps the closing one.
-        if line.filter({ $0 == "“" }).count > line.filter({ $0 == "”" }).count { line += "”" }
-        return line
+    /// PokiCore's reason for an approval ("sending a message (\"send\")", "input in Wallet") in the
+    /// system's language, without the word in brackets that set it off.
+    static func reason(_ why: String) -> String {
+        let plain = why.split(separator: "(").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        if plain.hasPrefix("input in ") {
+            guard let name = AppName.display(String(plain.dropFirst("input in ".count))) else { return "" }
+            return String(activity: "Input in \(name)")
+        }
+        return local(plain)
+    }
+
+    /// A label's actions. A ", then " inside typed text (between “ and ”) does not split it.
+    private static func actions(_ label: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        for piece in label.components(separatedBy: ", then ") {
+            current = current.isEmpty ? piece : current + ", then " + piece
+            if current.filter({ $0 == "“" }).count == current.filter({ $0 == "”" }).count {
+                parts.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { parts.append(current) }
+        return parts
     }
 
     /// The labels PokiCore writes (Computer.label in PokiCore's StepLabels.swift). Those with a name
@@ -76,6 +95,7 @@ enum ActivityWords {
         if let name = quoted("Tap") { return String(activity: "Tap “\(name)”") }
         if let name = quoted("Press and hold") { return String(activity: "Press and hold “\(name)”") }
         if let text = quoted("Type") { return String(activity: "Type “\(text)”") }
+        if let name = quoted("Run") { return String(activity: "Run “\(name)”") }
         if let name = quoted("Scroll to") { return String(activity: "Scroll to “\(name)”") }
         if let point = after("Tap at") { return String(activity: "Tap at \(point)") }
         if let point = after("Press and hold at") { return String(activity: "Press and hold at \(point)") }
@@ -86,7 +106,10 @@ enum ActivityWords {
         if fixed != label { return fixed }
         if let rest = after("Press"), rest.hasSuffix(" button") { return String(activity: "Press \(String(rest.dropLast(7))) button") }
         if let key = after("Press") { return String(activity: "Press \(key)") }
-        if let app = after("Open") { return String(activity: "Open \(app)") }
+        if let app = after("Open") {
+            guard let name = AppName.display(app) else { return local("Open") }
+            return String(activity: "Open \(name)")
+        }
         return label
     }
 }

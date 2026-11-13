@@ -24,6 +24,14 @@ struct SavedSession: Codable, Identifiable, Equatable {
     var autoName: String? = nil
     /// sha256 of the connector secret an outside agent's session came through (the relay says).
     var connector: String? = nil
+    /// When it was archived: out of the conversations list, in Settings > Conversations, every line kept.
+    var archived: Date? = nil
+    /// When it was last brought back from the archive. The list keeps its own time and place; the limit
+    /// counts it as new from this moment, so a full list does not drop it at once for its old date.
+    var unarchived: Date? = nil
+
+    /// Its age for the limit: the later of its last change and its return from the archive.
+    var keptSince: Date { max(updated, unarchived ?? .distantPast) }
 
     /// The row's second line: the last thing that happened, as plain text (markdown neither drawn nor
     /// shown as its marks).
@@ -52,7 +60,7 @@ struct SavedSession: Codable, Identifiable, Equatable {
             case .you(let text, _), .request(let text, _): return text
             case .step(let text, let ok): return ok == false ? String(localized: "\(text), failed") : text
             case .plan(let steps):
-                if let step = steps.last(where: { $0.state == .waiting }) { return String(localized: "\(step.text) · waiting for you") }
+                if let step = steps.last(where: { $0.state == .waiting }) { return String(localized: "\(step.text), waiting for you") }
                 if let step = steps.last { return step.text }
             case .note(.waiting): return String(localized: "Waiting for your OK")
             case .note(.problem(let text)): return text
@@ -68,24 +76,37 @@ struct SavedSession: Codable, Identifiable, Equatable {
         switch kind {
         case .poki: return autoName ?? (title == String(localized: "New conversation") ? "Poki" : String(title.prefix(40)))
         case .agent: return client ?? String(localized: "An agent")
-        case .handoff: return autoName.map { "\(client ?? String(localized: "An agent")) · \($0)" } ?? "\(client ?? String(localized: "An agent")) → Poki"
+        case .handoff: return autoName.map { "\(client ?? String(localized: "An agent")), \($0)" } ?? "\(client ?? String(localized: "An agent")) → Poki"
         case .voice: return autoName ?? (title.isEmpty ? String(localized: "Voice chat") : String(title.prefix(40)))
         }
     }
 }
 
 /// The saved sessions, newest first, one JSON file each in Application Support/Poki/Sessions. They stay on
-/// this iPhone; the routines thread's backup can carry them (`all()` / `restore(_:)`). At most 200 are kept.
+/// this iPhone; the routines thread's backup can carry them (`all()` / `restore(_:)`). At most 200 are kept in the list; archived
+/// ones do not count and are never deleted for it.
 @MainActor
 @Observable
 final class SessionStore {
-    static let shared = SessionStore()
+    /// Where the conversations are saved, one file each.
+    nonisolated static var defaultFolder: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return base.appendingPathComponent("Poki/Sessions", isDirectory: true)
+    }
+    static let shared: SessionStore = {
+        let sample = UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil
+        return SessionStore(folder: defaultFolder, defaults: .standard, samples: sample)
+    }()
+    /// The most conversations the list keeps; archived ones are not counted.
     static let limit = 200
+    /// Set once the conversations saved before archiving existed have been archived.
+    static let archivedEarlierKey = "sessions.archivedEarlier"
     /// An outside agent's session with no call for this long is over (most clients never send DELETE).
     static let agentIdle: TimeInterval = 10 * 60
 
     private(set) var sessions: [SavedSession] = []
     private let folder: URL
+    private let defaults: UserDefaults
     private var pendingWrites: Set<String> = []
     private var writeTask: Task<Void, Never>?
     /// The outside agent sessions seen since launch: id → client name.
@@ -112,37 +133,65 @@ final class SessionStore {
     /// The outside agent session whose call is running, if any.
     var activeSessionID: String? { currentSession }
 
-    private init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        folder = base.appendingPathComponent("Poki/Sessions", isDirectory: true)
+    init(folder: URL, defaults: UserDefaults, samples: Bool = false) {
+        self.folder = folder
+        self.defaults = defaults
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        if UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil {
+        if samples {
             sessions = Self.samples()
             return
         }
-        load()
+        let complete = load()
+        if complete { archiveEarlier() }
     }
 
-    private func load() {
+    /// The saved sessions from their files; false when a file could not be read (before the first unlock).
+    private func load() -> Bool {
         let decoder = JSONDecoder()
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        var loaded = files.filter { $0.pathExtension == "json" }.compactMap { url in
-            (try? Data(contentsOf: url)).flatMap { try? decoder.decode(SavedSession.self, from: $0) }
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)).map { $0.filter { $0.pathExtension == "json" } }
+        var complete = files != nil
+        var loaded: [SavedSession] = []
+        for url in files ?? [] {
+            guard let data = try? Data(contentsOf: url) else { complete = false; continue }
+            if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
         }
         // Nothing is live after a relaunch.
         for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = loaded[i].outcome ?? .stopped }
         sessions = loaded.sorted { $0.updated > $1.updated }
         trim()
+        return complete
+    }
+
+    /// The first launch of the version that archives puts every conversation saved before it in the
+    /// archive, so the list starts empty. Once only: a conversation the owner brings back stays back.
+    /// It waits for a launch that could read every file, so none is left out.
+    private func archiveEarlier() {
+        guard !defaults.bool(forKey: Self.archivedEarlierKey) else { return }
+        let now = Date()
+        for i in sessions.indices where sessions[i].archived == nil {
+            sessions[i].archived = now
+            pendingWrites.insert(sessions[i].id)
+        }
+        flush()
+        defaults.set(true, forKey: Self.archivedEarlierKey)
     }
 
     func session(_ id: String) -> SavedSession? { sessions.first { $0.id == id } }
 
     /// The latest in-app chat, to come back to at launch.
-    func latestPoki() -> SavedSession? { sessions.first { $0.kind == .poki } }
+    func latestPoki() -> SavedSession? { sessions.first { $0.kind == .poki && $0.archived == nil } }
 
     /// Live first, then newest.
     var ordered: [SavedSession] {
-        sessions.sorted { a, b in a.live != b.live ? a.live : a.updated > b.updated }
+        sessions.sorted { a, b in a.live != b.live ? a.live : a.updated != b.updated ? a.updated > b.updated : a.id < b.id }
+    }
+
+    /// The conversations list: every session not archived, live first, then newest.
+    var listed: [SavedSession] { ordered.filter { $0.archived == nil } }
+
+    /// Settings > Conversations: the archived ones, the last archived first.
+    var archivedSessions: [SavedSession] {
+        sessions.filter { $0.archived != nil }.sorted { a, b in a.archived != b.archived ? a.archived! > b.archived! : a.updated > b.updated }
     }
 
     var liveAgentCount: Int { sessions.filter { $0.live && ($0.kind == .agent || $0.kind == .handoff) }.count }
@@ -150,14 +199,20 @@ final class SessionStore {
     // MARK: Chats
 
     func save(chat: ChatModel) {
-        var session = self.session(chat.sessionID) ?? SavedSession(id: chat.sessionID, kind: chat.kind, client: chat.requester, title: chat.title,
-                                                                      started: Date(), updated: Date(), live: false, outcome: nil, entries: [], calls: [])
+        let saved = self.session(chat.sessionID)
+        var session = saved ?? SavedSession(id: chat.sessionID, kind: chat.kind, client: chat.requester, title: chat.title,
+                                            started: Date(), updated: Date(), live: false, outcome: nil, entries: [], calls: [])
+        let changed = saved == nil || session.entries != chat.entries
         session.entries = chat.entries
         session.calls = chat.savedCalls
         session.title = chat.title
         if let name = pendingNames.removeValue(forKey: chat.sessionID) { session.autoName = name }
-        session.updated = Date()
+        // Opening a conversation hands the same lines back: only a new line gives the row a new time
+        // and moves it up the list. (It used to jump to the top, marked "now", each time it was opened.)
+        // A new line in an archived conversation brings it back to the list.
+        if changed { session.updated = Date(); session.archived = nil }
         session.live = chat.running
+        guard session != saved else { return }
         put(session)
     }
 
@@ -245,6 +300,22 @@ final class SessionStore {
         }
     }
 
+    /// Out of the conversations list and into Settings > Conversations; every line stays. Not while it runs.
+    func archive(_ id: String) {
+        guard var session = session(id), !session.live, session.archived == nil else { return }
+        session.archived = Date()
+        put(session)
+    }
+
+    /// Back to the conversations list, at its own time and place among the days; for the limit it counts
+    /// as new from now.
+    func unarchive(_ id: String) {
+        guard var session = session(id), session.archived != nil else { return }
+        session.archived = nil
+        session.unarchived = Date()
+        put(session)
+    }
+
     func delete(_ id: String) {
         sessions.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: file(id))
@@ -277,13 +348,17 @@ final class SessionStore {
             update(agent: id) { session in
                 session.entries.append(ChatEntry(.step(summary, ok: nil)))
             }
-        case .toolFinished(let summary, let delivery, _, _, _, let id?):
+        case .toolFinished(let summary, let delivery, let app, _, _, let id?):
             let failed = delivery.hasPrefix("failed")
             update(agent: id) { session in
+                // Each step keeps the app it ran in, for the app's icon on the session's row.
                 if let i = session.entries.lastIndex(where: { if case .step(_, nil) = $0.kind { return true }; return false }) {
                     session.entries[i].kind = .step(summary, ok: !failed)
+                    session.entries[i].app = app
                 } else {
-                    session.entries.append(ChatEntry(.step(summary, ok: !failed)))
+                    var step = ChatEntry(.step(summary, ok: !failed))
+                    step.app = app
+                    session.entries.append(step)
                 }
                 session.outcome = failed ? .failed : nil
             }
@@ -291,13 +366,13 @@ final class SessionStore {
             currentSession = nil
         case .approvalRequested(let approval):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow: \(approval.summary)"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Asked you to allow \(approval.summary)"), ok: nil))) }
         case .approvalEnded(_, let approved):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
             update(agent: id) { $0.entries.append(ChatEntry(.note(approved == true ? .approved(Date()) : approved == false ? .declined : .expired))) }
         case .handoffRequested(_, _, let text, _):
             guard let id = currentSession, session(id)?.kind == .agent else { return }
-            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Your turn: \(text ?? String(localized: "finish this step"))"), ok: nil))) }
+            update(agent: id) { $0.entries.append(ChatEntry(.step(String(localized: "Your turn, \(text ?? String(localized: "finish this step"))"), ok: nil))) }
         case .relay, .handoffEnded: break
         }
     }
@@ -310,6 +385,7 @@ final class SessionStore {
         // A hand-off's own session is the in-app agent's (its steps come from ChatModel).
         guard session.kind == .agent else { return }
         session.live = true
+        session.archived = nil
         session.connector = session.connector ?? connectors[id]
         change(&session)
         session.updated = Date()
@@ -372,7 +448,8 @@ final class SessionStore {
         }
     }
 
-    private func flush() {
+    /// Writes the changed sessions now, rather than after the half-second gathering.
+    func flush() {
         writeTask = nil
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .deferredToDate
@@ -383,11 +460,15 @@ final class SessionStore {
         pendingWrites = []
     }
 
+    /// Past the limit, the oldest conversations in the list go, one just brought back from the archive
+    /// counting as new (`keptSince`). An archived one is never deleted here: only the owner's Delete in
+    /// Settings > Conversations removes it.
     private func trim() {
-        guard sessions.count > Self.limit else { return }
-        let sorted = sessions.sorted { $0.updated > $1.updated }
-        for old in sorted[Self.limit...] { try? FileManager.default.removeItem(at: file(old.id)) }
-        sessions = Array(sorted.prefix(Self.limit))
+        let listed = sessions.filter { $0.archived == nil }
+        guard listed.count > Self.limit else { return }
+        let gone = Set(listed.sorted { $0.keptSince > $1.keptSince }[Self.limit...].map(\.id))
+        for id in gone { try? FileManager.default.removeItem(at: file(id)) }
+        sessions.removeAll { gone.contains($0.id) }
     }
 
     private func file(_ id: String) -> URL {
@@ -400,6 +481,8 @@ final class SessionStore {
     private static func samples() -> [SavedSession] {
         let now = Date()
         func at(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
+        /// An entry that ran in `app`, for the row's app icon.
+        func inApp(_ app: String, _ entry: ChatEntry) -> ChatEntry { var entry = entry; entry.app = app; return entry }
         let mom = String(localized: "Text Mom “On my way”, tell me when it’s sent.")
         return [
             SavedSession(id: "sample-handoff", kind: .handoff, client: "Claude", title: mom, started: at(1), updated: at(0), live: true, outcome: nil, entries: [
@@ -407,23 +490,45 @@ final class SessionStore {
                 ChatEntry(.step(String(localized: "Look at the screen"), ok: true)),
                 ChatEntry(.step(String(localized: "Tap “Messages”"), ok: true)),
                 ChatEntry(.request(mom, from: "Claude")),
-                ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done), PlanStep(String(localized: "Open the chat with Mom"), state: .done),
-                                 PlanStep(String(localized: "Type “On my way”"), state: .done), PlanStep(String(localized: "Tap Send"), state: .waiting)])),
+                inApp("Messages", ChatEntry(.plan([PlanStep(String(localized: "Open Messages"), state: .done), PlanStep(String(localized: "Open the chat with Mom"), state: .done),
+                                 PlanStep(String(localized: "Type “On my way”"), state: .done), PlanStep(String(localized: "Tap Send"), state: .waiting)]))),
                 ChatEntry(.note(.waiting)),
             ], calls: []),
             SavedSession(id: "sample-poki", kind: .poki, client: nil, title: String(localized: "What iOS version is this?"), started: at(32), updated: at(31), live: false, outcome: .done, entries: [
                 ChatEntry(.time(at(32))),
                 ChatEntry(.you(String(localized: "What iOS version is this?"), delivered: true)),
-                ChatEntry(.plan([PlanStep(String(localized: "Open Settings"), state: .done), PlanStep(String(localized: "Open General › About"), state: .done)])),
+                // Settings has no icon in Poki/AppIcons: this row shows the placeholder tile.
+                inApp("Settings", ChatEntry(.plan([PlanStep(String(localized: "Open Settings"), state: .done), PlanStep(String(localized: "Open General › About"), state: .done)]))),
                 ChatEntry(.poki(String(localized: "It’s iOS 27.3."))),
             ], calls: []),
             SavedSession(id: "sample-codex", kind: .agent, client: "Codex", title: "Codex", started: at(64), updated: at(61), live: false, outcome: .done, entries: [
-                ChatEntry(.time(at(64))), ChatEntry(.step(String(localized: "Open Photos"), ok: true)), ChatEntry(.step(String(localized: "Look at the screen"), ok: true)),
-                ChatEntry(.step(String(localized: "Tap “Albums”"), ok: true)),
+                ChatEntry(.time(at(64))), inApp("Photos", ChatEntry(.step(String(localized: "Open Photos"), ok: true))),
+                inApp("Photos", ChatEntry(.step(String(localized: "Look at the screen"), ok: true))),
+                inApp("Photos", ChatEntry(.step(String(localized: "Tap “Albums”"), ok: true))),
+            ], calls: []),
+            // The owner's own examples for the rows' app icons: Notes, Starbucks, WeChat.
+            SavedSession(id: "sample-notes", kind: .poki, client: nil, title: String(localized: "Add oat milk to my shopping list"), started: at(96), updated: at(95), live: false, outcome: .done, entries: [
+                ChatEntry(.time(at(96))),
+                ChatEntry(.you(String(localized: "Add oat milk to my shopping list"), delivered: true)),
+                inApp("Notes", ChatEntry(.plan([PlanStep(String(localized: "Open Notes"), state: .done), PlanStep(String(localized: "Open “Shopping”"), state: .done)]))),
+                ChatEntry(.poki(String(localized: "Added “Oat milk” to Shopping in Notes."))),
+            ], calls: []),
+            SavedSession(id: "sample-starbucks", kind: .poki, client: nil, title: String(localized: "Order my usual coffee"), started: at(180), updated: at(178), live: false, outcome: .done, entries: [
+                ChatEntry(.time(at(180))),
+                ChatEntry(.you(String(localized: "Order my usual coffee"), delivered: true)),
+                inApp("Starbucks", ChatEntry(.plan([PlanStep(String(localized: "Open Starbucks"), state: .done), PlanStep(String(localized: "Tap Order"), state: .done)]))),
+                ChatEntry(.poki(String(localized: "Ordered a grande oat latte for pickup at 9:10."))),
+            ], calls: []),
+            SavedSession(id: "sample-wechat", kind: .poki, client: nil, title: String(localized: "Tell Alex I’m running late"), started: at(420), updated: at(418), live: false, outcome: .done, entries: [
+                ChatEntry(.time(at(420))),
+                ChatEntry(.you(String(localized: "Tell Alex I’m running late"), delivered: true)),
+                inApp("WeChat", ChatEntry(.plan([PlanStep(String(localized: "Open WeChat"), state: .done), PlanStep(String(localized: "Open the chat with Alex"), state: .done)]))),
+                ChatEntry(.poki(String(localized: "Sent “Running 10 minutes late” to Alex on WeChat."))),
             ], calls: []),
             SavedSession(id: "sample-cc", kind: .agent, client: "Claude Code", title: "Claude Code", started: at(1500), updated: at(1490), live: false, outcome: .stopped, entries: [
-                ChatEntry(.time(at(1500))), ChatEntry(.step(String(localized: "Open the App Store"), ok: true)),
-                ChatEntry(.step(String(localized: "Your turn: enter your Apple Account password"), ok: nil)),
+                // The App Store has no icon in Poki/AppIcons: this row shows the agent's badge.
+                ChatEntry(.time(at(1500))), inApp("App Store", ChatEntry(.step(String(localized: "Open the App Store"), ok: true))),
+                ChatEntry(.step(String(localized: "Your turn, enter your Apple Account password"), ok: nil)),
             ], calls: []),
         ]
     }

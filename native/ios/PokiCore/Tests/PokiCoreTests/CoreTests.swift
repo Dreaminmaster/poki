@@ -128,7 +128,7 @@ final class ToolTests: XCTestCase {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": 9]]])
-        XCTAssertFalse(result.isError, "the screen was read, so the answer is not an error; its error line says what was wrong")
+        XCTAssertTrue(result.isError, "a screen read does not make the failed action successful")
         XCTAssertTrue(result.text.contains("element 9 is not in the latest read"), result.text)
         XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
     }
@@ -169,6 +169,169 @@ final class ApprovalTests: XCTestCase {
         let wda = FakeWDA()
         wda.source([("Button", "Delete Photo"), ("Button", "Share")], app: "Photos")
         return wda
+    }
+
+    func testABatchReportsEverySensitiveActionBeforeOwnerApproval() async throws {
+        let wda = FakeWDA()
+        wda.source([("Button", "Photo"), ("Button", "Call"), ("Button", "Delete"), ("Button", "Pay")], app: "Photos")
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["tap": 1], ["tap": 2], ["tap": 3], ["tap": 4]]])
+
+        XCTAssertTrue(result.text.contains("not_sent from action 2: approval_required"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "Only the non-sensitive prefix may run")
+        let approval = try XCTUnwrap(core.pendingApproval)
+        XCTAssertTrue(approval.reason.contains("action 2: a call (\"call\")"), approval.reason)
+        XCTAssertTrue(approval.reason.contains("action 3: deleting (\"delete\")"), approval.reason)
+        XCTAssertTrue(approval.reason.contains("action 4: a payment (\"pay\")"), approval.reason)
+
+    }
+
+    /// "Payments, deletions and actions in Wallet always need your confirmation", whatever action the
+    /// agent picks to touch the button: every kind of action is aimed at Pay and at Delete, with the
+    /// rules for messages, calls and passwords off, and no touch may go down and lift on either before the owner
+    /// answers, on a screen with a row-sized Pay and on one with a tall Pay across the middle, where a
+    /// swipe can go down and lift. Each action goes in every way an action reaches the phone: alone in a
+    /// do, after a tap in the same do that opened that screen over one with harmless buttons where Pay
+    /// and Delete are now (its numbers and points are of the screen before), and as the step of a saved
+    /// routine. A new kind of action needs its samples here.
+    func testNoActionPressesPayOrDeleteWithoutTheOwner() async {
+        let delete: [Double] = [8, 44, 60, 40]
+        let samples: [ActionKind: [JSON]] = [
+            .run: [["run": "checkout"]],
+            .tap: [["tap": 1], ["tap": [195, 122]], ["tap": ["x": 40, "y": 64]]],
+            .type: [["type": "x", "ref": 1], ["type": "x", "ref": 2]],
+            .back: [["back": true]],
+            .handoff: [["handoff": ["kind": "payment", "text": "Pay for the order"]]],
+            .key: [["key": "return"]],
+            .swipe: [["swipe": "up"], ["swipe": "left"], ["swipe": ["direction": "left", "in": 1]], ["swipe": ["direction": "up", "in": 1]]],
+            .scrollTo: [["scroll_to": ["text": "Nowhere", "max_swipes": 1]], ["scroll_to": ["text": "Nowhere", "in": 1, "max_swipes": 1]]],
+            .longPress: [["long_press": 1]],
+            .drag: [["drag": ["from": 1, "to": 1]], ["drag": ["from": 2, "to": 2]], ["drag": [100, 110, 300, 130]], ["drag": ["from": [100, 110], "to": [300, 130]]]],
+            .pinch: [["pinch": 1]],
+            .button: [["button": "volume_up"]],
+            .launch: [["launch": "com.apple.Preferences"]],
+            .waitUntil: [["wait_until": ["text": "Pay", "ms": 100]]],
+            .wait: [["wait": 10]],
+        ]
+        enum Entrance: CaseIterable { case alone, afterATapThatOpenedIt, routineStep }
+        func inside(_ f: [Double], _ p: (Double, Double)) -> Bool { f[0] <= p.0 && p.0 <= f[0] + f[2] && f[1] <= p.1 && p.1 <= f[1] + f[3] }
+        /// Where each touch sent to the phone went down and lifted.
+        func touches(_ wda: FakeWDA) -> [(down: (Double, Double), up: (Double, Double))] {
+            func xy(_ b: JSON, _ x: String, _ y: String) -> (Double, Double) { (b[x]?.double ?? -1, b[y]?.double ?? -1) }
+            var out = (wda.bodies("POST /wda/tap") + wda.bodies("POST /wda/touchAndHold")).map { (xy($0, "x", "y"), xy($0, "x", "y")) }
+            out += (wda.bodies("POST /wda/pressAndDragWithVelocity") + wda.bodies("POST /wda/dragfromtoforduration")).map { (xy($0, "fromX", "fromY"), xy($0, "toX", "toY")) }
+            for body in wda.bodies("POST /actions") {
+                for finger in body["actions"]?.array ?? [] {
+                    let moves = (finger["actions"]?.array ?? []).filter { $0["type"]?.string == "pointerMove" }
+                    if let first = moves.first, let last = moves.last { out.append((xy(first, "x", "y"), xy(last, "x", "y"))) }
+                }
+            }
+            return out
+        }
+        /// A routine of one step, recorded on the screen read last as the recorder records a do.
+        func save(_ name: String, _ action: JSON, _ core: PokiCore, _ store: RoutineStore) -> Bool {
+            guard let recorded = core.computer.recordable(action) else { return false }
+            store.save(Routine(name: name, description: "", app: nil, steps: [recorded.step], params: [:], expect: [], read: [], runs: 0, ok: 0,
+                               failuresInARow: 0, lastStop: nil, lastMs: nil, savedBy: "test", created: Date(), updated: Date()))
+            return true
+        }
+        for kind in ActionKind.allCases {
+            guard let actions = samples[kind] else { XCTFail("no sample of \(kind.rawValue): aim one at Pay or Delete"); continue }
+            for (action, pay) in actions.flatMap({ a in ([[16, 100, 358, 44], [16, 380, 358, 120]] as [[Double]]).map { (a, $0) } }) {
+                let screen = [Node("Button", "Pay", pay), Node("Button", "Delete", delete)]
+                for entrance in Entrance.allCases {
+                    let wda = FakeWDA()
+                    let store = RoutineStore(url: nil)
+                    wda.tree(screen, app: "Shop")
+                    let (core, _, _) = makeCore(wda) { c in
+                        c.approvalWait = 0
+                        c.approvalMode = { .off }
+                        c.memory = store
+                    }
+                    _ = await core.call("look", [:])
+                    // The routine `run` sends: a tap on Pay, recorded on this screen.
+                    _ = save("checkout", ["tap": 1], core, store)
+                    var sent: [JSON] = [action]
+                    switch entrance {
+                    case .alone: break
+                    case .afterATapThatOpenedIt:
+                        wda.tree([Node("Button", "Orders", pay), Node("Button", "Back", delete), Node("Cell", "Order 1", [0, 600, 390, 44])], app: "Shop")
+                        _ = await core.call("look", [:])
+                        wda.set("POST /wda/tap") { [wda] _ in wda.tree(screen, app: "Shop"); return (200, ["value": .null]) }
+                        sent = [["tap": 3], action]
+                    case .routineStep:
+                        guard save("probe", action, core, store) else { continue }
+                        sent = [["run": "probe"]]
+                    }
+                    let result = await core.call("do", ["actions": .array(sent)])
+                    let pressed = touches(wda).filter { t in [pay, delete].contains { inside($0, t.down) && inside($0, t.up) } }
+                    XCTAssertTrue(pressed.isEmpty, "\(entrance) \(JSON.array(sent).serialized()) pressed \(pressed) on Pay at \(pay) without the owner: \(result.text)")
+                }
+            }
+        }
+    }
+
+    /// Seen in review: in one do, a tap opened a page with Delete in the top left, and back then tapped
+    /// it, judged by the Back button of the page before. A press after an action that may have changed
+    /// the screen (a tap, a launch, Home) is judged again on the screen it lands on; where that is
+    /// harmless, it goes.
+    func testBackAfterATapThatOpenedAPageIsJudgedOnThatPage() async {
+        let openers: [(endpoint: String, action: JSON)] = [("POST /wda/tap", ["tap": 2]), ("POST /wda/apps/activate", ["launch": "com.example.shop"]), ("POST /wda/homescreen", ["button": "home"])]
+        for opener in openers {
+            for (opened, asks) in [("Delete", true), ("Back", false)] {
+                let wda = FakeWDA()
+                wda.tree([Node("Button", "Back", [8, 50, 60, 40]), Node("Cell", "Orders", [0, 200, 390, 44])], app: "Shop")
+                let page = [Node("Button", opened, [8, 50, 60, 40]), Node("Cell", "Order 1", [0, 200, 390, 44])]
+                wda.set(opener.endpoint) { [wda] _ in wda.tree(page, app: "Shop"); return (200, ["value": .null]) }
+                let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+                _ = await core.call("look", [:])
+                let result = await core.call("do", ["actions": [opener.action, ["back": true]]])
+                let backTaps = wda.bodies("POST /wda/tap").filter { $0["x"]?.double == 38 && $0["y"]?.double == 70 }
+                XCTAssertEqual(backTaps.count, asks ? 0 : 1, "\(opener.action.serialized()) opened \(opened): \(result.text)")
+                XCTAssertEqual(result.text.contains("action 2 was not sent: the action before it may have changed the screen, and where it touches now it needs the owner's approval (deleting (\"delete\"))"), asks, "\(opener.action.serialized()): \(result.text)")
+            }
+        }
+    }
+
+    /// Seen in review: a short wait between the tap that opens a page and the press after it took the
+    /// tap's pause before the read away (the wait's own is 0), so a page that slides in 0.3 s after the
+    /// tap was read as the page before and back tapped the Delete that came where Back was. The pause
+    /// is the tap's, less the time since it, and the read is taken once two reads in a row agree.
+    func testAShortWaitAfterATapLeavesThePauseBeforeTheNextPress() async {
+        for (opened, asks) in [("Delete", true), ("Back", false)] {
+            let wda = FakeWDA()
+            wda.tree([Node("Button", "Back", [8, 50, 60, 40]), Node("Cell", "Orders", [0, 200, 390, 44])], app: "Shop")
+            let page = [Node("Button", opened, [8, 50, 60, 40]), Node("Cell", "Order 1", [0, 200, 390, 44])]
+            wda.set("POST /wda/tap") { [wda] _ in
+                Task { try? await Task.sleep(nanoseconds: 300_000_000); wda.tree(page, app: "Shop") }
+                return (200, ["value": .null])
+            }
+            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["tap": 2], ["wait": 10], ["back": true]]])
+            let backTaps = wda.bodies("POST /wda/tap").filter { $0["x"]?.double == 38 && $0["y"]?.double == 70 }
+            XCTAssertEqual(backTaps.count, asks ? 0 : 1, "opened \(opened): \(result.text)")
+            XCTAssertEqual(result.text.contains("action 3 was not sent: the action before it may have changed the screen, and where it touches now it needs the owner's approval (deleting (\"delete\"))"), asks, result.text)
+        }
+    }
+
+    /// A routine's swipe went without a check: a step recorded without an element is judged on the screen
+    /// read just before it, a swipe as any other, so one that would go down and lift inside a tall Pay
+    /// stops the run there, and one across a list goes.
+    func testARoutinesSwipeIsJudgedOnTheScreenBeforeIt() async {
+        for (screen, asks) in [([Node("Button", "Pay", [16, 380, 358, 120])], true), ([Node("Cell", "Row 1", [0, 380, 390, 44]), Node("Cell", "Row 2", [0, 424, 390, 44])], false)] {
+            let store = RoutineStore(url: nil)
+            store.save(Routine(name: "swipe", description: "", app: nil, steps: [RoutineStep(action: ["swipe": "left"], target: nil, app: nil, secret: nil)], params: [:], expect: [], read: [],
+                               runs: 0, ok: 0, failuresInARow: 0, lastStop: nil, lastMs: nil, savedBy: "test", created: Date(), updated: Date()))
+            let wda = FakeWDA()
+            wda.tree(screen, app: "Shop")
+            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.memory = store }
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["run": "swipe"]]])
+            XCTAssertEqual(wda.bodies("POST /wda/pressAndDragWithVelocity").count, asks ? 0 : 1, result.text)
+            XCTAssertEqual(result.text.contains("stopped at step 1 of 1: it needs the owner's approval (a payment (\"pay\"))"), asks, result.text)
+        }
     }
 
     func testADeletionWaitsForTheOwnerAndSendsNothing() async {
@@ -344,6 +507,77 @@ final class ApprovalTests: XCTestCase {
         core.resolveApproval(id: id, approved: true)  // a press that arrives late does nothing
         let again = await core.call("do", ["actions": [["tap": 1]]])
         XCTAssertTrue(again.text.contains("approval_required"), again.text)
+    }
+
+    /// A step on a screen, in the app it is in, and what holds it back when asking is on.
+    private struct HeldStep { let app: String; let bundle: String; let screen: [(String, String)]; let action: JSON; let reason: String }
+
+    /// PokiCore started on the step's screen with the way of asking `mode` holds, and the screen read.
+    private func started(on step: HeldStep, mode: LockedBox<ApprovalMode>) async -> (PokiCore, FakeWDA) {
+        let wda = FakeWDA()
+        wda.source(step.screen, app: step.app)
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": .string(step.bundle), "name": .string(step.app)]]) }
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.approvalMode = { mode.value } }
+        _ = await core.call("look", [:])
+        return (core, wda)
+    }
+
+    /// The step sent once more: whether it asked, the input it sent, and the request's reason.
+    private func send(_ step: HeldStep, _ core: PokiCore, _ wda: FakeWDA) async -> (asked: Bool, sent: Int, text: String, reason: String?) {
+        let inputs = { wda.bodies("POST /wda/tap").count + wda.bodies("POST /wda/keys").count }
+        let before = inputs()
+        let result = await core.call("do", ["actions": [step.action]])
+        let reason = core.pendingApproval?.reason
+        if let pending = core.pendingApproval { core.resolveApproval(id: pending.id, approved: false) }
+        return (result.text.contains("approval_required"), inputs() - before, result.text, reason)
+    }
+
+    /// The way of asking counts from the next step, not from the next time Poki opens. Poki started
+    /// with Never Ask; the owner turns asking on while it runs, and the next message sent, password
+    /// typed and call placed waits for the owner and sends nothing.
+    func testAskingTurnedOnWhilePokiRunsHoldsTheNextSendPasswordAndCall() async {
+        let steps = [
+            HeldStep(app: "Messages", bundle: "com.apple.MobileSMS", screen: [("Button", "Send")], action: ["tap": 1], reason: "sending a message (\"send\")"),
+            HeldStep(app: "Settings", bundle: "com.apple.Preferences", screen: [("SecureTextField", "Password")], action: ["type": "hunter2", "ref": 1], reason: "typing into a password field"),
+            HeldStep(app: "Phone", bundle: "com.apple.mobilephone", screen: [("Cell", "Mom, mobile")], action: ["tap": 1], reason: "a call (in Phone)"),
+        ]
+        for step in steps {
+            let mode = LockedBox(ApprovalMode.off)
+            let (core, wda) = await started(on: step, mode: mode)
+            let before = await send(step, core, wda)
+            XCTAssertFalse(before.asked, "\(step.app) with Never Ask: \(before.text)")
+            XCTAssertGreaterThan(before.sent, 0, "\(step.app) with Never Ask went ahead: \(before.text)")
+            for asking in [ApprovalMode.confirm, .reply] {
+                mode.value = asking
+                let after = await send(step, core, wda)
+                XCTAssertTrue(after.asked, "\(step.app) after turning on \(asking): \(after.text)")
+                XCTAssertEqual(after.sent, 0, "\(step.app) after turning on \(asking) sent input: \(after.text)")
+                XCTAssertEqual(after.reason, step.reason, "\(step.app) after turning on \(asking)")
+            }
+        }
+    }
+
+    /// The other way: Poki started asking, and the owner turns asking off while it runs. The next
+    /// message goes ahead with no request; a payment, a deletion and input in Wallet still wait.
+    func testAskingTurnedOffWhilePokiRunsLetsTheNextSendGoAndStillHoldsPaymentsDeletionsAndWallet() async {
+        let steps = [
+            (HeldStep(app: "Messages", bundle: "com.apple.MobileSMS", screen: [("Button", "Send")], action: ["tap": 1], reason: "sending a message (\"send\")"), stillAsks: false),
+            (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Pay")], action: ["tap": 1], reason: "a payment (\"pay\")"), stillAsks: true),
+            (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Delete")], action: ["tap": 1], reason: "deleting (\"delete\")"), stillAsks: true),
+            (HeldStep(app: "Wallet", bundle: "com.apple.Passbook", screen: [("Button", "Apple Card")], action: ["tap": 1], reason: "input in Wallet"), stillAsks: true),
+        ]
+        for (step, stillAsks) in steps {
+            let mode = LockedBox(ApprovalMode.confirm)
+            let (core, wda) = await started(on: step, mode: mode)
+            let asking = await send(step, core, wda)
+            XCTAssertTrue(asking.asked, "\(step.screen[0].1) while asking: \(asking.text)")
+            XCTAssertEqual(asking.reason, step.reason)
+            mode.value = .off
+            let off = await send(step, core, wda)
+            XCTAssertEqual(off.asked, stillAsks, "\(step.screen[0].1) after turning asking off: \(off.text)")
+            XCTAssertEqual(off.sent, stillAsks ? 0 : 1, "\(step.screen[0].1) after turning asking off: \(off.text)")
+            XCTAssertEqual(off.reason, stillAsks ? step.reason : nil)
+        }
     }
 
     func testTappingAContactInPhonePlacesNoCallWithoutTheOwner() async {
@@ -593,14 +827,15 @@ final class ApprovalTests: XCTestCase {
     func testInAMessagingAppReturnAfterTypingAsks() async {
         let composer = [("TextView", "Message")], list = [("SearchField", "Search"), ("Cell", "Mom")]
         // A tap on a conversation opens it: the search field's number belongs to the list read before,
-        // and the text goes to the composer.
+        // and the text goes to the composer. Typing by that number taps the old point first, on a
+        // screen not read yet, which asks as a tap there does.
         for (rows, actions): ([(String, String)], [JSON]) in [(composer, [["tap": 1], ["type": "on my way"], ["key": "return"]]), (composer, [["tap": 1], ["type": "on my way\n"]]),
                                                              (list, [["tap": 2], ["type": "on my way", "ref": 1], ["key": "return"]]), (list, [["tap": 2], ["type": "on my way\n", "ref": 1]])] {
             let (core, wda, _) = makeCore(messages("com.tencent.xin", rows))
             _ = await core.call("look", [:])
             let result = await core.call("do", ["actions": .array(actions)])
             XCTAssertTrue(result.text.contains("approval_required"), "\(actions): \(result.text)")
-            XCTAssertTrue(core.pendingApproval?.reason.hasPrefix("sending a message") == true, core.pendingApproval?.reason ?? "no request")
+            XCTAssertTrue(core.pendingApproval?.reason.contains("sending a message") == true, core.pendingApproval?.reason ?? "no request")
             XCTAssertFalse(wda.bodies("POST /wda/keys").contains { $0.serialized().contains("\\n") }, "\(actions): a return went out")
         }
         // Return in the app's search field searches: nothing is sent to anyone, whether the field was
@@ -675,6 +910,22 @@ final class MCPTests: XCTestCase {
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "look", "arguments": .object([:])]], session: session).body)
         XCTAssertEqual(call["result"]?["content"]?[1]?["type"], "image")
         XCTAssertEqual(call["result"]?["isError"], false)
+    }
+
+    func testFailedActionReturnsErrorAndRecoveryImageOverMCP() async throws {
+        let (core, wda, _) = makeCore()
+        let initialized = await post(core, ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["protocolVersion": "2025-06-18"]])
+        let session = try XCTUnwrap(initialized.headers["mcp-session-id"])
+        _ = await post(core, ["jsonrpc": "2.0", "method": "notifications/initialized"], session: session)
+        let response = await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": [
+            "name": "do", "arguments": ["actions": [["tap": 9999]]],
+        ]], session: session)
+        XCTAssertEqual(response.status, 200)
+        let result = try JSON.parse(response.body)["result"]
+        XCTAssertEqual(result?["isError"], true)
+        XCTAssertEqual(result?["content"]?[1]?["type"], "image")
+        XCTAssertTrue(result?["content"]?[0]?["text"]?.string?.contains("nothing was sent") == true)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
     }
 
     /// The app opens its session when an agent connects, so the first look does not pay for it.

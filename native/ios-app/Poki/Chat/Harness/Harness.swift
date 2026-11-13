@@ -2,6 +2,11 @@
 // - agent-system.md is agent/prompts/system.md (the same text as agent/prompts/pi-app.md, which
 //   agent/task-runner.mjs loads), except two sentences that named tools the app lacks: a locked phone
 //   is the owner's to unlock and a password prompt is handed to them, and a purchase is a plain tap;
+//   and, for ESP-465, the Return sentence names the type answer's read-back as the check before
+//   Return, an action's check lines (the send check after Return) count as evidence, and finish_task
+//   comes in the reply right after the observation that verifies the result; and a last paragraph on
+//   when a reply uses a Markdown table, which the chat draws as a table (the terminal and message
+//   channels the Mac agent answers in do not);
 // - the instructions put PokiCore's own MCP instructions first, as task-runner.mjs puts the MCP server's
 //   instructions first;
 // - look, do and status are PokiCore's tools with their MCP descriptions;
@@ -25,24 +30,30 @@ enum Harness {
         return text
     }()
 
-    static var instructions: String { [PokiCore.toolInstructions, system].joined(separator: "\n\n") }
+    static var instructions: String { [PokiCore.toolInstructions, system, WebTools.instructions].joined(separator: "\n\n") }
 
     /// The instructions for a task: the above, then the saved notes and the routines that fit it.
     @MainActor static func instructions(for task: String) -> String {
         let brief = PokiCore.memoryBrief(for: task)
         var parts = [instructions]
         // Poki learns the owner's repeated tasks: a saved routine runs them in one call next time.
-        parts.append("Before starting, check whether a saved routine covers this task (routines {action: \"list\"}) and run it with do {run: name} if so. When a task worked and was not a routine yet, save it with routines {action: \"save\", name, description} before finish_task, with a short name the owner would use, so it can be repeated next time.")
-        // Testing: a model decides approvals from what the owner said. A refused step goes through
-        // once the owner says yes to it, so the agent asks in words and tries again.
-        if ApprovalClassifier.isOn {
-            parts.append("Approvals here are decided automatically from what the owner said in this chat. When a step is refused (declined), do not tell the owner to tap anything: ask them in plain words whether they want that step done, and if they say yes, send the same step again.")
+        // The routines that fit are in the brief below, so the first call can be the routine itself:
+        // listing them first cost a whole model turn before anything happened on the phone. Poki is in
+        // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
+        // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
+        // step more; the save rides in the same reply instead of a turn before it.
+        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
+        // A model decides approvals from what the owner said. A refused step goes through once the
+        // owner says yes to it, so the agent asks in words and tries again.
+        if ApprovalClassifier.mode == .reply {
+            parts.append("Approvals here are decided from what the owner said in this chat. When a step is refused (declined), do not tell the owner to tap anything: ask them in plain words whether they want that step done, naming the step, and if they say yes, send the same step again.")
         }
         if !brief.isEmpty { parts.append(brief) }
         return parts.joined(separator: "\n\n")
     }
 
-    static let tools: [ToolSpec] = phoneTools + [reportPlan, finishTask]
+    /// Poki's own browser's tools (ESP-145) sit beside the phone's.
+    static let tools: [ToolSpec] = phoneTools + WebTools.specs + [reportPlan, finishTask]
 
     /// PokiCore's catalog: look, do and status.
     static let phoneTools: [ToolSpec] = {
@@ -60,8 +71,8 @@ enum Harness {
 
     static let reportPlan = ToolSpec(
         name: "report_plan",
-        description: "Publish a plan before phone actions. Update currentStep (1-based) on each step. title names the task.",
-        schema: object(["steps": ["type": "array", "items": string, "minItems": 1, "maxItems": 8], "currentStep": ["type": "integer", "minimum": 1, "maximum": 8], "title": string], ["steps", "currentStep"]))
+        description: "Publish a plan before actions. Update currentStep (1-based) on each step. title names the task in two to four words, as a heading in the user's language (\"Text Mom\", \"Order the usual\"), not the user's sentence; send it with the first plan. When the task sends a message to someone, to is that person as the user named them (\"Mom\"); leave it out otherwise.",
+        schema: object(["steps": ["type": "array", "items": string, "minItems": 1, "maxItems": 8], "currentStep": ["type": "integer", "minimum": 1, "maximum": 8], "title": string, "to": string], ["steps", "currentStep"]))
 
     static let finishTask = ToolSpec(
         name: "finish_task",

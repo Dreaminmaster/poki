@@ -467,7 +467,7 @@ class Run {
   async model_key() {
     const provider = this.opts.modelKey;
     if (!provider) return { skipped: 'not asked to give Poki a model key (pass --model-key openai to carry the Mac keychain item openai-api-key)' };
-    const typeIt = `ask the person to type the key in Poki: Agents > Accounts and Models`;
+    const typeIt = `ask the person to type the key in Poki: Settings > Models > Add Account`;
     const access = await this.access();
     if (!access) return { manual: true, skipped: `this Mac cannot reach Poki's files (this Poki Setup has no container commands and Xcode's devicectl is not installed); ${typeIt}` };
     const phone = phoneKey((await readHello(access)) ?? this.hello);

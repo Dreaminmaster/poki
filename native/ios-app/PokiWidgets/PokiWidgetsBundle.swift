@@ -18,30 +18,33 @@ struct PokiLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PokiActivityAttributes.self) { context in
             let face = context.face
-            LockScreenCard(face: face)
-                .activityBackgroundTint(ActivityTheme.current.lockBackground)
+            LockScreenCard(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
+                .environment(\.colorScheme, .dark)
+                // Outside the line above, where the system's own appearance can still be read: the flat
+                // colour that goes with the card's gradient, and light or dark handed down to the card.
+                .modifier(CardTint())
+                .activitySystemActionForegroundColor(.white)
                 .widgetURL(face.link)
         } dynamicIsland: { context in
             let face = context.face
-            let insets = ActivityMetrics.islandInsets
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face) }
-                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face) }
-                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face) }
+                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
+                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
+                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType) }
             } compactLeading: {
-                CompactLeading(face: face)
+                CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             } compactTrailing: {
-                CompactTrailing(face: face)
+                CompactTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             } minimal: {
-                MinimalView(face: face)
+                MinimalView(face: face).dynamicTypeSize(...ActivityMetrics.largestType)
             }
             .widgetURL(face.link)
-            // The outline takes the state's blue while the person is needed; otherwise the system's own.
-            .keylineTint(face.outlined ? ActivityTheme.current.approvalOutline : nil)
-            .contentMargins(.leading, insets.leading, for: .expanded)
-            .contentMargins(.trailing, insets.trailing, for: .expanded)
-            .contentMargins(.top, insets.top, for: .expanded)
-            .contentMargins(.bottom, insets.bottom, for: .expanded)
+            // Always Poki's blue; the system draws the outline only over a dark background, at its own width.
+            .keylineTint(ActivityTheme.current.outline)
+            // No margins: the bear stands on the island's own edge, and the views keep their distances.
+            .contentMargins(.all, 0, for: .expanded)
+            .contentMargins(.all, 0, for: .compactLeading)
+            .contentMargins(.all, 0, for: .minimal)
         }
     }
 }

@@ -18,9 +18,9 @@ final class LiveCore: CoreSession {
         var config = CoreConfig()
         // Signing tools may rename the app; its own id is Poki too.
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
-        // Sensitive steps wait for the owner unless they turned asking off in Agents › Approvals; the
-        // auto-classifier (Diagnostics › Testing) answers in their place when it is on.
-        config.sensitive.enabled = Self.asksBeforeSensitiveSteps || ApprovalClassifier.isOn
+        // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
+        // steps go; payments, deletions and guarded apps still wait.
+        config.approvalMode = { ApprovalClassifier.mode }
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation
@@ -30,10 +30,8 @@ final class LiveCore: CoreSession {
         core.onSession { signal in continuation.yield(.session(signal)) }
     }
 
-    /// Agents › Approvals › Ask Before Sensitive Steps. Read when Poki starts.
+    /// 0.3.1's Ask Before Sensitive Steps switch, which `ApprovalChoice.resolve` still reads.
     static let askKey = "approvals.ask"
-    /// On unless the owner turned it off: a phone that never chose asks.
-    static var asksBeforeSensitiveSteps: Bool { UserDefaults.standard.object(forKey: askKey) as? Bool ?? true }
 
     deinit { pump?.cancel() }
 
@@ -51,6 +49,7 @@ final class LiveCore: CoreSession {
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
     func callTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer { await core.callTool(name, arguments: arguments) }
+    func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
     func finishTask(switching: Bool = true) async -> String? { await core.finishTask(switching: switching) }

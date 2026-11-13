@@ -21,6 +21,19 @@ public struct SensitivityRules: Sendable, Equatable {
     public var enabled = true
     public init() {}
 
+    /// The rules a way of asking holds steps back by. Never asking lets typing a password, sending a
+    /// message and placing a call go ahead; payments, deletions and Wallet still wait for the owner.
+    public func asked(_ mode: ApprovalMode) -> SensitivityRules {
+        guard mode == .off else { return self }
+        var rules = self
+        rules.secureFields = false
+        rules.sending = []
+        rules.messagingApps = []
+        rules.calling = []
+        rules.callingApps = []
+        return rules
+    }
+
     static func matches(_ text: String, _ words: [String]) -> String? {
         let lowered = text.lowercased()
         for word in words {

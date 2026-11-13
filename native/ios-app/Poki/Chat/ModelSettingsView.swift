@@ -18,36 +18,102 @@ struct ModelSettingsView: View {
 
     var body: some View {
         List {
+            // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
+            Section {
+                InUseCard(add: { adding = true })
+            } header: {
+                Text("In Use").textCase(nil)
+            } footer: {
+                Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
+            }
+
+            Section {
+                NavigationLink(value: DetailsRoute.voice) {
+                    LabeledContent {
+                        Text(VoiceDirect.apiKey != nil || VoiceBridge.saved != nil ? "Live Voice" : "Dictation Only")
+                    } label: {
+                        SettingsLabel("Voice", systemImage: "waveform")
+                    }
+                }
+                .accessibilityIdentifier("details.voice")
+            }
+
+            // With no account yet the card above has Add Account, and an empty group would only be a heading.
+            if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
             Section {
                 ForEach(ModelProvider.allCases.filter(ModelAccounts.isSetUp)) { provider in
                     NavigationLink { AccountDetail(provider: provider) } label: { AccountRow(provider: provider) }
                 }
                 Button("Add Account", systemImage: "plus") { adding = true }
             } header: {
-                Text("Accounts")
+                Text("Accounts").textCase(nil)
             } footer: {
                 Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
             }
-
-            Section {
-                LabeledContent("Text Chat", value: ModelKeys.hasUsableKey ? "\(ModelKeys.selectedProvider.name), \(ModelKeys.selectedModelName)" : String(localized: "No Account"))
-                LabeledContent("Live Voice", value: VoiceDirect.apiKey != nil ? String(localized: "OpenAI") : String(localized: "No Account"))
-                LabeledContent("Dictation", value: String(localized: "On This iPhone"))
-            } header: {
-                Text("In Use")
-            } footer: {
-                Text("Open an account to choose what it is used for. Dictation in the message field needs no account.")
             }
-
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
         .background { Color.clear.accessibilityHidden(true).id(version) }
         .listStyle(.insetGrouped)
-        .navigationTitle("Accounts")
+        .listSectionSpacing(16)
+        .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
+    }
+}
+
+/// What runs now: the chat's model and its account, what the text chat, live voice and dictation each
+/// use (main's In Use rows), and Add Account while there is none. The chat model is changed on Poki's
+/// card, its one place.
+private struct InUseCard: View {
+    var add: () -> Void
+
+    var body: some View {
+        let has = ModelKeys.hasUsableKey
+        let provider = ModelKeys.selectedProvider
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                if has { ProviderTile(provider: provider, size: 44) } else { SettingsIcon(symbol: "sparkles", warns: true, size: 44) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: has ? ModelKeys.selectedModelName : String(localized: "No Account"))
+                        .font(.title3.weight(.semibold)).foregroundStyle(Color(.label))
+                    if has { Text(verbatim: provider.name).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { uses(has: has, provider: provider) }
+                VStack(alignment: .leading, spacing: 6) { uses(has: has, provider: provider) }
+            }
+            if !has {
+                SettingsPill(title: "Add Account", symbol: "plus", prominent: true, action: add)
+                    .accessibilityIdentifier("model.inUse.action")
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder private func uses(has: Bool, provider: ModelProvider) -> some View {
+        chip("Text Chat", has ? provider.name : String(localized: "No Account"))
+        chip("Live Voice", VoiceDirect.apiKey != nil ? String(localized: "OpenAI") : String(localized: "No Account"))
+        chip("Dictation", String(localized: "On This iPhone"))
+    }
+
+    private func chip(_ title: LocalizedStringKey, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption).foregroundStyle(Color(.secondaryLabel))
+            Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Color(.label))
+        }
+        .lineLimit(1)
+        // A chip never gets less than its words need: the row gives a long value (Dictation's
+        // "On This iPhone") its width from the shorter ones, and stacks the chips when they can't all fit.
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Tint.blueSoft.opacity(0.6), in: .rect(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -119,13 +185,13 @@ private struct AccountDetail: View {
                 NavigationLink { TextChatFeature(provider: provider) } label: {
                     LabeledContent {
                         Text(ModelKeys.selectedProvider == provider ? ModelKeys.selectedModelName : ModelAccounts.canChat(provider) ? String(localized: "Off") : String(localized: "Not Supported"))
-                    } label: { Label("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
+                    } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
                 }
                 .disabled(!ModelAccounts.canChat(provider))
                 NavigationLink { LiveVoiceFeature() } label: {
                     LabeledContent {
                         Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.enabled ? VoiceDirect.model : String(localized: "Off")) : String(localized: "Not Supported"))
-                    } label: { Label("Live Voice", systemImage: "waveform") }
+                    } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
                 }
                 .disabled(!ModelAccounts.canTalkLive(provider))
             } header: {
@@ -160,8 +226,7 @@ private struct AccountDetail: View {
     }
 }
 
-/// Account › Text Chat: whether this account runs the chat, its model, and which of its models the
-/// chat's model menu offers.
+/// Account › Text Chat: which of its models Poki's card offers. Which one answers is chosen on the card.
 private struct TextChatFeature: View {
     var provider: ModelProvider
     @State private var version = ModelKeys.saved
@@ -170,21 +235,6 @@ private struct TextChatFeature: View {
 
     var body: some View {
         Form {
-            Section {
-                Toggle("Use for Text Chat", isOn: Binding(get: { ModelKeys.selectedProvider == provider }, set: { on in
-                    if on { ModelKeys.selectedProvider = provider }
-                    else if let other = ModelProvider.allCases.first(where: { $0 != provider && ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
-                        ModelKeys.selectedProvider = other
-                    }
-                }))
-                if ModelKeys.selectedProvider == provider {
-                    Picker("Chat Model", selection: Binding(get: { ModelKeys.selectedModel }, set: { ModelKeys.selectedModel = $0; ModelKeys.saved += 1 })) {
-                        ForEach(ModelCatalog.available(provider)) { Text($0.name).tag($0.id) }
-                    }
-                }
-            } footer: {
-                Text("Only one account runs the text chat at a time.")
-            }
             Section {
                 ForEach(ModelCatalog.all(provider)) { choice in
                     Toggle(isOn: Binding(get: { ModelCatalog.enabled(provider).contains(choice.id) }, set: { ModelCatalog.set(choice.id, on: $0, for: provider) })) {
@@ -259,7 +309,7 @@ private struct LiveVoiceFeature: View {
 
 /// Add Account: the account types, each with how it connects; choosing one opens its key, address or
 /// sign-in.
-private struct AddAccount: View {
+struct AddAccount: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: ModelProvider?
     @State private var signingIn = false
@@ -302,14 +352,19 @@ private struct AddAccount: View {
 }
 
 /// Entering, replacing or removing one provider's key. The field is secure and the key is never shown
-/// again after it is saved.
-private struct KeyEntry: View {
+/// again after it is saved. Test Connection sends one small request with what is on the page (the typed
+/// key, or the saved one when the field is empty); Save tests too and keeps the page open on a failure,
+/// saved all the same.
+struct KeyEntry: View {
     @Environment(\.dismiss) private var dismiss
     var provider: ModelProvider
     @State private var key = ""
     @State private var url = ModelKeys.customURL
     @State private var modelID = ModelKeys.customModel
     @State private var failed = false
+    @State private var testing = false
+    @State private var result: ConnectionCheck.Result?
+    @State private var saved = false
 
     var body: some View {
         NavigationStack {
@@ -334,6 +389,34 @@ private struct KeyEntry: View {
                     }
                 }
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
+                if provider.wired {
+                    Section {
+                        Button(action: test) {
+                            HStack {
+                                Text(testing ? "Testing…" : "Test Connection")
+                                Spacer()
+                                if testing { ProgressView() }
+                            }
+                        }
+                        .disabled(testing || testKey == nil)
+                        .accessibilityIdentifier("keyEntry.test")
+                    } footer: {
+                        if let result, !testing {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label {
+                                    Text(result.words)
+                                } icon: {
+                                    Image(systemName: result.passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                }
+                                .foregroundStyle(result.passed ? Color(.systemGreen) : Color(.systemOrange))
+                                if let detail = result.detail { Text(verbatim: detail) }
+                                if saved, !result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("keyEntry.result")
+                        }
+                    }
+                }
                 if ModelKeys.hasKey(provider) {
                     Section { Button("Remove Key", role: .destructive) { ModelKeys.remove(provider); dismiss() } }
                 }
@@ -341,8 +424,39 @@ private struct KeyEntry: View {
             .navigationTitle(Text(verbatim: provider.name))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave) }
+                ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave || testing) }
+            }
+        }
+    }
+
+    /// The key a test sends: the one typed, else the saved one. A custom endpoint may have none, but
+    /// needs an address and a model.
+    private var testKey: String? {
+        let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if provider == .custom {
+            let ready = URL(string: url.trimmingCharacters(in: .whitespaces))?.scheme?.hasPrefix("http") == true && !modelID.trimmingCharacters(in: .whitespaces).isEmpty
+            return ready ? (typed.isEmpty ? ModelKeys.key(provider) ?? "" : typed) : nil
+        }
+        return typed.isEmpty ? ModelKeys.key(provider) : typed
+    }
+
+    private func test() {
+        guard let testKey else { return }
+        check(testKey, closeIfPassed: false)
+    }
+
+    private func check(_ key: String, closeIfPassed: Bool) {
+        testing = true
+        result = nil
+        let (url, modelID) = (url, modelID)
+        Task {
+            let outcome = await ConnectionCheck.run(provider, key: key, customURL: url, modelID: modelID)
+            result = outcome
+            testing = false
+            if closeIfPassed, outcome.passed {
+                try? await Task.sleep(for: .milliseconds(900))
+                dismiss()
             }
         }
     }
@@ -352,6 +466,7 @@ private struct KeyEntry: View {
     }
 
     private func save() {
+        let tested = testKey
         do {
             if provider == .custom {
                 ModelKeys.customURL = url.trimmingCharacters(in: .whitespaces)
@@ -368,7 +483,9 @@ private struct KeyEntry: View {
                 Task { _ = try? await ModelCatalog.refresh(provider) }
             }
             key = ""
-            dismiss()
+            saved = true
+            // Tested once saved; a failure keeps the page open with the result, the key saved all the same.
+            if provider.wired, let tested { check(tested, closeIfPassed: true) } else { dismiss() }
         } catch {
             failed = true
         }

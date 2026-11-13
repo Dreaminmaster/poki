@@ -1,38 +1,84 @@
 import Foundation
 import PiSwiftAI
+import PokiCore
 
-/// Testing only (Diagnostics → Approvals, off by default): a step PokiCore's rules would ask the owner
-/// about is put to the chat model instead, out of sight. The model gets the step and what the owner
-/// said in the chat and the live call, and answers allow or refuse; nothing is shown to tap. A refusal
-/// stands until the owner says yes in the chat or the call: the agent asks, the owner answers, and the
-/// next try is read with that answer in it. A tap anywhere is not taken as the owner's intent.
+/// Agents › Approvals. A step PokiCore's rules hold back (a payment, a message, a delete) is answered
+/// one of three ways, by the two selectors there:
+/// - Sensitivity Permissive, Balanced or Strict: in Poki's own chat and live call the chat model checks
+///   the step against what the owner said, and allows it or not (auto-approval). The chat shows the
+///   decision on a card and the Activity Log keeps it.
+/// - A step the model did not allow, and every step at Ask All, is the owner's: With Message
+///   Reply, the step is refused and the agent asks in words, and the owner's yes in the chat (or in the
+///   notification's reply field) lets the next try through; With Confirmation, an Allow / Don't Allow
+///   card, on the Live Activity, in a notification or in the chat.
+/// - An outside agent's step is always a confirmation: nothing the owner said is there to judge it by,
+///   and there is no chat to answer in. The same with no chat model set up.
+/// A tap anywhere is not taken as the owner's intent.
 @MainActor
 enum ApprovalClassifier {
-    nonisolated static let onKey = "approvals.classifier"
-    nonisolated static let levelKey = "approvals.classifier.level"
-    /// Read once: PokiCore's rules are set up from it when Poki starts.
-    nonisolated static let isOn = UserDefaults.standard.bool(forKey: onKey)
-    static let deadline: Double = 12
+    nonisolated static let onKey = ApprovalChoice.classifierKey
+    nonisolated static let levelKey = ApprovalChoice.levelKey
+    nonisolated static let modeKey = ApprovalChoice.modeKey
 
-    enum Level: String, CaseIterable, Identifiable {
-        case strict, balanced, permissive
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .strict: String(localized: "Strict")
-            case .balanced: String(localized: "Balanced")
-            case .permissive: String(localized: "Permissive")
-            }
-        }
-        static var saved: Level { Level(rawValue: UserDefaults.standard.string(forKey: levelKey) ?? "") ?? .balanced }
-        var rule: String {
-            switch self {
-            case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."
-            case .balanced: "ALLOW if the action directly serves what the owner asked for in this conversation. REFUSE if it is unrelated, goes further than the request, or the owner said no."
-            case .permissive: "ALLOW unless the action is clearly unrelated to what the owner asked, or the owner said no or not to do it."
-            }
-        }
+    /// How optional approvals are answered. Mandatory approvals always go to the owner.
+    typealias Mode = ApprovalMode
+    typealias Level = ApprovalLevel
+
+    /// The saved choice; before there was one, what 752's two switches did (`ApprovalChoice.resolve`).
+    nonisolated static var mode: Mode { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).mode }
+
+    /// A chat model with a key: without one there is nobody to ask.
+    static var hasModel: Bool {
+        let provider = ModelKeys.selectedProvider
+        return provider.wired && (ModelKeys.key(provider) != nil || provider == .custom) && provider.piModel(ModelKeys.selectedModel) != nil
     }
+
+    /// Who answers an approval first.
+    enum Route: Equatable {
+        /// Asking is off.
+        case allow
+        /// The chat model; `reply`: its no is final and the agent asks in words, else the owner gets a card.
+        case model(reply: Bool)
+        /// The owner, on a card.
+        case owner
+    }
+
+    /// Settled once per approval, when it is first asked, so the app and the chat read the same answer.
+    private static var routes: [String: Route] = [:]
+    /// Approvals the model did not allow that went on to the owner's card.
+    private(set) static var handed: Set<String> = []
+
+    static func route(_ approval: PendingApproval, voiceOn: Bool) -> Route {
+        if let known = routes[approval.id] { return known }
+        let mode = Self.mode
+        let own = AskPoki.chat?.running == true || voiceOn
+        let reply = mode == .reply && own
+        let route: Route
+        if requiresOwner(approval) { route = .owner }
+        else if mode == .off { route = .allow }
+        else if own, hasModel, reply || Level.saved != .everything { route = .model(reply: reply) }
+        else { route = .owner }
+        if routes.count > 200 { routes.removeAll(); handed.removeAll() }
+        routes[approval.id] = route
+        return route
+    }
+
+    static func requiresOwner(_ approval: PendingApproval) -> Bool {
+        let reason = approval.reason
+        if reason.hasPrefix("sending a message (a tap in ") { return true }
+        return !reason.hasPrefix("sending a message") && !reason.hasPrefix("a call (") &&
+            reason != "typing into a password field" && reason != "submitting a password field"
+    }
+
+    static func handToOwner(_ id: String) { handed.insert(id) }
+
+    /// The model's answer stood for this approval (it was not passed on to the owner).
+    static func modelAnswered(_ id: String) -> Bool {
+        if case .model = routes[id], !handed.contains(id) { return verdicts[id] != nil }
+        return false
+    }
+
+    static let deadline: Double = 12
 
     struct Verdict { let allowed: Bool; let reason: String }
 
@@ -97,6 +143,38 @@ enum ApprovalClassifier {
         return Verdict(allowed: allowed, reason: why.isEmpty ? (allowed ? "allowed" : "refused") : String(why.prefix(120)))
     }
 
+}
+
+extension ApprovalMode {
+    var title: String {
+        switch self {
+        case .reply: String(localized: "With Message Reply")
+        case .confirm: String(localized: "With Confirmation")
+        case .off: String(localized: "Never Ask")
+        }
+    }
+}
+
+extension ApprovalLevel {
+    var title: String {
+        switch self {
+        case .strict: String(localized: "Strict")
+        case .balanced: String(localized: "Balanced")
+        case .permissive: String(localized: "Permissive")
+        case .everything: String(localized: "Ask All")
+        }
+    }
+    /// The saved sensitivity (`ApprovalChoice.resolve`).
+    static var saved: ApprovalLevel { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).level }
+    var rule: String {
+        switch self {
+        case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."
+        case .balanced: "ALLOW if the action directly serves what the owner asked for in this conversation. REFUSE if it is unrelated, goes further than the request, or the owner said no."
+        case .permissive: "ALLOW unless the action is clearly unrelated to what the owner asked, or the owner said no or not to do it."
+        // No auto-approval: only the owner's own yes to this step lets it through.
+        case .everything: "ALLOW only if the owner answered yes to a question about this exact step in this conversation. Their original request alone is never enough. Otherwise REFUSE."
+        }
+    }
 }
 
 /// Resumes a continuation once.

@@ -36,7 +36,7 @@ Install Poki on my iPhone from https://github.com/JosssphZhou/poki
 
 The agent follows the [install-poki skill](skills/install-poki/SKILL.md) and runs `bin/install-iphone.mjs`, which does every step it can by itself. You only do what iOS asks of you: type your Apple Account into a Poki Setup window on the Mac, tap Trust and turn on Developer Mode on the iPhone, trust the developer, and open Poki. When Poki first opens it asks for Automation Mode: tap Continue and enter the iPhone passcode. If you cancel, turn Poki on again to be asked again. The agent tells you each one in a sentence when it comes up. A free Apple Account works.
 
-Requires macOS 14+, Node.js 24+, iOS 18+, a USB data cable, an Apple Account, and a compatible VPN/proxy app on the iPhone that routes 10.7.0.1 back to it, such as Karing or Shadowrocket configured through Poki's Setup instructions. On iOS 27 and later Poki controls the iPhone through its native services by default. On iOS 18 to 26 it uses the XCTest session instead, as Alpha 0.2.9 did; this release was not tested on a physical iPhone below iOS 27. Xcode is not required. Free Apple Account signing lasts 7 days and needs renewal. Enable UI Automation in the iPhone's Developer settings and configure model access in Poki. With an older Poki Setup and no Xcode, the agent asks you to finish model-key and connection setup manually and reports those checks as unverified until you confirm them.
+Requires macOS 14+, Node.js 24+, iOS 18+, a USB data cable, an Apple Account, and a VPN app on the iPhone that routes 10.7.0.1 back to it. The free LocalDevVPN from the App Store works, and so do Karing and Shadowrocket set up through Poki's Setup instructions. On iOS 27 and later Poki controls the iPhone through its native services by default. On iOS 18 to 26 it uses the XCTest session instead, as Alpha 0.2.9 did; this release was not tested on a physical iPhone below iOS 27. Xcode is not required. Free Apple Account signing lasts 7 days and needs renewal. Enable UI Automation in the iPhone's Developer settings. Poki also needs your own model account. Signing in with a ChatGPT Plus or Pro plan is the easiest start; you can also paste an API key from Anthropic, OpenAI, Gemini, DeepSeek or OpenRouter, or use your own OpenAI-compatible server. A Claude subscription cannot sign in, so use an Anthropic API key instead. With an older Poki Setup and no Xcode, the agent asks you to finish model-key and connection setup manually and reports those checks as unverified until you confirm them.
 
 No Node.js 24, or on Windows? The same prompt works once Poki Setup is installed: the agent then uses the command line tool inside Poki Setup. Poki Setup's own menu also copies a prompt for your agent (Poki > Copy Prompt for Your Agent on a Mac, Settings > Use an agent on Windows).
 
@@ -262,9 +262,11 @@ Poki is provided "as is", without warranty, as set out in the AGPL-3.0 license.
 
 ## License
 
-Poki is open source under the [AGPL-3.0-only license](LICENSE).
+Poki's code is open source under the [AGPL-3.0-only license](LICENSE).
 
-Copyright (c) 2026 Joseph Zhou and contributors. Open-source dependencies retain their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The Poki bear, the app icon and Poki's other artwork are not covered by that license. You can use screenshots to write about Poki; a fork needs its own name and artwork. See [BRAND.md](BRAND.md).
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Open-source dependencies and third-party assets retain their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Acknowledgments
 

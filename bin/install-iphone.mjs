@@ -11,6 +11,7 @@ import { diagnose, issueDraft, readRun } from '../src/install/report.mjs';
 import { codeCommand, defaultStateDir, manifest, run } from '../src/install/run.mjs';
 import { PROVIDERS } from '../src/install/model-key.mjs';
 import { readRecords } from '../src/install/records.mjs';
+import { updateOnly, updateResult } from '../src/install/update.mjs';
 
 const usage = `Usage: node bin/install-iphone.mjs <command> [options]
 
@@ -29,6 +30,7 @@ Commands:
   steps               Print the steps, who does each one, and the error codes.
 
 Options:
+  --update-only       Update an existing Poki without changing its configuration (alone or with run).
   --channel <name>    stable, beta, alpha (default) or pre-alpha.
   --udid <udid>       The iPhone to use when several are plugged in.
   --dry-run           Download and check the real Poki Setup, start its real helper, then simulate the
@@ -48,7 +50,8 @@ Options:
   --bundle <id>       records only: Poki's bundle id, when iOS does not list it as Poki.
   --no-device         diagnose only: do not ask usbmuxd, devicectl or Bonjour about devices.
 
-Exit codes: 0 done, 1 bad usage, 2 a step failed (see the code), 3 a person step is still open (run again).`;
+Exit codes: 0 done, 1 bad usage, 2 a step failed (see the code), 3 a person step is still open (run again).
+Update-only: 0 verified update, 2 stopped before installation, 3 installation failed, 4 readback failed.`;
 
 // Node 24 or later (package.json engines). An older Node fails later in a step that has nothing to
 // do with it, so it is named here, with the way around it: Poki Setup's own command line tool.
@@ -60,37 +63,54 @@ if (Number(process.versions.node.split('.')[0]) < 24 && process.env.POKI_INSTALL
   process.exit(2);
 }
 
-const { values: opts, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    channel: { type: 'string', default: 'alpha' },
-    udid: { type: 'string' },
-    'dry-run': { type: 'boolean', default: false },
-    json: { type: 'boolean', default: false },
-    state: { type: 'string' },
-    'setup-home': { type: 'string' },
-    bridge: { type: 'string' },
-    'app-dir': { type: 'string' },
-    reinstall: { type: 'boolean', default: false },
-    'model-key': { type: 'string' },
-    'model-key-item': { type: 'string' },
-    'no-device': { type: 'boolean', default: false },
-    out: { type: 'string' },
-    bundle: { type: 'string' },
-    version: { type: 'boolean', short: 'v', default: false },
-    help: { type: 'boolean', short: 'h', default: false },
-  },
-});
+let parsed;
+try {
+  parsed = parseArgs({
+    allowPositionals: true,
+    options: {
+      channel: { type: 'string' },
+      'update-only': { type: 'boolean', default: false },
+      udid: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
+      json: { type: 'boolean', default: false },
+      state: { type: 'string' },
+      'setup-home': { type: 'string' },
+      bridge: { type: 'string' },
+      'app-dir': { type: 'string' },
+      reinstall: { type: 'boolean', default: false },
+      'model-key': { type: 'string' },
+      'model-key-item': { type: 'string' },
+      'no-device': { type: 'boolean', default: false },
+      out: { type: 'string' },
+      bundle: { type: 'string' },
+      version: { type: 'boolean', short: 'v', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
+    },
+  });
+} catch (error) {
+  if (process.argv.includes('--update-only')) {
+    updateResult(false, 'update_options_conflict', 'Update-only cannot change configuration; remove the conflicting options and retry the same update-only command.');
+    process.exit(2);
+  }
+  throw error;
+}
+const { values: opts, positionals } = parsed;
 if (opts.version) {
   console.log(`Poki installer ${installerLabel(await installerVersion())}`);
   process.exit(0);
 }
 const [command, arg] = positionals;
+if (opts['update-only'] && !opts.help &&
+    (positionals.length > 1 || (command && command !== 'run') ||
+     ['channel', 'model-key', 'model-key-item', 'out', 'bundle'].some(key => opts[key] !== undefined) || opts.reinstall || opts['no-device'])) {
+  updateResult(false, 'update_options_conflict', 'Update-only cannot change configuration; remove the conflicting options and retry the same update-only command.');
+  process.exit(2);
+}
 const dryRun = opts['dry-run'];
 const state = resolve(opts.state ?? join(defaultStateDir(), dryRun ? 'dry-run' : ''));
 const appDir = opts['app-dir'] ? resolve(opts['app-dir']) : dryRun ? join(state, 'app') : undefined;
 const setupHome = opts['setup-home'] ? resolve(opts['setup-home']) : dryRun ? join(state, 'setup-home') : undefined;
-await mkdir(join(state, 'inbox'), { recursive: true });
+if (!opts['update-only']) await mkdir(join(state, 'inbox'), { recursive: true });
 
 // The Apple code is single-use but still a credential: it is read from a hidden prompt or stdin,
 // never from argv, where ps and shell history would show it.
@@ -130,10 +150,13 @@ async function bridgePath() {
   return findSetupBridge({ recorded: (await readRun(state))?.setup_bridge, into: appDir });
 }
 
-switch (opts.help ? 'help' : command) {
+switch (opts.help ? 'help' : opts['update-only'] ? 'update-only' : command) {
+  case 'update-only':
+    process.exitCode = await updateOnly({ bridgePath, setupHome, udid: opts.udid, json: opts.json, dryRun });
+    break;
   case 'run':
     if (opts['model-key'] !== undefined && !PROVIDERS.includes(opts['model-key'])) { console.error(`--model-key is one of ${PROVIDERS.join(', ')}.`); process.exitCode = 1; break; }
-    process.exitCode = await run({ modelKey: opts['model-key'], modelKeyItem: opts['model-key-item'], state, setupHome, channel: opts.channel, udid: opts.udid, dryRun, json: opts.json, bridge: opts.bridge && resolve(opts.bridge), appDir, reinstall: opts.reinstall });
+    process.exitCode = await run({ modelKey: opts['model-key'], modelKeyItem: opts['model-key-item'], state, setupHome, channel: opts.channel ?? 'alpha', udid: opts.udid, dryRun, json: opts.json, bridge: opts.bridge && resolve(opts.bridge), appDir, reinstall: opts.reinstall });
     break;
   case 'code':
     if (arg !== undefined) { console.error(`Do not put the Apple code on the command line. Run: ${codeCommand(state)} (and type it at the hidden prompt).`); process.exitCode = 1; break; }

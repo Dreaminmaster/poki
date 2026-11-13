@@ -26,7 +26,7 @@
 
 ## 빠른 시작
 
-**iPhone에 Poki App 설치하기.** [Alpha 릴리스](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)에서 Poki Setup을 다운로드하고 창의 안내를 따르세요. 자세한 내용은 [iPhone 설치 안내](README.md#poki-on-your-iphone)를 참고하세요.
+**iPhone에 Poki App 설치하기.** [Alpha 릴리스](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)에서 Poki Setup을 다운로드하고 창의 안내를 따르세요. 자세한 내용은 [iPhone 설치 안내](README.md#poki-on-your-iphone)를 참고하세요. iPhone에는 10.7.0.1을 기기 자신으로 되돌리는 VPN 앱도 필요합니다. App Store의 무료 앱 LocalDevVPN이면 됩니다. 모델 계정은 직접 준비해야 합니다. ChatGPT Plus 또는 Pro 요금제로 로그인하는 것이 가장 간편하며, Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter의 API 키를 붙여 넣거나 OpenAI 호환 자체 서버를 사용할 수도 있습니다. Claude 구독으로는 로그인할 수 없으니 Anthropic API 키를 사용하세요.
 
 **에이전트에게 설치를 맡기세요.** 아래 내용을 복사해 에이전트에게 전달하세요:
 
@@ -244,9 +244,11 @@ Poki는 AGPL-3.0 라이선스에 명시된 대로 어떠한 보증도 없이 "�
 
 ## 라이선스
 
-Poki는 [AGPL-3.0-only 라이선스](LICENSE)에 따라 공개된 오픈소스입니다.
+Poki의 코드는 [AGPL-3.0-only 라이선스](LICENSE)에 따라 공개된 오픈소스입니다.
 
-Copyright (c) 2026 Joseph Zhou and contributors. 오픈소스 의존성은 각자의 라이선스를 따릅니다. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요. 기여하려면 [CONTRIBUTING.md](CONTRIBUTING.md)를 읽어 보세요.
+Poki 곰, 앱 아이콘과 Poki의 다른 아트워크는 이 라이선스에 포함되지 않습니다. Poki를 소개할 때 스크린샷은 사용할 수 있지만, 포크는 자체 이름과 아트워크를 사용해야 합니다. 자세한 내용은 [BRAND.md](BRAND.md)를 참고하세요.
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. 오픈소스 의존성과 서드파티 에셋은 각자의 라이선스를 따릅니다. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요. 기여하려면 [CONTRIBUTING.md](CONTRIBUTING.md)를 읽어 보세요.
 
 ## 감사의 말
 

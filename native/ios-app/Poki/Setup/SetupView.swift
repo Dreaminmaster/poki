@@ -51,10 +51,11 @@ struct SetupView: View {
         .onChange(of: checkedByPhone) { was, now in
             if !was, now, step != .loopback { advanceSoon() }
         }
-        // The loopback moves on when it comes on while this page is open, and when the first check after
-        // opening finds it already on (a proxy app set up before Poki: the page opened on `checking`).
-        .onChange(of: model.loopback.state) { was, now in
-            if step == .loopback, !was.isWorking, model.loopback.isWorking { advanceSoon() }
+        // The loopback moves on when it comes on while this page is open, when the first check after
+        // opening finds it already on (a proxy app set up before Poki: the page opened on `checking`),
+        // and when Poki's own session opens without it (ESP-448).
+        .onChange(of: model.isDone(.loopback)) { was, now in
+            if step == .loopback, !was, now { advanceSoon() }
         }
         .onAppear { model.loopback.resume(); reconnectBuiltIn() }
         .onChange(of: step) { _, now in if now == .loopback { reconnectBuiltIn() } }
@@ -176,7 +177,17 @@ extension SetupStep {
 /// Opens Settings with the step in the Live Activity.
 @MainActor func openSettings(_ model: AppModel, for step: SetupStep?) {
     if let step { model.guide(step) }
-    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+    if let url = settingsURL(for: step) { UIApplication.shared.open(url) }
+}
+
+func settingsURL(for step: SetupStep?) -> URL? {
+    // 系统配置步骤打开设置首页；后台权限等步骤仍打开 Poki 的 App 权限页。
+    switch step {
+    case .runner?, .developerMode?, .pairing?, .automation?:
+        return URL(string: "App-prefs:")
+    default:
+        return URL(string: UIApplication.openSettingsURLString)
+    }
 }
 
 private struct InstructionsCard: View {
@@ -281,19 +292,25 @@ private struct LoopbackPage: View {
 
     var body: some View {
         let monitor = model.loopback
+        let localReady = model.hasOpenInProcessSession && !monitor.isWorking
+        let detail = LocalizedStringKey(monitor.detail)
         Section {
             LabeledContent {
-                if monitor.state == .checking { ProgressView() }
+                if monitor.state == .checking && !localReady { ProgressView() }
             } label: {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(headline(monitor))
-                        Text(monitor.isWorking || monitor.state == .noAnswer ? LocalizedStringKey(monitor.detail) : "Checking 10.7.0.1 every few seconds…")
+                        Text(localReady ? "Local automation ready" : headline(monitor))
+                        Text(localReady && monitor.state != .checking ? "The network loopback is unavailable." : detail)
                             .font(.footnote).foregroundStyle(Color(.secondaryLabel))
                     }
                 } icon: {
-                    Image(systemName: monitor.isWorking ? "checkmark.circle.fill" : monitor.state == .noAnswer ? "exclamationmark.triangle.fill" : "circle.dashed")
-                        .foregroundStyle(monitor.isWorking ? Color.green : monitor.state == .noAnswer ? Color.orange : Color.secondary)
+                    if localReady {
+                        Image(systemName: "iphone").foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: monitor.isWorking ? "checkmark.circle.fill" : monitor.state == .noAnswer ? "exclamationmark.triangle.fill" : "circle.dashed")
+                            .foregroundStyle(monitor.isWorking ? Color.green : monitor.state == .noAnswer ? Color.orange : Color.secondary)
+                    }
                 }
             }
         } header: {
@@ -306,14 +323,15 @@ private struct LoopbackPage: View {
 
         // The external app is the way (ESP-168): every app's steps can be read at any time.
         Section {
+            // The free one first: a new person usually has no proxy app.
+            NavigationLink { LocalDevVPNPage() } label: { proxyLabel("LocalDevVPN", id: "localdevvpn", installed: false, sub: "Free on the App Store") }
             ForEach(ProxyApps.all) { app in
                 NavigationLink { ProxyAppPage(app: app) } label: { proxyLabel(app.name, id: app.id, installed: app.isInstalled) }
             }
-            NavigationLink { LocalDevVPNPage() } label: { proxyLabel("LocalDevVPN", id: "localdevvpn", installed: false, sub: "Free on the App Store") }
         } header: {
             Text("Use Your Proxy App")
         } footer: {
-            if let chosen = model.setup.proxyApp, !monitor.isWorking, model.setup.loopback == .proxy {
+            if let chosen = model.setup.proxyApp, !monitor.isWorking, !localReady, model.setup.loopback == .proxy {
                 let name = ProxyApps.all.first { $0.id == chosen }?.name ?? "LocalDevVPN"
                 Text("\(name) is chosen, but nothing answers at 10.7.0.1 right now. Open \(name), make sure it is connected with the loopback on, then come back; this page updates by itself.")
             }
@@ -387,7 +405,8 @@ private struct LoopbackPage: View {
         switch monitor.state {
         case .working: "Loopback Is On"
         case .noAnswer: "Tunnel On, No Answer"
-        default: "Not On Yet"
+        case .checking: "Checking…"
+        case .off: "Off"
         }
     }
 }
@@ -469,7 +488,7 @@ private struct LoopbackStatusRow: View {
     var body: some View {
         let working = model.loopback.isWorking
         LabeledContent("Loopback") {
-            Text(working ? "Working" : model.loopback.state == .noAnswer ? "No Answer" : "Checking…")
+            Text(model.loopback.text)
                 .foregroundStyle(working ? Color.green : Color.secondary)
         }
         .onAppear { model.loopback.resume() }
@@ -550,7 +569,7 @@ private struct PairingPage: View {
             } else if SetupStep.onDevicePairing {
                 Section("How To") {
                     Label("Connect to Wi‑Fi and tap **Start Pairing**. Allow local network access when prompted.", systemImage: "1.circle")
-                    Label("Poki will open Settings. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle")
+                    Label("Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle")
                     Label("Enter the code shown here and on the Lock Screen.", systemImage: "3.circle")
                 }
             } else {
@@ -697,7 +716,9 @@ struct SetupStepRow: View {
     var body: some View {
         let done = model.isDone(step)
         LabeledContent {
-            if done {
+            if step == .loopback && !model.loopback.isWorking && model.hasOpenInProcessSession {
+                Text("Local automation ready").foregroundStyle(.secondary)
+            } else if done {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel(Text("Done"))
             } else {
                 Text(problem).foregroundStyle(.orange)
