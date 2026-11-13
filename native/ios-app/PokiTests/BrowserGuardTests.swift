@@ -17,6 +17,42 @@ final class BrowserGuardTests: XCTestCase {
         PokiBrowser.shared.close()
     }
 
+    func testWikipediaTaskKeepsPhoneAutomationOff() async throws {
+        let pages = try PageServer(pages: ["/": "<html><title>On this day</title><body>Public history page</body></html>"])
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["用维基百科搜一下历史上的今天"], "currentStep": 1]),
+            FakeCompletions.tool("web_open", ["url": "http://127.0.0.1:\(pages.port)/"]),
+            FakeCompletions.tool("status", [:]),
+            FakeCompletions.tool("routines", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": []]),
+            FakeCompletions.text("The public history page is ready."),
+        ])
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let previous = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, previous) { UserDefaults.standard.set(value, forKey: key) } }
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
+        let connection = app.setup.loopback
+        app.setup.loopback = .proxy
+        let chat = ChatModel(app: app, kind: .handoff, requester: "Browser regression")
+        defer { chat.stop(); app.stopSession(); app.setup.loopback = connection }
+
+        _ = await chat.runDelegated("用维基百科搜一下历史上的今天")
+
+        let web = try XCTUnwrap(chat.savedCalls.first(where: { $0.name == "web_open" }))
+        XCTAssertTrue(web.ok, web.answer)
+        XCTAssertTrue(web.answer.contains("Public history page"), web.answer)
+        XCTAssertFalse(app.sessionOn, "A website task must not start phone automation, including for status or saved routines.")
+        let phone = try XCTUnwrap(chat.savedCalls.first(where: { $0.name == "do" }))
+        XCTAssertFalse(phone.ok)
+        XCTAssertTrue(phone.answer.contains("sandbox browser"), phone.answer)
+        let prompt = FakeCompletions.system(try XCTUnwrap(server.requests.first))
+        XCTAssertFalse(prompt.contains("Start the task with a do in your first reply"))
+        XCTAssertTrue(prompt.contains("For a website task, start with web_open"))
+    }
+
     func testPokiRejectsCookiesAndLeavesSignInAgeAndTermsToTheOwner() async throws {
         let server = try PageServer(pages: ["/": Self.page])
         let opened = await WebTools.perform("web_open", arguments: Self.json(["url": "http://127.0.0.1:\(server.port)/"]))

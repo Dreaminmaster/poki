@@ -119,6 +119,8 @@ final class ChatModel {
     /// What the task under way opened and acted in, and what it was asked, for `taskApp`.
     private var taskApps = TaskApps()
     private var taskRequest = ""
+    private enum ToolRoute { case app, web }
+    private var toolRoute: ToolRoute?
     /// The whole plan the model published, for the task card's steps still to come.
     var planSteps: [String]? { modelPlan }
     private var task: Task<Void, Never>?
@@ -299,7 +301,7 @@ final class ChatModel {
         stopAsked = false
         planID = nil; noteID = nil; modelPlan = nil
         taskApp = nil
-        taskApps = TaskApps(); taskRequest = text
+        taskApps = TaskApps(); taskRequest = text; toolRoute = nil
         let instructions = Harness.instructions(for: text)
         let images = lastImages
         if Self.direct, provider == .anthropic || provider == .openai {
@@ -551,12 +553,29 @@ final class ChatModel {
             }
             return PokiCore.ToolAnswer(text: Harness.resultRecorded, jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):
+            if let refusal = selectRoute(.web) { return refusal }
             return await WebTools.perform(name, arguments: call.arguments)
-        default:
+        case "look", "do":
+            if let refusal = selectRoute(.app) { return refusal }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             return await app.runTool(call.name, arguments: call.arguments)
+        default:
+            return await app.runTool(call.name, arguments: call.arguments)
         }
+    }
+
+    private func selectRoute(_ next: ToolRoute) -> PokiCore.ToolAnswer? {
+        let hasExplicitApp = !AppIconStore.bundleIDs(namedIn: taskRequest).isEmpty
+        let mixed = hasExplicitApp && (modelPlan?.count ?? 0) > 1
+        if let toolRoute, toolRoute != next, !mixed {
+            let text = toolRoute == .web
+                ? "This task is using the sandbox browser. Phone controls were not started. Continue with web tools, or stop and ask the owner if a separate app task is needed."
+                : "This task is using phone controls. The sandbox browser was not opened. Continue in the requested app, or stop and ask the owner if a separate website task is needed."
+            return PokiCore.ToolAnswer(text: text, jpeg: nil, isError: true)
+        }
+        toolRoute = next
+        return nil
     }
 
     /// The bubble shows the model's steps up to the current one: those before it done, it under way. A step
