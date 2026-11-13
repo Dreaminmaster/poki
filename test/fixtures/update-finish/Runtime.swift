@@ -55,10 +55,18 @@ enum AppFiles { static let support = FileManager.default.temporaryDirectory.appe
 enum LoopbackMonitor { static let needsWiFi = "Connect to Wi-Fi." }
 enum SignerBridge {
     nonisolated(unsafe) static var fails = false
+    @MainActor static var holdsInstall = false
+    @MainActor static var installHeld: CheckedContinuation<Void, Never>?
+    @MainActor static var finishInstall: CheckedContinuation<Void, Never>?
     static func installVault() {}
+    @MainActor static func holdInstall() async {
+        guard holdsInstall else { return }
+        await withCheckedContinuation { finishInstall = $0; installHeld?.resume() }
+    }
     static func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
         progress?(["kind": "step", "id": "install"])
         await Task.yield()
+        await holdInstall()
         if fails { throw SignerError(message: "Installation failed.", code: "device") }
         return Data()
     }
@@ -75,11 +83,16 @@ final class FakeCore {
 }
 
 @main struct UpdateFinishRegression {
-    @MainActor static func installed() async -> SelfSigner {
+    @MainActor static func prepared() async -> SelfSigner {
         let signer = SelfSigner()
         signer.phone = { [:] }
         signer.isIdle = { true }
         await signer.prepare(kind: "update")
+        return signer
+    }
+
+    @MainActor static func installed() async -> SelfSigner {
+        let signer = await prepared()
         await signer.install()
         signer.finishNoticeAnswered()
         return signer
@@ -117,6 +130,30 @@ final class FakeCore {
         check(task.isError && task.text == "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.", "task during update is refused with an explanation", actual: task.text)
         let afterTimeout = await AppModel(signer: timedOut).phoneTool("look", arguments: "{}")
         check(afterTimeout.isError && afterTimeout.text == expected, "task after timeout receives restart instructions", actual: afterTimeout.text)
+
+        SignerBridge.holdsInstall = true
+        let slow = await prepared()
+        let install = Task { @MainActor in await slow.install() }
+        await withCheckedContinuation { SignerBridge.installHeld = $0 }
+        await drain()
+        check(slow.finishNotice, "a running install announces that Poki will close")
+        slow.finishNoticeAnswered()
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        await drain()
+        check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "foreground return during a running install keeps the installing message", actual: slow.installMessage)
+        Timer.advance(by: 15, oldProcessAlive: true)
+        await drain()
+        check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "15 seconds into a running install keeps the installing message", actual: slow.installMessage)
+        SignerBridge.holdsInstall = false
+        SignerBridge.finishInstall?.resume()
+        await install.value
+        Timer.advance(by: 14, oldProcessAlive: true)
+        await drain()
+        let afterFourteen = slow.installMessage
+        Timer.advance(by: 1, oldProcessAlive: true)
+        await drain()
+        check(afterFourteen == "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." && slow.working == expected,
+              "the 15-second wait starts when the install returns", actual: "\(afterFourteen ?? "nil") | then: \(slow.working ?? "nil")")
 
         SignerBridge.fails = true
         let failed = await installed()

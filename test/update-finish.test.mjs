@@ -28,7 +28,7 @@ test('an installed update gives restart instructions when the old process surviv
     await exec('swiftc', ['-parse-as-library', join(dir, 'SelfSigner.swift'), join(dir, 'AppModel.swift'),
       fileURLToPath(new URL('./fixtures/update-finish/Runtime.swift', import.meta.url)),
       '-o', join(dir, 'check')]);
-    const result = await exec(join(dir, 'check'));
+    const result = await exec(join(dir, 'check'), { timeout: 60_000 });
     process.stdout.write(result.stdout);
     assert.match(result.stdout, /PASS: timeout shows restart instructions/);
   } catch (error) {
