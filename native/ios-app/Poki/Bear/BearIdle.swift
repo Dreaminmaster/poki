@@ -30,6 +30,9 @@ struct BearIdle {
         var work: Float = 0, tap: Float = 0
         /// How far the left paw is up, as at the top of the model's wave.
         var raise: Float = 0
+        /// How far the resting paws are turned down, out of the way of a head that comes down on them:
+        /// the left one and the right one, in radians.
+        var lower = SIMD2<Float>(0, 0)
         /// How far the eyes are shut, as a line, from 0 (open) to 1.
         var shut: Float = 0
         /// How far the mouth is open (from a quarter on), and the sparkles out, from 0 to 1.
@@ -43,7 +46,7 @@ struct BearIdle {
             p.arms = a.arms + b.arms; p.smile = a.smile + b.smile
             p.scratch = a.scratch + b.scratch; p.rub = a.rub + b.rub
             p.bend = a.bend + b.bend; p.reach = a.reach + b.reach; p.work = a.work + b.work; p.tap = a.tap + b.tap
-            p.raise = a.raise + b.raise; p.shut = a.shut + b.shut; p.mouth = a.mouth + b.mouth; p.sparkles = a.sparkles + b.sparkles
+            p.raise = a.raise + b.raise; p.lower = a.lower + b.lower; p.shut = a.shut + b.shut; p.mouth = a.mouth + b.mouth; p.sparkles = a.sparkles + b.sparkles
             return p
         }
 
@@ -55,7 +58,7 @@ struct BearIdle {
             p.arms = a.arms * w; p.smile = a.smile * w
             p.scratch = a.scratch * w; p.rub = a.rub * w
             p.bend = a.bend * w; p.reach = a.reach * w; p.work = a.work * w; p.tap = a.tap * w
-            p.raise = a.raise * w; p.shut = a.shut * w; p.mouth = a.mouth * w; p.sparkles = a.sparkles * w
+            p.raise = a.raise * w; p.lower = a.lower * w; p.shut = a.shut * w; p.mouth = a.mouth * w; p.sparkles = a.sparkles * w
             return p
         }
     }
@@ -111,6 +114,11 @@ struct BearIdle {
         breathAt = now
     }
 
+    /// How far a resting paw is turned down for each radian the head tilts to its side, by itself: the
+    /// left paw, the right paw. The paws rest a finger under the chin, the left one nearer: tilted onto
+    /// one, the head went into it. These are the least that keep them out.
+    static let tilt: (left: Float, right: Float) = (2, 0.4)
+
     static func ease(_ x: Float) -> Float { let x = min(max(x, 0), 1); return x * x * (3 - 2 * x) }
 
     /// Turning its head somewhere, so worth drawing at the full rate; breathing and swaying alone are slow enough for a third of it.
@@ -157,6 +165,7 @@ struct BearIdle {
             p.bodyYaw += g.pose.bodyYaw * w
             p.gaze += g.pose.gaze * w
             p.arms += g.pose.arms * w
+            p.lower += g.pose.lower * w
             // The eyes smile once the arms are most of the way up, and open before they come down.
             p.smile += g.pose.smile * Self.ease((w - 0.35) / 0.5)
             let x = g.progress(at: t)
@@ -169,7 +178,10 @@ struct BearIdle {
             case .hum:
                 // The head rocks side to side twice, the body a little after it.
                 let swell = Float(sin(.pi * x))
-                p.headRoll += g.size * Float(sin(4 * .pi * x)) * swell * w
+                let rock = g.size * Float(sin(4 * .pi * x)) * swell * w
+                p.headRoll += rock
+                // The right paw is clear of a rock this small.
+                p.lower.x += Self.tilt.left * max(-rock, 0)
                 p.bodyRoll += 0.03 * Float(sin(4 * .pi * x - 0.6)) * swell * w
             case .look, .stretch:
                 break
@@ -215,6 +227,7 @@ struct BearIdle {
             pose.gaze = SIMD2(side * 0.009, .random(in: -0.002...0.004))
         case 5..<8: // the head tilted, curious
             pose.headRoll = side * .random(in: 0.10...0.15)
+            pose.lower = SIMD2(Self.tilt.left * max(-pose.headRoll, 0), Self.tilt.right * max(pose.headRoll, 0))
             pose.headYaw = side * 0.06
             pose.gaze = SIMD2(side * 0.004, 0.003)
         default: // a look up
@@ -271,7 +284,7 @@ struct BearIdleJoints {
     static let swap: Float = 0.22
     /// How far the forearms turn down for work, and how far each way from there as the paws tap: they
     /// only ever go down from where they rest, so they stay out of the head and in sight under it.
-    static let work: (down: Float, tap: Float) = (0.2, 0.2)
+    static let work: (down: Float, tap: Float, nod: Float) = (0.2, 0.2, 2)
     /// Both arms up, `arms` at 1: how far each goes along the model's wave, and how far its paw then
     /// comes in toward the cheek, as `bend` and `reach` bring it. Further along the wave the paws leave
     /// the picture's sides; nearer the cheeks they go into the head.
@@ -279,11 +292,6 @@ struct BearIdleJoints {
     /// The right paw rubbing (`scratch` at 1): how far it goes along the wave, to beside the cheek, and
     /// how far its forearm turns each way as it rubs. Higher, the lowered head comes down on it.
     static let scratch: (raise: Float, rub: Float) = (0.5, 0.12)
-    /// How far a forearm turns down for each radian the head comes down on its paw: as it nods, and as
-    /// it tilts to the left paw's side or the right one's. The paws rest a finger under the chin (the
-    /// left one nearer): a head that nods, or tilts to a paw's side, went into it. These are the least
-    /// that keep the paws out.
-    static let giveWay: (nod: Float, left: Float, right: Float) = (1.2, 2, 1.2)
 
     /// How far a pupil moves for `gaze`: across and up the face, and forward as much as across, so
     /// that it stays in front of the face's curve and its white.
@@ -341,18 +349,18 @@ struct BearIdleJoints {
         let shift = Self.shift(pose.gaze)
         for eye in eyes where eye < joints.count { joints[eye].translation += shift }
         if let (upper, fore) = arms, joints.count > max(upper.right, upper.left, fore.right, fore.left) {
-            // A resting paw gives way to the head: down as far as the head nods, and tilts to its side.
-            let nod = Self.giveWay.nod * max(pose.headPitch, 0), resting = max(1 - pose.arms, 0)
-            joints[fore.right].rotation *= simd_quatf(angle: (nod + Self.giveWay.right * max(pose.headRoll, 0)) * max(resting - pose.scratch, 0), axis: [1, 0, 0])
-            joints[fore.left].rotation *= simd_quatf(angle: (nod + Self.giveWay.left * max(-pose.headRoll, 0)) * max(resting - pose.raise, 0), axis: [1, 0, 0])
+            joints[fore.left].rotation *= simd_quatf(angle: pose.lower.x, axis: [1, 0, 0])
+            joints[fore.right].rotation *= simd_quatf(angle: pose.lower.y, axis: [1, 0, 0])
             let bend = Self.cheer.bend * pose.arms, reach = Self.cheer.reach * pose.arms
             joints[upper.left].rotation *= simd_quatf(angle: -0.6 * (pose.reach + reach), axis: [1, 0, 0])
             joints[fore.left].rotation *= simd_quatf(angle: -1.4 * (pose.bend + bend), axis: [0, 0, 1])
             joints[upper.right].rotation *= simd_quatf(angle: -0.6 * reach, axis: [1, 0, 0])
             joints[fore.right].rotation *= simd_quatf(angle: 1.4 * (bend + Self.scratch.rub * pose.rub), axis: [0, 0, 1])
             if pose.work > 0 {
-                joints[fore.right].rotation *= simd_quatf(angle: (Self.work.down - Self.work.tap * pose.tap) * pose.work, axis: [1, 0, 0])
-                joints[fore.left].rotation *= simd_quatf(angle: (Self.work.down + Self.work.tap * pose.tap) * pose.work, axis: [1, 0, 0])
+                // The head is lowered over the paws, and nods: they go down twice as far as it does.
+                let down = Self.work.down + Self.work.nod * max(pose.headPitch, 0)
+                joints[fore.right].rotation *= simd_quatf(angle: (down - Self.work.tap * pose.tap) * pose.work, axis: [1, 0, 0])
+                joints[fore.left].rotation *= simd_quatf(angle: (down + Self.work.tap * pose.tap) * pose.work, axis: [1, 0, 0])
             }
         }
         if pose.smile > 0 { smile(pose.smile, in: &joints) } else if pose.shut > 0 { smile(pose.shut, top: 0.2, in: &joints) }

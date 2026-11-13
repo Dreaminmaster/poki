@@ -22,7 +22,7 @@ enum BearAct: Equatable {
     case failed
     /// Off: asleep, its head on one side, its eyes shut.
     case paused
-    /// Poki cannot reach the phone: a paw up at the side of its head, rubbing it, looking up, puzzled.
+    /// Poki cannot reach the phone: a paw up beside its head, rubbing there, looking up, puzzled.
     case lost
     /// A paw up beside its ear, its head tilted, nodding now and then.
     case listening
@@ -78,9 +78,13 @@ enum BearStance {
             p.raise = 0.9
         case .waiting:
             p.headYaw = 0.35; p.headPitch = 0.1
+            // The head is turned and lowered onto the left paw, which goes down from under it.
+            p.lower = [0.1, 0]
             p.shut = 1
         case .paused:
             p.headPitch = 0.18; p.headRoll = 0.22
+            // The head hangs onto the right paw, which goes down from under it.
+            p.lower = [0, 0.5]
             p.shoulders = -0.1
             p.shut = 1
         case .lost:
@@ -190,7 +194,7 @@ enum BearTalk {
 /// A reaction played once when the state changes, from wherever the bear is, and back to standing:
 /// pleased when a task is done (its arms go up, its eyes smile as in a blink, its mouth opens, the
 /// sparkles come out and it gives two little bounces), sad when one went wrong (as its flat picture: a
-/// paw up at the side of its head, rubbing it, the head tilted and lowered, the eyes drooping and looking
+/// paw up beside its cheek, rubbing there, the head tilted and lowered, the eyes drooping and looking
 /// down). It comes in over a third of a second and goes over half a second, so a change of state is
 /// never a jump.
 struct BearReaction: Equatable {
@@ -244,6 +248,8 @@ struct BearReaction: Equatable {
             p.shoulders = -0.1 * w
             p.gaze = SIMD2(0, -0.006) * w
             p.scratch = w
+            // The other paw goes down a little from under the lowered head.
+            p.lower = [0.04 * w, 0]
             // The paw rubs beside the cheek, three times a second, while it is held.
             p.rub = held < hold ? Float(sin(2 * .pi * 3 * held)) : 0
         }
