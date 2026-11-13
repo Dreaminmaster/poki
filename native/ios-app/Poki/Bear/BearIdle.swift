@@ -16,7 +16,7 @@ struct BearIdle {
         var shoulders: Float = 0
         /// Where the pupils look, sideways and up.
         var gaze = SIMD2<Float>(0, 0)
-        /// How far both arms are up and out, from 0 (down) to 1 (a stretch).
+        /// How far both arms are up, from 0 (down) to 1: a paw out beside each cheek.
         var arms: Float = 0
         /// How far the eyes have gone to the smile's arcs, from 0 (open) to 1 (smiling).
         var smile: Float = 0
@@ -25,7 +25,8 @@ struct BearIdle {
         /// The raised left paw bent in toward the head, and brought forward, from 0 to 1: with `raise`,
         /// at the chin, the ear or the top of the head.
         var bend: Float = 0, reach: Float = 0
-        /// Both paws forward, working, from 0 to 1, and their tapping (-1 to 1).
+        /// Both paws down and forward from where they rest, working, from 0 to 1, and their tapping
+        /// (-1 to 1): one goes down as the other comes up.
         var work: Float = 0, tap: Float = 0
         /// How far the left paw is up, as at the top of the model's wave.
         var raise: Float = 0
@@ -268,26 +269,47 @@ struct BearIdleJoints {
 
     /// How far back the model's own blink puts the pupils, and forward the arcs, to swap them.
     static let swap: Float = 0.22
-    /// How far the arms turn up and out at a full stretch, and the forearms in.
-    static let stretch: (upper: Float, fore: Float) = (1.2, 0.5)
+    /// How far the forearms turn down for work, and how far each way from there as the paws tap: they
+    /// only ever go down from where they rest, so they stay out of the head and in sight under it.
+    static let work: (down: Float, tap: Float) = (0.2, 0.2)
+    /// Both arms up, `arms` at 1: how far each goes along the model's wave, and how far its paw then
+    /// comes in toward the cheek, as `bend` and `reach` bring it. Further along the wave the paws leave
+    /// the picture's sides; nearer the cheeks they go into the head.
+    static let cheer: (raise: Float, bend: Float, reach: Float) = (0.8, 0.2, 0.3)
+    /// How far a forearm turns down for each radian the head comes down on its paw. The paws rest a
+    /// finger under the chin: a head that nods, or tilts to a paw's side, went into it.
+    static let giveWay: Float = 2
 
     /// How far a pupil moves for `gaze`: across and up the face, and forward as much as across, so
     /// that it stays in front of the face's curve and its white.
     static func shift(_ gaze: SIMD2<Float>) -> SIMD3<Float> { SIMD3(gaze.x, gaze.y, abs(gaze.x)) }
 
-    /// The raised paw, the open mouth and the sparkles, as the model has them at the top of its wave
-    /// (`hello`): the paw and the sparkles part of the way; the mouth open from a quarter, as far as
-    /// `pose.mouth` says. Laid before `apply`, which turns the joints from where these leave them.
+    /// The raised paws, the open mouth and the sparkles, as the model has them at the top of its wave
+    /// (`hello`): the paws and the sparkles part of the way; the mouth open from a quarter, as far as
+    /// `pose.mouth` says. The model waves with its left paw only; the right one goes the same way on
+    /// its own side. The wave takes the paw out round the head, which is wider than the shoulders: an
+    /// arm turned straight up from where it hangs goes into the head. Laid before `apply`, which turns
+    /// the joints from where these leave them.
     func show(_ pose: BearIdle.Pose, from hello: [Transform], in joints: inout [Transform]) {
-        func toward(_ joint: Int, _ w: Float) {
-            guard joint < joints.count, joint < hello.count, w > 0 else { return }
-            let a = joints[joint], b = hello[joint], w = min(w, 1)
+        func toward(_ joint: Int, _ b: Transform, _ w: Float) {
+            guard joint < joints.count, w > 0 else { return }
+            let a = joints[joint], w = min(w, 1)
             joints[joint] = Transform(scale: simd_mix(a.scale, b.scale, SIMD3(repeating: w)), rotation: simd_slerp(a.rotation, b.rotation, w),
                                       translation: simd_mix(a.translation, b.translation, SIMD3(repeating: w)))
         }
-        for joint in sparkles { toward(joint, pose.sparkles) }
-        if let left = shoulders?.left { toward(left, pose.raise) }
-        if let (upper, fore) = arms { toward(upper.left, pose.raise); toward(fore.left, pose.raise) }
+        for joint in sparkles where joint < hello.count { toward(joint, hello[joint], pose.sparkles) }
+        var sides: [(left: Int, right: Int)] = []
+        if let (right, left) = shoulders { sides.append((left, right)) }
+        if let (upper, fore) = arms { sides += [(upper.left, upper.right), (fore.left, fore.right)] }
+        for (left, right) in sides where max(left, right) < min(joints.count, hello.count) {
+            // The left joint's way to the top of the wave, on the other side of the body's middle.
+            let from = joints[left], to = hello[left], turn = to.rotation * from.rotation.inverse
+            let mirrored = Transform(scale: joints[right].scale * to.scale / from.scale,
+                                     rotation: simd_quatf(ix: turn.imag.x, iy: -turn.imag.y, iz: -turn.imag.z, r: turn.real) * joints[right].rotation,
+                                     translation: joints[right].translation + (to.translation - from.translation) * SIMD3(-1, 1, 1))
+            toward(left, to, pose.raise + Self.cheer.raise * pose.arms)
+            toward(right, mirrored, Self.cheer.raise * pose.arms)
+        }
         if pose.mouth >= 0.25 {
             for joint in mouths where joint < joints.count && joint < hello.count { joints[joint] = hello[joint] }
             if let open = mouths.last, open < joints.count { joints[open].scale.y *= min(pose.mouth, 1) }
@@ -313,26 +335,23 @@ struct BearIdleJoints {
         }
         let shift = Self.shift(pose.gaze)
         for eye in eyes where eye < joints.count { joints[eye].translation += shift }
-        if let (upper, fore) = arms, pose.arms > 0, joints.count > max(upper.right, upper.left, fore.right, fore.left) {
-            joints[upper.left].rotation *= simd_quatf(angle: Self.stretch.upper * pose.arms, axis: [0, 0, 1])
-            joints[upper.right].rotation *= simd_quatf(angle: -Self.stretch.upper * pose.arms, axis: [0, 0, 1])
-            joints[fore.left].rotation *= simd_quatf(angle: -Self.stretch.fore * pose.arms, axis: [0, 0, 1])
-            joints[fore.right].rotation *= simd_quatf(angle: Self.stretch.fore * pose.arms, axis: [0, 0, 1])
-        }
         if let (upper, fore) = arms, pose.scratch > 0, joints.count > max(upper.right, fore.right) {
             joints[upper.right].rotation *= simd_quatf(angle: -1.4 * pose.scratch, axis: [1, 0, 0]) * simd_quatf(angle: -0.8 * pose.scratch, axis: [0, 0, 1])
             joints[fore.right].rotation *= simd_quatf(angle: -1.4 * pose.scratch + 0.25 * pose.rub, axis: [0, 0, 1])
         }
         if let (upper, fore) = arms, joints.count > max(upper.right, upper.left, fore.right, fore.left) {
-            if pose.bend != 0 || pose.reach != 0 {
-                joints[upper.left].rotation *= simd_quatf(angle: -0.6 * pose.reach, axis: [1, 0, 0])
-                joints[fore.left].rotation *= simd_quatf(angle: -1.4 * pose.bend, axis: [0, 0, 1])
-            }
+            // A resting paw gives way to the head: down as far as the head nods, and tilts to its side.
+            let nod = max(pose.headPitch, 0), resting = max(1 - pose.arms, 0)
+            joints[fore.right].rotation *= simd_quatf(angle: Self.giveWay * (nod + max(pose.headRoll, 0)) * resting, axis: [1, 0, 0])
+            joints[fore.left].rotation *= simd_quatf(angle: Self.giveWay * (nod + max(-pose.headRoll, 0)) * max(resting - pose.raise, 0), axis: [1, 0, 0])
+            let bend = Self.cheer.bend * pose.arms, reach = Self.cheer.reach * pose.arms
+            joints[upper.left].rotation *= simd_quatf(angle: -0.6 * (pose.reach + reach), axis: [1, 0, 0])
+            joints[fore.left].rotation *= simd_quatf(angle: -1.4 * (pose.bend + bend), axis: [0, 0, 1])
+            joints[upper.right].rotation *= simd_quatf(angle: -0.6 * reach, axis: [1, 0, 0])
+            joints[fore.right].rotation *= simd_quatf(angle: 1.4 * bend, axis: [0, 0, 1])
             if pose.work > 0 {
-                joints[upper.right].rotation *= simd_quatf(angle: -0.8 * pose.work, axis: [1, 0, 0])
-                joints[upper.left].rotation *= simd_quatf(angle: -0.8 * pose.work, axis: [1, 0, 0])
-                joints[fore.right].rotation *= simd_quatf(angle: (-0.6 - 0.12 * pose.tap) * pose.work, axis: [1, 0, 0])
-                joints[fore.left].rotation *= simd_quatf(angle: (-0.6 + 0.12 * pose.tap) * pose.work, axis: [1, 0, 0])
+                joints[fore.right].rotation *= simd_quatf(angle: (Self.work.down - Self.work.tap * pose.tap) * pose.work, axis: [1, 0, 0])
+                joints[fore.left].rotation *= simd_quatf(angle: (Self.work.down + Self.work.tap * pose.tap) * pose.work, axis: [1, 0, 0])
             }
         }
         if pose.smile > 0 { smile(pose.smile, in: &joints) } else if pose.shut > 0 { smile(pose.shut, top: 0.2, in: &joints) }
