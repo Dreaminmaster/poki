@@ -295,6 +295,10 @@ final class ChatModel {
     }
 
     private func send(_ text: String, again: Bool, thumbnails: [Data] = []) {
+        if let message = app.signer.installMessage {
+            add(.note(.problem(message)))
+            return
+        }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Pictures may go without words, and Try Again sends them again.
         guard !text.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
@@ -428,6 +432,7 @@ final class ChatModel {
     /// Runs a task an outside agent handed over (`ask_poki`) and answers with Poki's last words, how the
     /// task ended, and finish_task's summary and answer.
     func runDelegated(_ task: String) async -> (text: String, success: Bool?) {
+        if let message = app.signer.installMessage { return (message, false) }
         ChatModel.delegatedBusy = requester ?? AppLocalization.text(LocalizedStringResource("an agent"))
         defer { ChatModel.delegatedBusy = nil }
         lastOutcome = nil

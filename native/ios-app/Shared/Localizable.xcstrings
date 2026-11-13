@@ -2518,7 +2518,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置 › 隐私与安全性 › 开发者模式”中开启开发者模式，并确认系统为 iOS 17.4 或更高版本。"
+            "value" : "请在“设置 › 隐私与安全 › 开发者模式”中开启开发者模式，并确认系统为 iOS 17.4 或更高版本。"
           }
         },
         "zh-Hant" : {
@@ -8679,7 +8679,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请依次检查：“配置 › 回环”（LocalDevVPN 或代理已连接且配好 10.7.0.1）、“配置 › 配对”（开启回环后重配）、“设置 › 隐私与安全性”中的开发者模式。Poki 无法连接此 iPhone。"
+            "value" : "请依次检查：“配置 › 回环”（LocalDevVPN 或代理已连接且配好 10.7.0.1）、“配置 › 配对”（开启回环后重配）、“设置 › 隐私与安全”中的开发者模式。Poki 无法连接此 iPhone。"
           }
         },
         "zh-Hant" : {
@@ -8701,7 +8701,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置 › 隐私与安全性 › 麦克风”中允许访问麦克风。"
+            "value" : "请在“设置 › 隐私与安全 › 麦克风”中允许访问麦克风。"
           }
         },
         "zh-Hant" : {
@@ -9259,7 +9259,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即将打开“设置”。请前往“**隐私与安全性 › 开发者模式**”，轻点“**与 Poki 配对**”。"
+            "value" : "即将打开系统“设置”首页。请前往“**隐私与安全 › 开发者模式**”，轻点“**与 Poki 配对**”。"
           }
         },
         "zh-Hant" : {
@@ -9271,7 +9271,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Settings will open. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**."
+            "value" : "Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**."
           }
         }
       }
@@ -9478,7 +9478,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“隐私与安全性”›“开发者模式”›“与 Poki 配对”。"
+            "value" : "“隐私与安全”›“开发者模式”›“与 Poki 配对”。"
           }
         },
         "en" : {
@@ -9500,7 +9500,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“隐私与安全性”›“开发者模式”，然后重启。"
+            "value" : "“隐私与安全”›“开发者模式”，然后重启。"
           }
         },
         "en" : {
@@ -9522,7 +9522,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“隐私与安全性”›“开发者模式”。重启后轻点“打开”。"
+            "value" : "“隐私与安全”›“开发者模式”。重启后轻点“打开”。"
           }
         },
         "en" : {
@@ -30684,7 +30684,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 将打开“设置”。前往“**隐私与安全性 › 开发者模式**”并轻点“**与 Poki 配对**”。"
+            "value" : "Poki 将打开“设置”。前往“**隐私与安全 › 开发者模式**”并轻点“**与 Poki 配对**”。"
           }
         },
         "zh-Hant" : {
@@ -31821,7 +31821,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "前往“设置 › 隐私与安全性 › 开发者模式”，开启后重启手机并轻点“打开”。"
+            "value" : "前往“设置 › 隐私与安全 › 开发者模式”，开启后重启手机并轻点“打开”。"
           }
         },
         "zh-Hant" : {
@@ -31844,7 +31844,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "前往“设置 › 隐私与安全性 › 开发者模式 › 与 Poki 配对”，输入此处显示的配对码。"
+            "value" : "前往“设置 › 隐私与安全 › 开发者模式 › 与 Poki 配对”，输入此处显示的配对码。"
           }
         },
         "zh-Hant" : {
@@ -32217,13 +32217,174 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "回环已开启。iOS 把配对服务换到了另一个端口，Poki 会通过本地网络找到它。请保持无线局域网开启，并在“设置 › 隐私与安全性 › 本地网络”中允许 Poki。如果仍未恢复，请重新启动 iPhone。"
+            "value" : "回环已开启。iOS 把配对服务换到了另一个端口，Poki 会通过本地网络找到它。请保持无线局域网开启，并在“设置 › 隐私与安全 › 本地网络”中允许 Poki。如果仍未恢复，请重新启动 iPhone。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "迴環已開啟。iOS 把配對服務換到了另一個連接埠，Poki 會透過區域網路找到它。請保持無線區域網開啟，並在「設定 › 隱私權與安全性 › 區域網路」中允許 Poki。如果仍未恢復，請重新啟動 iPhone。"
+          }
+        }
+      }
+    },
+    "Reopen Poki" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reopen Poki"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新打开 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新開啟 Poki"
+          }
+        }
+      }
+    },
+    "Finishing the Update" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finishing the Update"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新"
+          }
+        }
+      }
+    },
+    "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装更新。请不要在多任务界面划掉 Poki。重新打开 Poki 前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安裝更新。請不要在多工處理畫面滑掉 Poki。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以回到主屏幕等待。更新安装完成后，Poki 会自动关闭，之后请重新打开 Poki。如果一直没有变化，请用电脑上的 Poki Setup 更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以回到主畫面等待。更新安裝完成後，Poki 會自動關閉，之後請重新開啟 Poki。如果一直沒有變化，請用電腦上的 Poki Setup 更新。"
+          }
+        }
+      }
+    },
+    "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安装，正在等待 Poki 关闭。重新打开 Poki 前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安裝，正在等待 Poki 關閉。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安装。请在多任务界面向上划掉 Poki，然后重新打开。重新打开前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新版已安裝。請在多工處理畫面向上滑掉 Poki，然後重新開啟。重新開啟前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在多任务界面向上划掉 Poki，然后重新打开以完成更新。如果仍显示可用更新，请重试。重新打开前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在多工處理畫面向上滑掉 Poki，然後重新開啟以完成更新。如果仍顯示可用更新，請重試。重新開啟前，功能暫不可用。"
           }
         }
       }

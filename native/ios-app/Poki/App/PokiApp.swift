@@ -228,7 +228,13 @@ struct RootView: View {
     }
 
     var body: some View {
-        navigation
+        Group {
+            if let message = model.signer.installMessage {
+                UpdateFinishView(message: message, needsReopen: model.signer.needsReopen)
+            } else {
+                navigation
+            }
+        }
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
@@ -239,7 +245,6 @@ struct RootView: View {
         } message: { ask in
             Text("\(ask.client) is signing in through \(ask.connector) and returns to \(ask.callback), which isn’t on Poki’s list of known agents. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone.")
         }
-        // The update's last step: Poki has to exit, and does so by itself.
         .alert("Poki Will Close to Finish the Update", isPresented: Binding(get: { model.signer.finishNotice }, set: { if !$0 { model.signer.finishNoticeAnswered() } })) {
             Button("OK") { model.signer.finishNoticeAnswered() }
         } message: {

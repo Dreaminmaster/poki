@@ -346,10 +346,8 @@ final class Computer: @unchecked Sendable {
         }
         typedInto = nil
         let footer = gone.isEmpty ? [] : ["gone since the last read: " + gone.prefix(20).map { "\($0.ref) \($0.element.type) \"\($0.element.text.prefix(40))\"" }.joined(separator: ", ")]
-        // An answer that carries the screen is not an error, whatever happened to the actions: the
-        // `error:` line says what, and the model goes on from the picture and the elements. Only an
-        // answer with nothing read, or with nothing sent at all, is one.
-        return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil && did.isEmpty && jpeg == nil)
+        // A screenshot helps the caller recover from a failed action without hiding the failure.
+        return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
@@ -387,7 +385,7 @@ final class Computer: @unchecked Sendable {
         if let error { lines.append("error: \(error)") }
         lines += extra
         lines.append("poki: Poki is in front, showing the owner's chat with you, so no screen of the task is read yet. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved routine.")
-        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil && did.isEmpty)
+        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil)
     }
 
     /// The `handoff:` line: a step handed to the owner that is waiting, or just done (reported once).
@@ -560,7 +558,7 @@ final class Computer: @unchecked Sendable {
             for (at, action) in actions.enumerated() {
                 if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
                     var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy)
-                    result.text += "\nnot_sent from action \(at + 1): the screen may have changed. Choose the remaining actions from the fresh screen above and send them in a new do call. Do not repeat the actions already sent."
+                    result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
                     return result
                 }
                 if sensitive(action, &scan) != nil { break }

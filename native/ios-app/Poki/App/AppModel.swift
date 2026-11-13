@@ -264,6 +264,7 @@ final class AppModel {
     func inProcessReadyForProbe() { inProcessSession = .open; host.update(runner: .running); probeDriven = true }
 
     func phoneTool(_ name: String, arguments: String) async -> (text: String, isError: Bool) {
+        if let message = signer.installMessage { return (message, true) }
         let result = await core.tool(name, arguments: arguments)
         return (result.text, result.isError)
     }
@@ -588,6 +589,7 @@ final class AppModel {
     /// setup step the person just did in Settings.
     func becameActive() {
         inFront = true
+        guard signer.installFinish == .idle else { return }
         InProcessWDA.gate.withLock { $0.inFront = true }
         cameToFront = Date()
         // A pairing file and disk image Poki Setup put in the container while Poki was running (or
