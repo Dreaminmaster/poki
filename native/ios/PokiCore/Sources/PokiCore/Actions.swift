@@ -439,7 +439,9 @@ extension Computer {
         case .waitUntil:
             return ("wait_until", try await waitUntil(spec, until: until))
         case .wait:
-            guard let ms = spec.double else { throw ActionFailure(message: "wait takes milliseconds", delivery: .notSent) }
+            guard let ms = spec.double, ms.isFinite, ms >= 0 else {
+                throw ActionFailure(message: "wait takes nonnegative milliseconds", delivery: .notSent)
+            }
             let seconds = min(ms / 1000, 3, max(0, until - now()))
             await sleep(seconds: seconds)
             return ("wait", "wait \(Int(seconds * 1000)) ms")
