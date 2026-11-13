@@ -20,6 +20,8 @@ struct BearIdle {
         var arms: Float = 0
         /// How far the eyes have gone to the smile's arcs, from 0 (open) to 1 (smiling).
         var smile: Float = 0
+        /// How far the right paw is up at the side of the head, from 0 to 1, and how it rubs there (-1 to 1).
+        var scratch: Float = 0, rub: Float = 0
     }
 
     /// The small things it does, which take turns.
@@ -75,6 +77,11 @@ struct BearIdle {
 
     /// Turning its head somewhere, so worth drawing at the full rate; breathing and swaying alone are slow enough for a third of it.
     func busy(at t: TimeInterval) -> Bool { glance?.turning(at: t) ?? false }
+
+    /// Something else plays until `t`: nothing of its own starts before then, and not at once after.
+    mutating func rest(until t: TimeInterval) {
+        nextGlance = max(nextGlance, t + .random(in: 1.0...2.0))
+    }
 
     /// A hi is coming: whatever it is doing, it comes back now, quickly.
     mutating func attend(at t: TimeInterval) {
@@ -198,6 +205,8 @@ struct BearIdleJoints {
     /// The pupils and the smile's arcs, which look with them.
     let eyes: [Int]
     let pupils: [Int], arcs: [Int]
+    /// The closed mouth and the open one, and the three sparkles.
+    let mouths: [Int], sparkles: [Int]
     /// The upper arms and forearms, right and left.
     let arms: (upper: (right: Int, left: Int), fore: (right: Int, left: Int))?
 
@@ -210,6 +219,8 @@ struct BearIdleJoints {
         pupils = ["Eye_R", "Eye_L"].compactMap(joint)
         arcs = ["SmileEye_R", "SmileEye_L"].compactMap(joint)
         eyes = pupils + arcs
+        mouths = ["Mouth", "MouthOpen"].compactMap(joint)
+        sparkles = ["Spark_1", "Spark_2", "Spark_3"].compactMap(joint)
         if let ur = joint("UpperArm_R"), let ul = joint("UpperArm_L"), let fr = joint("Forearm_R"), let fl = joint("Forearm_L") {
             arms = ((ur, ul), (fr, fl))
         } else {
@@ -225,6 +236,17 @@ struct BearIdleJoints {
     /// How far a pupil moves for `gaze`: across and up the face, and forward as much as across, so
     /// that it stays in front of the face's curve and its white.
     static func shift(_ gaze: SIMD2<Float>) -> SIMD3<Float> { SIMD3(gaze.x, gaze.y, abs(gaze.x)) }
+
+    /// The open mouth and the sparkles, as the model has them at the top of its wave (`hello`): the
+    /// sparkles come out part of the way; the mouth is open from half way.
+    func show(_ face: (mouth: Float, sparkles: Float), from hello: [Transform], in joints: inout [Transform]) {
+        for joint in sparkles where joint < joints.count && joint < hello.count && face.sparkles > 0 {
+            let a = joints[joint], b = hello[joint], w = face.sparkles
+            joints[joint] = Transform(scale: simd_mix(a.scale, b.scale, SIMD3(repeating: w)), rotation: simd_slerp(a.rotation, b.rotation, w),
+                                      translation: simd_mix(a.translation, b.translation, SIMD3(repeating: w)))
+        }
+        if face.mouth >= 0.5 { for joint in mouths where joint < joints.count && joint < hello.count { joints[joint] = hello[joint] } }
+    }
 
     /// The pupils' or the arcs' height where the blink is.
     func shut(_ blink: BearBlink.Moment, in joints: inout [Transform]) {
@@ -250,6 +272,10 @@ struct BearIdleJoints {
             joints[upper.right].rotation *= simd_quatf(angle: -Self.stretch.upper * pose.arms, axis: [0, 0, 1])
             joints[fore.left].rotation *= simd_quatf(angle: -Self.stretch.fore * pose.arms, axis: [0, 0, 1])
             joints[fore.right].rotation *= simd_quatf(angle: Self.stretch.fore * pose.arms, axis: [0, 0, 1])
+        }
+        if let (upper, fore) = arms, pose.scratch > 0, joints.count > max(upper.right, fore.right) {
+            joints[upper.right].rotation *= simd_quatf(angle: -1.4 * pose.scratch, axis: [1, 0, 0]) * simd_quatf(angle: -0.8 * pose.scratch, axis: [0, 0, 1])
+            joints[fore.right].rotation *= simd_quatf(angle: -1.4 * pose.scratch + 0.25 * pose.rub, axis: [0, 0, 1])
         }
         if pose.smile > 0 { smile(pose.smile, in: &joints) }
     }

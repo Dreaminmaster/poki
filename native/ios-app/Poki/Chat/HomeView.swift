@@ -50,15 +50,11 @@ enum HomeMotion {
 
 // MARK: Poki's picture
 
-extension PokiMood {
-    /// The faces the three-dimensional bear has so far: ready, and at work. The others stay flat.
-    var modelled: Bool { [.ready, .thinking, .onYourPhone, .checking].contains(self) }
-}
-
-/// Poki's round picture: the bear's face for its state, on a pale blue ground. Ready
-/// or at work, it is the three-dimensional bear, blinking, and a tap on it makes it say hi
-/// (`ModelBear`); the other faces are not modelled yet and are the flat ones, which blink and hop
-/// when the state changes (`BlinkingFace`). The two fade into each other.
+/// Poki's round picture: the bear for its state, on a pale blue ground. For the states it plays
+/// (`PokiMood.act`: ready, at work, done, gone wrong) it is the three-dimensional bear, which blinks,
+/// reacts when a task is done or goes wrong, and says hi to a tap (`ModelBear`); the faces it does not
+/// play yet are the flat ones, which blink and hop when the state changes (`BlinkingFace`). The two
+/// fade into each other.
 struct PokiPortrait: View {
     var mood: PokiMood
     var side: CGFloat = HomeMotion.avatar
@@ -66,11 +62,32 @@ struct PokiPortrait: View {
     var pokes = 0
 
     var body: some View {
+        #if DEBUG
+        // `-pokiMoodCycle ready,done,ready,tripped` shows those states in turn, four seconds each, to
+        // watch the bear change between them.
+        if let cycle = Self.cycle {
+            TimelineView(.periodic(from: .now, by: 4)) { context in
+                portrait(cycle[Int(context.date.timeIntervalSinceReferenceDate / 4) % cycle.count])
+            }
+        } else {
+            portrait(mood)
+        }
+        #else
+        portrait(mood)
+        #endif
+    }
+
+    #if DEBUG
+    private static let cycle: [PokiMood]? = UserDefaults.standard.string(forKey: "pokiMoodCycle")
+        .map { $0.split(separator: ",").compactMap { PokiMood(rawValue: String($0)) } }.flatMap { $0.isEmpty ? nil : $0 }
+    #endif
+
+    private func portrait(_ mood: PokiMood) -> some View {
         ZStack {
             Circle().fill(Tint.portrait)
             // The board's bear is 50 points in the 56-point circle, 6 points down, so the circle
             // cuts it at the chest.
-            ModelBear(modelled: mood.modelled, side: side * 50 / 56, pokes: pokes) {
+            ModelBear(act: mood.act, side: side * 50 / 56, pokes: pokes) {
                 BlinkingFace(mood: mood, side: side * 50 / 56)
             }
             .frame(width: side * 50 / 56, height: side * 50 / 56)
