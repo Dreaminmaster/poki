@@ -104,6 +104,7 @@ final class SelfSigner {
         switch installFinish {
         case .idle: nil
         case .installing: String(localized: "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki.")
+            + "\n\n" + String(localized: "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer.")
         case .waitingForExit: String(localized: "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.")
         case .needsReopen(let installed): installed
             ? String(localized: "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki.")
