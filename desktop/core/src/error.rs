@@ -2,6 +2,8 @@
 //! shows `to_string()` as is, so the text says what happened and what to do next.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("{0}")]
+    UpdateCheck(&'static str),
     /// A plain sentence for the person.
     #[error("{0}")]
     Message(String),
@@ -47,6 +49,7 @@ impl Error {
     pub fn kind(&self) -> &'static str {
         match self {
             Error::Message(_) => "message",
+            Error::UpdateCheck(_) => "update_preflight",
             Error::Device(_) => "device",
             Error::Apple { .. } => "apple",
             Error::NeedsPerson(_) => "needs_person",

@@ -291,7 +291,7 @@ final class SelfSigner {
             self.ready[kind] = p
             self.log.add("signing", "prepared \(kind): \(p.version) (\(p.build)), profile until \(p.expires)")
             self.notify(title: kind == "update" ? String(localized: "Poki Update Ready") : String(localized: "Poki Refresh Ready"),
-                        body: String(localized: "Open Setup and tap Install when Poki isn't running a task."))
+                        body: String(localized: "Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task."))
         }
     }
 

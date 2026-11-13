@@ -15131,24 +15131,24 @@
         }
       }
     },
-    "Open Setup and tap Install when Poki isn't running a task." : {
+    "Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 未执行任务时，打开“配置”并轻点“安装”。"
+            "value" : "Poki 未执行任务时，打开“设置 > 连接 > 签名与更新”，安装已准备好的版本。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 未執行任務時，開啟「設定精靈」並輕點「安裝」。"
+            "value" : "Poki 未執行任務時，開啟「設定 > 連線 > 簽署與更新」，安裝已準備好的版本。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Setup and tap Install when Poki isn’t running a task."
+            "value" : "Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task."
           }
         }
       }
@@ -15776,19 +15776,19 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 会同 Poki Setup 一样提前从此更新通道下载并签名更新。Stable 仅含正式版，Beta、Alpha 和 Pre-alpha 提供先行测试版。"
+            "value" : "Poki 会从此通道及更稳定的通道准备更新。如果均无可用版本，会使用下一个有版本的较不稳定通道。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 會同 Poki Setup 一樣提前從此更新通道下載並簽名更新。Stable 僅含正式版，Beta、Alpha 和 Pre-alpha 提供先行測試版。"
+            "value" : "Poki 會從此通道及更穩定的通道準備更新。如果均無可用版本，會使用下一個有版本的較不穩定通道。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki downloads and signs updates from this release channel ahead of time, just like Poki Setup. Stable receives full releases only; Beta, Alpha, and Pre-alpha get earlier builds."
+            "value" : "Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel."
           }
         }
       }
@@ -29745,25 +29745,25 @@
         }
       }
     },
-    "Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only; Beta, Alpha and Pre-alpha get earlier builds." : {
+    "Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki downloads and signs updates from this release channel ahead of time, just like Poki Setup. Stable receives full releases only; Beta, Alpha, and Pre-alpha get earlier builds."
+            "value" : "Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 会同 Poki Setup 一样提前从此更新通道下载并签名更新。Stable 仅含正式版，Beta、Alpha 和 Pre-alpha 提供先行测试版。"
+            "value" : "Poki 会从此通道及更稳定的通道准备更新。如果均无可用版本，会使用下一个有版本的较不稳定通道。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 會同 Poki Setup 一樣提前從此更新通道下載並簽名更新。Stable 僅含正式版，Beta、Alpha 和 Pre-alpha 提供先行測試版。"
+            "value" : "Poki 會從此通道及更穩定的通道準備更新。如果均無可用版本，會使用下一個有版本的較不穩定通道。"
           }
         }
       }

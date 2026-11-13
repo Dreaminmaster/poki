@@ -22,6 +22,7 @@ let phoneCalls = 0;
 let signInCalls = 0;
 let installCalls = 0;
 let record = null;
+let updateBuild = '100';
 // Poki's container on the simulated phone. POKI_FAKE_CONTAINER lets a test look inside it, and a fake
 // devicectl reach the same files. old-bridge is Poki Setup 0.2.1, which has no container commands.
 const container = process.env.POKI_FAKE_CONTAINER || mkdtempSync(join(tmpdir(), 'poki-fake-container-'));
@@ -112,7 +113,7 @@ const containerCommands = has('old-bridge') ? {} : {
 };
 
 const commands = {
-  app_info: () => ({ version: '0.2.1-319', os: 'macos', arch: 'aarch64', data_dir: process.env.POKI_SETUP_HOME || '', simulated: true }),
+  app_info: () => ({ update_only: has('old-bridge') ? undefined : 1, version: '0.2.1-319', os: 'macos', arch: 'aarch64', data_dir: process.env.POKI_SETUP_HOME || '', simulated: true }),
   account: () => ({ signed_in: signedIn, apple_id: signedIn ? 'tester@example.com' : null, team_id: signedIn ? 'TEAMID1234' : null, password_kept: signedIn, pending_factor: pending }),
   sign_in: ({ apple_id, password }) => {
     if (!apple_id || !password) fail('bad_request', 'apple_id and password are required');
@@ -136,6 +137,28 @@ const commands = {
     if (scenario === 'usbmuxd') fail('usbmuxd', 'Poki Setup cannot reach usbmuxd, which macOS starts when an iPhone is plugged in. Plug the iPhone in with a data cable and unlock it.');
     if (phoneCalls <= Number(process.env.POKI_FAKE_UNPLUGGED_CALLS ?? 2)) return [];
     return [{ phone: { udid, link: { kind: 'usb' } }, facts: facts(), error: null, record }];
+  },
+  update_inspect: () => {
+    const rejection = {
+      'update-not-newer': 'The target build is not newer than the installed build; keep Poki installed and wait for a newer build on the same channel.',
+      'update-missing': 'The recorded Poki is not installed on this iPhone; check the selected phone and use first-install only if it has no existing Poki data.',
+      'update-team': 'The installed app and this computer have different signing teams; keep Poki installed and use the original signing computer.',
+      'update-channel': 'The phone and computer use different update channels; keep both settings unchanged and ask for help choosing the matching update.',
+    };
+    for (const [name, message] of Object.entries(rejection)) if (has(name)) fail('update_preflight', message);
+    return { udid, installed: { version: '0.4.0', build: updateBuild, channel: 'alpha' }, target: { version: '0.4.0', build: '101' } };
+  },
+  renew: ({ update_only, expected }) => {
+    if (update_only !== true || expected?.build !== '101') fail('bad_request', 'Use the verified update target.');
+    if (has('update-disconnect')) process.exit(1);
+    progress({ kind: 'step', id: 'profiles', title: 'Installing the provisioning profiles' });
+    if (has('update-install-fails')) fail('device', 'Simulated installation failure');
+    if (!has('update-readback-mismatch')) updateBuild = '101';
+    return { version: '0.4.0', build: '101' };
+  },
+  update_readback: () => {
+    if (has('update-readback-fails')) fail('device', 'Simulated readback failure');
+    return { version: '0.4.0', build: updateBuild };
   },
   install,
   records: () => (record ? [record] : []),

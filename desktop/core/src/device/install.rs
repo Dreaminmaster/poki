@@ -61,17 +61,21 @@ pub async fn install_ipa(phone: &Phone, ipa: &Path, upgrade: bool, reporter: &Re
     };
     let result = within(600, "installing Poki (unlock the iPhone, check it for a prompt, then try again)", work).await?;
     tracing::info!(ok = result.is_ok(), "install finished");
-    result.map_err(|e| match e {
+    result.map_err(install_error)?;
+    reporter.done("install", None);
+    Ok(())
+}
+
+fn install_error(e: idevice::IdeviceError) -> Error {
+    match e {
         idevice::IdeviceError::InstallationProxy(idevice::services::installation_proxy::InstallationProxyError::OperationFailed(ref text)) if text.contains("ApplicationVerificationFailed") => Error::device(
             "The iPhone did not accept the app's signature. Make sure this iPhone is registered on the Apple ID's team and Developer Mode is on, then try again.",
         ),
         idevice::IdeviceError::InstallationProxy(idevice::services::installation_proxy::InstallationProxyError::OperationFailed(ref text)) if text.contains("MismatchedApplicationIdentifierEntitlement") => Error::device(
-            "Poki is already installed from another Apple ID. Delete it on the iPhone, then install again.",
+            "The installed Poki has a different application signing identity. Keep Poki installed to preserve its data, and update it using the original signing identity on the original computer.",
         ),
         other => Error::device(format!("Install failed: {other}")),
-    })?;
-    reporter.done("install", None);
-    Ok(())
+    }
 }
 
 /// Runs `fut`, or fails with a readable error after `secs` seconds.
@@ -115,4 +119,20 @@ pub async fn find_apps(phone: &Phone, prefix: &str) -> Result<Vec<InstalledApp>>
     }
     out.sort_by(|a, b| a.bundle_id.cmp(&b.bundle_id));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn identity_mismatch_keeps_the_existing_app_and_its_data() {
+        let failure = idevice::IdeviceError::InstallationProxy(
+            idevice::services::installation_proxy::InstallationProxyError::OperationFailed(
+                "MismatchedApplicationIdentifierEntitlement".into(),
+            ),
+        );
+        let message = super::install_error(failure).to_string();
+        assert!(message.contains("Keep Poki installed"), "{message}");
+        assert!(message.contains("original signing identity"), "{message}");
+        assert!(!message.contains("Delete it"), "{message}");
+    }
 }
