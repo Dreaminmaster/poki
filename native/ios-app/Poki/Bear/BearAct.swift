@@ -24,7 +24,7 @@ enum BearAct: Equatable {
     case paused
     /// Poki cannot reach the phone: a paw up at the side of its head, rubbing it, looking up, puzzled.
     case lost
-    /// A paw up beside its ear, its head tilted away from it, nodding now and then.
+    /// A paw up beside its ear, its head tilted, nodding now and then.
     case listening
     /// Its mouth moving as it talks.
     case speaking
@@ -86,18 +86,18 @@ enum BearStance {
         case .lost:
             p.headPitch = -0.1; p.headRoll = -0.1
             p.gaze = [-0.004, 0.008]
-            p.raise = 0.95; p.bend = 0.7
+            // The paw is beside the head, where the rubbing does not take it into the head.
+            p.raise = 0.9; p.reach = 0.5
         case .listening:
-            // Tilted toward the paw, the head came down on it.
-            p.headRoll = 0.08
+            // Tilted further toward the paw, the head came down on it.
+            p.headRoll = -0.04
             p.gaze = [-0.004, 0.002]
-            p.raise = 0.9; p.reach = 0.3
+            p.raise = 0.8; p.reach = 0.3
         case .speaking:
             p.headPitch = -0.05
             p.mouth = 1
         case .hello:
-            // Reaching in a little, the waving paw stays inside the picture's side all the way up.
-            p.raise = 1; p.reach = 0.3
+            p.raise = 1
             p.mouth = 1
             p.sparkles = 1
         }
@@ -124,7 +124,7 @@ enum BearStance {
             // Asleep: a slow nod with each long breath.
             p.headPitch = 0.03 * Float(sin(t * 2 * .pi / 4))
         case .lost:
-            // The paw rubs the head, twice a second.
+            // The paw rubs beside the head, twice a second.
             p.bend = 0.12 * Float(sin(t * 2 * .pi * 2))
         case .listening:
             // A small nod every few seconds.
@@ -244,7 +244,7 @@ struct BearReaction: Equatable {
             p.shoulders = -0.1 * w
             p.gaze = SIMD2(0, -0.006) * w
             p.scratch = w
-            // The paw rubs the head, three times a second, while it is held.
+            // The paw rubs beside the cheek, three times a second, while it is held.
             p.rub = held < hold ? Float(sin(2 * .pi * 3 * held)) : 0
         }
         return p
