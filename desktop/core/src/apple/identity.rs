@@ -64,6 +64,34 @@ pub fn has_key(team: &str) -> Result<bool> {
     }
 }
 
+/// Reuses the exact installed certificate without creating keys or replacing certificates.
+#[cfg(feature = "device")]
+pub(crate) async fn existing_for_update(portal: &mut Portal<'_>, team: &str, fingerprint: &str) -> Result<Identity> {
+    let certificate = update_certificate(portal, team, fingerprint).await?;
+    let pem = match crate::vault::installed() {
+        Some(v) => v.get(&format!("key-{team}"))?.ok_or_else(|| Error::msg("The original signing key is unavailable; use the original signing computer."))?,
+        None => std::fs::read(key_path(team)?).map_err(|_| Error::msg("The original signing key is unavailable; use the original signing computer."))?,
+    };
+    let key = RsaPrivateKey::from_pkcs8_pem(&String::from_utf8_lossy(&pem)).map_err(|_| Error::msg("The saved signing identity is unusable; use the original signing computer."))?;
+    let key_pkcs8 = key.to_pkcs8_der().map_err(|e| Error::msg(e.to_string()))?.as_bytes().to_vec();
+    if !certificate_matches(&key_pkcs8, &certificate.der) {
+        return Err(Error::msg("The saved signing key does not match the original certificate; use the original signing computer."));
+    }
+    Ok(Identity { team_id: team.into(), certificate, key_pkcs8 })
+}
+
+#[cfg(feature = "device")]
+pub(crate) async fn update_certificate(portal: &mut Portal<'_>, team: &str, fingerprint: &str) -> Result<Certificate> {
+    select_update_certificate(portal.certificates(team).await?, fingerprint)
+}
+
+#[cfg(feature = "device")]
+fn select_update_certificate(certificates: Vec<Certificate>, fingerprint: &str) -> Result<Certificate> {
+    use sha2::{Digest, Sha256};
+    certificates.into_iter().find(|c| hex::encode(Sha256::digest(&c.der)) == fingerprint && days_left(&c.der).unwrap_or(-1) > 1)
+        .ok_or_else(|| Error::UpdateCheck("The original signing certificate is unavailable or expiring; keep Poki installed and renew it with its original signing identity."))
+}
+
 /// A throwaway identity with a self-signed "Apple Development" certificate, for checking the
 /// signing pipeline without an Apple Account (`poki-setup selftest-sign`). iOS won't trust it.
 pub fn self_signed(team: &str) -> Result<Identity> {
@@ -401,5 +429,18 @@ mod replacement_tests {
     fn the_question_names_the_certificate_and_what_stops() {
         let m = limit_message(&cert("5F00", "Poki Setup on Old Mac", "Apple Development: Jane"));
         assert!(m.contains("Poki Setup on Old Mac") && m.contains("5F00") && m.contains("stops opening") && m.contains("Replace Certificate"));
+    }
+}
+
+#[cfg(all(test, feature = "device"))]
+mod update_tests {
+    #[test]
+    fn update_certificate_requires_the_installed_certificate() {
+        use sha2::{Digest, Sha256};
+        let identity = super::self_signed("TESTTEAM").unwrap();
+        let fingerprint = hex::encode(Sha256::digest(&identity.certificate.der));
+        assert!(super::select_update_certificate(vec![identity.certificate.clone()], &fingerprint).is_ok());
+        assert!(super::select_update_certificate(vec![identity.certificate], &"0".repeat(64)).is_err());
+        assert!(super::select_update_certificate(vec![], &fingerprint).is_err());
     }
 }

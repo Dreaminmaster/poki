@@ -125,6 +125,24 @@ impl Signer {
         Ok(pick)
     }
 
+    #[cfg(feature = "device")]
+    pub(crate) async fn check_update_identity(&mut self, team: &str, certificate: &str) -> Result<()> {
+        let token = self.token().await?;
+        let session = self.account.session.clone().ok_or_else(|| Error::UpdateCheck("Sign in on the original signing computer, then retry update-only."))?;
+        let mut portal = Portal::new(&session, &token, self.client.anisette())?;
+        identity::update_certificate(&mut portal, team, certificate).await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "device")]
+    pub(crate) async fn sign_update(&mut self, team: &Team, unpacked: sign::Unpacked, certificate: &str, out: &Path, reporter: &Reporter) -> Result<SignedBuild> {
+        let token = self.token().await?;
+        let session = self.account.session.clone().ok_or_else(|| Error::msg("Sign in on the original signing computer, then retry update-only."))?;
+        let mut portal = Portal::new(&session, &token, self.client.anisette())?;
+        let ident = identity::existing_for_update(&mut portal, &team.team_id, certificate).await?;
+        sign_prepared(&mut portal, team, unpacked, ident, out, reporter, true).await
+    }
+
     /// For support: the chosen team's development certificates as Apple lists them.
     pub async fn diagnose_certificates(&mut self) -> Result<Vec<String>> {
         let team = self.team().await?;
@@ -204,6 +222,10 @@ pub async fn sign_for_team(signer: &mut Signer, team: &Team, phone: Option<(&str
         None => Default::default(),
     };
     let unpacked = sign::unpack(ipa, &team.team_id, &requested, reporter)?;
+    sign_prepared(&mut portal, team, unpacked, ident, out, reporter, false).await
+}
+
+async fn sign_prepared(portal: &mut Portal<'_>, team: &Team, unpacked: sign::Unpacked, ident: identity::Identity, out: &Path, reporter: &Reporter, preserve_group: bool) -> Result<SignedBuild> {
     let group = portal.ensure_app_group(&team.team_id, &unpacked.app_group, "Poki").await?;
     let mut profiles = vec![];
     let mut raw_profiles = vec![];
@@ -216,6 +238,13 @@ pub async fn sign_for_team(signer: &mut Signer, team: &Team, phone: Option<(&str
         portal.assign_app_group(&team.team_id, &app_id, &group).await?;
         let p = portal.profile(&team.team_id, &app_id).await?;
         let parsed = sign::profile::parse(&p.data)?;
+        if preserve_group {
+            let merged = sign::entitlements::merge(&b.requested, &parsed.entitlements);
+            let groups = merged.get("com.apple.security.application-groups").and_then(|v| v.as_array());
+            if !groups.is_some_and(|groups| groups.iter().any(|v| v.as_string() == Some(unpacked.app_group.as_str()))) {
+                return Err(Error::UpdateCheck("The signing profile cannot preserve the installed app group; keep Poki installed and use the original signing setup."));
+            }
+        }
         expires = expires.min(parsed.expires_at);
         raw_profiles.push(p.data.clone());
         profiles.push((b.new_id.clone(), parsed));
