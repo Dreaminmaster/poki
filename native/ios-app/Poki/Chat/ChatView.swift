@@ -168,6 +168,7 @@ struct ChatView: View {
         .onChange(of: chat.running) { was, now in
             if was, !now, endedWell { DoneLinger.shared.celebrate() }
         }
+        .onChange(of: MessageFieldAsk.shared.pending, initial: true) { if MessageFieldAsk.shared.take() { writing = true } }
     }
 
     /// How far your first words rise: from the message field to their place under the top bar.

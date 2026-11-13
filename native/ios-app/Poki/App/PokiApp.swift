@@ -280,18 +280,18 @@ struct RootView: View {
         }
     }
 
-    /// The Action Button, Control Center, Shortcuts or Spotlight (PokiEntry), once Poki is in front: the
-    /// microphone starts only there. A task under way is shown, not interrupted: Talk starts voice only
-    /// when Poki is free. Pairing stays on its step.
+    /// The Action Button, Control Center, Shortcuts or Spotlight (PokiEntry), once Poki is in front. A task
+    /// under way is shown, not interrupted: Talk goes on only when Poki is free. Pairing stays on its step.
     private func takeEntry() {
         guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay else { return }
         detailsOpen = false
         statusOpen = false
         if let handoff = AskPoki.liveSessionID { show(.session(handoff)); return }
         show(.chat)
-        guard request == .talk, !chat.running, !model.voice.isOn, model.voice.canTalk else { return }
-        ApprovalNotice.requestPermission()
-        Task { await model.voice.start() }
+        guard request == .talk, !chat.running, !model.voice.isOn else { return }
+        // Until the talk in the chat replaces the full-screen Voice page, Talk opens the message field and
+        // leaves the microphone off. With the talk in, this line becomes openLiveVoice().
+        MessageFieldAsk.shared.ask()
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.
