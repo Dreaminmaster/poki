@@ -244,9 +244,11 @@ Poki は AGPL-3.0 ライセンスの定めるとおり、無保証かつ「現�
 
 ## ライセンス
 
-Poki は [AGPL-3.0-only ライセンス](LICENSE)のもとでオープンソースとして公開されています。
+Poki のコードは [AGPL-3.0-only ライセンス](LICENSE)のもとでオープンソースとして公開されています。
 
-Copyright (c) 2026 Joseph Zhou and contributors. オープンソースの依存関係には、それぞれのライセンスが適用されます。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。コントリビュートについては [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
+Poki のクマ、アプリアイコン、その他の Poki のアートワークはこのライセンスの対象外です。Poki を紹介するためにスクリーンショットを使うことはできます。フォークには独自の名前とアートワークが必要です。詳しくは [BRAND.md](BRAND.md) をご覧ください。
+
+Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. オープンソースの依存関係とサードパーティの素材には、それぞれのライセンスが適用されます。[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。コントリビュートについては [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
 
 ## 謝辞
 

@@ -1,6 +1,6 @@
 # Open-source notices
 
-The root AGPL-3.0-only license covers original Poki MCP contributions. Third-party code retains its respective copyright notices and license terms.
+The root AGPL-3.0-only license covers original Poki code. Poki's brand assets, including the Poki bear, are not covered; see [BRAND.md](BRAND.md). Third-party code retains its respective copyright notices and license terms.
 
 ## idevice
 
