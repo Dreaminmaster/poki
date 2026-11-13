@@ -48,6 +48,7 @@ enum FirstRun {
 struct FirstRunGuide: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// A setup step a link opened (a pairing file from Poki Setup) while the first run is up.
     @Binding var link: SetupStep?
     var done: () -> Void
@@ -166,6 +167,8 @@ struct FirstRunGuide: View {
             .sheet(item: $keyFor, onDismiss: refresh) { KeyEntry(provider: $0) }
             .sheet(isPresented: $signingIn, onDismiss: refresh) { ChatGPTSignIn() }
         }
+        // Past this size a row's name breaks into single letters and the button's words are cut.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .interactiveDismissDisabled()
     }
 
@@ -223,20 +226,29 @@ struct FirstRunGuide: View {
 
     private func stepRow(_ step: SetupStep) -> some View {
         let ticked = model.isDone(step)
+        // At the accessibility sizes the state goes under the name, as Settings lays its rows out.
+        let stacked = typeSize.isAccessibilitySize
         return HStack(spacing: 14) {
-            SettingsIcon(symbol: ticked ? "checkmark" : step.symbol, size: 30)
-            Text(step.pageTitle).font(.body).foregroundStyle(Color(.label)).multilineTextAlignment(.leading)
-            Spacer(minLength: 8)
-            if ticked {
-                Text("Done").font(.subheadline).foregroundStyle(Tint.greenInk)
-            } else if nextStep?.step == step {
-                Text("Next").font(.footnote.weight(.semibold)).foregroundStyle(Tint.amberInk)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(Tint.amberSoft, in: .capsule)
+            if !stacked { SettingsIcon(symbol: ticked ? "checkmark" : step.symbol, size: 30) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.pageTitle).font(.body).foregroundStyle(Color(.label)).multilineTextAlignment(.leading)
+                if stacked { stepState(step, ticked: ticked) }
             }
+            Spacer(minLength: 8)
+            if !stacked { stepState(step, ticked: ticked) }
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
         }
-        .padding(.horizontal, 14).frame(minHeight: 56).contentShape(.rect)
+        .padding(.horizontal, 14).padding(.vertical, stacked ? 10 : 0).frame(minHeight: 56).contentShape(.rect)
+    }
+
+    @ViewBuilder private func stepState(_ step: SetupStep, ticked: Bool) -> some View {
+        if ticked {
+            Text("Done").font(.subheadline).foregroundStyle(Tint.greenInk)
+        } else if nextStep?.step == step {
+            Text("Next").font(.footnote.weight(.semibold)).foregroundStyle(Tint.amberInk)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(Tint.amberSoft, in: .capsule)
+        }
     }
 
     private func providerRow(_ provider: ModelProvider) -> some View {
@@ -264,7 +276,7 @@ struct FirstRunGuide: View {
                 .accessibilityIdentifier("firstRun.primary")
             if showsLater {
                 Button { go(next) } label: {
-                    Text("Not Now").font(.subheadline.weight(.medium)).foregroundStyle(Tint.homeSecondary)
+                    Text("Not Now").font(.subheadline.weight(.medium)).foregroundStyle(Color(.label).opacity(0.72))
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(.rect)
                 }
                 .accessibilityIdentifier("firstRun.later")
