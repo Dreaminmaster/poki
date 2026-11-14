@@ -1,7 +1,7 @@
 import Foundation
 
 /// The Live Activity's words, in English and Simplified Chinese (LiveActivity.xcstrings, carried by
-/// both the app and the widget extension), following the system language. The table is the Live
+/// both the app and the widget extension), following Poki’s UI language. The table is the Live
 /// Activity's own; the app's other screens have theirs in Localizable.xcstrings. Home and All Steps
 /// borrow `label` for PokiCore's step labels.
 ///
@@ -10,17 +10,17 @@ import Foundation
 /// here; tapping the activity opens Poki, which explains it.
 ///
 /// The app keeps the state's words in English ("Runner Stopped", "Waiting for agent", PokiCore's
-/// "Tap “Send”"), and the face words them in the system's language when it draws them, so the
+/// "Tap “Send”"), and the face words them in Poki's UI language when it draws them, so the
 /// app's own checks on them do not depend on the language.
 enum ActivityWords {
     static let table = "LiveActivity"
 
-    /// A word the app keeps in English, in the system's language. A state the app names in English
+    /// A word the app keeps in English, in Poki's UI language. A state the app names in English
     /// ("Runner asleep") is said in Poki's one set of status words; a text the table does not have (an
     /// error from the pairing) stays as it is.
     static func local(_ key: String) -> String {
         if let word = states[key] { return word.text }
-        return Bundle.main.localizedString(forKey: key, value: key, table: table)
+        return AppLocalization.bundle.localizedString(forKey: key, value: key, table: table)
     }
 
     /// The app's English names of a state (the activity's `headline`, `RunnerStatus.title`) that are
@@ -42,7 +42,7 @@ enum ActivityWords {
         "Carrying on", "The agent carried on by itself",
     ]
 
-    /// A step label from PokiCore in the system's language, whole, for the app's own screens.
+    /// A step label from PokiCore in Poki's UI language, whole, for the app's own screens.
     /// Several actions ("Tap “Search”, then type “cats”") are worded one by one and joined in that
     /// language's own way.
     static func label(_ label: String) -> String {
@@ -117,6 +117,6 @@ enum ActivityWords {
 extension String {
     /// One of the Live Activity's words, from its own table.
     init(activity key: String.LocalizationValue) {
-        self.init(localized: key, table: ActivityWords.table)
+        self = AppLocalization.text(LocalizedStringResource(key, table: ActivityWords.table))
     }
 }

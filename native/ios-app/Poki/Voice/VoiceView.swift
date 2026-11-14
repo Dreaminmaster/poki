@@ -24,7 +24,7 @@ struct VoiceView: View {
                 // beside it for dictation). This page only says how it runs and keeps its options.
                 Section {
                     LabeledContent {
-                        Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? String(localized: "OpenAI key") : String(localized: "Voice bridge")) : String(localized: "Not Available"))
+                        Text(voice.canTalkLive ? (VoiceDirect.apiKey != nil ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
                             .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
                     } label: {
                         SettingsLabel("Live Voice", systemImage: "waveform")
@@ -43,7 +43,7 @@ struct VoiceView: View {
                 }
                 ActionButtonSection()
             }
-            .navigationTitle("Dictation & Mute")
+            .navigationTitle(AppLocalization.text("Dictation & Mute"))
             .navigationBarTitleDisplayMode(.inline)
     }
 

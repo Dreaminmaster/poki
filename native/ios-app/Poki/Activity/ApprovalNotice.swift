@@ -13,9 +13,9 @@ enum ApprovalNotice {
     /// Allow and Don't Allow on the notification itself (touch and hold it, or pull it down), so an
     /// approval can be answered without opening Poki. Allow asks for Face ID or the passcode first.
     @MainActor static func registerActions() {
-        let allowAction = UNNotificationAction(identifier: allow, title: String(localized: "Allow"),
+        let allowAction = UNNotificationAction(identifier: allow, title: AppLocalization.text(LocalizedStringResource("Allow")),
                                                options: [.authenticationRequired], icon: UNNotificationActionIcon(systemImageName: "checkmark"))
-        let denyAction = UNNotificationAction(identifier: deny, title: String(localized: "Don’t Allow"),
+        let denyAction = UNNotificationAction(identifier: deny, title: AppLocalization.text(LocalizedStringResource("Don’t Allow")),
                                               options: [.destructive], icon: UNNotificationActionIcon(systemImageName: "xmark"))
         let approvals = UNNotificationCategory(identifier: category, actions: [allowAction, denyAction], intentIdentifiers: [],
                                                options: [.hiddenPreviewsShowTitle])
@@ -73,8 +73,8 @@ final class ApprovalNoticeDelegate: NSObject, UNUserNotificationCenterDelegate, 
 enum ConnectionNotice {
     @MainActor static func post(_ ask: AppModel.ConnectionAsk) {
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Allow \(ask.client) to connect?")
-        content.body = String(localized: "A client Poki doesn’t know (\(ask.callback)) is signing in with \(ask.connector). Open Poki to allow or deny it.")
+        content.title = AppLocalization.text(LocalizedStringResource("Allow \(ask.client) to connect?"))
+        content.body = AppLocalization.text(LocalizedStringResource("A client Poki doesn’t know (\(ask.callback)) is signing in with \(ask.connector). Open Poki to allow or deny it."))
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = "connections"
@@ -92,8 +92,8 @@ enum PairingNotice {
     @MainActor static func post(pin: String) {
         let content = UNMutableNotificationContent()
         let shown = pin.count == 6 ? "\(pin.prefix(3)) \(pin.suffix(3))" : pin
-        content.title = String(localized: "Pairing code \(shown)")
-        content.body = String(localized: "Type it on the Pair with Poki screen in Settings.")
+        content.title = AppLocalization.text(LocalizedStringResource("Pairing code \(shown)"))
+        content.body = AppLocalization.text(LocalizedStringResource("Type it on the Pair with Poki screen in Settings."))
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])

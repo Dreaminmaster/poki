@@ -4,11 +4,19 @@ import XCTest
 /// The chat's opening words say whether Poki asks before a sensitive step, as Poki’s Rules page has it.
 @MainActor
 final class GreetingTests: XCTestCase {
+    private var language = AppLocalization.system
     private var saved: Any?
     private static let promise = "Asks before irreversible steps."
 
-    override func setUp() async throws { saved = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey) }
-    override func tearDown() async throws { UserDefaults.standard.set(saved, forKey: ApprovalClassifier.modeKey) }
+    override func setUp() async throws {
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        saved = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
+    }
+    override func tearDown() async throws {
+        UserDefaults.standard.set(saved, forKey: ApprovalClassifier.modeKey)
+        AppLocalization.shared.preference = language
+    }
 
     private func greeting(_ chat: ChatModel) -> [String] {
         chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }

@@ -159,8 +159,7 @@ struct AppIconView: View {
     /// The icon in its light look whatever the page's: the home page's pills (the owner: their icons
     /// should not change with dark mode).
     var alwaysLight = false
-    /// A PNG in Poki/AppIcons drawn in place of `app`'s icon: for a pill whose task is not in an app
-    /// on this iPhone (starring Poki on GitHub, in Poki's browser).
+    /// A bundled PNG keeps the icon available even when its app is not installed.
     var carried: String?
     @Environment(\.colorScheme) private var scheme
 

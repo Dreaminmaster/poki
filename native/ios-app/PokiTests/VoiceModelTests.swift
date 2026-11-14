@@ -16,6 +16,21 @@ final class BridgeStub: URLProtocol {
     override func stopLoading() {}
 }
 
+/// A voice bridge in trouble: one host no longer knows the address, the other never answers in time.
+final class BridgeTroubleStub: URLProtocol {
+    static let gone = "http://voice-bridge-gone.test/voice/0123456789abcdef"
+    static let slow = "http://voice-bridge-slow.test/voice/0123456789abcdef"
+    override class func canInit(with request: URLRequest) -> Bool { ["voice-bridge-gone.test", "voice-bridge-slow.test"].contains(request.url?.host()) }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard request.url?.host() == "voice-bridge-gone.test" else { client?.urlProtocol(self, didFailWithError: URLError(.timedOut)); return }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error":"unknown token"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
 /// The Realtime connection: the test plays the server's events in and sees what was sent and whether it was closed.
 final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onEvent: (@MainActor ([String: Any]) -> Void)?
@@ -540,5 +555,80 @@ extension VoiceModelTests {
         XCTAssertEqual(h.voice.talkState, .failed(TalkState.connectionLost))
         h.voice.dismissProblem()
         XCTAssertNil(h.voice.talkState)
+    }
+    /// A talk speaks Poki's chosen language, whatever the iPhone's: the state on the talk bar, the
+    /// reason under it, the step lines and the note when the connection drops. A step line already
+    /// listed keeps its words when the language changes.
+    func testATalksWordsFollowTheLanguageChosenInPoki() async {
+        let saved = AppLocalization.shared.preference
+        defer { AppLocalization.shared.preference = saved }
+        let expected: [(language: String, connecting: String, step: String, interrupted: String, reason: String, lost: String)] = [
+            ("en", "Connecting", "Using the phone", "Interrupted", "Check the network, then try again.",
+             "Connection lost. Nothing is sent again. Talk again to hear how running steps ended."),
+            ("zh-Hans", "正在连接", "正在操作手机", "已打断", "请检查网络后重试。",
+             "连接中断。已发出的内容不会重发，重新对话可以了解步骤的结果。"),
+            ("zh-Hant", "正在連線", "正在操作手機", "已打斷", "請檢查網路後再試。",
+             "連線中斷。已送出的內容不會重送，重新對話可以了解步驟的結果。"),
+        ]
+        for words in expected {
+            AppLocalization.shared.preference = words.language
+            let h = Harness(phoneTool: { _, _ in ("done", false) })
+            var said: [VoiceLine] = []
+            h.voice.onConversationEnded = { lines, _ in said = lines }
+            await h.connect()
+            XCTAssertEqual(h.voice.talkState?.word, words.connecting, words.language)
+
+            h.link.play(["type": "session.created"],
+                        ["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
+                        ["type": "response.created", "response": ["id": "r1"]],
+                        ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]],
+                        ["type": "response.done", "response": ["id": "r1"]])
+            await h.time.settle()
+            AppLocalization.shared.preference = words.language == "en" ? "zh-Hans" : "en"
+            XCTAssertEqual(h.voice.lines.last { $0.role == .tool }?.text, words.step, words.language)
+            AppLocalization.shared.preference = words.language
+
+            h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
+                        ["type": "input_audio_buffer.speech_started"], ["type": "output_audio_buffer.cleared"])
+            XCTAssertEqual(h.voice.talkState?.word, words.interrupted, words.language)
+
+            h.link.onClosed?("gone")
+            XCTAssertEqual(h.voice.talkState?.reason, words.reason, words.language)
+            XCTAssertEqual(said.last?.text, words.lost, words.language)
+            h.voice.dismissProblem()
+        }
+    }
+
+    /// When a talk cannot start, the reason under the talk bar is in Poki's chosen language, whatever
+    /// the iPhone's: no model and no bridge, a bridge that no longer knows the address, a bridge that
+    /// does not answer in time.
+    func testWhyATalkCouldNotStartFollowsTheLanguageChosenInPoki() async {
+        let saved = AppLocalization.shared.preference
+        URLProtocol.registerClass(BridgeTroubleStub.self)
+        defer { AppLocalization.shared.preference = saved; URLProtocol.unregisterClass(BridgeTroubleStub.self) }
+        let expected: [(language: String, noModel: String, gone: String, slow: String)] = [
+            ("en", "Set up Poki's model first (an OpenAI key talks fastest), or enter a voice bridge address from your Mac.",
+             "Copy the voice bridge address again from your Mac. This address wasn’t recognized.",
+             "The voice connection took too long. Check the network, then try again."),
+            ("zh-Hans", "请先设置 Poki 的模型（用 OpenAI 密钥对话最快），或输入 Mac 上的语音桥接地址。",
+             "请从 Mac 重新拷贝语音桥接地址。当前地址无法识别。", "语音连接超时。请检查网络后重试。"),
+            ("zh-Hant", "請先設定 Poki 的模型（用 OpenAI 金鑰對話最快），或輸入 Mac 上的語音橋接地址。",
+             "請從 Mac 重新複製語音橋接位址。目前位址無法識別。", "語音連線逾時。請檢查網路後再試。"),
+        ]
+        for words in expected {
+            AppLocalization.shared.preference = words.language
+            let h = Harness()
+            h.voice.removeBridge()
+            await h.voice.start(microphone: false)
+            XCTAssertEqual(h.voice.talkState?.reason, words.noModel, words.language)
+            h.voice.dismissProblem()
+
+            for (address, reason) in [(BridgeTroubleStub.gone, words.gone), (BridgeTroubleStub.slow, words.slow)] {
+                XCTAssertTrue(h.voice.setBridge(address))
+                await h.connect()
+                XCTAssertEqual(h.voice.talkState?.reason, reason, "\(words.language) \(address)")
+                h.voice.dismissProblem()
+            }
+        }
     }
 }

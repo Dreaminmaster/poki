@@ -151,14 +151,14 @@ struct SetupView: View {
 
 extension SetupStep {
     /// The page's title (board 03: title case).
-    var pageTitle: LocalizedStringKey {
+    var pageTitle: String {
         switch self {
-        case .runner: "Install Poki Runner"
-        case .developerMode: "Turn On Developer Mode"
-        case .loopback: "Turn On Loopback"
-        case .pairing: "Pair This iPhone"
-        case .automation: "Allow UI Automation"
-        case .background: "Keep Poki Running"
+        case .runner: AppLocalization.text("Install Poki Runner")
+        case .developerMode: AppLocalization.text("Turn On Developer Mode")
+        case .loopback: AppLocalization.text("Turn On Loopback")
+        case .pairing: AppLocalization.text("Pair This iPhone")
+        case .automation: AppLocalization.text("Allow UI Automation")
+        case .background: AppLocalization.text("Keep Poki Running")
         }
     }
 
@@ -345,12 +345,12 @@ private struct LoopbackPage: View {
                     LabeledContent("Built-in Connection") { ProgressView() }
                     Button("Cancel Connection", role: .destructive) { model.tunnel.disconnect() }.disabled(connectionLocked)
                 case .connected:
-                    LabeledContent("Built-in Connection", value: String(localized: "Connected"))
+                    LabeledContent("Built-in Connection", value: AppLocalization.text(LocalizedStringResource("Connected")))
                     Button("Disconnect Local Connection") { model.tunnel.disconnect() }.disabled(connectionLocked)
                 case .disconnecting:
                     LabeledContent("Built-in Connection") { ProgressView() }
                 case .failed(let message):
-                    Label(Bundle.main.localizedString(forKey: message, value: message, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                    Label(AppLocalization.bundle.localizedString(forKey: message, value: message, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                     enableButton
                 case .off, .unavailable:
                     enableButton
@@ -557,14 +557,14 @@ private struct PairingPage: View {
         default:
             if let trouble = model.pairingTrouble {
                 Section {
-                    Label(String(localized: "The phone no longer accepts this pairing: \(trouble)"), systemImage: "exclamationmark.triangle")
+                    Label(AppLocalization.text(LocalizedStringResource("The phone no longer accepts this pairing: \(trouble)")), systemImage: "exclamationmark.triangle")
                 } footer: {
                     Text(SetupStep.onDevicePairing ? "This happens after a restore, a reset of Location & Privacy, or when the phone forgot Poki. Pair again; the old key is replaced." : "This happens after a restore, a reset of Location & Privacy, or when the phone forgot Poki. Pair again from Poki Setup on your computer and send the new file here; the old key is replaced.")
                 }
             } else if model.pairingPath != nil {
                 Section {
-                    Label(model.pairingVerifiedAt.map { String(localized: "Paired. The phone accepted it at \($0.formatted(date: .omitted, time: .shortened)).") }
-                            ?? String(localized: "Paired. Checked the next time the runner starts."), systemImage: "checkmark.seal.fill")
+                    Label(model.pairingVerifiedAt.map { AppLocalization.text(LocalizedStringResource("Paired. The phone accepted it at \($0.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).")) }
+                            ?? AppLocalization.text(LocalizedStringResource("Paired. Checked the next time the runner starts.")), systemImage: "checkmark.seal.fill")
                 }
             } else if SetupStep.onDevicePairing {
                 Section("How To") {
@@ -613,14 +613,14 @@ private struct PairingPage: View {
         .task { while !Task.isCancelled { model.lookForHandedPairing(); try? await Task.sleep(for: .seconds(3)) } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.propertyList, .xml, .data]) { result in
             do { try model.importPairingFile(from: result.get()); importError = nil }
-            catch { importError = String(localized: "Invalid Pairing File: \(error.localizedDescription)") }
+            catch { importError = AppLocalization.text(LocalizedStringResource("Invalid Pairing File: \(error.localizedDescription)")) }
         }
     }
 
     @ViewBuilder private var diskImage: some View {
         switch model.diskImage.state {
         case .ready:
-            LabeledContent("Status", value: String(localized: "Ready"))
+            LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Ready")))
         case .downloading(let step):
             LabeledContent("Downloading") { HStack { Text(verbatim: "\(step)"); ProgressView() } }
         case .missing:
@@ -702,7 +702,7 @@ struct SetupChecklist: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Setup")
+        .navigationTitle(AppLocalization.text("Setup"))
         .onAppear { model.loopback.resume() }
         .sheet(isPresented: $guiding) { SetupGuide(start: SetupStep.shown.first { !model.isDone($0) }) }
     }
@@ -731,13 +731,13 @@ struct SetupStepRow: View {
     private var problem: String {
         switch step {
         case .loopback:
-            if model.loopback.state == .noAnswer { return String(localized: "No Answer") }
-            return model.setup.loopback == .none ? String(localized: "Needed") : String(localized: "Off")
+            if model.loopback.state == .noAnswer { return AppLocalization.text(LocalizedStringResource("No Answer")) }
+            return model.setup.loopback == .none ? AppLocalization.text(LocalizedStringResource("Needed")) : AppLocalization.text(LocalizedStringResource("Off"))
         case .pairing:
-            if model.pairingTrouble != nil { return String(localized: "Pair Again") }
-            if model.pairingPath != nil, !model.diskImage.isReady { return String(localized: "Downloading") }
-            return String(localized: "Needed")
-        default: return String(localized: "Needed")
+            if model.pairingTrouble != nil { return AppLocalization.text(LocalizedStringResource("Pair Again")) }
+            if model.pairingPath != nil, !model.diskImage.isReady { return AppLocalization.text(LocalizedStringResource("Downloading")) }
+            return AppLocalization.text(LocalizedStringResource("Needed"))
+        default: return AppLocalization.text(LocalizedStringResource("Needed"))
         }
     }
 }
@@ -778,7 +778,7 @@ struct SetupStepPage: View {
                 Text("iOS doesn’t let Poki check this one, so turn the switch on once it’s done.")
             }
         }
-        .navigationTitle(Text(step.pageTitle))
+        .navigationTitle(step.pageTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume() }
     }
@@ -832,7 +832,7 @@ struct SetupStepPage: View {
             }
             content
         }
-        .navigationTitle(Text(step.pageTitle))
+        .navigationTitle(step.pageTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.loopback.resume()

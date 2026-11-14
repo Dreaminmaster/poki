@@ -55,7 +55,7 @@ struct MemoryView: View {
             } header: {
                 SettingsHeader("Move or Back Up")
             } footer: {
-                Text(message ?? String(localized: "One file with every routine and note. Importing merges it in; the newer copy of a routine wins. Poki Setup on your computer can back it up and put it back."))
+                Text(message ?? AppLocalization.text(LocalizedStringResource("One file with every routine and note. Importing merges it in; the newer copy of a routine wins. Poki Setup on your computer can back it up and put it back.")))
             }
 
             Section {
@@ -65,7 +65,7 @@ struct MemoryView: View {
                 .accessibilityIdentifier("memory.clear")
             }
         }
-        .navigationTitle("Memory")
+        .navigationTitle(AppLocalization.text("Memory"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: reload)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
@@ -77,7 +77,7 @@ struct MemoryView: View {
                     let data = try Data(contentsOf: url)
                     message = try store.importData(data, by: "import")
                 } catch {
-                    message = String(localized: "That file could not be imported: \(String(describing: error))")
+                    message = AppLocalization.text(LocalizedStringResource("That file could not be imported: \(String(describing: error))"))
                 }
                 reload()
             case .failure(let error):
@@ -125,9 +125,9 @@ private struct RoutineRow: View {
     }
 
     private var detail: String {
-        let steps = String(localized: "\(routine.steps.count) steps")
-        let runs = routine.runs == 0 ? String(localized: "not run yet") : String(localized: "worked \(routine.ok) of \(routine.runs)")
+        let steps = AppLocalization.text(LocalizedStringResource("\(routine.steps.count) steps"))
+        let runs = routine.runs == 0 ? AppLocalization.text(LocalizedStringResource("not run yet")) : AppLocalization.text(LocalizedStringResource("worked \(routine.ok) of \(routine.runs)"))
         let base = "\(steps) · \(runs) · \(routine.savedBy)"
-        return routine.stale ? String(localized: "Needs redoing: stopped twice in a row") + " · " + base : base
+        return routine.stale ? AppLocalization.text(LocalizedStringResource("Needs redoing: stopped twice in a row")) + " · " + base : base
     }
 }
