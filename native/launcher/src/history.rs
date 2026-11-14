@@ -462,7 +462,13 @@ fn front_name(summary: &Value) -> Value {
     if let Some(id) = app["bundle_id"].as_str() {
         return id.into();
     }
-    app["name"].clone()
+    if let Some(name) = app["name"].as_str().filter(|name| !name.is_empty()) {
+        return name.into();
+    }
+    match app["pid"].as_u64() {
+        Some(pid) => format!("no app name, pid {pid}").into(),
+        None => Value::Null,
+    }
 }
 
 fn is_secure(element: &Value) -> bool {

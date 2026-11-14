@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import Vision
 import ImageIO
+import notify
 
 /// poki_history_* through the C ABI (native/launcher/src/history.rs): the screen read as text through
 /// the accessibility audit service, on a tunnel of its own and with no XCTest session.
@@ -86,6 +87,12 @@ final class HistoryProbe: ObservableObject {
     private var started: Date?
     private var batteryAtStart: Float = -1
     private var progressSeen = 0
+    private var lockToken: Int32 = NOTIFY_TOKEN_INVALID
+    private var screenToken: Int32 = NOTIFY_TOKEN_INVALID
+    private var wasLocked = false
+    private var wasDark = false
+    private var expectedEmpty = 0
+    private var unexplained = 0
     private let file = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("history-test-log.txt")
     private static let limit = 400
 
@@ -344,6 +351,9 @@ final class HistoryProbe: ObservableObject {
         started = Date()
         running = true
         progressSeen = 0
+        expectedEmpty = 0
+        unexplained = 0
+        watchScreen()
         request["interval_ms"] = seconds * 1000
         request["duration_s"] = minutes * 60
         UIDevice.current.isBatteryMonitoringEnabled = true
@@ -383,8 +393,12 @@ final class HistoryProbe: ObservableObject {
             let every = max(1, 60 / max(1, seconds))
             guard progressSeen <= 5 || progressSeen % every == 0 else { return }
             note("read \(n) ok \(line["ms"] as? Int ?? 0) ms, \(line["app"] as? String ?? "?"), \(line["elements"] as? Int ?? 0) elements\(line["changed"] as? Bool == true ? ", changed" : "")")
+        } else if let reason = screenReason() {
+            expectedEmpty += 1
+            note("read \(n) nothing to read, \(reason) (\(line["ms"] as? Int ?? 0) ms)")
         } else {
-            note("read \(n) FAILED after \(line["ms"] as? Int ?? 0) ms (\(line["code"] as? String ?? "error")): \(line["error"] as? String ?? "")")
+            unexplained += 1
+            note("read \(n) FAILED with the screen on and unlocked after \(line["ms"] as? Int ?? 0) ms (\(line["code"] as? String ?? "error")): \(line["error"] as? String ?? "")")
         }
     }
 
@@ -398,12 +412,52 @@ final class HistoryProbe: ObservableObject {
         } else {
             note("battery level not available")
         }
+        note("of the failures, \(expectedEmpty) came with the screen off or the phone locked, \(unexplained) with the screen on and unlocked")
         if let error = value["last_error"] as? String { note("last error: \(error)") }
         note(context(model: model))
         end()
     }
 
+    /// iOS's own lock and screen state, so a read that finds nothing can be told from a failure.
+    private func state(_ token: Int32) -> Bool {
+        var value: UInt64 = 0
+        return token != NOTIFY_TOKEN_INVALID && notify_get_state(token, &value) == NOTIFY_STATUS_OK && value != 0
+    }
+
+    private func screenReason() -> String? {
+        let locked = state(lockToken), dark = state(screenToken)
+        if dark { return locked ? "screen off and locked" : "screen off" }
+        return locked ? "phone locked" : nil
+    }
+
+    private func watchScreen() {
+        guard lockToken == NOTIFY_TOKEN_INVALID else { return }
+        let changed: @Sendable (Int32) -> Void = { [weak self] _ in Task { @MainActor in self?.screenChanged() } }
+        notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
+        notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
+        wasLocked = state(lockToken)
+        wasDark = state(screenToken)
+        if lockToken == NOTIFY_TOKEN_INVALID || screenToken == NOTIFY_TOKEN_INVALID { note("lock and screen state not available") }
+    }
+
+    private func screenChanged() {
+        guard running else { return }
+        let locked = state(lockToken), dark = state(screenToken)
+        if dark != wasDark { note(dark ? "screen turned off" : "screen turned on") }
+        if locked != wasLocked { note(locked ? "phone locked" : "phone unlocked") }
+        wasLocked = locked
+        wasDark = dark
+    }
+
+    private func unwatchScreen() {
+        if lockToken != NOTIFY_TOKEN_INVALID { notify_cancel(lockToken) }
+        if screenToken != NOTIFY_TOKEN_INVALID { notify_cancel(screenToken) }
+        lockToken = NOTIFY_TOKEN_INVALID
+        screenToken = NOTIFY_TOKEN_INVALID
+    }
+
     private func end() {
+        unwatchScreen()
         keepAlive.stop()
         endTask()
         for o in observers { NotificationCenter.default.removeObserver(o) }
