@@ -236,6 +236,47 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(chat.savedCalls.isEmpty)
     }
 
+    func testAmbiguousContinuationWaitsForTheOwnersChoice() async throws {
+        let tasks = ["Draft the clipboard issue on GitHub", "Check tomorrow's weather in Settings"]
+        var sessions: [String] = []
+        for text in tasks {
+            let received = expectation(description: "original task reached model")
+            let ended = expectation(description: "original task stopped")
+            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            _ = chat(on: server)
+            let original = ChatModel(app: try XCTUnwrap(app))
+            original.newConversation()
+            ChatModel.afterTask = { _ in ended.fulfill() }
+            original.send(text)
+            await fulfillment(of: [received], timeout: 10)
+            original.stop()
+            await fulfillment(of: [ended], timeout: 10)
+            ChatModel.afterTask = nil
+            sessions.append(original.sessionID)
+        }
+        let selected = expectation(description: "chosen task reached model")
+        let finished = expectation(description: "chosen task finished")
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")]) { _ in selected.fulfill() }
+        _ = chat(on: server)
+        let chat = ChatModel(app: try XCTUnwrap(app))
+        chat.newConversation()
+        chat.send("继续")
+        XCTAssertFalse(chat.running, "multiple stopped tasks require a choice before model execution")
+        let question = chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }.last ?? ""
+        XCTAssertTrue(question.contains(tasks[0]) && question.contains(tasks[1]), question)
+        guard !chat.running, let option = question.split(separator: "\n").first(where: { $0.contains(tasks[0]) }),
+              let number = option.split(separator: ".").first else { chat.stop(); return }
+        ChatModel.afterTask = { _ in finished.fulfill() }
+        chat.send(String(number))
+        await fulfillment(of: [selected, finished], timeout: 10)
+        ChatModel.afterTask = nil
+        XCTAssertEqual(chat.sessionID, sessions[0], "the owner's choice restores that conversation")
+        let payload = try JSONSerialization.data(withJSONObject: try XCTUnwrap(server.requests.first))
+        let sent = String(decoding: payload, as: UTF8.self)
+        XCTAssertTrue(sent.contains(tasks[0]))
+        XCTAssertFalse(sent.contains(tasks[1]), "the unrelated stopped task must not be sent as the selected task")
+    }
+
     /// The system prompt names no tool the model does not have (the app has no unlock_device or
     /// handle_alert).
     func testThePromptNamesOnlyToolsTheModelHas() throws {
