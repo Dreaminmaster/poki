@@ -1,0 +1,61 @@
+name: Mirror approved Beta to R2
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published numbered Beta tag to mirror or retry
+        required: true
+        type: string
+
+concurrency:
+  group: r2-release-catalog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    environment: beta
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download the published GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^(app-[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+|ios-beta-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+)$ ]]
+          mkdir -p artifacts evidence
+          gh api "repos/$GH_REPO/releases/tags/$TAG" > release.json
+          gh release download "$TAG" --dir artifacts
+      - name: Verify files and publish the signed catalog last
+        env:
+          POKI_RELEASE_SIGNING_KEY: ${{ secrets.POKI_RELEASE_SIGNING_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.POKI_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.POKI_R2_SECRET_ACCESS_KEY }}
+          POKI_R2_ENDPOINT: ${{ secrets.POKI_R2_ENDPOINT }}
+          POKI_R2_BUCKET: poki-releases
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          aws --version
+          node scripts/release/publish-r2.mjs --release release.json --assets artifacts --output evidence --publish | tee evidence/publication.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r2-publication-evidence
+          path: evidence/
+          if-no-files-found: ignore

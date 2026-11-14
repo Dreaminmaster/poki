@@ -36,11 +36,10 @@ Until November 2026 app releases were tagged `ios-vX.Y.Z`, `ios-vX.Y.Z-beta.K`, 
 rolling releases `ios-prealpha-latest` and `ios-alpha-latest`, which carry the Poki Setup update too.
 Compatibility depends on the build, not just the 0.2.2 version label: revision `481faf22`, whose main commit count is
 661, already recognizes both schemes. This is a source check, not a check of the shipped binary. Pre-alpha and Alpha continue to publish those compatibility
-copies. Betas and stables exist only as `app-*`.
+copies. New Betas use `app-*`; the independently numbered `ios-beta-*` compatibility records below remain available to installed clients.
 
 N is the commit count of the built commit on `main`, so it only goes up while `main` is never
-rewritten. Betas and stables drop it from their names; inside the app, `CFBundleVersion` still
-carries it.
+rewritten. New Beta IPA filenames retain the numeric build, which must match `CFBundleVersion` inside the app. Stable filenames still omit it.
 
 ## One build, promoted
 
@@ -77,6 +76,8 @@ Every publish creates a draft first, checks its file count, then publishes. Rele
 deploys) and `SHA256SUMS`, plus Poki Setup's `PokiSetup-*` installers and `SHA256SUMS-desktop.txt`.
 
 ## Installed clients
+
+New Beta promotions retain `Poki-external-X.Y.Z-N.ipa` and mirror the approved files into the signed R2 catalog. The older Beta filename limitation below still matters for releases already published and older clients. Keep compatibility records until their actual selectors have been checked. See [Update sources](update-sources.md#acceptance-without-changing-the-installed-phone) for the old-client entry, source evidence and isolated outage plan, and [Internal preview testing](update-sources.md#internal-preview-testing) for testing without adding another user channel.
 
 A Poki or Poki Setup that is already installed picks its update with the code it shipped with, so a
 release has to suit that code as published. Two of its rules decide the layout. Both are in every
