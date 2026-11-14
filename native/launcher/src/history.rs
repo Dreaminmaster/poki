@@ -33,6 +33,8 @@ use std::{
 const SECURE_TRAIT: u64 = 1 << 24;
 /// A key of the on-screen keyboard.
 const KEY_TRAIT: u64 = 1 << 5;
+/// UIAccessibilityTraitHeader.
+const HEADER_TRAIT: u64 = 1 << 16;
 
 const OPEN_WITHIN: Duration = Duration::from_secs(20);
 /// Apps iOS keeps listing among those on screen while the phone is unlocked and something else is in
@@ -328,6 +330,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut last_text: Option<u64> = None;
     let points: Option<Vec<(f64, f64)>> = request["direct_points"].as_array().map(|points| points.iter().filter_map(|point| Some((point[0].as_f64()?, point[1].as_f64()?))).collect());
     let mut direct: Option<ax::direct::Direct> = None;
+    let include_text = request["include_text"].as_bool().unwrap_or(false);
     let mut ended = "finished";
     loop {
         if RUN.load(Ordering::SeqCst) != me {
@@ -376,6 +379,11 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 line["elements"] = summary["elements"].clone();
                 line["app"] = front_name(&summary);
                 line["changed"] = changed.into();
+                // The capture loop asks for the text itself, and gets it only for a screen that changed.
+                if include_text && changed {
+                    line["text"] = summary["text"].clone();
+                    line["title"] = title_of(&tree);
+                }
             }
             Err(failure) => {
                 // A screen that shows no app (locked or off) is an answer, and the connection stays.
@@ -472,6 +480,19 @@ fn front_name(summary: &Value) -> Value {
         Some(pid) => format!("no app name, pid {pid}").into(),
         None => Value::Null,
     }
+}
+
+/// The screen's title: its first heading that is not a password field.
+fn title_of(tree: &Value) -> Value {
+    let empty = vec![];
+    tree["elements"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
+        .filter(|element| element["traits"].as_u64().unwrap_or(0) & HEADER_TRAIT != 0 && !is_secure(element))
+        .find_map(|element| element["label"].as_str().map(str::trim).filter(|label| !label.is_empty()))
+        .map(Value::from)
+        .unwrap_or(Value::Null)
 }
 
 fn is_secure(element: &Value) -> bool {
@@ -637,6 +658,12 @@ mod tests {
         assert_eq!(windows(&json!({"windows_ms": [50, 3000]})), [Duration::from_millis(200), Duration::from_secs(3)]);
         let line = serde_json::to_value(ax::Attempt::default()).unwrap();
         assert_eq!(line["answered"], false);
+    }
+
+    #[test]
+    fn the_title_is_the_first_heading() {
+        assert_eq!(title_of(&tree()), "Shopping list");
+        assert_eq!(title_of(&json!({"elements": [{"label": "Plain"}]})), Value::Null);
     }
 
     #[test]

@@ -496,6 +496,11 @@ struct AdvancedSettingsView: View {
                 }
                 .accessibilityIdentifier("moreSettings.log")
 
+                NavigationLink { HistoryPage().settingsPage() } label: {
+                    SettingsRow(title: "iPhone History", symbol: "clock.arrow.circlepath")
+                }
+                .accessibilityIdentifier("moreSettings.history")
+
                 NavigationLink { TestingOptionsView().settingsPage() } label: {
                     SettingsRow(title: "Testing Options", symbol: "testtube.2")
                 }
