@@ -416,7 +416,7 @@ final class SelfSigner {
     /// The upgrade's progress while it installs, for `install`'s watch.
     private var installFraction: Double?
     private var steppedAside = false
-    private enum ExitRequest { case unconfirmed, confirmed, closing }
+    private enum ExitRequest { case unconfirmed, stopping, stopped, closing }
     private var exitRequest = ExitRequest.unconfirmed
     private var installBackground: UIBackgroundTaskIdentifier = .invalid
 
@@ -441,28 +441,31 @@ final class SelfSigner {
     func finishNoticeAnswered() {
         guard finishNotice else { return }
         finishNotice = false
-        exitRequest = .confirmed
-        exitIfReady()
+        exitRequest = .stopping
+        log.add("signing", "update confirmed: stopping runtime before installation progress")
+        Task { @MainActor in
+            await beforeExit()
+            SessionStore.shared.flush()
+            UserDefaults.standard.synchronize()
+            exitRequest = .stopped
+            guard !needsReopen else { return }
+            log.add("signing", "update runtime stopped and state saved; moving to background")
+            UIApplication.shared.perform(NSSelectorFromString("suspend"))
+            exitIfReady()
+        }
     }
 
     private func exitIfReady() {
-        guard exitRequest == .confirmed, !needsReopen,
+        guard exitRequest == .stopped, !needsReopen,
               installFraction != nil || installFinish == .waitingForExit else { return }
         exitRequest = .closing
         finishTimer?.invalidate()
         finishTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.requireReopen() }
         }
-        Task { @MainActor in
-            await beforeExit()
-            guard !needsReopen else { return }
-            endInstallBackground()
-            SessionStore.shared.flush()
-            UserDefaults.standard.synchronize()
-            log.add("signing", "update accepted: runtime stopped and state saved; exiting normally")
-            UIApplication.shared.perform(NSSelectorFromString("suspend"))
-            exit(0)
-        }
+        endInstallBackground()
+        log.add("signing", "update accepted: runtime stopped and state saved; exiting normally")
+        exit(0)
     }
 
     /// An install result is required before foreground return or the timer can claim success.
