@@ -7659,6 +7659,28 @@
         }
       }
     },
+    "Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在内置浏览器打开 https://github.com/JosssphZhou/poki，给 Poki 点个 Star。如果我没登录 GitHub，就打开 https://github.com/login?return_to=/JosssphZhou/poki 交给我自己登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在內建瀏覽器打開 https://github.com/JosssphZhou/poki，給 Poki 點個 Star。如果我沒登入 GitHub，就打開 https://github.com/login?return_to=/JosssphZhou/poki 交給我自己登入"
+          }
+        }
+      }
+    },
     "Open it and tap Connect, then return to Poki. It may disconnect another VPN app." : {
       "localizations" : {
         "zh-Hans" : {
@@ -10353,6 +10375,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "即時語音對話，Poki 回答並操作"
+          }
+        }
+      }
+    },
+    "Star Poki" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Star Poki"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给 Poki 点 Star"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "給 Poki 點 Star"
           }
         }
       }
@@ -32693,6 +32737,29 @@
         }
       }
     },
+    "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新。如果 5 秒后仍未完成，请在多任务界面向上划掉 Poki，然后重新打开。重新打开 Poki 前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新。如果 5 秒後仍未完成，請在多工處理畫面向上滑掉 Poki，然後重新開啟。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
     "Finishing the Update" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32739,25 +32806,25 @@
         }
       }
     },
-    "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer." : {
+    "You can return to the Home Screen and wait." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer."
+            "value" : "You can return to the Home Screen and wait."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可以回到主屏幕等待。更新安装完成后，Poki 会自动关闭，之后请重新打开 Poki。如果一直没有变化，请用电脑上的 Poki Setup 更新。"
+            "value" : "可以回到主屏幕等待。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可以回到主畫面等待。更新安裝完成後，Poki 會自動關閉，之後請重新開啟 Poki。如果一直沒有變化，請用電腦上的 Poki Setup 更新。"
+            "value" : "可以回到主畫面等待。"
           }
         }
       }

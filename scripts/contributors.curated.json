@@ -493,5 +493,28 @@
   "zerocodefast": {
     "status": "excluded",
     "note": "Issue #132 invited Poki to be listed in a directory; outreach, not a contribution."
+  },
+  "yulunRyanw": {
+    "status": "community",
+    "categories": [
+      "design"
+    ],
+    "summary": "Special contributor: sent a full set of interface designs for the 0.4.0 redesign (#250, #256 to #268); closed without merging, they shaped the direction of the new interface.",
+    "basis": [
+      "#250",
+      "#256",
+      "#257",
+      "#258",
+      "#259",
+      "#260",
+      "#261",
+      "#262",
+      "#263",
+      "#264",
+      "#265",
+      "#266",
+      "#267",
+      "#268"
+    ]
   }
 }

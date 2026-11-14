@@ -61,12 +61,20 @@ enum SignerBridge {
     @MainActor static var holdsInstall = false
     @MainActor static var installHeld: CheckedContinuation<Void, Never>?
     @MainActor static var finishInstall: CheckedContinuation<Void, Never>?
+    @MainActor static var prepareHeld: CheckedContinuation<Void, Never>?
+    @MainActor static var finishPrepare: CheckedContinuation<Void, Never>?
+    nonisolated(unsafe) static var installProgress: (@Sendable ([String: Any]) -> Void)?
     static func installVault() {}
     @MainActor static func holdInstall() async {
         guard holdsInstall else { return }
         await withCheckedContinuation { finishInstall = $0; installHeld?.resume() }
     }
+    @MainActor static func holdPrepare() async {
+        guard prepareHeld != nil else { return }
+        await withCheckedContinuation { finishPrepare = $0; prepareHeld?.resume() }
+    }
     static func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
+        installProgress = progress
         progress?(["kind": "step", "id": "install"])
         await Task.yield()
         await holdInstall()
@@ -74,6 +82,9 @@ enum SignerBridge {
         return Data()
     }
     static func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
+        progress?(["kind": "step", "id": "release", "title": "Getting the newest Poki"])
+        await Task.yield()
+        await holdPrepare()
         let prepared = #"{"kind":"update","ipa":"/tmp/test.ipa","bundle_id":"test.poki","version":"9.0.0","build":"9999","tag":"test","team_name":"Test","team_is_free":true,"profile_expires_at":0,"prepared_at":0}"#
         return try JSONDecoder().decode(type, from: Data(prepared.utf8))
     }
@@ -134,6 +145,19 @@ final class FakeCore {
         let afterTimeout = await AppModel(signer: timedOut).phoneTool("look", arguments: "{}")
         check(afterTimeout.isError && afterTimeout.text == expected, "task after timeout receives restart instructions", actual: afterTimeout.text)
 
+        let downloading = SelfSigner()
+        downloading.phone = { [:] }
+        let prepare = Task { @MainActor in await downloading.prepare(kind: "update") }
+        await withCheckedContinuation { SignerBridge.prepareHeld = $0 }
+        Timer.advance(by: 15, oldProcessAlive: true)
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        await drain()
+        check(downloading.installMessage == nil && !downloading.needsReopen,
+              "unfinished preparation does not show exit instructions", actual: downloading.installMessage)
+        SignerBridge.prepareHeld = nil
+        SignerBridge.finishPrepare?.resume()
+        await prepare.value
+
         SignerBridge.holdsInstall = true
         let slow = await prepared()
         let install = Task { @MainActor in await slow.install() }
@@ -146,7 +170,14 @@ final class FakeCore {
         check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "foreground return during a running install keeps the installing message", actual: slow.installMessage)
         Timer.advance(by: 15, oldProcessAlive: true)
         await drain()
-        check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "15 seconds into a running install keeps the installing message", actual: slow.installMessage)
+        check(!slow.needsReopen && slow.installMessage?.contains("Do not close Poki in the app switcher.") == true, "15 seconds before system installation keeps the upload protected", actual: slow.installMessage)
+        let finishing = "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+        for fraction in [0.0, 0.4, 0.9] {
+            SignerBridge.installProgress?(["kind": "part", "id": "install", "fraction": fraction])
+            await drain()
+            check(slow.installMessage == finishing && !slow.needsReopen,
+                  "system installation at \(fraction) offers conditional exit guidance without claiming success", actual: slow.installMessage)
+        }
         SignerBridge.holdsInstall = false
         SignerBridge.finishInstall?.resume()
         await install.value

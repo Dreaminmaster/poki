@@ -6,8 +6,8 @@ releases Poki Setup installs and renews with.
 
 | Channel | Tag | Title | GitHub release | Who it is for |
 | --- | --- | --- | --- | --- |
-| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release (not marked Latest) | everyone |
-| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease | testers |
+| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release | everyone |
+| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease, which can be made a full release marked Latest | testers |
 | Alpha | `app-X.Y.Z-alpha.N` | Poki v0.3.0 (712) Alpha | rolling `app-alpha-latest`, prerelease | early testers |
 | Pre-alpha | `app-X.Y.Z-prealpha.N` | Poki v0.3.0 (712) Pre-alpha | rolling `app-prealpha-latest`, prerelease | developers |
 
@@ -15,14 +15,31 @@ A channel includes the channels above it: Beta installs the newest Stable or Bet
 the newest Stable, Beta or Alpha, and Pre-alpha the newest release of any kind. Poki Setup's own
 updates (`desktop-v*`, `desktop-alpha-*` and `desktop-prealpha-*` tags) follow the same channel.
 If no installable release exists in a channel or any more stable channel it includes, Poki Setup
-tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. Stable and Beta
-therefore fall back to Alpha while neither offers a release. This is `pick` in
+tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. This is `pick` in
 `desktop/core/src/release.rs`, not a change to the saved channel.
 
+**When Stable and Beta have no release of their own, they fall back to Alpha.** A person on Stable
+or Beta then installs and renews with the newest Alpha build until a Beta or Stable release is
+published, and keeps the channel they chose.
+
 The checkout installer defaults to Alpha (`bin/install-iphone.mjs`); Poki Setup without a saved
-choice defaults to Stable. On November 13, 2026, Alpha offered Poki 0.4.0 (1130), and Beta and
-Stable had no app release of their own. Read current release metadata on each run. Do not pin
-that snapshot or silently switch an existing user's channel.
+choice defaults to Stable. Read current release metadata on each run, and do not silently switch
+an existing user's channel.
+
+## When GitHub refuses the release list
+
+Poki Setup, the checkout installer and the iPhone app read the release list from `api.github.com`
+without signing in. GitHub limits these anonymous requests per network address, and everyone
+behind the same address shares that limit. Over it, GitHub answers 403 or 429, and the error reads
+`Could not read Poki's releases from GitHub` with the status. The error does not say whether it was
+the limit or another refusal, but a 403 or 429 here is usually the limit. The phone shows Not Found
+as the newest version on its channel instead.
+
+Retrying at once does not help, because each attempt is another request against the same limit. Switch to
+another network or proxy node and try again, or wait an hour. In Poki Setup, Install from an IPA
+File installs a `Poki-external-*.ipa` and the `Poki-signing.zip` beside it downloaded from the
+release page in a browser, which does not read the list. Use it only over a Poki signed with the
+same Apple Account.
 
 Poki Setup orders versions so that `0.3.0-beta.1 < 0.3.0-beta.2 < 0.3.0 < 0.3.0-712`: a pre-release
 suffix sorts below the plain version, a build number above it.

@@ -1,5 +1,9 @@
 # Install
 
+This guide installs Poki MCP from source, which needs full Xcode. Poki MCP is no longer updated and stays available as it is. To put the Poki app on an iPhone,
+use the [install-poki skill](../skills/install-poki/SKILL.md) or Poki Setup instead, as the
+[README](../README.md#install-poki-on-your-iphone) describes; that path does not need Xcode.
+
 For remote access, see [Remote iPhone over LAN or Tailscale](remote-iphone.md). Both paths require initial trusted USB setup; cross-network access also requires Tailscale.
 
 ## Requirements
@@ -38,7 +42,7 @@ Setup does **not** install Xcode, developer disk images, device profiles, or sig
 
 Keep `npm start` running while using an MCP client:
 
-- The daemon listens on `127.0.0.1:47825` by default, so it is not exposed to external networks and is not registered as a login item. `POKI_BIND_HOST` and `POKI_HOST_ALLOW` can move it onto a LAN or tailnet — see [Configuration](configuration.md).
+- The daemon listens on `127.0.0.1:47825` by default, so it is not exposed to external networks and is not registered as a login item. `POKI_BIND_HOST` and `POKI_HOST_ALLOW` can move it onto a LAN or tailnet; see [Configuration](configuration.md).
 - Its endpoint and bearer token are written to `~/Library/Application Support/PokiMCP/mcp.json` (`0600`) and removed on normal shutdown.
 - The stdio wrapper (`src/stdio.mjs`) connects to this running daemon; it does not auto-start the service.
 
@@ -136,7 +140,8 @@ To use a physical iPhone, first pair it with your Mac over USB. After that, keep
 - Where iOS asks for the passcode before automation (the XCTest session), it asks when you tap Start,
   while you are there, not in the middle of a task. A session that fails to open is reopened by Poki itself.
 - Before an update installs, Poki ends its Live Activity and background task.
-- Agents › Safety holds Approvals and the Activity Log. Settings has a Contribute section above Updates.
+- Settings is grouped into Connection, Models, Agents, Memory and Appearance. Connection holds
+  Approvals and Signing & Updates, where the app updates itself.
 - How Poki picks its control method, and what happens without a loopback: see
   [ios-loopback.md](ios-loopback.md#which-method-does-the-work).
 
