@@ -180,6 +180,15 @@ async fn watch(request: &Value) -> Result<Value, Failure> {
 async fn front(request: &Value) -> Result<Value, Failure> {
     let target = Target::from(request)?;
     let mut device = target.open().await?;
+    // The audit service keeps naming a Sleep screen process that is left running as the only app.
+    // Ending it first tells whether the service then names the app really in front.
+    let ended = if request["end_sleep_screen"].as_bool() == Some(true) {
+        let ended = end_sleep_screen(&mut device).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        Some(ended)
+    } else {
+        None
+    };
     let (tree, attempts) = ax::read_tree_overlapped(&mut device.adapter, &device.rsd, Duration::from_secs(3), Duration::from_secs(5)).await;
     let mut answer = match tree {
         Some(tree) => summarize(&tree, false),
@@ -189,6 +198,11 @@ async fn front(request: &Value) -> Result<Value, Failure> {
     let pids: Vec<u64> = attempts.iter().flat_map(|attempt| &attempt.apps).filter_map(|app| app["pid"].as_u64()).collect();
     answer["attempts"] = json!(attempts);
     answer["services"] = json!(accessibility_services(&device));
+    match ended {
+        Some(Ok(count)) => answer["sleep_screen_ended"] = count.into(),
+        Some(Err(error)) => answer["sleep_screen_error"] = error.into(),
+        None => {}
+    }
 
     let path = request["screenshot_path"].as_str().map(String::from);
     instruments(&mut device, &pids, path.as_deref(), &mut answer).await;
@@ -196,6 +210,33 @@ async fn front(request: &Value) -> Result<Value, Failure> {
 }
 
 /// The instruments side of `front`: who the processes are, and one screenshot.
+/// Ends every Sleep screen process. Returns how many were asked to end.
+async fn end_sleep_screen(device: &mut crate::device::Device) -> Result<usize, String> {
+    use idevice::{
+        ReadWrite,
+        dvt::{device_info::DeviceInfoClient, process_control::ProcessControlClient, remote_server::RemoteServerClient},
+    };
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            let mut server: RemoteServerClient<Box<dyn ReadWrite>> = device.connect().await?;
+            let pids: Vec<u64> = DeviceInfoClient::new(&mut server)
+                .await?
+                .running_processes()
+                .await?
+                .into_iter()
+                .filter(|process| process.name == "SleepLockScreen")
+                .map(|process| process.pid as u64)
+                .collect();
+            let mut control = ProcessControlClient::new(&mut server).await?;
+            for pid in &pids {
+                control.kill_app(*pid).await?;
+            }
+            Ok::<_, idevice::IdeviceError>(pids.len())
+        })
+    })
+    .map_err(|error| error.to_string())
+}
+
 /// Run in place on this thread: the compiler cannot prove this future is Send (the instruments
 /// connection is only a service for one lifetime of its stream), and it does not need to move.
 async fn instruments(device: &mut crate::device::Device, pids: &[u64], screenshot_path: Option<&str>, answer: &mut Value) {

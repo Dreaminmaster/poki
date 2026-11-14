@@ -208,12 +208,13 @@ final class HistoryProbe: ObservableObject {
     /// What the phone says about the app in front without its contents, after `delay` seconds so the
     /// owner can put another app in front: two overlapping subscriptions, the processes behind the
     /// apps they name, and one screenshot read as text on this phone. The picture is deleted at once.
-    func front(model: AppModel, delay: Int = 10) async {
+    func front(model: AppModel, delay: Int = 10, endSleepScreen: Bool = false) async {
         guard !reading, !running, var request = makeRequest("front", model: model) else { return }
         reading = true
         defer { reading = false }
         let picture = FileManager.default.temporaryDirectory.appendingPathComponent("history-front-\(UUID().uuidString).png")
         request["screenshot_path"] = picture.path
+        if endSleepScreen { request["end_sleep_screen"] = true }
         note("front app check in \(delay) s, Poki is pid \(ProcessInfo.processInfo.processIdentifier): \(context(model: model))", keep: false)
         if keepAwake { try? keepAlive.start() }
         let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-front")
@@ -227,6 +228,8 @@ final class HistoryProbe: ObservableObject {
             let data = try await HistoryBridge.call(request)
             let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             func number(_ key: String) -> String { (value[key] as? Int).map { "\($0)" } ?? "none" }
+            if let count = value["sleep_screen_ended"] as? Int { note("ended \(count) Sleep screen processes before reading", keep: false) }
+            if let error = value["sleep_screen_error"] as? String { note("the Sleep screen process could not be ended: \(error)", keep: false) }
             let attempts = value["attempts"] as? [[String: Any]] ?? []
             for line in Self.attempts(attempts) { note(line, keep: false) }
             for (index, attempt) in attempts.enumerated() {
@@ -442,6 +445,8 @@ struct HistoryTestSection: View {
             Button("Watch Screen for 30 Seconds") { Task { await probe.watch(model: model) } }
                 .disabled(probe.reading || probe.running)
             Button("Check Front App in 10 Seconds") { Task { await probe.front(model: model) } }
+                .disabled(probe.reading || probe.running)
+            Button("End Sleep Screen and Check in 10 Seconds") { Task { await probe.front(model: model, endSleepScreen: true) } }
                 .disabled(probe.reading || probe.running)
             Stepper(value: $probe.seconds, in: 1...60) {
                 LabeledContent("Seconds Between Reads") { Text(verbatim: "\(probe.seconds)").monospacedDigit() }
