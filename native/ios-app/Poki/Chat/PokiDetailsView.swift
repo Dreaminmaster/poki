@@ -90,6 +90,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
+                    NavigationLink { HistoryPage().settingsPage() } label: {
+                        SettingsRow(title: "Backtape", symbol: "clock.arrow.circlepath")
+                    }
+                    .accessibilityIdentifier("moreSettings.history")
                     NavigationLink(value: DetailsRoute.conversations) {
                         SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
                     }
@@ -495,11 +499,6 @@ struct AdvancedSettingsView: View {
                     SettingsRow(title: "Log", symbol: "doc.text")
                 }
                 .accessibilityIdentifier("moreSettings.log")
-
-                NavigationLink { HistoryPage().settingsPage() } label: {
-                    SettingsRow(title: "iPhone History", symbol: "clock.arrow.circlepath")
-                }
-                .accessibilityIdentifier("moreSettings.history")
 
                 NavigationLink { TestingOptionsView().settingsPage() } label: {
                     SettingsRow(title: "Testing Options", symbol: "testtube.2")

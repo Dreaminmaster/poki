@@ -33151,22 +33151,6 @@
         }
       }
     },
-    "iPhone History" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iPhone 历史记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iPhone 歷史記錄"
-          }
-        }
-      }
-    },
     "Keep Poki Awake During the Test" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33647,22 +33631,6 @@
         }
       }
     },
-    "Exclude from History" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从历史记录中排除"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從歷史記錄中排除"
-          }
-        }
-      }
-    },
     "Excluded" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33723,54 +33691,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已清除歷史記錄"
-          }
-        }
-      }
-    },
-    "History Is Locked" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "历史记录已锁定"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "歷史記錄已鎖定"
-          }
-        }
-      }
-    },
-    "History Lock" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "历史记录锁"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "歷史記錄鎖"
-          }
-        }
-      }
-    },
-    "History is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "历史记录由一个只属于 Poki 的 4 到 8 位 PIN 锁定。iPhone 的密码无法打开它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "歷史記錄由一個只屬於 Poki 的 4 到 8 位 PIN 鎖定。iPhone 的密碼無法打開它。"
           }
         }
       }
@@ -33883,22 +33803,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已略過一個 App"
-          }
-        }
-      }
-    },
-    "Make a PIN for iPhone History" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "为 iPhone 历史记录设置 PIN"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "為 iPhone 歷史記錄設定 PIN"
           }
         }
       }
@@ -34415,22 +34319,6 @@
         }
       }
     },
-    "Turn On iPhone History" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开 iPhone 历史记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟 iPhone 歷史記錄"
-          }
-        }
-      }
-    },
     "Unlock" : {
       "localizations" : {
         "zh-Hans" : {
@@ -34443,22 +34331,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "解鎖"
-          }
-        }
-      }
-    },
-    "Unlock iPhone History" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解锁 iPhone 历史记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解鎖 iPhone 歷史記錄"
           }
         }
       }
@@ -34603,6 +34475,182 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 只儲存這些 App 顯示的內容。其他 App 一律略過。"
+          }
+        }
+      }
+    },
+    "Backtape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒带"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒帶"
+          }
+        }
+      }
+    },
+    "Make a PIN for Backtape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为倒带设置 PIN"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為倒帶設定 PIN"
+          }
+        }
+      }
+    },
+    "Turn On Backtape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开倒带"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟倒帶"
+          }
+        }
+      }
+    },
+    "Unlock Backtape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁倒带"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖倒帶"
+          }
+        }
+      }
+    },
+    "Exclude from Backtape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从倒带中排除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從倒帶中排除"
+          }
+        }
+      }
+    },
+    "Backtape Lock" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒带锁"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒帶鎖"
+          }
+        }
+      }
+    },
+    "Backtape Is Locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒带已锁定"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒帶已鎖定"
+          }
+        }
+      }
+    },
+    "Backtape is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒带由一个只属于 Poki 的 4 到 8 位 PIN 锁定。iPhone 的密码无法打开它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒帶由一個只屬於 Poki 的 4 到 8 位 PIN 鎖定。iPhone 的密碼無法打開它。"
+          }
+        }
+      }
+    },
+    "Back One Hour" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后退一小时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後退一小時"
+          }
+        }
+      }
+    },
+    "Forward One Hour" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前进一小时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前進一小時"
+          }
+        }
+      }
+    },
+    "Latest" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新"
           }
         }
       }

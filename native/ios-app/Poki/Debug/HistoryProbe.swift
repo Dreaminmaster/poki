@@ -571,7 +571,7 @@ struct HistoryTestSection: View {
                 .textSelection(.enabled)
             }
         } header: {
-            Text("iPhone History")
+            Text("Backtape")
         } footer: {
             Text("Reads the screen as text through the accessibility service, with no automation session. Nothing is stored, and the log holds only counts, timings and app names. After a read, note whether iOS showed a banner, an indicator or a prompt. For the background run, tap Start, use the iPhone as usual, then come back.")
         }

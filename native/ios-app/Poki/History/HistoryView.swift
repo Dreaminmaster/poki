@@ -1,8 +1,7 @@
 import SwiftUI
 
-// iPhone History's page (issue 356): the settings card with the privacy controls on top, and under
-// it the timeline. Days hold the parts of the day, each with a title, a description and the icons of
-// the apps used. A part opens into blocks of 10 minutes, and a block into the reads kept in it.
+// Backtape's page (issue 356): the deck on top (BacktapeDeck.swift), a tape of 10 minute blocks under
+// a playhead, and under it the privacy controls. A block opens into the reads kept in it.
 // Titles and descriptions are made on the phone without a model: app names, screen titles and the
 // first lines read.
 
@@ -112,9 +111,11 @@ enum HistoryNames {
 // MARK: Rows
 
 /// The icons of a span's apps. Pressing and holding one offers to leave that app out from now on.
-private struct HistoryIcons: View {
+struct HistoryIcons: View {
     var apps: [String]
     @ObservedObject private var capture = HistoryCapture.shared
+
+    init(apps: [String]) { self.apps = apps }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -122,7 +123,7 @@ private struct HistoryIcons: View {
                 AppIconView(app: app, size: 24)
                     .contextMenu {
                         Text(verbatim: HistoryNames.app(app))
-                        Button("Exclude from History") { capture.exclude(app) }
+                        Button("Exclude from Backtape") { capture.exclude(app) }
                         Button("Delete This App's History", role: .destructive) { Task { await capture.clear(app: app) } }
                     }
             }
@@ -130,28 +131,13 @@ private struct HistoryIcons: View {
     }
 }
 
-private struct HistorySpanRow: View {
-    var heading: String
-    var span: HistorySpan
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: heading).font(.caption).foregroundStyle(.secondary)
-            Text(verbatim: span.title).font(.body.weight(.semibold)).lineLimit(2)
-            if !span.summary.isEmpty {
-                Text(verbatim: span.summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(4)
-            }
-            HistoryIcons(apps: span.apps)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 // MARK: The page
 
 struct HistoryPage: View {
     @ObservedObject private var capture = HistoryCapture.shared
-    @State private var days: [(day: Date, parts: [HistorySpan])] = []
+    /// Blocks of 10 minutes, oldest first.
+    @State private var blocks: [HistorySpan] = []
+    @State private var opened: HistorySpan?
     @State private var size: (entries: Int, bytes: Int64) = (0, 0)
     @State private var asking = false
     @State private var clearing = false
@@ -159,8 +145,25 @@ struct HistoryPage: View {
 
     var body: some View {
         List {
+            // The tape and the reads on it open only after Face ID, Touch ID or Poki's PIN.
+            if !blocks.isEmpty || capture.enabled {
+                if !lock.unlocked {
+                    HistoryUnlockSections()
+                } else if blocks.isEmpty {
+                    Section {
+                        Text("Nothing is kept yet. Use the iPhone as usual and come back.").foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section {
+                        BacktapeDeck(blocks: blocks, opened: $opened)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+            }
             Section {
-                Toggle("iPhone History", isOn: Binding(get: { capture.enabled }, set: { on in
+                Toggle("Backtape", isOn: Binding(get: { capture.enabled }, set: { on in
                     if on { asking = true } else { capture.enabled = false }
                 }))
                 if capture.enabled {
@@ -206,40 +209,24 @@ struct HistoryPage: View {
                     LabeledContent("Reads Kept") { Text(verbatim: "\(size.entries)").monospacedDigit() }
                 }
             }
-            if !days.isEmpty || capture.enabled {
+            if !blocks.isEmpty || capture.enabled {
                 Section {
-                    Button("Clear History", role: .destructive) { clearing = true }.disabled(days.isEmpty)
+                    Button("Clear History", role: .destructive) { clearing = true }.disabled(blocks.isEmpty)
                 }
             }
-            // The timeline and the reads in it open only after Face ID, Touch ID or Poki's PIN.
-            if !lock.unlocked {
-                if !days.isEmpty || capture.enabled { HistoryUnlockSections() }
-            } else {
+            if lock.unlocked, !blocks.isEmpty || capture.enabled {
                 Section {
-                    NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("History Lock") }
-                }
-                ForEach(days, id: \.day) { day in
-                    Section {
-                        ForEach(day.parts) { part in
-                            NavigationLink { HistoryGate { HistoryPartPage(part: part).settingsPage() } } label: {
-                                HistorySpanRow(heading: AppLocalization.bundle.localizedString(forKey: HistoryNames.part(Calendar.current.component(.hour, from: part.start)), value: nil, table: nil), span: part)
-                            }
-                        }
-                    } header: {
-                        Text(verbatim: day.day.formatted(Date.FormatStyle(date: .complete, time: .omitted).locale(AppLocalization.locale)))
-                    }
-                }
-                if days.isEmpty, capture.enabled {
-                    Section {
-                        Text("Nothing is kept yet. Use the iPhone as usual and come back.").foregroundStyle(.secondary)
-                    }
+                    NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Backtape Lock") }
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("iPhone History"))
+        .navigationTitle(AppLocalization.text("Backtape"))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: capture.changes) { await load() }
-        .alert("Turn On iPhone History", isPresented: $asking) {
+        .navigationDestination(item: $opened) { block in
+            HistoryGate { HistoryBlockPage(start: block.start, end: block.end).settingsPage() }
+        }
+        .alert("Turn On Backtape", isPresented: $asking) {
             Button("Turn On") { capture.enabled = true }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -256,31 +243,13 @@ struct HistoryPage: View {
 
     private func load() async {
         let entries = await HistoryStore.shared.recent()
-        days = HistoryNames.days(entries)
+        blocks = HistoryNames.blocks(HistorySpan(start: .distantPast, end: .distantFuture, entries: entries)).reversed()
         size = await HistoryStore.shared.size()
     }
 }
 
-/// A part of a day: its blocks of 10 minutes.
-private struct HistoryPartPage: View {
-    var part: HistorySpan
-
-    var body: some View {
-        let blocks = HistoryNames.blocks(part)
-        List {
-            ForEach(blocks) { block in
-                NavigationLink { HistoryGate { HistoryBlockPage(start: block.start, end: block.end).settingsPage() } } label: {
-                    HistorySpanRow(heading: block.start.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale)), span: block)
-                }
-            }
-        }
-        .navigationTitle(part.start.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(AppLocalization.locale)))
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 /// A block of 10 minutes: the reads kept in it, by app, with delete on each.
-private struct HistoryBlockPage: View {
+struct HistoryBlockPage: View {
     var start: Date
     var end: Date
     @ObservedObject private var capture = HistoryCapture.shared
