@@ -184,9 +184,11 @@ final class ChatHarnessTests: XCTestCase {
     func testStoppedConversationReachesModelAfterReload() async throws {
         let waiting = expectation(description: "model received the published plan")
         let ended = expectation(description: "stopped task ended")
+        let firstEnded = expectation(description: "earlier task completed")
         let server = try FakeCompletions(replies: [
+            FakeCompletions.text("Hello."),
             FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Inspect Wi-Fi", "Report the result"], "currentStep": 2]),
-        ], holdAfter: 1) { request in
+        ], holdAfter: 2) { request in
             if (request["messages"] as? [[String: Any]])?.contains(where: { $0["role"] as? String == "tool" }) == true {
                 waiting.fulfill()
             }
@@ -196,17 +198,21 @@ final class ChatHarnessTests: XCTestCase {
         let original = ChatModel(app: app)
         original.newConversation()
         let request = "Open Settings and inspect Wi-Fi, then report what was found."
+        ChatModel.afterTask = { _ in firstEnded.fulfill() }
+        original.send("Say hello")
+        await fulfillment(of: [firstEnded], timeout: 10)
         ChatModel.afterTask = { _ in ended.fulfill() }
         original.send(request)
         await fulfillment(of: [waiting], timeout: 10)
+        SessionStore.shared.flush()
+        let disk = SessionStore(folder: SessionStore.defaultFolder, defaults: .standard)
+        let saved = try XCTUnwrap(disk.session(original.sessionID))
         original.stop()
         await fulfillment(of: [ended], timeout: 10)
         ChatModel.afterTask = nil
         SessionStore.shared.flush()
 
-        let disk = SessionStore(folder: SessionStore.defaultFolder, defaults: .standard)
-        let saved = try XCTUnwrap(disk.session(original.sessionID))
-        XCTAssertEqual(saved.outcome, .stopped)
+        XCTAssertEqual(saved.outcome, .stopped, "an interrupted live task must replace the earlier task's done outcome")
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")
