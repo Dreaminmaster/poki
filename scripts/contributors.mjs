@@ -5,9 +5,9 @@
 //   node scripts/contributors.mjs                      report: counted, pending, new
 //   node scripts/contributors.mjs --out-dir <dir>      also write contributors.json and contributors.md there
 //   node scripts/contributors.mjs --check              exit 1 if someone qualifies but is not on the wall
-//   node scripts/contributors.mjs --write-readme       rewrite the core wall and the thanks wall in all six READMEs from scripts/contributors.curated.json
+//   node scripts/contributors.mjs --write-readme       rewrite the co-creator, core and thanks sections in all six READMEs from scripts/contributors.curated.json
 //
-// Statuses in the curated file: counted (core wall), community (thanks wall and the JSON,
+// Statuses in the curated file: counted (co-creator and core sections), community (thanks wall and the JSON,
 // early feedback and attempts), pending (undecided), excluded (not a contribution).
 //
 // Facts (who, which PRs and issues, first date) come from `gh api`.
@@ -25,6 +25,9 @@ const curatedPath = join(root, 'scripts/contributors.curated.json');
 const readmes = { en: 'README.md', 'zh-CN': 'README.zh-CN.md', 'zh-TW': 'README.zh-TW.md', ja: 'README.ja.md', ko: 'README.ko.md', es: 'README.es.md' };
 const start = '<!-- CORE-CONTRIBUTORS:START -->';
 const end = '<!-- CORE-CONTRIBUTORS:END -->';
+const coCreatorLogin = 'ZhehanZhang';
+const coCreatorStart = '<!-- CO-CREATOR:START -->';
+const coCreatorEnd = '<!-- CO-CREATOR:END -->';
 const perRow = 3;
 
 const usage = `Usage: node scripts/contributors.mjs [--out-dir <dir>] [--check] [--write-readme]`;
@@ -92,7 +95,10 @@ function collect() {
 function wallLogins(file = readmes.en) {
   const text = readFileSync(join(root, file), 'utf8');
   const from = text.indexOf(start);
-  const block = from === -1 ? text.slice(text.search(/^## Core contributors/m)) : text.slice(from, text.indexOf(end, from));
+  const core = from === -1 ? text.slice(text.search(/^## Core contributors/m)) : text.slice(from, text.indexOf(end, from));
+  const coCreatorFrom = text.indexOf(coCreatorStart);
+  const coCreator = coCreatorFrom === -1 ? '' : text.slice(coCreatorFrom, text.indexOf(coCreatorEnd, coCreatorFrom));
+  const block = core + coCreator;
   return [...block.matchAll(/<a href="https:\/\/github\.com\/([A-Za-z0-9-]+)"><img/g)].map(m => m[1]).filter((v, i, a) => a.indexOf(v) === i);
 }
 
@@ -164,11 +170,17 @@ function renderWall(rows, language, kinds) {
   for (let i = 0; i < cells.length; i += perRow) rowsHtml.push(`    <tr>\n      ${cells.slice(i, i + perRow).join('\n      ')}\n    </tr>`);
   return `\n<table>\n  <tbody>\n${rowsHtml.join('\n')}\n  </tbody>\n</table>\n`;
 }
-function injectWall(text, block, file) {
-  const from = text.indexOf(start);
-  const to = text.indexOf(end, from);
-  if (from === -1 || to === -1) throw new Error(`${file} is missing the ${start} ... ${end} markers.`);
-  return text.slice(0, from + start.length) + block + text.slice(to);
+function renderCoCreator(row, language) {
+  const name = escapeAttr(shownName(row));
+  const avatar = new URL(row.avatar); avatar.searchParams.set('size', '320');
+  const text = row.entry.lines[language] ?? row.entry.lines.en;
+  return `\n<p align="center">\n  <a href="${row.profile}"><img src="${avatar}" width="160" height="160" alt="${name}"/><br /><b>${name}</b></a><br />\n  ${text}\n</p>\n`;
+}
+function injectWall(text, block, file, startMarker = start, endMarker = end) {
+  const from = text.indexOf(startMarker);
+  const to = text.indexOf(endMarker, from);
+  if (from === -1 || to === -1) throw new Error(`${file} is missing the ${startMarker} ... ${endMarker} markers.`);
+  return text.slice(0, from + startMarker.length) + block + text.slice(to);
 }
 
 // ---- main --------------------------------------------------------------
@@ -195,15 +207,18 @@ try {
   }
 
   if (flag('--write-readme')) {
-    const rows = result.counted.filter(r => r.entry?.lines);
-    const missing = result.counted.filter(r => !r.entry?.lines).map(r => r.login);
+    const coCreator = result.counted.find(r => r.login === coCreatorLogin);
+    if (!coCreator) throw new Error(`No counted contributor found for: ${coCreatorLogin}`);
+    const rows = result.counted.filter(r => r.login !== coCreatorLogin && r.entry?.lines);
+    const missing = result.counted.filter(r => r.reviewed && !r.entry?.lines).map(r => r.login);
     if (missing.length) throw new Error(`No README lines yet for: ${missing.join(', ')}`);
     const kinds = refKind(people);
     const changed = [];
     for (const [language, file] of Object.entries(readmes)) {
       const path = join(root, file);
       const before = readFileSync(path, 'utf8');
-      const after = injectWall(before, renderWall(rows, language, kinds), file);
+      const withCoCreator = injectWall(before, renderCoCreator(coCreator, language), file, coCreatorStart, coCreatorEnd);
+      const after = injectWall(withCoCreator, renderWall(rows, language, kinds), file);
       if (before !== after) { writeFileSync(path, after); changed.push(file); }
     }
     console.log(changed.length ? `Updated ${changed.join(', ')}` : 'README walls already up to date.');
