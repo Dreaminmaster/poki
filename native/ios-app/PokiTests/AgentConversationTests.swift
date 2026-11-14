@@ -54,6 +54,47 @@ final class AgentConversationTests: XCTestCase {
         XCTAssertEqual(steps(store.listed.first), taps, "every call is in it, in order")
     }
 
+    /// Concurrent MCP requests from the same client can share one conversation, while their
+    /// completion events arrive out of order. They must never overwrite one another's receipts.
+    func testOverlappingSessionsKeepTheirOwnStepResultsAndStayLiveUntilBothEnd() throws {
+        let store = launch()
+        let first = "overlap-first-" + UUID().uuidString
+        let second = "overlap-second-" + UUID().uuidString
+        for id in [first, second] {
+            store.observe(.session(.started(id: id, client: "claude-ai", version: "1.0", connector: "work")), approvals: [])
+        }
+        store.observe(.toolStarted(name: "look", summary: "First request", session: first), approvals: [])
+        store.observe(.toolStarted(name: "do", summary: "Second request", session: second), approvals: [])
+        XCTAssertEqual(store.listed.count, 1)
+
+        // The first step completes while the second is still pending. Before this fix,
+        // the first result overwrote the second pending step because it was the latest.
+        store.observe(.toolFinished(summary: "First read completed", delivery: "sent", app: "Safari",
+                                    thumbnail: nil, error: nil, session: first), approvals: [])
+        store.observe(.session(.ended(id: first)), approvals: [])
+        let stillLive = try XCTUnwrap(store.listed.first)
+        XCTAssertTrue(stillLive.live, "second MCP session remains active")
+        store.archive(stillLive.id)
+        XCTAssertNil(store.session(stillLive.id)?.archived, "an active shared conversation cannot be archived")
+
+        store.observe(.toolFinished(summary: "Second tap failed", delivery: "failed: timeout", app: "Notes",
+                                    thumbnail: nil, error: nil, session: second), approvals: [])
+        let receipts = try XCTUnwrap(store.listed.first).entries.compactMap { entry -> (String, Bool?, String?)? in
+            if case .step(let summary, let ok) = entry.kind { return (summary, ok, entry.app) }
+            return nil
+        }
+        XCTAssertEqual(receipts.count, 2)
+        XCTAssertEqual(receipts[0].0, "First read completed")
+        XCTAssertEqual(receipts[0].1, true)
+        XCTAssertEqual(receipts[0].2, "Safari")
+        XCTAssertEqual(receipts[1].0, "Second tap failed")
+        XCTAssertEqual(receipts[1].1, false)
+        XCTAssertEqual(receipts[1].2, "Notes")
+
+        store.observe(.session(.ended(id: second)), approvals: [])
+        XCTAssertFalse(try XCTUnwrap(store.listed.first).live)
+    }
+
     func testEachClientAndEachConnectorKeepsItsOwnConversation() {
         let store = launch()
         for round in 1...3 {

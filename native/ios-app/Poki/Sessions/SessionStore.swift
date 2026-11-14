@@ -130,6 +130,10 @@ final class SessionStore {
     private var connectors: [String: String] = [:]
     /// The conversation each outside MCP session's calls are kept in: session id → conversation id.
     private var conversations: [String: String] = [:]
+    /// Multiple MCP sessions may overlap while sharing one saved conversation.
+    private var activeAgentSessions: Set<String> = []
+    /// A completion must update the step started by its own MCP session, not another session's step.
+    private var pendingAgentSteps: [String: [UUID]] = [:]
     /// The session whose call is running, for approvals and hand-offs (they carry no session).
     private var currentSession: String?
     /// The outside agent session whose call is running, if any.
@@ -329,6 +333,7 @@ final class SessionStore {
     func observe(_ event: ShellEvent, approvals: [PendingApproval]) {
         switch event {
         case .session(.started(let id, let client, _, let connector)):
+            activeAgentSessions.insert(id)
             if client.isEmpty {
                 // A session that began before Poki last started: named from the connector's agent,
                 // else the last client that said its name.
@@ -339,22 +344,33 @@ final class SessionStore {
             }
             if let connector { connectors[id] = connector }
         case .session(.ended(let id)):
-            if var session = session(conversations[id] ?? id), session.live {
+            activeAgentSessions.remove(id)
+            let conversationID = conversations[id] ?? id
+            // Another MCP session might still be working in this same conversation.
+            // The first DELETE must not make the other session's active work archivable.
+            guard !activeAgentSessions.contains(where: { conversations[$0] == conversationID }) else { break }
+            if var session = session(conversationID), session.live {
                 session.live = false
                 session.outcome = session.outcome ?? .done
                 session.updated = Date()
                 put(session)
             }
         case .toolStarted(_, let summary, let id?):
+            activeAgentSessions.insert(id) // Also covers reconnects without a fresh initialize event.
             currentSession = conversation(for: id)
+            let step = ChatEntry(.step(summary, ok: nil))
+            pendingAgentSteps[id, default: []].append(step.id)
             update(agent: id) { session in
-                session.entries.append(ChatEntry(.step(summary, ok: nil)))
+                session.entries.append(step)
             }
         case .toolFinished(let summary, let delivery, let app, _, _, let id?):
             let failed = delivery.hasPrefix("failed")
+            let stepID = pendingAgentSteps[id]?.isEmpty == false ? pendingAgentSteps[id]?.removeFirst() : nil
+            if pendingAgentSteps[id]?.isEmpty == true { pendingAgentSteps.removeValue(forKey: id) }
             update(agent: id) { session in
-                // Each step keeps the app it ran in, for the app's icon on the session's row.
-                if let i = session.entries.lastIndex(where: { if case .step(_, nil) = $0.kind { return true }; return false }) {
+                // Match by the original MCP session's step ID. Several sessions can share a
+                // conversation and finish in a different order from the starts.
+                if let stepID, let i = session.entries.firstIndex(where: { $0.id == stepID }) {
                     session.entries[i].kind = .step(summary, ok: !failed)
                     session.entries[i].app = app
                 } else {
