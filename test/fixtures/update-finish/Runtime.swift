@@ -58,12 +58,14 @@ enum SignerBridge {
     @MainActor static var holdsInstall = false
     @MainActor static var installHeld: CheckedContinuation<Void, Never>?
     @MainActor static var finishInstall: CheckedContinuation<Void, Never>?
+    nonisolated(unsafe) static var installProgress: (@Sendable ([String: Any]) -> Void)?
     static func installVault() {}
     @MainActor static func holdInstall() async {
         guard holdsInstall else { return }
         await withCheckedContinuation { finishInstall = $0; installHeld?.resume() }
     }
     static func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
+        installProgress = progress
         progress?(["kind": "step", "id": "install"])
         await Task.yield()
         await holdInstall()
@@ -133,6 +135,7 @@ final class FakeCore {
 
         SignerBridge.holdsInstall = true
         let slow = await prepared()
+        check(slow.installMessage == nil, "preparing the update does not show exit instructions")
         let install = Task { @MainActor in await slow.install() }
         await withCheckedContinuation { SignerBridge.installHeld = $0 }
         await drain()
@@ -143,7 +146,14 @@ final class FakeCore {
         check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "foreground return during a running install keeps the installing message", actual: slow.installMessage)
         Timer.advance(by: 15, oldProcessAlive: true)
         await drain()
-        check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "15 seconds into a running install keeps the installing message", actual: slow.installMessage)
+        check(!slow.needsReopen && slow.installMessage?.contains("Do not close Poki in the app switcher.") == true, "15 seconds before system installation keeps the upload protected", actual: slow.installMessage)
+        let finishing = "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+        for fraction in [0.0, 0.4, 0.9] {
+            SignerBridge.installProgress?(["kind": "part", "id": "install", "fraction": fraction])
+            await drain()
+            check(slow.installMessage == finishing && !slow.needsReopen,
+                  "system installation at \(fraction) offers conditional exit guidance without claiming success", actual: slow.installMessage)
+        }
         SignerBridge.holdsInstall = false
         SignerBridge.finishInstall?.resume()
         await install.value
