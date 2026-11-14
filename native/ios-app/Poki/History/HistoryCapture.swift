@@ -82,6 +82,29 @@ final class HistoryCapture: ObservableObject {
         loading = false
     }
 
+    /// Screens that sit over the app in front for a moment and say nothing about what the owner did.
+    static let overlays = [
+        "com.apple.ScreenshotServicesService", "com.apple.InCallService", "com.apple.CoreAuthUI",
+        "com.apple.SharingViewService", "com.apple.PassbookUIService",
+    ]
+
+    /// The title a kept notification carries, so the page can tell it from a screen.
+    static let bannerTitle = "Notification"
+    private var lastBanner = ""
+
+    /// The notification banner in a read of the Home Screen: the sending app's name as the banner
+    /// shows it, and the text. The banner's element reads "Notification" and the next one
+    /// "APP, now, dot, text". Only English and Chinese labels are known so far.
+    static func banner(in lines: [String]) -> (app: String, text: String)? {
+        guard let mark = lines.firstIndex(where: { ["Notification", "通知"].contains($0) }), lines.indices.contains(mark + 1) else { return nil }
+        let parts = lines[mark + 1].components(separatedBy: ", ")
+        guard parts.count >= 2 else { return nil }
+        let rest = parts.count >= 4 && parts[2] == "dot" ? parts[3...] : parts[1...]
+        let text = rest.joined(separator: ", ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let app = parts[0].trimmingCharacters(in: .whitespaces)
+        return app.isEmpty || text.isEmpty ? nil : (app.localizedCapitalized, text)
+    }
+
     private func save(_ value: Any?, _ key: String) {
         guard !loading else { return }
         if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
@@ -226,7 +249,20 @@ final class HistoryCapture: ObservableObject {
               let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               line["ok"] as? Bool == true,
               let lines = line["text"] as? [String], !lines.isEmpty else { return }
-        let app = line["app"] as? String ?? ""
+        var app = line["app"] as? String ?? ""
+        var title = line["title"] as? String ?? ""
+        var lines = lines
+        // System overlays are not something the owner was doing, so they are never kept.
+        if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return }
+        if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame {
+            // The Home Screen itself is left out. A notification banner over it is kept once, under
+            // the name of the app that sent it.
+            guard let banner = Self.banner(in: lines), banner.app + banner.text != lastBanner else { return }
+            lastBanner = banner.app + banner.text
+            app = banner.app
+            title = Self.bannerTitle
+            lines = [banner.text]
+        }
         guard keeps(app) else {
             // The observing record names an app left out once each time it comes to the front.
             if lastLeftOut != app {
@@ -237,7 +273,7 @@ final class HistoryCapture: ObservableObject {
         }
         lastLeftOut = nil
         let now = Date()
-        HistoryStore.shared.add(at: now, app: app, title: line["title"] as? String ?? "", text: lines.joined(separator: "\n"))
+        HistoryStore.shared.add(at: now, app: app, title: title, text: lines.joined(separator: "\n"))
         lastKept = now
         changes += 1
     }
