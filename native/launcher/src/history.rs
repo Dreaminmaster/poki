@@ -378,11 +378,14 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 line["changed"] = changed.into();
             }
             Err(failure) => {
-                // A tunnel that failed once is not used again; the next read opens a new one.
-                if let Some(mut old) = direct.take() {
-                    let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
+                // A screen that shows no app (locked or off) is an answer, and the connection stays.
+                // Any other failure ends the tunnel; the next read opens a new one.
+                if !failure.detail.contains("no point of the screen") {
+                    if let Some(mut old) = direct.take() {
+                        let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
+                    }
+                    device = None;
                 }
-                device = None;
                 stats.failures += 1;
                 stats.last_error = Some(failure.detail.clone());
                 line["ok"] = false.into();

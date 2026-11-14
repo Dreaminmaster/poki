@@ -406,12 +406,23 @@ final class HistoryProbe: ObservableObject {
             let every = max(1, 60 / max(1, seconds))
             guard progressSeen <= 5 || progressSeen % every == 0 else { return }
             note("read \(n) ok \(line["ms"] as? Int ?? 0) ms, \(line["app"] as? String ?? "?"), \(line["elements"] as? Int ?? 0) elements\(line["changed"] as? Bool == true ? ", changed" : "")")
-        } else if let reason = screenReason() {
-            expectedEmpty += 1
-            note("read \(n) nothing to read, \(reason) (\(line["ms"] as? Int ?? 0) ms)")
         } else {
-            unexplained += 1
-            note("read \(n) FAILED with the screen on and unlocked after \(line["ms"] as? Int ?? 0) ms (\(line["code"] as? String ?? "error")): \(line["error"] as? String ?? "")")
+            // The lock notice can arrive just after the read that found nothing, so the state is read a moment later.
+            let ms = line["ms"] as? Int ?? 0
+            let code = line["code"] as? String ?? "error"
+            let error = line["error"] as? String ?? ""
+            Task { @MainActor in
+                if self.screenReason() == nil { try? await Task.sleep(for: .milliseconds(800)) }
+                if let reason = self.screenReason() {
+                    self.expectedEmpty += 1
+                    // The first one and then one a minute, like the good reads.
+                    guard self.expectedEmpty == 1 || self.expectedEmpty % max(1, 60 / max(1, self.seconds)) == 0 else { return }
+                    self.note("read \(n) nothing to read, \(reason) (\(ms) ms)")
+                } else {
+                    self.unexplained += 1
+                    self.note("read \(n) FAILED with the screen on and unlocked after \(ms) ms (\(code)): \(error)")
+                }
+            }
         }
     }
 

@@ -388,12 +388,7 @@ fn flatten(
             .field(record, "UIAccessibilitySnapshotKeyChildren")
             .ok_or("Missing snapshot children")?;
         let children = a.array(children_value);
-        if a.field(record, "UIAccessibilitySnapshotKeyChildrenCount")
-            .and_then(|v| a.integer(v))
-            != Some(children.len() as u64)
-        {
-            return Err("Truncated snapshot children".into());
-        }
+        // The count may be larger than the children sent (a long list is cut by the phone): what came is read.
         let mut node = Node::default();
         for (number, name) in [(2001, "label"), (5019, "identifier"), (2006, "value"), (3003, "bundle_id")] {
             if let Some(value) = attribute(a, attrs, number).and_then(|v| a.string(v)) {
@@ -499,13 +494,14 @@ mod tests {
         }
     }
     #[test]
-    fn direct_snapshot_takes_its_own_root_and_rejects_truncated_children() {
+    fn direct_snapshot_takes_its_own_root_and_reads_cut_lists() {
         let (archive, mut root) = fixture(true);
         // A root with another identity than the one asked for is read as it is.
         assert_eq!(flatten(&archive, &root, 42, 11, 3).unwrap()["elements"].as_array().unwrap().len(), 2);
+        // A count above the children sent is a list the phone cut short: what came is read.
         root.as_dictionary_mut()
             .unwrap()
             .insert("UIAccessibilitySnapshotKeyChildrenCount".into(), 2.into());
-        assert!(flatten(&archive, &root, 42, 10, 3).is_err());
+        assert_eq!(flatten(&archive, &root, 42, 10, 3).unwrap()["elements"].as_array().unwrap().len(), 2);
     }
 }
