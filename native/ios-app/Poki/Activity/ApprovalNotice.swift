@@ -55,11 +55,15 @@ enum ApprovalNotice {
 final class ApprovalNoticeDelegate: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = ApprovalNoticeDelegate()
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let id = response.notification.request.content.userInfo["approval"] as? String else { return }
-        let action = response.actionIdentifier
-        guard action == ApprovalNotice.allow || action == ApprovalNotice.deny else { return }
-        await MainActor.run { ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action == ApprovalNotice.allow)) }
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            defer { completionHandler() }
+            guard let id = response.notification.request.content.userInfo["approval"] as? String else { return }
+            let action = response.actionIdentifier
+            guard action == ApprovalNotice.allow || action == ApprovalNotice.deny else { return }
+            ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action == ApprovalNotice.allow))
+        }
     }
 
     /// While Poki is open the banner still shows, so the buttons are there too.

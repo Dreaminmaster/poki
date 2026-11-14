@@ -44,7 +44,10 @@ final class UIApplication {
         return nextTask
     }
     func endBackgroundTask(_ id: Int) { backgroundTasks.remove(id) }
-    func perform(_ selector: Selector) {}
+    var suspendedAfterSave = false
+    func perform(_ selector: Selector) {
+        suspendedAfterSave = UpdateResources.stopped && UpdateResources.savedAfterStop
+    }
 }
 final class UIDevice { static let current = UIDevice(); let name = "Test iPhone" }
 final class UNMutableNotificationContent {
@@ -139,7 +142,7 @@ enum RunnerProbe { static func shutdown() async { UpdateResources.automation = f
 enum AttentionNotice { static func clear() {} }
 final class SessionStore {
     static let shared = SessionStore()
-    func flush() { UpdateResources.savedAfterStop = UpdateResources.stopped && UIApplication.shared.backgroundTasks.isEmpty }
+    func flush() { UpdateResources.savedAfterStop = UpdateResources.stopped }
 }
 enum ProcessExit {
     nonisolated(unsafe) static var attempts: [Int32] = []
@@ -296,10 +299,10 @@ final class FakeCore {
         closing.finishNoticeAnswered()
         await drain()
         check(ProcessExit.attempts.isEmpty, "confirming before upload completes does not exit")
-        SignerBridge.installProgress?(["kind": "part", "id": "install", "fraction": 0.4])
-        await drain()
         check(ProcessExit.attempts.isEmpty && !UpdateResources.savedAfterStop,
               "pending automation close prevents saving and exit")
+        check(!UpdateResources.audio && !UpdateResources.continuedRun && !UpdateResources.voiceAudio,
+              "confirmation stops audio without waiting for installation percentage")
         UpdateResources.finishClose?()
         UpdateResources.finishClose = nil
         await drain()
@@ -307,6 +310,13 @@ final class FakeCore {
               "pending Live Activity dismissal prevents saving and exit")
         UpdateResources.finishActivity?.resume()
         UpdateResources.finishActivity = nil
+        await drain()
+        check(UpdateResources.stopped && UpdateResources.savedAfterStop && UIApplication.shared.suspendedAfterSave,
+              "confirmation stops runtime, saves state, and backgrounds before installation percentage",
+              actual: "resources stopped \(UpdateResources.stopped), saved \(UpdateResources.savedAfterStop), suspended safely \(UIApplication.shared.suspendedAfterSave)")
+        check(ProcessExit.attempts.isEmpty && !UIApplication.shared.backgroundTasks.isEmpty,
+              "upload keeps its background task until the system accepts installation")
+        SignerBridge.installProgress?(["kind": "part", "id": "install", "fraction": 0.4])
         await drain()
         check(ProcessExit.attempts == [0] && ProcessExit.safe,
               "confirmed system installation stops keep-alives, saves state, and exits normally",
