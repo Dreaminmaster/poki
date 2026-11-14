@@ -185,8 +185,8 @@ final class HistoryProbe: ObservableObject {
                 }
                 for app in attempt["apps"] as? [[String: Any]] ?? [] {
                     let id = app["bundle_id"] as? String ?? "unnamed"
-                    let children = (app["children"] as? Int).map(String.init) ?? "none"
-                    let visible = (app["visible_children"] as? Int).map(String.init) ?? "none"
+                    let children = (app["children"] as? Int).map { "\($0)" } ?? "none"
+                    let visible = (app["visible_children"] as? Int).map { "\($0)" } ?? "none"
                     note("app \(id) pid \(app["pid"] as? Int ?? 0), described \(app["described"] as? Bool == true ? "yes" : "no"), children \(children), visible \(visible)", keep: false)
                 }
             }
