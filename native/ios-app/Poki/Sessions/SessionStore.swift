@@ -154,9 +154,8 @@ enum ChatContinuation {
         let stopped = recent.filter { $0.outcome == .stopped || $0.live }
         let generic: Set<String> = [
             "继续", "繼續", "接着做", "接著做", "继续任务", "繼續任務", "继续刚才的任务", "繼續剛才的任務",
-            "继续上次的任务", "继续早晨的任务", "继续早上的任务", "繼續早上的任務",
+            "继续上次的任务",
             "continue", "resume", "carry on", "go on", "keep going", "continue the task", "resume the task",
-            "continue this morning's task",
         ]
         if generic.contains(request) {
             if let selected = stopped.first(where: { $0.id == current }) { return .resume(selected) }
