@@ -58,11 +58,17 @@ enum SignerBridge {
     @MainActor static var holdsInstall = false
     @MainActor static var installHeld: CheckedContinuation<Void, Never>?
     @MainActor static var finishInstall: CheckedContinuation<Void, Never>?
+    @MainActor static var prepareHeld: CheckedContinuation<Void, Never>?
+    @MainActor static var finishPrepare: CheckedContinuation<Void, Never>?
     nonisolated(unsafe) static var installProgress: (@Sendable ([String: Any]) -> Void)?
     static func installVault() {}
     @MainActor static func holdInstall() async {
         guard holdsInstall else { return }
         await withCheckedContinuation { finishInstall = $0; installHeld?.resume() }
+    }
+    @MainActor static func holdPrepare() async {
+        guard prepareHeld != nil else { return }
+        await withCheckedContinuation { finishPrepare = $0; prepareHeld?.resume() }
     }
     static func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
         installProgress = progress
@@ -73,6 +79,9 @@ enum SignerBridge {
         return Data()
     }
     static func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
+        progress?(["kind": "step", "id": "release", "title": "Getting the newest Poki"])
+        await Task.yield()
+        await holdPrepare()
         let prepared = #"{"kind":"update","ipa":"/tmp/test.ipa","bundle_id":"test.poki","version":"9.0.0","build":"9999","tag":"test","team_name":"Test","team_is_free":true,"profile_expires_at":0,"prepared_at":0}"#
         return try JSONDecoder().decode(type, from: Data(prepared.utf8))
     }
@@ -133,9 +142,21 @@ final class FakeCore {
         let afterTimeout = await AppModel(signer: timedOut).phoneTool("look", arguments: "{}")
         check(afterTimeout.isError && afterTimeout.text == expected, "task after timeout receives restart instructions", actual: afterTimeout.text)
 
+        let downloading = SelfSigner()
+        downloading.phone = { [:] }
+        let prepare = Task { @MainActor in await downloading.prepare(kind: "update") }
+        await withCheckedContinuation { SignerBridge.prepareHeld = $0 }
+        Timer.advance(by: 15, oldProcessAlive: true)
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        await drain()
+        check(downloading.installMessage == nil && !downloading.needsReopen,
+              "unfinished preparation does not show exit instructions", actual: downloading.installMessage)
+        SignerBridge.prepareHeld = nil
+        SignerBridge.finishPrepare?.resume()
+        await prepare.value
+
         SignerBridge.holdsInstall = true
         let slow = await prepared()
-        check(slow.installMessage == nil, "preparing the update does not show exit instructions")
         let install = Task { @MainActor in await slow.install() }
         await withCheckedContinuation { SignerBridge.installHeld = $0 }
         await drain()
