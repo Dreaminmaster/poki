@@ -1,8 +1,10 @@
 //! PokiLauncher: gets the WebDriverAgent runner up on the phone it runs on, keeps it up, and pairs
 //! the phone with itself. A C ABI for the Poki app (include/poki_launcher.h); docs/ios-core.md §3.
 
+pub mod ax;
 pub mod ddi;
 pub mod device;
+pub mod history;
 pub mod launch;
 pub mod pair;
 pub mod remote;
@@ -264,6 +266,33 @@ pub unsafe extern "C" fn poki_signer_call(request_json: *const c_char, cb: Event
         callback.call(&event);
     });
     0
+}
+
+/// Runs one iPhone History test (history.rs) on the launcher's runtime, on a tunnel of its own.
+/// Events: {"event":"progress","progress":{...}} for every read of a run, then exactly one
+/// {"event":"result","ok":true,"value":...} or {"event":"result","ok":false,"error":"...","fix":"...",
+/// "code":"..."}. -1 when the request is unreadable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn poki_history_call(request_json: *const c_char, cb: EventCallback, context: *mut c_void) -> i32 {
+    pin_crypto_provider();
+    let Some(text) = (unsafe { read_str(request_json) }) else { return -1 };
+    let Ok(request) = serde_json::from_str::<Value>(&text) else { return -1 };
+    let callback = Callback { function: cb, context };
+    runtime().spawn(async move {
+        let result = history::handle(request, move |line| callback.call(&serde_json::json!({"event": "progress", "progress": line}))).await;
+        let event = match result {
+            Ok(value) => serde_json::json!({"event": "result", "ok": true, "value": value}),
+            Err(e) => serde_json::json!({"event": "result", "ok": false, "error": e.detail, "fix": e.fix, "code": e.code}),
+        };
+        callback.call(&event);
+    });
+    0
+}
+
+/// Ends the history run in progress, if any; it then answers with what it measured so far.
+#[unsafe(no_mangle)]
+pub extern "C" fn poki_history_cancel() {
+    history::cancel();
 }
 
 #[cfg(test)]
