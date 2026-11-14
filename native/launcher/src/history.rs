@@ -7,6 +7,7 @@
 //! Two requests, each on a tunnel of its own (never the launcher's):
 //! - `read_once`: one read. Answers with the seconds it took, the apps on screen and the number of
 //!   elements. The screen's text is counted, and returned only when `include_text` is set.
+//! - `watch`: one subscription kept open for `seconds`. Answers with every tree dump as it arrived.
 //! - `run`: a read every `interval_ms` for `duration_s`. Reports each read as it is made, then the
 //!   reads made, the failures and the longest gap between two reads.
 //!
@@ -32,6 +33,15 @@ const SECURE_TRAIT: u64 = 1 << 24;
 const KEY_TRAIT: u64 = 1 << 5;
 
 const OPEN_WITHIN: Duration = Duration::from_secs(20);
+/// Apps iOS keeps listing among those on screen while the phone is unlocked and something else is in
+/// front (the Sleep screen, during and after Sleep Focus). History does not read a locked phone, so
+/// their elements are never the screen the owner is looking at.
+const LOCK_SCREEN_ONLY: [&str; 1] = ["com.apple.SleepLockScreen"];
+
+fn lock_screen_only(app: &Value) -> bool {
+    app["bundle_id"].as_str().is_some_and(|id| LOCK_SCREEN_ONLY.contains(&id))
+}
+
 /// One subscription of a run's read.
 const DEFAULT_READ_WITHIN: Duration = Duration::from_secs(10);
 
@@ -89,6 +99,7 @@ fn no_tree(attempts: &[ax::Attempt]) -> Failure {
 pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> Result<Value, Failure> {
     match request["op"].as_str().unwrap_or("") {
         "read_once" => read_once(&request).await,
+        "watch" => watch(&request).await,
         "run" => run(&request, emit).await,
         other => Err(Failure::new(format!("unknown history request \"{other}\"")).code("config")),
     }
@@ -138,6 +149,25 @@ async fn read_once(request: &Value) -> Result<Value, Failure> {
     answer["second_read_ms"] = json!(again_ms);
     answer["attempts"] = json!(attempts);
     answer["second_attempts"] = json!(second);
+    Ok(answer)
+}
+
+/// One subscription kept open for `seconds`, whatever arrives: the answer is how the tree grew.
+async fn watch(request: &Value) -> Result<Value, Failure> {
+    let target = Target::from(request)?;
+    let seconds = request["seconds"].as_u64().unwrap_or(30).clamp(2, 300);
+    let asked = Instant::now();
+    let mut device = target.open().await?;
+    let connect_ms = milliseconds(asked.elapsed());
+    let (tree, attempts) = ax::read_tree_held(&mut device.adapter, &device.rsd, false, &[Duration::from_secs(seconds)], true).await;
+    let mut answer = match tree {
+        Some(tree) => summarize(&tree, false),
+        None => json!({}),
+    };
+    answer["tree"] = answer.get("elements").is_some().into();
+    answer["connect_ms"] = connect_ms.into();
+    answer["attempts"] = json!(attempts);
+    answer["services"] = json!(accessibility_services(&device));
     Ok(answer)
 }
 
@@ -290,10 +320,23 @@ fn is_key(element: &Value) -> bool {
 /// fields and keyboard keys give no text. The text is returned only when asked for.
 pub fn summarize(tree: &Value, include_text: bool) -> Value {
     let empty = vec![];
-    let elements = tree["elements"].as_array().unwrap_or(&empty);
+    let all = tree["elements"].as_array().unwrap_or(&empty);
+    // Elements come in reading order with their depth, so an app's own elements follow it, deeper.
+    let mut elements: Vec<&Value> = vec![];
+    let mut hidden_below: Option<u64> = None;
+    for element in all {
+        let depth = element["depth"].as_u64().unwrap_or(0);
+        if hidden_below.is_some_and(|below| depth > below) {
+            continue;
+        }
+        hidden_below = (element["role"] == "Application" && lock_screen_only(element)).then_some(depth);
+        if hidden_below.is_none() {
+            elements.push(element);
+        }
+    }
     let mut lines: Vec<String> = vec![];
     let mut secure = 0;
-    for element in elements {
+    for element in &elements {
         if is_secure(element) {
             secure += 1;
             continue;
@@ -312,10 +355,12 @@ pub fn summarize(tree: &Value, include_text: bool) -> Value {
         .as_array()
         .unwrap_or(&empty)
         .iter()
+        .filter(|app| !lock_screen_only(app))
         .map(|app| json!({"name": app["name"], "bundle_id": app["bundle_id"], "pid": app["pid"]}))
         .collect();
-    let front = match &tree["foreground_app"] {
-        Value::Object(app) => json!({"name": app.get("name"), "bundle_id": app.get("bundle_id"), "pid": app.get("pid")}),
+    // In front: the one app left on screen once the lock screen's own are set aside.
+    let front = match applications.as_slice() {
+        [app] => app.clone(),
         _ => Value::Null,
     };
     let mut answer = json!({
@@ -388,6 +433,26 @@ mod tests {
     }
 
     #[test]
+    fn the_sleep_screen_behind_an_app_is_not_part_of_the_screen() {
+        let tree = json!({
+            "applications": [{"name": "Sleep", "bundle_id": "com.apple.SleepLockScreen", "pid": 90}, {"name": "Notes", "bundle_id": "com.apple.mobilenotes", "pid": 412}],
+            "foreground_app": null,
+            "elements": [
+                {"role": "Application", "label": "Sleep", "bundle_id": "com.apple.SleepLockScreen", "depth": 0},
+                {"role": "StaticText", "label": "Good night", "depth": 1},
+                {"role": "Button", "label": "Dismiss", "depth": 2},
+                {"role": "Application", "label": "Notes", "bundle_id": "com.apple.mobilenotes", "depth": 0},
+                {"role": "StaticText", "label": "Shopping list", "depth": 1},
+            ],
+        });
+        let summary = summarize(&tree, true);
+        assert_eq!(summary["elements"], 2);
+        assert_eq!(summary["text"], json!(["Shopping list"]));
+        assert_eq!(summary["front"]["bundle_id"], "com.apple.mobilenotes");
+        assert_eq!(summary["applications"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn an_empty_or_unexpected_tree_is_an_empty_summary() {
         let summary = summarize(&json!({}), true);
         assert_eq!(summary["elements"], 0);
@@ -427,7 +492,7 @@ mod tests {
     async fn a_request_without_a_pairing_or_with_an_unknown_name_is_refused() {
         let unpaired = handle(json!({"op": "read_once"}), |_| {}).await.unwrap_err();
         assert_eq!(unpaired.code, Some("pairing"));
-        let unknown = handle(json!({"op": "watch"}), |_| {}).await.unwrap_err();
+        let unknown = handle(json!({"op": "record"}), |_| {}).await.unwrap_err();
         assert_eq!(unknown.code, Some("config"));
     }
 

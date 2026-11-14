@@ -45,7 +45,7 @@ pub async fn read_tree_with_timeout(
     let deadline = tokio::time::Instant::now() + wait;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let answer = subscribe(adapter, rsd, include_offscreen, remaining.min(ANSWER_WITHIN), &mut Attempt::default()).await?;
+        let answer = subscribe(adapter, rsd, include_offscreen, remaining.min(ANSWER_WITHIN), false, &mut Attempt::default()).await?;
         if let Some(tree) = answer {
             return Ok(tree);
         }
@@ -78,7 +78,23 @@ pub struct Attempt {
     pub selectors: Vec<String>,
     pub roots: usize,
     pub nodes: usize,
+    /// Every tree dump as it arrived, first sixty.
+    pub timeline: Vec<DumpNote>,
+    /// The apps the tree named at the end, each with the children its element lists.
+    pub apps: Vec<Json>,
     pub error: Option<String>,
+}
+
+/// The tree after one dump: its size, how many children its elements list, and how many of those
+/// listed children the service has not described.
+#[derive(Default, Debug, Clone, serde::Serialize)]
+pub struct DumpNote {
+    pub at_ms: u64,
+    pub bytes: u64,
+    pub nodes: usize,
+    pub roots: usize,
+    pub listed_children: usize,
+    pub missing_children: usize,
 }
 
 impl Attempt {
@@ -106,11 +122,23 @@ pub async fn read_tree_traced(
     include_offscreen: bool,
     windows: &[Duration],
 ) -> (Option<Json>, Vec<Attempt>) {
+    read_tree_held(adapter, rsd, include_offscreen, windows, false).await
+}
+
+/// As `read_tree_traced`; with `hold`, a subscription is kept for its whole wait even after a tree
+/// has arrived, so the timeline shows how the tree grows.
+pub async fn read_tree_held(
+    adapter: &mut AdapterHandle,
+    rsd: &RsdHandshake,
+    include_offscreen: bool,
+    windows: &[Duration],
+    hold: bool,
+) -> (Option<Json>, Vec<Attempt>) {
     let mut attempts = vec![];
     for window in windows {
         let mut attempt = Attempt { window_ms: window.as_millis() as u64, ..Attempt::default() };
         let asked = tokio::time::Instant::now();
-        let answer = subscribe(adapter, rsd, include_offscreen, *window, &mut attempt).await;
+        let answer = subscribe(adapter, rsd, include_offscreen, *window, hold, &mut attempt).await;
         attempt.took_ms = asked.elapsed().as_millis() as u64;
         let tree = match answer {
             Ok(tree) => tree,
@@ -134,6 +162,7 @@ async fn subscribe(
     rsd: &RsdHandshake,
     include_offscreen: bool,
     wait: Duration,
+    hold: bool,
     attempt: &mut Attempt,
 ) -> Result<Option<Json>> {
     let port = rsd
@@ -161,11 +190,12 @@ async fn subscribe(
         true,
     )
     .await?;
+    let mut tree = Tree {
+        include_offscreen,
+        ..Tree::default()
+    };
+    let asked = tokio::time::Instant::now();
     let result = tokio::time::timeout(wait, async {
-        let mut tree = Tree {
-            include_offscreen,
-            ..Tree::default()
-        };
         loop {
             let message = Message::from_reader(&mut socket).await?;
             acknowledge(&mut socket, &message).await?;
@@ -182,14 +212,23 @@ async fn subscribe(
                         attempt.archives += 1;
                         if let Some(data) = archive.data(archive.root()) {
                             let inner = Archive::parse(data)?;
+                            let dumps = attempt.dumps;
                             attempt.count(&inner);
                             tree.update(&inner)?;
                             attempt.roots = tree.roots.len();
                             attempt.nodes = tree.nodes.len();
-                            if tree.ready() {
-                                return Ok::<Json, Box<dyn std::error::Error + Send + Sync>>(
-                                    tree.json(),
-                                );
+                            if attempt.dumps > dumps && attempt.timeline.len() < 60 {
+                                attempt.timeline.push(DumpNote {
+                                    at_ms: asked.elapsed().as_millis() as u64,
+                                    bytes: bytes.len() as u64,
+                                    nodes: tree.nodes.len(),
+                                    roots: tree.roots.len(),
+                                    listed_children: tree.listed_children(),
+                                    missing_children: tree.missing_children(),
+                                });
+                            }
+                            if tree.ready() && !hold {
+                                return Ok::<(), Box<dyn std::error::Error + Send + Sync>>(());
                             }
                         }
                     }
@@ -198,6 +237,13 @@ async fn subscribe(
         }
     })
     .await;
+    attempt.apps = tree.apps();
+    // A held subscription ends with its time; what it gathered by then is the answer.
+    let result = match result {
+        Ok(Ok(())) => Ok(Some(tree.json())),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Ok((hold && tree.ready()).then(|| tree.json())),
+    };
     let _ = call(
         &mut socket,
         3,
@@ -207,7 +253,7 @@ async fn subscribe(
     )
     .await;
     let _ = socket.shutdown().await;
-    result.ok().transpose()
+    result
 }
 
 // AX archives contain custom classes. Keep UIDs intact and resolve only fields
@@ -499,6 +545,35 @@ impl Tree {
             }
         }
         Ok(())
+    }
+    /// Children the elements list, and those among them the service sent no attributes for.
+    fn listed_children(&self) -> usize {
+        self.nodes.values().map(|node| node.children.len().max(node.visible_children.len())).sum()
+    }
+    fn missing_children(&self) -> usize {
+        self.nodes
+            .values()
+            .flat_map(|node| node.children.iter().chain(&node.visible_children))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter(|id| !self.nodes.contains_key(id))
+            .count()
+    }
+    /// The apps on screen with what their own elements list: names and counts only.
+    fn apps(&self) -> Vec<Json> {
+        self.roots
+            .iter()
+            .map(|(id, pid)| {
+                let node = self.nodes.get(id);
+                json!({
+                    "bundle_id": node.and_then(|n| n.fields.get("bundle_id")),
+                    "pid": pid,
+                    "described": node.is_some(),
+                    "children": node.map(|n| n.children.len()),
+                    "visible_children": node.map(|n| n.visible_children.len()),
+                })
+            })
+            .collect()
     }
     fn ready(&self) -> bool {
         !self.roots.is_empty()

@@ -128,8 +128,8 @@ final class HistoryProbe: ObservableObject {
     }
 
     /// One line per subscription of a read: what the service sent back, in numbers and names only.
-    private static func attempts(_ value: Any?) -> [String] {
-        (value as? [[String: Any]] ?? []).enumerated().map { index, attempt in
+    private static func attempts(_ value: [[String: Any]]) -> [String] {
+        value.enumerated().map { index, attempt in
             func number(_ key: String) -> Int { attempt[key] as? Int ?? 0 }
             func counts(_ key: String) -> String {
                 let all = attempt[key] as? [String: Any] ?? [:]
@@ -163,12 +163,52 @@ final class HistoryProbe: ObservableObject {
         }
     }
 
+    /// One subscription kept open for `seconds` while the owner uses the phone: how the tree fills in.
+    func watch(model: AppModel, seconds: Int = 30) async {
+        guard !reading, !running, var request = makeRequest("watch", model: model) else { return }
+        reading = true
+        defer { reading = false }
+        request["seconds"] = seconds
+        note("watch \(seconds) s: \(context(model: model))", keep: false)
+        if keepAwake { try? keepAlive.start() }
+        let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-watch")
+        defer { keepAlive.stop(); if hold != .invalid { UIApplication.shared.endBackgroundTask(hold) } }
+        do {
+            let data = try await HistoryBridge.call(request)
+            let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            let attempts = value["attempts"] as? [[String: Any]] ?? []
+            for line in Self.attempts(attempts) { note(line, keep: false) }
+            for attempt in attempts {
+                for dump in attempt["timeline"] as? [[String: Any]] ?? [] {
+                    func number(_ key: String) -> Int { dump[key] as? Int ?? 0 }
+                    note("dump at \(number("at_ms")) ms, \(number("bytes")) bytes, \(number("roots")) roots, \(number("nodes")) nodes, \(number("listed_children")) children listed, \(number("missing_children")) not described", keep: false)
+                }
+                for app in attempt["apps"] as? [[String: Any]] ?? [] {
+                    let id = app["bundle_id"] as? String ?? "unnamed"
+                    let children = (app["children"] as? Int).map(String.init) ?? "none"
+                    let visible = (app["visible_children"] as? Int).map(String.init) ?? "none"
+                    note("app \(id) pid \(app["pid"] as? Int ?? 0), described \(app["described"] as? Bool == true ? "yes" : "no"), children \(children), visible \(visible)", keep: false)
+                }
+            }
+            if value["tree"] as? Bool == true {
+                note("\(Self.apps(value)), \(value["elements"] as? Int ?? 0) elements, \(value["text_lines"] as? Int ?? 0) text lines, \(value["text_characters"] as? Int ?? 0) characters", keep: false)
+            } else {
+                note("NO TREE at the end of the watch", keep: false)
+            }
+            note("after: \(context(model: model))", keep: false)
+        } catch {
+            let failure = error as? HistoryBridge.Failure
+            note("watch failed (\(failure?.code ?? "error")): \(error.localizedDescription)", keep: false)
+            if let fix = failure?.fix { note(fix, keep: false) }
+        }
+    }
+
     private func answerOnce(_ request: [String: Any], model: AppModel) async {
         do {
             let data = try await HistoryBridge.call(request)
             let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             func ms(_ key: String) -> String { (value[key] as? Int).map { String(format: "%.2f s", Double($0) / 1000) } ?? "none" }
-            let attempts = Self.attempts(value["attempts"])
+            let attempts = Self.attempts(value["attempts"] as? [[String: Any]] ?? [])
             guard value["tree"] as? Bool == true else {
                 note("NO TREE: connect \(ms("connect_ms")), waited \(ms("read_ms"))", keep: false)
                 for line in attempts { note(line, keep: false) }
@@ -313,6 +353,8 @@ struct HistoryTestSection: View {
             Button("Read Screen Once") { Task { await probe.readOnce(model: model) } }
                 .disabled(probe.reading || probe.running)
             Button("Read in 10 Seconds") { Task { await probe.readOnce(model: model, delay: 10) } }
+                .disabled(probe.reading || probe.running)
+            Button("Watch Screen for 30 Seconds") { Task { await probe.watch(model: model) } }
                 .disabled(probe.reading || probe.running)
             Stepper(value: $probe.seconds, in: 1...60) {
                 LabeledContent("Seconds Between Reads") { Text(verbatim: "\(probe.seconds)").monospacedDigit() }

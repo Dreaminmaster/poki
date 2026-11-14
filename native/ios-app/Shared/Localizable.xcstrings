@@ -33279,6 +33279,22 @@
         }
       }
     },
+    "Watch Screen for 30 Seconds" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "观察屏幕 30 秒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "觀察螢幕 30 秒"
+          }
+        }
+      }
+    },
     "Text files must be 100 KB or smaller." : {
       "localizations" : {
         "zh-Hans" : {
