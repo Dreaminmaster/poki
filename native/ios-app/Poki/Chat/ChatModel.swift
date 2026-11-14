@@ -37,6 +37,8 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
     var textDocuments: [ChatTextDocument]?
+    var continuationChoices: [String]?
+    var continuedTask: String?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
     /// The same delimited owner request for the model, consent evidence and task routing.
@@ -337,6 +339,32 @@ final class ChatModel {
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("Poki is working on a task for \(busy). Try again when it’s done.")))))
             return
         }
+        var resumedTask: String?
+        if kind == .poki, thumbnails.isEmpty, lastImages.isEmpty {
+            switch ChatContinuation.resolve(text, current: sessionID, choices: entries.last?.continuationChoices,
+                                            sessions: SessionStore.shared.sessions) {
+            case .newTask: break
+            case .resume(let session):
+                resumedTask = session.continuationTask
+                if session.id != sessionID { restore(session) }
+            case .clarify(let sessions):
+                entries.append(ChatEntry(.you(text, delivered: true)))
+                let question = AppLocalization.text(LocalizedStringResource("Which task would you like to continue?"))
+                let explanation: String
+                if sessions.isEmpty {
+                    explanation = AppLocalization.text(LocalizedStringResource("I couldn't find a matching task. Tell me what you wanted to do and where it stopped."))
+                } else {
+                    explanation = AppLocalization.text(LocalizedStringResource("Here are your recent tasks. Reply with a number or the task's name."))
+                }
+                let options = sessions.enumerated().map {
+                    "\($0.offset + 1). \(String(($0.element.continuationTask ?? $0.element.title).prefix(160)))"
+                }.joined(separator: "\n")
+                var reply = ChatEntry(.poki([question, explanation, options].filter { !$0.isEmpty }.joined(separator: "\n\n")))
+                reply.continuationChoices = sessions.map(\.id)
+                entries.append(reply)
+                return
+            }
+        }
         // A pause of half an hour or more gets its own time line, as in Messages.
         if !again, let lastAt = entries.last?.at, Date().timeIntervalSince(lastAt) > 1800 { entries.append(ChatEntry(.time(Date()))) }
         let you: ChatEntry
@@ -344,6 +372,7 @@ final class ChatModel {
             you = last
         } else {
             var entry = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
+            entry.continuedTask = resumedTask
             if !thumbnails.isEmpty { entry.attachments = thumbnails } else { lastImages = [] }
             if !documents.isEmpty { entry.textDocuments = documents }
             you = entry
@@ -377,12 +406,13 @@ final class ChatModel {
         stopAsked = false
         planID = nil; noteID = nil; modelPlan = nil
         taskApp = nil
-        taskApps = TaskApps(); taskRequest = text; toolRoute = nil
+        taskApps = TaskApps(); taskRequest = resumedTask ?? text; toolRoute = nil
+        let continuation = resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
         let images = lastImages
         let namedApps = chooseWorkspace && kind == .poki && app.canPlanSplitView
             ? AppIconStore.bundleIDs(namedIn: text) : []
         if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
-            let instructions = [Harness.instructions(for: text), restoredContext].compactMap { $0 }.joined(separator: "\n\n")
+            let instructions = [Harness.instructions(for: resumedTask ?? text), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
                 client = provider == .openai ? OpenAIClient(key: key, model: model) : AnthropicClient(key: key, model: model)
@@ -467,7 +497,7 @@ final class ChatModel {
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
             let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil)
-            let instructions = [Harness.instructions(for: message, inSplitView: splitSession != nil), restoredContext].compactMap { $0 }.joined(separator: "\n\n")
+            let instructions = [Harness.instructions(for: resumedTask ?? message, inSplitView: splitSession != nil), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(message.isEmpty ? Self.picturesOnly : message, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
