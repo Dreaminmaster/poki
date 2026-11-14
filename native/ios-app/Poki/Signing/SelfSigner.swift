@@ -88,9 +88,8 @@ final class SelfSigner {
     var isIdle: () -> Bool = { false }
     /// Why an install waits, for the message under the button.
     var busyReason: () -> String? = { nil }
-    /// Before an install the owner asked for: Poki winds down (automation session, Live Activity)
-    /// so it exits cleanly when iOS replaces it, and comes back on after.
-    var beforeInstall: () -> Void = {}
+    /// Stops runtime work before the confirmed update saves state and exits.
+    var beforeExit: () async -> Void = {}
 
     enum InstallFinish: Equatable {
         case idle, installing, waitingForExit
@@ -353,14 +352,10 @@ final class SelfSigner {
         ) { [weak self] _ in
             Task { @MainActor in self?.exitWaitEnded() }
         }
-        beforeInstall()
         steppedAside = false
         installFraction = nil
-        // iOS holds the last part of an upgrade until the app it replaces leaves the screen: Poki
-        // steps aside to the Home Screen by itself once the new copy is almost in (or has stalled
-        // there), keeping a background task so the request can finish; iOS then ends Poki, and the
-        // notice above reopens it.
-        let background = UIApplication.shared.beginBackgroundTask(withName: "Poki update")
+        // Keep the upload alive until installation_proxy has accepted the package.
+        installBackground = UIApplication.shared.beginBackgroundTask(withName: "Poki update")
         let watch = Task { @MainActor [weak self] in
             var last: (fraction: Double, since: Date)?
             while !Task.isCancelled, let self, self.working != nil {
@@ -376,17 +371,23 @@ final class SelfSigner {
             }
         }
         watch.cancel()
-        UIApplication.shared.endBackgroundTask(background)
+        endInstallBackground()
         if lastError != nil {
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [reopen])
             requireReopen()
+        } else if needsReopen {
+            installFinish = .needsReopen(installed: true)
+            working = installMessage
         } else {
             installFinish = .waitingForExit
-            finishTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.exitWaitEnded() }
+            if exitRequest != .closing {
+                finishTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
+                    Task { @MainActor in self?.exitWaitEnded() }
+                }
             }
             if !steppedAside { stepAside() }
             working = installMessage
+            exitIfReady()
         }
     }
 
@@ -415,35 +416,58 @@ final class SelfSigner {
     /// The upgrade's progress while it installs, for `install`'s watch.
     private var installFraction: Double?
     private var steppedAside = false
+    private enum ExitRequest { case unconfirmed, confirmed, closing }
+    private var exitRequest = ExitRequest.unconfirmed
+    private var installBackground: UIBackgroundTaskIdentifier = .invalid
 
-    /// Poki to the Home Screen, as the person swiping up would: iOS finishes the upgrade only once the
-    /// app it replaces is no longer in front. Once per install.
+    private func endInstallBackground() {
+        guard installBackground != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(installBackground)
+        installBackground = .invalid
+    }
+
+    /// Ask before ending the process. The install step can announce itself before upload finishes.
     private func stepAside() {
         guard !steppedAside else { return }
         log.add("signing", "the install's last step: telling the owner Poki will close to finish")
         steppedAside = true
         working = String(localized: "Finishing the update: Poki will close to finish it")
-        // The last step: the owner is told Poki will close (the alert's OK steps aside, and iOS ends
-        // Poki by itself otherwise); the notice says it again in case the alert was missed.
         finishNotice = true
         notify(title: String(localized: "Poki Will Close to Finish the Update"),
                body: String(localized: "Poki will close by itself. Open it again once the update is in."))
     }
     /// The last install step's alert: Poki has to exit for the update to finish.
     var finishNotice = false
-    /// OK on that alert: Poki leaves for the Home Screen.
     func finishNoticeAnswered() {
         guard finishNotice else { return }
         finishNotice = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self, !self.needsReopen else { return }
+        exitRequest = .confirmed
+        exitIfReady()
+    }
+
+    private func exitIfReady() {
+        guard exitRequest == .confirmed, !needsReopen,
+              installFraction != nil || installFinish == .waitingForExit else { return }
+        exitRequest = .closing
+        finishTimer?.invalidate()
+        finishTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.requireReopen() }
+        }
+        Task { @MainActor in
+            await beforeExit()
+            guard !needsReopen else { return }
+            endInstallBackground()
+            SessionStore.shared.flush()
+            UserDefaults.standard.synchronize()
+            log.add("signing", "update accepted: runtime stopped and state saved; exiting normally")
             UIApplication.shared.perform(NSSelectorFromString("suspend"))
+            exit(0)
         }
     }
 
     /// An install result is required before foreground return or the timer can claim success.
     private func exitWaitEnded() {
-        guard installFinish == .waitingForExit else { return }
+        guard installFinish == .waitingForExit || exitRequest == .closing else { return }
         requireReopen()
     }
 
@@ -466,7 +490,10 @@ final class SelfSigner {
             if progress["id"] as? String == "install" { stepAside() }
         case "part":
             fraction = progress["fraction"] as? Double
-            if progress["id"] as? String == "install" { installFraction = fraction }
+            if progress["id"] as? String == "install" {
+                installFraction = fraction
+                exitIfReady()
+            }
             if let d = progress["detail"] as? String { working = d }
         case "note", "waiting": if let t = progress["text"] as? String { working = t }
         default: break
