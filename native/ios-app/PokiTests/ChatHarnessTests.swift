@@ -220,13 +220,57 @@ final class ChatHarnessTests: XCTestCase {
         ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
         let restored = ChatModel(app: app)
         restored.restore(saved)
-        restored.send("继续早晨的任务")
+        restored.send("继续")
         await fulfillment(of: [received], timeout: 10)
         let payload = try JSONSerialization.data(withJSONObject: try XCTUnwrap(next.requests.first))
         let sent = String(decoding: payload, as: UTF8.self)
         XCTAssertTrue(sent.contains(request), "the restored task must reach the model, not only the screen")
         XCTAssertTrue(sent.contains("Inspect Wi-Fi"), "the model needs the interrupted plan")
         restored.stop()
+    }
+
+    func testTimeQualifiedContinuationRequiresTheOwnersChoice() async throws {
+        let store = SessionStore.shared
+        let previous = store.sessions.filter { $0.archived == nil }.map(\.id)
+        previous.forEach { store.archive($0) }
+        var sessions: [String] = []
+        defer {
+            sessions.forEach { store.delete($0) }
+            previous.forEach { store.unarchive($0) }
+        }
+        let tasks = ["Check the afternoon weather", "Draft the morning GitHub issue"]
+        for text in tasks {
+            let received = expectation(description: "original task received")
+            let ended = expectation(description: "original task stopped")
+            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            _ = chat(on: server)
+            let original = ChatModel(app: try XCTUnwrap(app))
+            original.newConversation()
+            ChatModel.afterTask = { _ in ended.fulfill() }
+            original.send(text)
+            await fulfillment(of: [received], timeout: 10)
+            original.stop()
+            await fulfillment(of: [ended], timeout: 10)
+            ChatModel.afterTask = nil
+            sessions.append(original.sessionID)
+
+            for current in [true, false] {
+                for request in ["继续早晨的任务", "继续早上的任务", "繼續早上的任務", "continue this morning’s task"] {
+                    let probe = ChatModel(app: try XCTUnwrap(app))
+                    if current {
+                        probe.restore(try XCTUnwrap(store.session(sessions[0])))
+                    } else {
+                        probe.newConversation()
+                    }
+                    probe.send(request)
+                    XCTAssertFalse(probe.running, "\(request), current=\(current), candidates=\(sessions.count): ask before starting the model")
+                    let question = probe.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }.last ?? ""
+                    XCTAssertTrue(question.contains("Which task"), question)
+                    for task in tasks.prefix(sessions.count) { XCTAssertTrue(question.contains(task), question) }
+                    guard !probe.running else { probe.stop(); return }
+                }
+            }
+        }
     }
 
     func testUnknownContinuationAsksBeforeStartingTheModel() throws {
