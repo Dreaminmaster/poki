@@ -23,7 +23,7 @@ struct HistorySpan: Identifiable, Hashable {
         return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map(\.key)
     }
 
-    var title: String {
+    @MainActor var title: String {
         let names = apps.prefix(3).map(HistoryNames.app)
         return names.isEmpty ? AppLocalization.text("Screen Text") : names.joined(separator: ", ")
     }
@@ -41,6 +41,7 @@ struct HistorySpan: Identifiable, Hashable {
     }
 }
 
+@MainActor
 enum HistoryNames {
     static func app(_ id: String) -> String { AppIconStore.name(id) ?? id }
 
