@@ -329,6 +329,10 @@ pub struct Walk {
     /// One per element the focus landed on: how many strings it carried, their characters, and the
     /// first few characters of the longest (enough to tell which app it belongs to).
     pub elements: Vec<Json>,
+    /// Moves no element answered.
+    pub silent: u32,
+    /// Distinct strings the other events carried.
+    pub other: Vec<String>,
     /// How far the walk got: connect, check-in, capabilities, moving.
     pub stage: &'static str,
     pub error: Option<String>,
@@ -370,8 +374,8 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
     for step in 0..steps {
         let mut options = plist::Dictionary::new();
         options.insert("allowNonAX".into(), passthrough(false.into()));
-        // 5 is the first element, 4 the next.
-        options.insert("direction".into(), passthrough((if step == 0 { 5 } else { 4 }).into()));
+        // 4 is the next element.
+        options.insert("direction".into(), passthrough(4.into()));
         options.insert("includeContainers".into(), passthrough(true.into()));
         call(&mut socket, 5 + step as u32, "deviceInspectorMoveWithOptions:", passthrough(Value::Dictionary(options)), false).await?;
         let landed = tokio::time::timeout(wait, async {
@@ -381,9 +385,6 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
                 walk.messages += 1;
                 let selector = message.data.as_ref().and_then(Value::as_string).unwrap_or("none").chars().take(60).collect::<String>();
                 *walk.selectors.entry(selector.clone()).or_default() += 1;
-                if selector != "hostInspectorCurrentElementChanged:" {
-                    continue;
-                }
                 let mut strings = Vec::new();
                 if let Some(AuxValue::Array(bytes)) = message.aux.as_ref().and_then(|aux| aux.values.first()) {
                     if let Ok(archive) = Archive::parse(bytes) {
@@ -392,6 +393,16 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
                             inner.strings(&mut strings);
                         }
                     }
+                }
+                if selector != "hostInspectorCurrentElementChanged:" {
+                    // What the other events say (app state changes name apps): a few distinct strings.
+                    for text in strings {
+                        let text: String = text.chars().take(40).collect();
+                        if walk.other.len() < 12 && !walk.other.contains(&text) {
+                            walk.other.push(text);
+                        }
+                    }
+                    continue;
                 }
                 return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(strings);
             }
@@ -403,8 +414,13 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
                 walk.elements.push(json!({"strings": strings.len(), "characters": strings.iter().map(|text| text.chars().count()).sum::<usize>(), "starts": longest}));
             }
             Ok(Err(error)) => return Err(error),
-            // No element answered this move: the walk is over, or the service does not move here.
-            Err(_) => break,
+            // No element answered this move; a few silent moves in a row end the walk.
+            Err(_) => {
+                walk.silent += 1;
+                if walk.silent >= 4 {
+                    break;
+                }
+            }
         }
     }
     let _ = call(&mut socket, 900, "deviceSetAppMonitoringEnabled:", 0.into(), false).await;
