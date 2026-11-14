@@ -213,23 +213,16 @@ struct BearPlayback {
     }
 }
 
-/// The white pads behind the bear's eyes, shut with the eyes. In the model they are fixed to the head,
-/// so a blink drew its line, and the smile its arc, on two whole white discs: the white-painted eyes
-/// the flat bear was faulted for. Here each pad is moved over, in the model's own mesh, from the head's
-/// joint to its eye's, so it goes wherever the eye goes and shuts with it: the eye's height squeezes the
-/// pad with the pupil, and while the eye is not open the pads fade to a faint trace and the highlight
-/// goes. Drawn as the face is drawn, in the same pass, the pads cannot fall out of step with it.
+/// Fades the white eye pads and hides the highlights as the eyes shut, using the original mesh.
+/// The pads keep their authored binding to the head; they fade out completely so the closed-eye
+/// arcs are not drawn on full white discs. Both materials still render with the face in one pass.
 ///
-/// They were drawn as two models of their own, placed each frame where the eyes were: the face is
-/// drawn a pass behind the pose and the two were apart while the head turned, a pad moved only when its
-/// look changed, and the pupils' shift to look somewhere was taken back off them even after the bear
-/// stopped looking. A white came off its eye, sank under the face on one side and showed through the
-/// cheek beside it, until the app started again. A bear without parts named `EyePad_…` and
+/// Do not rebind the pads by regenerating the imported skinned mesh here. On physical iOS 27.0,
+/// even `MeshResource.generate(from: model.mesh.contents)` with unchanged contents triggers a
+/// CoreRE assertion, not a Swift error that `try?` can catch. A bear without parts named `EyePad_…` and
 /// `Catchlight_…` and joints ending in `Eye_L` and `Eye_R` keeps its eyes as they are.
 @MainActor
 private struct EyePads {
-    /// How much of a pad shows once its eye has started to shut.
-    static let shut: Float = 0.2
     /// The eye's joint scale under which the eye counts as shutting; the blink's first step is 0.7.
     static let shutting: Float = 0.75
 
@@ -243,8 +236,8 @@ private struct EyePads {
     private var drawnOpen: Float = 1
 
     init?(bear: ModelEntity) {
-        guard var model = bear.model, let skeleton = model.mesh.contents.skeletons.first else { return nil }
-        var contents = model.mesh.contents
+        guard let model = bear.model, let skeleton = model.mesh.contents.skeletons.first else { return nil }
+        let contents = model.mesh.contents
         let names = skeleton.joints.map(\.name)
         func materialIndex(_ prefix: String) -> Int? {
             let indices = Set(contents.models.filter { $0.id.hasPrefix(prefix) }.flatMap { $0.parts.map(\.materialIndex) })
@@ -254,30 +247,14 @@ private struct EyePads {
               let white = model.materials[pad] as? PhysicallyBasedMaterial,
               let highlightMaterial = model.materials[highlight] as? PhysicallyBasedMaterial else { return nil }
         var eyes: [Int] = []
-        var models: [MeshResource.Model] = []
-        for var part in contents.models {
+        for part in contents.models {
             if part.id.hasPrefix("EyePad_") {
                 let side = part.id.dropFirst("EyePad_".count).prefix(1)
                 guard let eye = names.firstIndex(where: { $0 == "Eye_\(side)" || $0.hasSuffix("/Eye_\(side)") }) else { return nil }
                 eyes.append(eye)
-                var parts: [MeshResource.Part] = []
-                for var piece in part.parts {
-                    guard let old = piece.jointInfluences, piece.positions.count > 0 else { return nil }
-                    // Each vertex's influences, in the same places, all on the eye.
-                    let influences = old.influences.map { MeshJointInfluence(jointIndex: eye, weight: $0.weight) }
-                    piece.jointInfluences = MeshResource.JointInfluences(influences: MeshBuffer(influences),
-                                                                         influencesPerVertex: max(old.influences.count / piece.positions.count, 1))
-                    parts.append(piece)
-                }
-                part.parts = MeshPartCollection(parts)
             }
-            models.append(part)
         }
         guard eyes.count == 2 else { return nil }
-        contents.models = MeshModelCollection(models)
-        guard let mesh = try? MeshResource.generate(from: contents) else { return nil }
-        model.mesh = mesh
-        bear.model = model
         self.bear = bear
         self.eyes = eyes
         self.pad = pad
@@ -302,7 +279,7 @@ private struct EyePads {
         drawnOpen = open
         var pads = white
         if case .transparent(let opacity) = white.blending {
-            pads.blending = .transparent(opacity: .init(scale: opacity.scale * (Self.shut + (1 - Self.shut) * open), texture: opacity.texture))
+            pads.blending = .transparent(opacity: .init(scale: opacity.scale * open, texture: opacity.texture))
         }
         model.materials[pad] = pads
         model.materials[highlight] = open == 1 ? shown : hidden
@@ -528,7 +505,7 @@ private final class BearCanvas: UIView {
         guard let renderer else { return }
 
         let entity = loaded.entity.clone(recursive: true)
-        // The eye pads are moved onto the eyes before the bear goes to the renderer.
+        // Prepare the eye materials without rebuilding the model's skinned mesh.
         func skin(_ e: Entity) -> ModelEntity? {
             if let model = e as? ModelEntity, !model.jointNames.isEmpty { return model }
             return e.children.lazy.compactMap(skin).first
