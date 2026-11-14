@@ -472,11 +472,12 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertFalse(model.hasOpenInProcessSession)
     }
 
-    func testRemoteInitializationDoesNotEnableAutomation() async {
+    func testRemoteInitializationAndStatusWaitForPhoneReadToEnableAutomation() async {
         let opened = expectation(description: "Connecting an agent does not enable Automation Mode")
         opened.isInverted = true
         session.onPrepare = { opened.fulfill() }
-        let core = PokiCore(config: CoreConfig(), host: model.host)
+        let transport = SessionScreenTransport(session: session)
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
 
         let reply = await core.handle(RelayRequest(id: "initialize", method: "POST", headers: [:], body:
             #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Test agent","version":"1"}}}"#))
@@ -484,8 +485,25 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(reply.status, 200)
         XCTAssertNotNil(reply.headers["mcp-session-id"])
         await finishPreparing()
+        for _ in 0..<2 {
+            let status = await core.handle(RelayRequest(id: "status", method: "POST", headers: [:], body:
+                #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}"#))
+            XCTAssertEqual(status.status, 200)
+            XCTAssertTrue(status.body.contains("runner:"), status.body)
+            XCTAssertFalse(status.body.contains("\"isError\":true"), status.body)
+        }
         await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(session.isOpen, "readonly status must not enable Automation Mode")
         XCTAssertFalse(model.hasOpenInProcessSession)
+
+        session.onPrepare = nil
+        let screen = await core.handle(RelayRequest(id: "phone-step", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"look","arguments":{}}}"#))
+        XCTAssertEqual(screen.status, 200)
+        XCTAssertTrue(screen.body.contains("General"), screen.body)
+        XCTAssertFalse(screen.body.contains("\"isError\":true"), screen.body)
+        XCTAssertEqual(transport.screenReads, 1)
+        XCTAssertTrue(session.isOpen)
     }
 
     func testPureChatCompletesWithoutAutomation() async throws {
