@@ -112,6 +112,7 @@ final class AgentConversationTests: XCTestCase {
         let silent = UUID().uuidString.lowercased()
         store.observe(.session(.started(id: silent, client: "claude-ai", version: "1.0", connector: "work")), approvals: [])
         store.observe(.session(.ended(id: silent)), approvals: [])
+        store.flush()
         let originalID = store.listed.first?.id
         let reconnected = launch()
         call(reconnected, client: "claude-ai", connector: "work", step: "Look at the screen")
@@ -120,6 +121,7 @@ final class AgentConversationTests: XCTestCase {
         XCTAssertEqual(reconnected.listed.first?.id, originalID)
         XCTAssertEqual(reconnected.listed.first?.name, "Claude")
         XCTAssertEqual(steps(reconnected.listed.first), ["Open Notes", "Tap “Shopping” (failed)", "Look at the screen"])
+        reconnected.flush()
         XCTAssertEqual(launch().sessions, reconnected.sessions)
     }
 }
