@@ -103,7 +103,8 @@ final class AppIconStore {
 
     /// The bundle IDs of the apps `text` names, in any of their names: "打开美团外卖点下酒菜" names Meituan
     /// Waimai and not Meituan, as the longest name wins where one starts another. A Latin name counts
-    /// only as a whole word, and one-letter names ("X") never.
+    /// only as a whole word, and one-letter names ("X") never. A name of digits ("12306") counts next to
+    /// Chinese text ("打开12306查询") but not inside a longer run of Latin letters or digits.
     static func bundleIDs(namedIn text: String) -> [String] {
         let text = Array(text.lowercased())
         var found: [String] = []
@@ -113,7 +114,11 @@ final class AppIconStore {
                 let chars = Array(name)
                 guard i + chars.count <= text.count, Array(text[i..<i + chars.count]) == chars else { return false }
                 guard chars.allSatisfy(\.isASCII) else { return true }
-                return (i == 0 || !text[i - 1].isLetter) && (i + chars.count == text.count || !text[i + chars.count].isLetter)
+                // A Latin name stops at any letter; a number only at a Latin letter or a digit, as Chinese
+                // characters are letters too and sit right against it.
+                let numeric = chars.allSatisfy(\.isNumber)
+                let joins: (Character) -> Bool = numeric ? { $0.isASCII && ($0.isLetter || $0.isNumber) } : { $0.isLetter }
+                return (i == 0 || !joins(text[i - 1])) && (i + chars.count == text.count || !joins(text[i + chars.count]))
             }
             guard let hit, let id = KnownApps.byName[hit] else { i += 1; continue }
             if !found.contains(id) { found.append(id) }

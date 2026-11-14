@@ -42,14 +42,26 @@ enum Harness {
         // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
         // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
         // step more; the save rides in the same reply instead of a turn before it.
-        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
+        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. When you are not sure of an app's iPhone bundle id, or a launch answers that no app with that bundle id is installed, do not tell the owner the app is missing yet: go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it; say the app is not installed only when that search finds nothing. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
             parts.append("Approvals here are decided from what the owner said in this chat. When a step is refused (declined), do not tell the owner to tap anything: ask them in plain words whether they want that step done, naming the step, and if they say yes, send the same step again.")
         }
+        if let apps = appIDs(for: task) { parts.append(apps) }
         if !brief.isEmpty { parts.append(brief) }
         return parts.joined(separator: "\n\n")
+    }
+
+    @MainActor private static func appIDs(for task: String) -> String? {
+        let apps = AppIconStore.bundleIDs(namedIn: task).compactMap { KnownApps.byID[$0.lowercased()] }
+        guard !apps.isEmpty else { return nil }
+        let lines = apps.map { app -> String in
+            let names = app.names.joined(separator: " / ")
+            let others = app.otherIDs.isEmpty ? "" : " (another edition: \(app.otherIDs.joined(separator: ", ")))"
+            return "- \(names): \(app.id)\(others)"
+        }
+        return "The apps this request names and their iPhone bundle ids. Launch them with these ids, not ids from memory (Android package names differ):\n" + lines.joined(separator: "\n")
     }
 
     /// Poki's own browser's tools (ESP-145) sit beside the phone's.
