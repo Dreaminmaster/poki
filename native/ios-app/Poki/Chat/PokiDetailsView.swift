@@ -369,7 +369,7 @@ struct ConnectionView: View {
                     // Why turning on failed, under the switch that was turned on (not only on Poki's
                     // page). Poki's own sentences are localized; PokiCore's stay as they came.
                     if !on, !model.sessionStarting, let problem = model.problem {
-                        Text(verbatim: Bundle.main.localizedString(forKey: problem, value: problem, table: nil))
+                        Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
                             .foregroundStyle(.red)
                     }
                 }

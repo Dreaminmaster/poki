@@ -342,7 +342,7 @@ enum HomeIdea {
     /// out, the owner is handed GitHub's sign-in page itself, not the repository with a note to find
     /// it. Its key does not change with the language, so Forget holds after the iPhone's language changes.
     static var star: HomeShortcut {
-        HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: String(localized: "Star Poki"),
+        HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: AppLocalization.text(LocalizedStringResource("Star Poki")),
                      prompt: String(localized: """
                      Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to \
                      GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me
