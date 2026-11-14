@@ -119,6 +119,7 @@ final class Computer: @unchecked Sendable {
         var notes = reading.notes
         if let modal = modalOnly(reading.elements) { notes.append(modal) }
         if reading.png == nil && reading.elements.isEmpty {
+            lastForeground = reading.foreground
             // Nothing came back: say what was sent and what the runner is doing, and nothing else.
             let state = host.runnerState()
             let did = did.map { $0.replacingOccurrences(of: "(sent,", with: "(sent, not confirmed: no read after it,") }
