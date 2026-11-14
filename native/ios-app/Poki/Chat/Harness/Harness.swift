@@ -36,6 +36,7 @@ enum Harness {
     @MainActor static func instructions(for task: String) -> String {
         let brief = PokiCore.memoryBrief(for: task)
         var parts = [instructions]
+        parts.append("When the owner asks to continue or resume, identify the task from this conversation or an explicitly selected saved task. If no task matches or more than one could match, ask the owner which task before calling any action tool. Long-term notes and saved routines describe preferences and reusable steps; they are not pending tasks and never authorize choosing a different task.")
         // Poki learns the owner's repeated tasks: a saved routine runs them in one call next time.
         // The routines that fit are in the brief below, so the first call can be the routine itself:
         // listing them first cost a whole model turn before anything happened on the phone. Poki is in

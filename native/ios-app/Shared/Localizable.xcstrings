@@ -1,6 +1,75 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Which task would you like to continue?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which task would you like to continue?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你想继续哪一件任务？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你想繼續哪一件任務？"
+          }
+        }
+      }
+    },
+    "I couldn't find a matching task. Tell me what you wanted to do and where it stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I couldn't find a matching task. Tell me what you wanted to do and where it stopped."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有找到对应的任务。请告诉我原本要做什么，以及停在了哪一步。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有找到對應的任務。請告訴我原本要做什麼，以及停在了哪一步。"
+          }
+        }
+      }
+    },
+    "Here are your recent tasks. Reply with a number or the task's name." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Here are your recent tasks. Reply with a number or the task's name."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下面是最近的任务，请回复编号或任务名称。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下面是最近的任務，請回覆編號或任務名稱。"
+          }
+        }
+      }
+    },
     "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %@, make sure it is connected with the loopback on, then come back; this page updates by itself." : {
       "extractionState" : "manual",
       "localizations" : {
