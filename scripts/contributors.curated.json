@@ -516,5 +516,24 @@
       "#267",
       "#268"
     ]
+  },
+  "whiteluw": {
+    "status": "counted",
+    "categories": [
+      "code",
+      "testing"
+    ],
+    "basis": [
+      "#326"
+    ],
+    "summary": "Contributed #326 to avoid a 3D bear startup crash on iPhone.",
+    "lines": {
+      "en": "Contributed #326 to avoid a 3D bear startup crash on iPhone.",
+      "zh-CN": "在 #326 中修复 iPhone 上三维小熊初始化时的闪退。",
+      "zh-TW": "在 #326 修正 iPhone 上三維小熊初始化時的閃退。",
+      "ja": "#326 で iPhone の 3D クマの初期化時に発生するクラッシュを修正しました。",
+      "ko": "#326에서 iPhone의 3D 곰 초기화 중 발생하는 충돌을 수정했습니다.",
+      "es": "Corrigió en #326 un fallo al inicializar el oso 3D en el iPhone."
+    }
   }
 }
