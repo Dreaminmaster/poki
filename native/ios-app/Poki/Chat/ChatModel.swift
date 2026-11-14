@@ -141,6 +141,7 @@ final class ChatModel {
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
     private var client: ModelClient?
+    private var restoredContext: String?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
     private var modelPlan: [String]?
 
@@ -233,6 +234,7 @@ final class ChatModel {
         if isDemo { entries = [ChatEntry(.time(Date()))] + greeting.dropFirst(); return }
         loop = nil
         client = nil
+        restoredContext = nil
         calls = []
         planID = nil; noteID = nil; modelPlan = nil
         sessionID = UUID().uuidString.lowercased()
@@ -248,6 +250,7 @@ final class ChatModel {
         planID = nil; noteID = nil; modelPlan = nil
         sessionID = session.id
         calls = session.calls
+        restoredContext = session.modelContext
         entries = session.entries.isEmpty ? greeting : session.entries
     }
 
@@ -379,7 +382,7 @@ final class ChatModel {
         let namedApps = chooseWorkspace && kind == .poki && app.canPlanSplitView
             ? AppIconStore.bundleIDs(namedIn: text) : []
         if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
-            let instructions = Harness.instructions(for: text)
+            let instructions = [Harness.instructions(for: text), restoredContext].compactMap { $0 }.joined(separator: "\n\n")
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
                 client = provider == .openai ? OpenAIClient(key: key, model: model) : AnthropicClient(key: key, model: model)
@@ -464,7 +467,7 @@ final class ChatModel {
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
             let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil)
-            let instructions = Harness.instructions(for: message, inSplitView: splitSession != nil)
+            let instructions = [Harness.instructions(for: message, inSplitView: splitSession != nil), restoredContext].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(message.isEmpty ? Self.picturesOnly : message, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
