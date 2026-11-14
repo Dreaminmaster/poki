@@ -355,7 +355,7 @@ final class BrowserGuardTests: XCTestCase {
 }
 
 /// HTML pages on 127.0.0.1 by path; any other path is not found.
-final class PageServer: @unchecked Sendable {
+private final class PageServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "page-server")
     private let pages: [String: String]

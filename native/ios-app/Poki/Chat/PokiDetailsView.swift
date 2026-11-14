@@ -427,6 +427,15 @@ struct AdvancedSettingsView: View {
         @Bindable var model = model
         let voice = model.voice
         List {
+            if model.automationPath == .inProcess {
+                Section {
+                    Toggle(isOn: $model.closeSessionWhenIdle) { SettingsRow(title: "Hide Banner When Idle", symbol: "rectangle.on.rectangle.slash") }
+                } header: {
+                    SettingsHeader("Connection")
+                } footer: {
+                    Text("Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again.")
+                }
+            }
             // Main's Runner section. The in-process path has no Poki Runner to start or stop (ESP-152).
             if model.automationPath == .runner {
                 Section {
