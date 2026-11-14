@@ -1,4 +1,6 @@
 import PokiCore
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Poki
 
@@ -20,6 +22,10 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     private var heldOpenStarted = false
     private var answer: [String: Any]?
     var onPrepare: (@Sendable () -> Void)?
+    var openingDelay: TimeInterval = 0
+    private var requested: TimeInterval = 0
+    private var ready: TimeInterval = 0
+    var openingTimes: (requested: TimeInterval, ready: TimeInterval) { lock.withLock { (requested, ready) } }
     /// The next open waits until `answer(_:)`.
     func holdNextOpen() { lock.withLock { gate = DispatchSemaphore(value: 0); heldOpenStarted = false } }
     var isOpen: Bool { lock.withLock { open } }
@@ -27,7 +33,9 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     /// Lets a held open go on, with this answer instead of opening (nil opens).
     func answer(_ result: [String: Any]?) { lock.withLock { answer = result; gate?.signal(); gate = nil } }
     func prepare() -> [String: Any] {
+        lock.withLock { requested = ProcessInfo.processInfo.systemUptime }
         onPrepare?()
+        if openingDelay > 0 { Thread.sleep(forTimeInterval: openingDelay) }
         if let held = lock.withLock({ () -> DispatchSemaphore? in heldOpenStarted = gate != nil; return gate }) {
             held.wait()
             if let given = lock.withLock({ () -> [String: Any]? in defer { answer = nil }; return answer }) { return given }
@@ -35,6 +43,7 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
         return lock.withLock {
             let reused = open
             open = true
+            ready = ProcessInfo.processInfo.systemUptime
             return ["ok": true, "generation": 1, "reused": reused, "seconds": 0.0]
         }
     }
@@ -629,7 +638,7 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(launcher.restarts, restarts + 1, "one retry while the loopback stays up")
     }
 
-    func testAPasscodeWaitAsksTheOwnerAndTellsTheAgentWhoMustEnterIt() async {
+    func testAPasscodeWaitAsksTheOwnerAndTellsTheAgentWhoMustEnterIt() async throws {
         session.holdNextOpen()
         model.wakeRunner()
         // On the simulator the launcher is WebDriverAgent on the Mac; its answer comes first.
@@ -639,6 +648,7 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(model.passcodeHint, "Poki's home asks the owner for the passcode")
         let waiting = model.host.currentRunner.describe
         XCTAssertTrue(waiting.contains("owner to enter the iPhone passcode"), waiting)
+        try await captureSessionState("passcode")
         session.answer(["ok": false, "code": "com.apple.dt.XCTest.XCTFuture 1000", "detail": "Timed out while enabling automation mode.", "seconds": 60.0])
         await waitFor("iOS gave up on the passcode") { !self.model.passcodeHint && !self.model.host.currentRunner.describe.hasPrefix("starting") }
         let failed = model.host.currentRunner.describe
@@ -688,12 +698,90 @@ final class InProcessPasscodeTests: XCTestCase {
         }
         await waitFor("the remote phone step requests automation") { self.session.isHoldingOpen }
         XCTAssertEqual(transport.screenReads, 0, "no screen request may reach native automation before it is ready")
+        let chat = ChatModel(app: model)
+        XCTAssertEqual(PokiStatus.current(model: model, chat: chat).word, "Preparing")
+        try await captureSessionState("waiting", chat: chat)
         session.answer(nil)
         let reply = await reading.value
         XCTAssertEqual(reply.status, 200)
         XCTAssertTrue(reply.body.contains("General"), reply.body)
         XCTAssertFalse(reply.body.contains("\"isError\":true"), reply.body)
         XCTAssertEqual(transport.screenReads, 1, "the first phone read succeeds without a model retry")
+        XCTAssertNotEqual(PokiStatus.current(model: model, chat: chat).word, "Preparing")
+        try await captureSessionState("ready", chat: chat)
+    }
+
+    func testSimulatedFirstScreenTimings() async throws {
+        try XCTSkipUnless(UserDefaults.standard.bool(forKey: "sessionTiming"), "explicit simulated timing run only")
+        session.openingDelay = 1.92
+        var samples: [[String: Any]] = []
+        for kind in ["shortcut", "named-app", "implicit-phone"] {
+            for sample in 1...5 {
+                for schedule in ["eager-ready-model", "on-demand"] {
+                    await withCheckedContinuation { done in model.closeInProcess("timing sample") { done.resume() } }
+                    await prepareWithoutPhoneTask()
+                    if schedule == "eager-ready-model" {
+                        model.wakeRunner()
+                        await waitFor("baseline session is already ready before submission") { self.model.hasOpenInProcessSession }
+                    }
+                    let transport = SessionScreenTransport(session: session)
+                    let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
+                    let submitted = ProcessInfo.processInfo.systemUptime
+                    model.chatTaskBegan()
+                    let reply = await core.handle(RelayRequest(id: "timed-read", method: "POST", headers: [:], body:
+                        #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"look","arguments":{}}}"#))
+                    let readAt = try XCTUnwrap(transport.firstReadAt)
+                    let times = session.openingTimes
+                    let valid = reply.status == 200 && reply.body.contains("General") && !reply.body.contains("\"isError\":true")
+                    XCTAssertTrue(valid, reply.body)
+                    XCTAssertEqual(transport.screenReads, 1)
+                    XCTAssertGreaterThanOrEqual(readAt, times.ready)
+                    if schedule == "on-demand" { XCTAssertGreaterThanOrEqual(times.requested, submitted) }
+                    else { XCTAssertLessThanOrEqual(times.ready, submitted) }
+                    samples.append(["category": kind, "schedule": schedule, "sample": sample,
+                                    "submitted": submitted, "session_requested": times.requested,
+                                    "session_ready": times.ready, "first_screen_read": readAt,
+                                    "elapsed_seconds": readAt - submitted, "ok": valid])
+                    model.chatTaskEnded(reply: nil, session: "timing", acted: true)
+                }
+            }
+        }
+        let output: [String: Any] = ["simulated": true, "open_delay_seconds": 1.92, "model_thinking_seconds": 0,
+                                    "baseline": "reconstructed eager-ready scheduling, not an old binary",
+                                    "boundary": "AppModel task submission lifecycle through MCP look to parsed fake-native screen; UI input and model network excluded",
+                                    "samples": samples]
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("OnDemandEvidence")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]).write(to: folder.appendingPathComponent("timings.json"))
+    }
+
+    private func captureSessionState(_ name: String, chat: ChatModel? = nil) async throws {
+        guard UserDefaults.standard.bool(forKey: "sessionEvidence") else { return }
+        let language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "zh-Hans"
+        defer { AppLocalization.shared.preference = language }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        let chat = chat ?? ChatModel(app: model)
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(model).environment(chat).environment(\.locale, AppLocalization.locale))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let drawn = expectation(description: "ChatView rendered its geometry and state")
+        let frames = SessionEvidenceFrames { drawn.fulfill() }
+        let display = CADisplayLink(target: frames, selector: #selector(SessionEvidenceFrames.tick))
+        display.add(to: .main, forMode: .common)
+        await fulfillment(of: [drawn], timeout: 5)
+        display.invalidate()
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("OnDemandEvidence")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try XCTUnwrap(image.pngData()).write(to: folder.appendingPathComponent("\(name).png"))
     }
 
 }
@@ -917,6 +1005,8 @@ private final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let lock = NSLock()
     private var reads = 0
+    private var firstRead: TimeInterval?
+    var firstReadAt: TimeInterval? { lock.withLock { firstRead } }
     var screenReads: Int { lock.withLock { reads } }
     init(session: FakeAutomation) { self.session = session }
 
@@ -932,11 +1022,26 @@ private final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
         case "/wda/activeAppInfo": value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
         case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
         case "/source":
-            lock.withLock { reads += 1 }
+            lock.withLock {
+                reads += 1
+                if firstRead == nil { firstRead = ProcessInfo.processInfo.systemUptime }
+            }
             value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeButton name="General" label="General" x="16" y="100" width="358" height="44" /></XCUIElementTypeApplication></AppiumAUT>"#)
         default: value = .null
         }
         let response: JSON = ["value": value]
         return (200, response.data())
+    }
+}
+
+@MainActor
+private final class SessionEvidenceFrames: NSObject {
+    private var remaining = 3
+    private let drawn: () -> Void
+    init(drawn: @escaping () -> Void) { self.drawn = drawn }
+    @objc func tick() {
+        guard remaining > 0 else { return }
+        remaining -= 1
+        if remaining == 0 { drawn() }
     }
 }

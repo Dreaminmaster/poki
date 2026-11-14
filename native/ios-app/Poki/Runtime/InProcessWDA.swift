@@ -149,6 +149,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             "GET /source": { [unowned self] _, _ in
                 var code: NSString?
                 guard let xml = self.native.sourceXML(nil, maxDepth: self.maxDepth, maxChildren: self.maxChildren, code: &code) else { throw Refusal("unknown error", "no element tree: \(code ?? "unknown")") }
+                let readAt = ProcessInfo.processInfo.systemUptime
+                Task { @MainActor in AppLog.shared.add("session-timing", String(format: "screen_read_succeeded uptime=%.6f", readAt)) }
                 return .string(xml)
             },
             "GET /element/active": { [unowned self] _, _ in

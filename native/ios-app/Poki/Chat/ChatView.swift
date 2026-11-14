@@ -200,6 +200,19 @@ struct ChatView: View {
             ApprovalAskCard(title: approval.question, expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) })
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if model.passcodeHint {
+            Label(Self.local(AppModel.handoffWording(.automationPasscode)), systemImage: "lock")
+                .font(.callout).padding(12)
+                .frame(maxWidth: .infinity)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .accessibilityIdentifier("session.passcode")
+        } else if model.preparingPhone {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Preparing")
+            }
+            .font(.callout).padding(8)
+            .accessibilityIdentifier("session.preparing")
         } else if let text = model.handoffText {
             TurnCard(text: Self.local(text), done: model.handoffDoneInApp)
                 .transition(.move(edge: .bottom).combined(with: .opacity))

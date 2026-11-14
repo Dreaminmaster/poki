@@ -58,9 +58,6 @@ final class AppModel {
     /// runner standing by on its own after the idle time. The bear sleeps and Hands reads off only for
     /// this one: standing by after a quiet minute is still ready. Cleared when the runner starts again.
     private(set) var ownerPaused = false
-    /// Stop the runner after this long without agent activity; 0 never stops it.
-    /// 60 s by default. An agent can think for about a minute between steps of a long task; after a
-    /// longer pause the runner stops, and the agent's next request starts it again.
     private enum IdleSessionPolicy { case close, pauseAutomation }
     // Switch to pauseAutomation if device acceptance finds that same-process reads cannot resume.
     private static let idleSessionPolicy = IdleSessionPolicy.close
@@ -329,13 +326,11 @@ final class AppModel {
         // them while the runner is fine, so the runner is asked first; only a runner that does not
         // answer is started again (each restart costs seconds and flashes the automation banner).
         host.onRestart { [weak self, automationPath] in
-            // In-process there is no runner to ask: the session is closed and opened again.
+            // Keep an active in-process session through the task; an initial failed open can retry.
             guard automationPath == .runner else {
                 Task { @MainActor in
                     guard let self else { return }
-                    // A reopened session reads nothing in this launch, so the one open is kept: its
-                    // requests have deadlines of their own, and a busy app answers again by itself.
-                    self.log.add("runner", "PokiCore asked for a restart: the in-process session is kept (a reopened one cannot read the screen in the same launch)")
+                    self.log.add("runner", "PokiCore asked for a restart: keeping the in-process session through this task")
                     self.warmInProcess("PokiCore's restart")
                 }
                 return
@@ -422,6 +417,13 @@ final class AppModel {
     var hasOpenInProcessSession: Bool {
         automationPath == .inProcess && sessionOn && inProcessSession == .open
     }
+    var preparingPhone: Bool {
+        guard automationPath == .inProcess, sessionOn else { return false }
+        switch inProcessSession {
+        case .opening, .closing(reopen: true), .failed("open_under_way", _), .failed("open_poki_first", _): return true
+        default: return false
+        }
+    }
     /// Poki's own automation session (ESP-152); a fake in tests.
     private let automation: InProcessAutomation
     private var inProcessWarming = false
@@ -506,6 +508,7 @@ final class AppModel {
             guard Date().timeIntervalSince(inProcessWarmStarted) > Self.staleOpen else { return }
             log.add("runner", "the in-process open under way has not answered in \(Int(Self.staleOpen)) s: asking again for \(why)")
         }
+        log.add("session-timing", String(format: "session_requested uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         inProcessWarming = true
         inProcessOpensInFlight += 1
         inProcessWarmStarted = Date()
@@ -541,6 +544,7 @@ final class AppModel {
                 self.log.add("runner", ok ? "in-process session ready for \(why) (generation \(result["generation"] ?? 0), \((result["reused"] as? Bool) == true ? "already open" : "opened"), \(seconds) s\(warm))"
                                           : "in-process session not ready for \(why): \(result["code"] ?? "unknown") after \(seconds) s")
                 if ok {
+                    self.log.add("session-timing", String(format: "session_ready uptime=%.6f", ProcessInfo.processInfo.systemUptime))
                     self.automationStarted()
                     // An open session proves both, also when the launcher only found the image mounted.
                     if !self.setup.developerMode || !self.setup.uiAutomation {
@@ -1381,6 +1385,7 @@ final class AppModel {
             if status != relayStatus { log.add("relay", "\(status)") }
             relayStatus = status
         case .toolStarted(_, let summary, _):
+            if !chatTaskActive { log.add("session-timing", String(format: "phone_step_received uptime=%.6f", ProcessInfo.processInfo.systemUptime)) }
             lastAgentActivity = Date(); lastStepAt = Date()
             stepUnderWay = (summary, Date())
             activityText = summary
@@ -1488,8 +1493,8 @@ final class AppModel {
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
     func finishTask() {
+        if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
-        lastAgentActivity = Date()
         lastShot = nil
         Task { [core, log] in if let line = await core.finishTask() { log.add("runner", line) } }
     }
@@ -1498,8 +1503,9 @@ final class AppModel {
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
     func chatTaskBegan() {
-        chatTaskActive = true
-        lastAgentActivity = Date()
+        log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
+        chatTaskActive = automationPath == .inProcess
+        if chatTaskActive { lastAgentActivity = Date() }
         lastShot = nil
         // The owner sees at once that Poki took the task: the Live Activity (started here, while
         // Poki is in front) and iOS's background line say so before the model's first answer.
