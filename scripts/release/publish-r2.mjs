@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomUUID, sign, verify } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -10,6 +10,8 @@ const { values } = parseArgs({ options: {
   release: { type: 'string' }, assets: { type: 'string' }, output: { type: 'string' },
   config: { type: 'string', default: 'config/release-source.json' },
   previous: { type: 'string' }, publish: { type: 'boolean', default: false },
+  'verify-upload': { type: 'boolean', default: false },
+  'cleanup-verification': { type: 'boolean', default: false },
 } });
 
 function command(program, args) {
@@ -34,8 +36,7 @@ function decode(bytes, key) {
   return catalog;
 }
 
-async function main() {
-  if (!values.release || !values.assets || !values.output) throw new Error('Required: --release <GitHub release JSON> --assets <directory> --output <directory>');
+async function sourceSettings() {
   const config = JSON.parse(await readFile(values.config, 'utf8'));
   const address = new URL(config.url);
   if (address.protocol !== 'https:' || address.username || address.password || address.search || address.hash || address.pathname !== '/catalog.json') throw new Error('The production catalog must use HTTPS at /catalog.json');
@@ -43,6 +44,93 @@ async function main() {
   const key = createPrivateKey(process.env.POKI_RELEASE_SIGNING_KEY ?? '');
   const publicKey = createPublicKey(key);
   if (publicKey.asymmetricKeyType !== 'ed25519' || publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex') !== config.public_key.toLowerCase()) throw new Error('Signing key does not match the reviewed public key');
+  return { address, key, publicKey };
+}
+
+function storageSettings() {
+  for (const name of ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'POKI_R2_ENDPOINT', 'POKI_R2_BUCKET']) {
+    if (!process.env[name]) throw new Error(`Missing publication credential or setting: ${name}`);
+  }
+  const endpoint = new URL(process.env.POKI_R2_ENDPOINT);
+  if (endpoint.protocol !== 'https:' || !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(endpoint.hostname) || endpoint.pathname !== '/' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid R2 S3 endpoint');
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(process.env.POKI_R2_BUCKET)) throw new Error('Invalid R2 bucket');
+  return { bucket: process.env.POKI_R2_BUCKET, aws: ['--endpoint-url', endpoint.href, '--region', 'auto'] };
+}
+
+function upload(storage, file, object, options = []) {
+  command('aws', [...storage.aws, 's3', 'cp', resolve(file), `s3://${storage.bucket}/${object}`, ...options, '--only-show-errors']);
+}
+
+async function readback(address, expected, publicKey) {
+  const response = await fetch(address, { redirect: 'error', signal: AbortSignal.timeout(15000), cache: 'no-store' });
+  if (!response.ok) throw new Error(`Catalog readback failed (${response.status})`);
+  const bytes = await response.text();
+  decode(bytes, publicKey);
+  if (bytes !== expected) throw new Error('Published catalog readback differs; inspect the retained previous catalog');
+}
+
+async function cleanupVerification() {
+  const receiptFile = join(values.output, 'verification-object.json');
+  let receipt;
+  try { receipt = JSON.parse(await readFile(receiptFile, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  if (!/^_verification\/[a-f0-9-]{36}\/catalog\.json$/.test(receipt.object)) throw new Error('Cleanup is restricted to a verification catalog');
+  const config = JSON.parse(await readFile(values.config, 'utf8'));
+  const address = new URL(receipt.object, new URL(config.url).origin + '/');
+  const storage = storageSettings();
+  command('aws', [...storage.aws, 's3', 'rm', `s3://${storage.bucket}/${receipt.object}`, '--only-show-errors']);
+  const response = await fetch(address, { redirect: 'error', signal: AbortSignal.timeout(15000), cache: 'no-store' });
+  if (response.status !== 404) throw new Error(`Verification object still readable after cleanup (${response.status})`);
+  await writeFile(join(values.output, 'cleanup.json'), JSON.stringify({ object: receipt.object, deleted: true, publicStatus: response.status }, null, 2));
+  console.log('Verification object deleted; public readback returned 404.');
+}
+
+async function verifyUpload() {
+  const { address, key, publicKey } = await sourceSettings();
+  const storage = storageSettings();
+  const production = await fetch(address, { redirect: 'error', signal: AbortSignal.timeout(15000), cache: 'no-store' });
+  if (!production.ok && production.status !== 404) throw new Error('Cannot snapshot the production catalog');
+  const before = await production.text();
+  const object = `_verification/${randomUUID()}/catalog.json`;
+  const testAddress = new URL(object, address.origin + '/');
+  const payload = Buffer.from(JSON.stringify({ schema: 1, releases: [] }));
+  const signature = sign(null, payload, key);
+  const envelope = JSON.stringify({ payload: payload.toString('base64'), signature: signature.toString('base64') });
+  await mkdir(values.output, { recursive: true });
+  await writeFile(join(values.output, 'verification-object.json'), JSON.stringify({ object }));
+  const file = join(values.output, 'verification-catalog.json');
+  const options = ['--content-type', 'application/json', '--cache-control', 'no-store'];
+  try {
+    await writeFile(file, envelope);
+    upload(storage, file, object, options);
+    await readback(testAddress, envelope, publicKey);
+    console.log(`Signed verification catalog uploaded and verified: ${testAddress.href}`);
+    signature[0] ^= 1;
+    const corrupt = JSON.stringify({ payload: payload.toString('base64'), signature: signature.toString('base64') });
+    const corruptFile = join(values.output, 'invalid-signature-catalog.json');
+    await writeFile(corruptFile, corrupt);
+    upload(storage, corruptFile, object, options);
+    let rejected = false;
+    try { await readback(testAddress, corrupt, publicKey); }
+    catch (error) { if (error.message !== 'Previous catalog signature is invalid') throw error; rejected = true; }
+    if (!rejected) throw new Error('Invalid remote signature was accepted');
+    console.log('Invalid signature downloaded from the isolated test object was rejected.');
+    const after = await fetch(address, { redirect: 'error', signal: AbortSignal.timeout(15000), cache: 'no-store' });
+    if (after.status !== production.status || (production.ok && await after.text() !== before)) throw new Error('Production catalog changed during verification');
+    await writeFile(join(values.output, 'verification.json'), JSON.stringify({ url: testAddress.href, signatureVerified: true, invalidSignatureRejected: true, productionStatus: production.status, productionUnchanged: true, installersUploaded: false }, null, 2));
+  } finally {
+    await cleanupVerification();
+  }
+}
+
+async function main() {
+  if (values['verify-upload'] || values['cleanup-verification']) {
+    if (!values.output || values.publish || values.release || values.assets || values.previous || (values['verify-upload'] && values['cleanup-verification'])) throw new Error('Verification cannot be combined with release publication inputs');
+    if (values['cleanup-verification']) return cleanupVerification();
+    return verifyUpload();
+  }
+  if (!values.release || !values.assets || !values.output) throw new Error('Required: --release <GitHub release JSON> --assets <directory> --output <directory>');
+  const { address, key, publicKey } = await sourceSettings();
 
   const release = JSON.parse(await readFile(values.release, 'utf8'));
   const tag = release.tag_name;
@@ -68,12 +156,7 @@ async function main() {
   let previousBytes;
   if (values.publish) {
     if (values.previous) throw new Error('--previous is for offline preparation only');
-    for (const name of ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'POKI_R2_ENDPOINT', 'POKI_R2_BUCKET']) {
-      if (!process.env[name]) throw new Error(`Missing publication credential or setting: ${name}`);
-    }
-    const endpoint = new URL(process.env.POKI_R2_ENDPOINT);
-    if (endpoint.protocol !== 'https:' || !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(endpoint.hostname) || endpoint.pathname !== '/' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid R2 S3 endpoint');
-    if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(process.env.POKI_R2_BUCKET)) throw new Error('Invalid R2 bucket');
+    storageSettings();
     const response = await fetch(address, { redirect: 'error', signal: AbortSignal.timeout(15000), cache: 'no-store' });
     if (response.ok) previousBytes = await response.text();
     else if (response.status !== 404) throw new Error(`Cannot read current catalog (${response.status})`);
@@ -93,11 +176,10 @@ async function main() {
   console.log(`Prepared ${tag}: ${assets.length} verified files. Source: ${address.origin}`);
   if (!values.publish) { console.log('Prepared only; nothing uploaded.'); return; }
 
-  const bucket = process.env.POKI_R2_BUCKET;
-  const aws = ['--endpoint-url', process.env.POKI_R2_ENDPOINT, '--region', 'auto'];
+  const storage = storageSettings();
   for (const asset of assets) {
     const object = `releases/${tag}/${asset.name}`;
-    command('aws', [...aws, 's3', 'cp', resolve(values.assets, asset.name), `s3://${bucket}/${object}`, '--cache-control', 'public,max-age=31536000,immutable', '--only-show-errors']);
+    upload(storage, resolve(values.assets, asset.name), object, ['--cache-control', 'public,max-age=31536000,immutable']);
     const response = await fetch(asset.browser_download_url, { redirect: 'error', signal: AbortSignal.timeout(120000) });
     if (!response.ok) throw new Error(`Public R2 file is unavailable: ${asset.name} (${response.status})`);
     const hash = createHash('sha256');
@@ -107,10 +189,9 @@ async function main() {
     console.log(`Verified R2 download: ${asset.browser_download_url} (${size} bytes)`);
   }
   // Keep the previous signed catalog recoverable before changing discovery.
-  if (previousBytes) command('aws', [...aws, 's3', 'cp', resolve(values.output, 'previous-catalog.json'), `s3://${bucket}/catalog-history/before-${tag}.json`, '--content-type', 'application/json', '--only-show-errors']);
-  command('aws', [...aws, 's3', 'cp', resolve(catalogFile), `s3://${bucket}/${basename(address.pathname)}`, '--content-type', 'application/json', '--cache-control', 'no-store', '--only-show-errors']);
-  const current = await fetch(address, { redirect: 'error', signal: AbortSignal.timeout(15000), cache: 'no-store' });
-  if (!current.ok || await current.text() !== envelope) throw new Error('Published catalog readback differs; inspect the retained previous catalog');
+  if (previousBytes) upload(storage, resolve(values.output, 'previous-catalog.json'), `catalog-history/before-${tag}.json`, ['--content-type', 'application/json']);
+  upload(storage, resolve(catalogFile), basename(address.pathname), ['--content-type', 'application/json', '--cache-control', 'no-store']);
+  await readback(address, envelope, publicKey);
   console.log(`Published and read back signed catalog: ${address.href}`);
 }
 

@@ -13,6 +13,11 @@ on:
     branches: [main]
     paths: ['.github/channels.json']
   workflow_dispatch:
+    inputs:
+      verify_r2:
+        description: Verify a signed catalog in an isolated R2 path, then delete it; skip promotion
+        type: boolean
+        default: false
 
 concurrency:
   group: publish-promotion
@@ -23,6 +28,7 @@ permissions:
 
 jobs:
   read:
+    if: inputs.verify_r2 != true
     runs-on: ubuntu-latest
     outputs:
       rec: ${{ steps.r.outputs.rec }}
@@ -40,6 +46,38 @@ jobs:
           channel="$(echo "$rec" | jq -r '.channel // empty')"
           case "$channel" in beta|stable|'') ;; *) echo "unknown channel: $channel" >&2; exit 1 ;; esac
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+  verify-r2:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_r2 == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.POKI_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.POKI_R2_SECRET_ACCESS_KEY }}
+      POKI_R2_ENDPOINT: ${{ secrets.POKI_R2_ENDPOINT }}
+      POKI_R2_BUCKET: poki-releases
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Upload and verify only an isolated signed catalog
+        env:
+          POKI_RELEASE_SIGNING_KEY: ${{ secrets.POKI_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/release/publish-r2.mjs --verify-upload --output evidence | tee evidence/verification.log
+      - name: Ensure the test object is removed
+        if: always()
+        run: node scripts/release/publish-r2.mjs --cleanup-verification --output evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r2-upload-verification
+          path: evidence/
+          if-no-files-found: ignore
 
   publish:
     needs: read

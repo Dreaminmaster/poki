@@ -99,3 +99,14 @@ test('a published release cannot be replaced with different bytes under the same
   assert.match(result.stderr, /immutable/);
   assert.equal(await readFile(join(f.root, 'output/catalog.json'), 'utf8'), original);
 });
+
+test('isolated verification refuses release inputs and cannot delete the production catalog', async t => {
+  const f = await fixture(t);
+  const mixed = f.run(['--verify-upload', '--publish']);
+  assert.equal(mixed.status, 1);
+  assert.match(mixed.stderr, /Verification cannot be combined/);
+  await writeFile(join(f.root, 'output/verification-object.json'), JSON.stringify({ object: 'catalog.json' }));
+  const cleanup = spawnSync(process.execPath, [script, '--cleanup-verification', '--output', join(f.root, 'output')], { encoding: 'utf8' });
+  assert.equal(cleanup.status, 1);
+  assert.match(cleanup.stderr, /Cleanup is restricted/);
+});
