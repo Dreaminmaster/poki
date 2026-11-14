@@ -19,12 +19,14 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     private var gate: DispatchSemaphore?
     private var heldOpenStarted = false
     private var answer: [String: Any]?
+    var onPrepare: (@Sendable () -> Void)?
     /// The next open waits until `answer(_:)`.
     func holdNextOpen() { lock.withLock { gate = DispatchSemaphore(value: 0); heldOpenStarted = false } }
     var isHoldingOpen: Bool { lock.withLock { gate != nil && heldOpenStarted } }
     /// Lets a held open go on, with this answer instead of opening (nil opens).
     func answer(_ result: [String: Any]?) { lock.withLock { answer = result; gate?.signal(); gate = nil } }
     func prepare() -> [String: Any] {
+        onPrepare?()
         if let held = lock.withLock({ () -> DispatchSemaphore? in heldOpenStarted = gate != nil; return gate }) {
             held.wait()
             if let given = lock.withLock({ () -> [String: Any]? in defer { answer = nil }; return answer }) { return given }
@@ -446,6 +448,82 @@ final class InProcessPasscodeTests: XCTestCase {
         let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
         done.expectationDescription = what
         await fulfillment(of: [done], timeout: 5)
+    }
+
+    func testForegroundAndPrerequisitesDoNotEnableAutomation() async {
+        let opened = expectation(description: "Automation Mode stays off without a phone task")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        model.becameActive()
+
+        await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+    }
+
+    func testRemoteInitializationDoesNotEnableAutomation() async {
+        let opened = expectation(description: "Connecting an agent does not enable Automation Mode")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        let core = PokiCore(config: CoreConfig(), host: model.host)
+
+        let reply = await core.handle(RelayRequest(id: "initialize", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Test agent","version":"1"}}}"#))
+
+        XCTAssertEqual(reply.status, 200)
+        XCTAssertNotNil(reply.headers["mcp-session-id"])
+        await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+    }
+
+    func testPureChatCompletesWithoutAutomation() async throws {
+        let server = try FakeCompletions(replies: [FakeCompletions.text("The answer is four.")])
+        let chat = try await chatWithoutAutomation(on: server, request: "What is two plus two?")
+
+        XCTAssertTrue(chat.entries.contains { if case .poki(let text) = $0.kind { text == "The answer is four." } else { false } })
+        XCTAssertTrue(chat.savedCalls.isEmpty)
+    }
+
+    func testBrowserOnlyChatCompletesWithoutAutomation() async throws {
+        let page = try PageServer(pages: ["/": "<html><head><title>Local fixture</title></head><body><p>Test capacity: 81 percent</p></body></html>"])
+        defer { PokiBrowser.shared.close() }
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("web_open", ["url": "http://127.0.0.1:\(page.port)/"]),
+            FakeCompletions.text("The page says 81 percent."),
+        ])
+        let chat = try await chatWithoutAutomation(on: server, request: "Read the capacity on this webpage.")
+
+        XCTAssertTrue(chat.entries.contains { if case .poki(let text) = $0.kind { text == "The page says 81 percent." } else { false } })
+        let call = try XCTUnwrap(chat.savedCalls.first)
+        XCTAssertEqual(call.name, "web_open")
+        XCTAssertTrue(call.ok)
+        XCTAssertTrue(call.answer.contains("81 percent"))
+        let modelInput = try JSONSerialization.data(withJSONObject: server.requests)
+        XCTAssertTrue(String(decoding: modelInput, as: UTF8.self).contains("81 percent"), "the real page observation reached the model")
+    }
+
+    private func chatWithoutAutomation(on server: FakeCompletions, request: String) async throws -> ChatModel {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        let opened = expectation(description: "A task without phone tools leaves Automation Mode off")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        model.becameActive()
+        let chat = ChatModel(app: model, kind: .handoff, requester: "Test agent")
+
+        chat.send(request)
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !chat.running }, object: nil)
+        await fulfillment(of: [completed], timeout: 10)
+        await fulfillment(of: [opened], timeout: 0.1)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+        return chat
     }
 
     /// On cellular the launcher reports `local_ddi`: the image is mounted, and nothing reached the
