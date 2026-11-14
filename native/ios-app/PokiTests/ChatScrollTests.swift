@@ -48,6 +48,43 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(feed.appliedJump, jump.requestID, "Navigation must acknowledge the exact request")
     }
 
+    /// Opening and dismissing a saved-message jump only changes scroll position: it must not
+    /// unmount the composer, discard unsent text, or replace the active conversation.
+    func testSearchJumpAndCancellationKeepUnsentChatDraft() throws {
+        let savedChat = UserDefaults.standard.object(forKey: "pokiChat")
+        let savedDraft = UserDefaults.standard.object(forKey: "pokiDraft")
+        UserDefaults.standard.set("demo", forKey: "pokiChat")
+        UserDefaults.standard.set("Draft that must remain unsent", forKey: "pokiDraft")
+        defer {
+            UserDefaults.standard.set(savedChat, forKey: "pokiChat")
+            UserDefaults.standard.set(savedDraft, forKey: "pokiDraft")
+        }
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let feed = Feed()
+        self.feed = feed
+        let window = try show(NavigationStack {
+            SearchChatHost(feed: feed)
+        }.environment(app).environment(chat))
+        settle { Self.find(CapsuleTextView.self, in: window) != nil }
+        let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        XCTAssertEqual(field.plainText, "Draft that must remain unsent")
+        let originalID = chat.sessionID
+        let originalEntries = chat.entries
+
+        let selected = try XCTUnwrap(chat.entries.first?.id)
+        feed.jump = ConversationSearchJump(sessionID: originalID, entryID: selected)
+        pump(0.4)
+        XCTAssertEqual(field.plainText, "Draft that must remain unsent")
+        XCTAssertEqual(chat.entries, originalEntries)
+        XCTAssertEqual(chat.sessionID, originalID)
+
+        feed.jump = nil
+        pump(0.3)
+        XCTAssertEqual(field.plainText, "Draft that must remain unsent")
+        XCTAssertEqual(chat.entries, originalEntries)
+    }
+
     /// The owner's case, on the chat page itself with its demo conversation: a new conversation, the
     /// keyboard up, a message sent, then Poki's reply, the task card growing step by step and the
     /// approval card over the message field. The page stayed at its top, and the reply and the task
@@ -141,6 +178,14 @@ final class ChatScrollTests: XCTestCase {
         @Published var entries: [ChatEntry] = (0..<30).flatMap { i in
             [ChatEntry(.you("Question \(i): what is on my calendar this afternoon?", delivered: true)),
              ChatEntry(.poki("Answer \(i): a design review at three and a call with the bank at five."))]
+        }
+    }
+
+    private struct SearchChatHost: View {
+        @ObservedObject var feed: Feed
+        var body: some View {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {},
+                     openModel: {}, searchJump: feed.jump, openThreads: {})
         }
     }
 
