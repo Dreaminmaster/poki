@@ -45,7 +45,7 @@ struct DiagnosticsView: View {
             }
             .textSelection(.enabled)
         }
-        .navigationTitle("Diagnostics")
+        .navigationTitle(AppLocalization.text("Diagnostics"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await run() }
     }
@@ -54,8 +54,8 @@ struct DiagnosticsView: View {
     static func title(_ r: ProbeResult) -> String {
         let label = r.label.replacingOccurrences(of: " (10.7.0.1)", with: "")
         let outcome = r.outcome.prefix(1).uppercased() + r.outcome.dropFirst()
-        func local(_ s: String) -> String { Bundle.main.localizedString(forKey: s, value: s, table: nil) }
-        return String(localized: "\(local(label)), \(local(outcome))")
+        func local(_ s: String) -> String { AppLocalization.bundle.localizedString(forKey: s, value: s, table: nil) }
+        return AppLocalization.text(LocalizedStringResource("\(local(label)), \(local(outcome))"))
     }
 
     private func run() async {
@@ -78,7 +78,7 @@ struct LogView: View {
         }
         .listStyle(.plain)
         .overlay { if log.lines.isEmpty { ContentUnavailableView("No Log Yet", systemImage: "doc.text") } }
-        .navigationTitle("Log")
+        .navigationTitle(AppLocalization.text("Log"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -138,7 +138,7 @@ struct TestingOptionsView: View {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }
             }
         }
-        .navigationTitle("Testing Options")
+        .navigationTitle(AppLocalization.text("Testing Options"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }

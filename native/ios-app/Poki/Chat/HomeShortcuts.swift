@@ -285,7 +285,7 @@ final class HomeShortcutStore {
             return nil
         }
         let routes = routines.map { HomeShortcuts.Remembered(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
-        let basis = [requests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
+        let basis = [AppLocalization.language, requests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
                      routes.map { "\($0.text)\($0.runs)" }.joined(separator: ","), forgotten.sorted().joined(separator: ",")]
         guard basis != self.basis else { return }
         (self.basis, self.routes, self.requests) = (basis, routes, requests)

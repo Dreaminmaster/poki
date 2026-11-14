@@ -23,6 +23,8 @@ struct PokiActivityAttributes: ActivityAttributes {
         enum Voice: String, Codable, Hashable {
             case listening, thinking, speaking
         }
+        /// Refreshes an existing activity when the shared UI language changes; older states decode nil.
+        var uiLanguage: String? = nil
         var phase: Phase
         /// What the agent is doing, in a few words ("Tap “Send”"), or the phase's line, in English: the
         /// face words it in the system's language (ActivityWords).

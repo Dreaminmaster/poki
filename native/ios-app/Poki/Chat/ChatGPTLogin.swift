@@ -46,7 +46,7 @@ final class ChatGPTBrowserLogin: NSObject, ASWebAuthenticationPresentationContex
     private var manual: CheckedContinuation<String, Error>?
     private let cancel = CancellationToken()
 
-    struct Cancelled: LocalizedError { var errorDescription: String? { String(localized: "Sign-in was cancelled.") } }
+    struct Cancelled: LocalizedError { var errorDescription: String? { AppLocalization.text(LocalizedStringResource("Sign-in was cancelled.")) } }
 
     func signIn() async throws -> OAuthCredentials {
         let callbacks = OAuthLoginCallbacks(
@@ -159,7 +159,7 @@ struct ChatGPTSignIn: View {
             ModelKeys.selectedProvider = .chatgpt
             dismiss()
         } catch {
-            problem = String(localized: "The keychain did not take the sign-in. Try again.")
+            problem = AppLocalization.text(LocalizedStringResource("The keychain did not take the sign-in. Try again."))
         }
     }
 }

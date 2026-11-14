@@ -75,7 +75,7 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         // do not get through.
         config.iceServers = [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"])]
         config.continualGatheringPolicy = .gatherContinually
-        guard let peer = factory.peerConnection(with: config, constraints: constraints, delegate: self) else { throw VoiceError.realtime(0, "WebRTC could not start") }
+        guard let peer = factory.peerConnection(with: config, constraints: constraints, delegate: self) else { throw VoiceError.noWebRTC }
         self.peer = peer
         if microphone {
             // Poki's background keep-alive may have left the shared session in .playback, which cannot
@@ -108,7 +108,7 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
 
         let offer: RTCSessionDescription = try await withCheckedThrowingContinuation { done in
             peer.offer(for: constraints) { sdp, error in
-                if let sdp { done.resume(returning: sdp) } else { done.resume(throwing: error ?? VoiceError.realtime(0, "no offer")) }
+                if let sdp { done.resume(returning: sdp) } else { done.resume(throwing: error ?? VoiceError.noOffer) }
             }
         }
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in

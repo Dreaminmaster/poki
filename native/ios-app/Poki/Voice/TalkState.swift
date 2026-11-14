@@ -26,12 +26,12 @@ enum TalkState: Equatable {
     /// The state in the app's status words: two to four characters in Chinese, no subject.
     var word: String {
         switch self {
-        case .connecting: String(localized: "Connecting")
+        case .connecting: AppLocalization.text(LocalizedStringResource("Connecting"))
         case .listening, .hearing: StatusWord.listening.text
         case .thinking: StatusWord.thinking.text
         case .acting: StatusWord.running.text
         case .speaking: StatusWord.speaking.text
-        case .interrupted: String(localized: "Interrupted")
+        case .interrupted: AppLocalization.text(LocalizedStringResource("Interrupted"))
         case .failed(let why): why == Self.connectionLost ? StatusWord.disconnected.text : StatusWord.error.text
         }
     }
@@ -39,6 +39,6 @@ enum TalkState: Equatable {
     /// What went wrong, for the line under the word; nil when the word says it all.
     var reason: String? {
         guard case .failed(let why) = self else { return nil }
-        return why == Self.connectionLost ? String(localized: "Check the network, then try again.") : why
+        return why == Self.connectionLost ? AppLocalization.text(LocalizedStringResource("Check the network, then try again.")) : why
     }
 }

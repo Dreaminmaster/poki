@@ -335,18 +335,11 @@ enum HomeIdea {
 
     static var examples: [HomeShortcut] { examples(for: .current) }
 
-    /// Starring Poki on GitHub, second on the home page from the first open, for a new owner and one
-    /// who updates alike: the list is worked out again at each launch, so nothing is stored for it.
-    /// Like every pill it reads as an icon, a name in bold and an action (GitHub's mark, GitHub,
-    /// starring Poki), but it has no app this iPhone opens: the task runs in Poki's own browser. Signed
-    /// out, the owner is handed GitHub's sign-in page itself, not the repository with a note to find
-    /// it. Its key does not change with the language, so Forget holds after the iPhone's language changes.
+    /// The fixed key keeps Forget stable across language changes. The carried mark also appears
+    /// when GitHub is not installed, so the task can explain how to install it.
     static var star: HomeShortcut {
-        HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: String(localized: "Star Poki"),
-                     prompt: String(localized: """
-                     Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to \
-                     GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me
-                     """), icon: "github")
+        HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: AppLocalization.text(LocalizedStringResource("Star Poki")),
+                     prompt: AppLocalization.text(LocalizedStringResource("Open the GitHub app on this iPhone, go to the JosssphZhou/poki repository, and star it. If the app is not installed, stop and ask me to install it from the App Store. Do not use a browser. If I am not signed in, stop on the login screen and let me sign in myself. If I have already starred the repository, tell me and leave it starred.")), icon: "github")
     }
 
     static func examples(for language: AppLanguage) -> [HomeShortcut] {
@@ -354,12 +347,12 @@ enum HomeIdea {
     }
 
     private static var english: [HomeShortcut] {
-        [idea("Slack", String(localized: "Tell the team I’m late")),
-         idea("Messages", String(localized: "Text Mom I’m on my way")),
-         idea("Uber", String(localized: "Book a ride home")),
-         idea("Starbucks", String(localized: "Order my usual coffee")),
-         idea("Notes", String(localized: "Add milk to my list")),
-         idea("Instagram", String(localized: "Post today’s photo"))].compactMap { $0 }
+        [idea("Slack", AppLocalization.text(LocalizedStringResource("Tell the team I’m late"))),
+         idea("Messages", AppLocalization.text(LocalizedStringResource("Text Mom I’m on my way"))),
+         idea("Uber", AppLocalization.text(LocalizedStringResource("Book a ride home"))),
+         idea("Starbucks", AppLocalization.text(LocalizedStringResource("Order my usual coffee"))),
+         idea("Notes", AppLocalization.text(LocalizedStringResource("Add milk to my list"))),
+         idea("Instagram", AppLocalization.text(LocalizedStringResource("Post today’s photo")))].compactMap { $0 }
     }
 
     /// The apps people in mainland China use every day, written in Chinese rather than translated from
@@ -390,15 +383,15 @@ enum HomeGreeting {
 
     static func hello(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
-        case 5..<11: String(localized: "Good morning.")
-        case 11..<18: String(localized: "Good afternoon.")
-        case 18..<23: String(localized: "Good evening.")
-        default: String(localized: "Up late.")
+        case 5..<11: AppLocalization.text(LocalizedStringResource("Good morning."))
+        case 11..<18: AppLocalization.text(LocalizedStringResource("Good afternoon."))
+        case 18..<23: AppLocalization.text(LocalizedStringResource("Good evening."))
+        default: AppLocalization.text(LocalizedStringResource("Up late."))
         }
     }
 
     /// The line under the hello, the same at any hour.
-    static var ask: String { String(localized: "What should Poki do?") }
+    static var ask: String { AppLocalization.text(LocalizedStringResource("What should Poki do?")) }
 }
 
 /// The greeting as the home page draws it, for the time `date` falls in: the hello in ink and the
@@ -510,6 +503,9 @@ struct HomePage<Footer: View>: View {
         .animation(HomeMotion.lift, value: writing)
         .animation(HomeMotion.lift, value: editorTyping)
         .task(id: SessionStore.shared.sessions.count) {
+            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+        }
+        .onChange(of: AppLocalization.language) { _, _ in
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { page = $0 }

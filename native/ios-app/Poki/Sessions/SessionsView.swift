@@ -170,8 +170,8 @@ struct SessionsView: View {
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
-        .accessibilityValue(Text(verbatim: [AppName.display(app), needs ? String(localized: "Needs your attention") : nil,
-                                                         trouble.map { $0 == .failed ? String(localized: "Failed") : String(localized: "Stopped") }]
+        .accessibilityValue(Text(verbatim: [AppName.display(app), needs ? AppLocalization.text(LocalizedStringResource("Needs your attention")) : nil,
+                                                         trouble.map { $0 == .failed ? AppLocalization.text(LocalizedStringResource("Failed")) : AppLocalization.text(LocalizedStringResource("Stopped")) }]
             .compactMap { $0 }.joined(separator: ", ")))
         // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -211,9 +211,9 @@ struct SessionsView: View {
 
         var title: String {
             switch self {
-            case .today: String(localized: "Today")
-            case .yesterday: String(localized: "Yesterday")
-            case .earlier: String(localized: "Earlier")
+            case .today: AppLocalization.text(LocalizedStringResource("Today"))
+            case .yesterday: AppLocalization.text(LocalizedStringResource("Yesterday"))
+            case .earlier: AppLocalization.text(LocalizedStringResource("Earlier"))
             }
         }
 
@@ -253,7 +253,7 @@ struct SessionsView: View {
                 updated: now,
                 live: true,
                 outcome: nil,
-                entries: [ChatEntry(.poki(String(localized: "Needs your OK: send “On my way” to Mom"))), ChatEntry(.note(.waiting))],
+                entries: [ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Needs your OK: send “On my way” to Mom")))), ChatEntry(.note(.waiting))],
                 calls: [],
                 customName: "Claude → Poki"
             ),
@@ -261,12 +261,12 @@ struct SessionsView: View {
                 id: "sample-2",
                 kind: .poki,
                 client: nil,
-                title: String(localized: "What iOS version is this?"),
+                title: AppLocalization.text(LocalizedStringResource("What iOS version is this?")),
                 started: now,
                 updated: now,
                 live: false,
                 outcome: .done,
-                entries: [ChatEntry(.poki(String(localized: "It’s iOS 27.3. Want me to check for an update?")))],
+                entries: [ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("It’s iOS 27.3. Want me to check for an update?"))))],
                 calls: []
             ),
             SavedSession(
@@ -278,7 +278,7 @@ struct SessionsView: View {
                 updated: now,
                 live: false,
                 outcome: .done,
-                entries: [ChatEntry(.poki(String(localized: "Opened Photos and tapped “Albums”. Done in 3 steps.")))],
+                entries: [ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Opened Photos and tapped “Albums”. Done in 3 steps."))))],
                 calls: [],
                 customName: "Codex"
             ),
@@ -286,12 +286,12 @@ struct SessionsView: View {
                 id: "sample-4",
                 kind: .poki,
                 client: nil,
-                title: String(localized: "Order oat milk again"),
+                title: AppLocalization.text(LocalizedStringResource("Order oat milk again")),
                 started: yesterday,
                 updated: yesterday,
                 live: false,
                 outcome: .done,
-                entries: [ChatEntry(.poki(String(localized: "Ran your routine: same order as last week, $4.99.")))],
+                entries: [ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Ran your routine: same order as last week, $4.99."))))],
                 calls: []
             ),
             SavedSession(
@@ -303,7 +303,7 @@ struct SessionsView: View {
                 updated: yesterday,
                 live: false,
                 outcome: .done,
-                entries: [ChatEntry(.poki(String(localized: "Your turn, enter your Apple Account password")))],
+                entries: [ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Your turn, enter your Apple Account password"))))],
                 calls: [],
                 customName: "Claude Code"
             ),
@@ -447,12 +447,12 @@ struct AgentBadge: View {
 /// outside agent borrowing Poki's hands, at step 2 of 3. Nothing runs.
 private enum GuestSample {
     static var isOn: Bool { UserDefaults.standard.string(forKey: "pokiHome") != nil }
-    static let plan = [String(localized: "Open TestFlight"), String(localized: "Find Poki"), String(localized: "Tap Update")]
+    static var plan: [String] { [AppLocalization.text(LocalizedStringResource("Open TestFlight")), AppLocalization.text(LocalizedStringResource("Find Poki")), AppLocalization.text(LocalizedStringResource("Tap Update"))] }
     static let entries: [ChatEntry] = {
         var steps = ChatEntry(.plan([PlanStep(plan[0], state: .done), PlanStep(plan[1])]))
         steps.at = Date().addingTimeInterval(-42)
-        steps.title = String(localized: "Install the newest build")
-        return [ChatEntry(.request(String(localized: "Open TestFlight and install the newest Poki build."), from: "Claude Code")), steps]
+        steps.title = AppLocalization.text(LocalizedStringResource("Install the newest build"))
+        return [ChatEntry(.request(AppLocalization.text(LocalizedStringResource("Open TestFlight and install the newest Poki build.")), from: "Claude Code")), steps]
     }()
 }
 
@@ -488,7 +488,7 @@ struct SessionView: View {
                         ApprovalAskCard(title: approval.question, expires: approval.expires,
                                         answer: { approved in model.resolve(approval, approved: approved) })
                     } else if session?.live == true, let text = model.handoffText {
-                        TurnCard(text: Bundle.main.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
+                        TurnCard(text: AppLocalization.bundle.localizedString(forKey: text, value: text, table: nil), done: model.handoffDoneInApp)
                     }
                     if running != nil || sample {
                         // Said where Stop is, and only there: the words promise what the button does.
@@ -521,9 +521,9 @@ struct SessionView: View {
     private func caption(_ session: SavedSession?) -> String {
         guard let session else { return "" }
         switch session.kind {
-        case .agent: return String(localized: "Over MCP, \(ChatTime.row(session.started))")
-        case .handoff: return String(localized: "Handed to Poki, \(ChatTime.row(session.started))")
-        case .voice: return String(localized: "Voice, \(ChatTime.row(session.started))")
+        case .agent: return AppLocalization.text(LocalizedStringResource("Over MCP, \(ChatTime.row(session.started))"))
+        case .handoff: return AppLocalization.text(LocalizedStringResource("Handed to Poki, \(ChatTime.row(session.started))"))
+        case .voice: return AppLocalization.text(LocalizedStringResource("Voice, \(ChatTime.row(session.started))"))
         case .poki: return ""
         }
     }

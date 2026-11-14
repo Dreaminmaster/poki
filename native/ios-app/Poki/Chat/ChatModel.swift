@@ -178,12 +178,26 @@ final class ChatModel {
 
     private var greeting: [ChatEntry] {
         [ChatEntry(.time(Date())),
-         ChatEntry(.poki(String(localized: "Hi, I’m Poki. Tell me what to do on this iPhone."))),
-         ChatEntry(.poki(app.asksBeforeSensitiveSteps ? String(localized: "I’ll ask before anything you can’t undo.")
-                         : String(localized: "Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking.")))]
+         ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Hi, I’m Poki. Tell me what to do on this iPhone.")))),
+         ChatEntry(.poki(app.asksBeforeSensitiveSteps ? AppLocalization.text(LocalizedStringResource("I’ll ask before anything you can’t undo."))
+                         : AppLocalization.text(LocalizedStringResource("Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."))))]
     }
 
-    private func greet() { entries = greeting }
+    private var greetingIDs: [UUID] = []
+
+    private func greet() {
+        entries = greeting
+        greetingIDs = entries.map(\.id)
+    }
+
+    /// Only the untouched, in-memory introduction is UI copy. Saved/user/model messages stay as
+    /// written; changing language must not replace a conversation or its entries' identities.
+    func languageChanged() {
+        guard !running, !isSample, !greetingIDs.isEmpty, entries.map(\.id) == greetingIDs else { return }
+        let translated = greeting
+        for index in entries.indices.dropFirst() { entries[index].kind = translated[index].kind }
+    }
+
 
     /// Asking was turned on or off: a conversation that holds only the greeting says what holds now.
     private func approvalsChanged() {
@@ -235,7 +249,7 @@ final class ChatModel {
             default: continue
             }
         }
-        return String(localized: "New conversation")
+        return AppLocalization.text(LocalizedStringResource("New conversation"))
     }
 
     // MARK: Sending
@@ -292,7 +306,7 @@ final class ChatModel {
         // Another conversation (an outside agent's hand-off) is working the phone: one task at a time.
         if kind == .poki, let busy = ChatModel.delegatedBusy {
             entries.append(ChatEntry(.you(text, delivered: false)))
-            add(.note(.problem(String(localized: "Poki is working on a task for \(busy). Try again when it’s done."))))
+            add(.note(.problem(AppLocalization.text(LocalizedStringResource("Poki is working on a task for \(busy). Try again when it’s done.")))))
             return
         }
         // A pause of half an hour or more gets its own time line, as in Messages.
@@ -310,8 +324,8 @@ final class ChatModel {
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
-            add(.poki(provider.signsIn ? String(localized: "Sign in to ChatGPT first. Open Settings, then Models.")
-                                       : String(localized: "Add a model key first. Open Settings, then Models.")))
+            add(.poki(provider.signsIn ? AppLocalization.text(LocalizedStringResource("Sign in to ChatGPT first. Open Settings, then Models."))
+                                       : AppLocalization.text(LocalizedStringResource("Add a model key first. Open Settings, then Models."))))
             return
         }
         let model = ModelKeys.selectedModel
@@ -354,7 +368,7 @@ final class ChatModel {
         }
         guard let piModel = provider.piModel(model) else {
             running = false
-            add(.note(.problem(String(localized: "pi has no model \(model) for \(provider.name)."))))
+            add(.note(.problem(AppLocalization.text(LocalizedStringResource("pi has no model \(model) for \(provider.name).")))))
             return
         }
         // Another model starts a new loop that carries the conversation over.
@@ -419,7 +433,7 @@ final class ChatModel {
     /// task ended, and finish_task's summary and answer.
     func runDelegated(_ task: String) async -> (text: String, success: Bool?) {
         if let message = app.signer.installMessage { return (message, false) }
-        ChatModel.delegatedBusy = requester ?? String(localized: "an agent")
+        ChatModel.delegatedBusy = requester ?? AppLocalization.text(LocalizedStringResource("an agent"))
         defer { ChatModel.delegatedBusy = nil }
         lastOutcome = nil
         send(task)
@@ -450,9 +464,9 @@ final class ChatModel {
         case .done:
             markDelivered(youID)
             reply = entries.reversed().lazy.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }.first
-        case .stopped: add(.poki(String(localized: "Stopped.")))
+        case .stopped: add(.poki(AppLocalization.text(LocalizedStringResource("Stopped."))))
         case .overTurns:
-            reply = String(localized: "I stopped after \(Self.maxTurns) steps. Tell me how to go on.")
+            reply = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))
             add(.poki(reply ?? ""))
         case .failed(let words):
             reply = words
@@ -479,15 +493,15 @@ final class ChatModel {
         runToken += 1
         running = false
         awaitingModel = false
-        guard phoneStepUnderWay else { add(.poki(String(localized: "Stopped."))); return }
-        let stopping = ChatEntry(.poki(String(localized: "Stopping…")))
+        guard phoneStepUnderWay else { add(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))); return }
+        let stopping = ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopping…"))))
         entries.append(stopping)
         let stopped = task
         Task { [weak self] in
             await stopped?.value
             _ = await self?.app.phoneSettles(within: 30)
             guard let self, let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
-            self.entries[i].kind = .poki(String(localized: "Stopped."))
+            self.entries[i].kind = .poki(AppLocalization.text(LocalizedStringResource("Stopped.")))
             self.persist()
         }
     }
@@ -525,11 +539,11 @@ final class ChatModel {
                 continue
             case .refused:
                 finishPlan()
-                add(.poki(String(localized: "The model declined this request.")))
+                add(.poki(AppLocalization.text(LocalizedStringResource("The model declined this request."))))
                 return
             case .cutOff:
                 finishPlan()
-                add(.note(.problem(String(localized: "The answer was cut off."))))
+                add(.note(.problem(AppLocalization.text(LocalizedStringResource("The answer was cut off.")))))
                 return
             case .done:
                 // A reply without tools ends the turn, as a chat does: the model may be asking the owner something.
@@ -538,7 +552,7 @@ final class ChatModel {
             }
         }
         finishPlan()
-        add(.poki(String(localized: "I stopped after \(Self.maxTurns) steps. Tell me how to go on.")))
+        add(.poki(AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))))
     }
 
     /// The phone's tools go to PokiCore; the harness's two are answered here, as task-runner.mjs answers them.
@@ -782,26 +796,26 @@ final class ChatModel {
 
     /// The boards' stories (ESP-326), for the sample scenes and the demo.
     enum Sample {
-        static var mom: String { String(localized: "Text Mom I’m running 10 min late") }
+        static var mom: String { AppLocalization.text(LocalizedStringResource("Text Mom I’m running 10 min late")) }
         static var momSteps: [String] {
-            [String(localized: "Open WhatsApp"), String(localized: "Find the chat with Mom"),
-             String(localized: "Type “Running 10 min late. Save me a seat!”"), String(localized: "Send it")]
+            [AppLocalization.text(LocalizedStringResource("Open WhatsApp")), AppLocalization.text(LocalizedStringResource("Find the chat with Mom")),
+             AppLocalization.text(LocalizedStringResource("Type “Running 10 min late. Save me a seat!”")), AppLocalization.text(LocalizedStringResource("Send it"))]
         }
-        static var coffee: String { String(localized: "Order my usual coffee") }
+        static var coffee: String { AppLocalization.text(LocalizedStringResource("Order my usual coffee")) }
         /// The tasks' short names, as the model gives them with its plan.
-        static var momTitle: String { String(localized: "Text Mom") }
-        static var coffeeTitle: String { String(localized: "Order the usual") }
+        static var momTitle: String { AppLocalization.text(LocalizedStringResource("Text Mom")) }
+        static var coffeeTitle: String { AppLocalization.text(LocalizedStringResource("Order the usual")) }
         static var coffeeSteps: [String] {
-            [String(localized: "Open Blue Door Coffee"), String(localized: "Reorder “Oat flat white, large”"),
-             String(localized: "Pay $5.40"), String(localized: "Confirm pickup at 9:55")]
+            [AppLocalization.text(LocalizedStringResource("Open Blue Door Coffee")), AppLocalization.text(LocalizedStringResource("Reorder “Oat flat white, large”")),
+             AppLocalization.text(LocalizedStringResource("Pay $5.40")), AppLocalization.text(LocalizedStringResource("Confirm pickup at 9:55"))]
         }
         /// The demo's own story, for the home page's suggestion "Messages Text Mom I’m on my way".
         static var demoSteps: [String] {
-            [String(localized: "Open Messages"), String(localized: "Find the chat with Mom"),
-             String(localized: "Type “On my way!”"), String(localized: "Send it")]
+            [AppLocalization.text(LocalizedStringResource("Open Messages")), AppLocalization.text(LocalizedStringResource("Find the chat with Mom")),
+             AppLocalization.text(LocalizedStringResource("Type “On my way!”")), AppLocalization.text(LocalizedStringResource("Send it"))]
         }
         static var demoApproval: PendingApproval {
-            PendingApproval(id: "demo", app: "Messages", summary: String(localized: "Send “On my way!” to Mom"),
+            PendingApproval(id: "demo", app: "Messages", summary: AppLocalization.text(LocalizedStringResource("Send “On my way!” to Mom")),
                             reason: "sending a message (\"send\")", expires: Date().addingTimeInterval(48))
         }
         /// The app the scene's task is in, for the task card.
@@ -815,7 +829,7 @@ final class ChatModel {
         /// The step a scene's approval card asks about. `-pokiApprovalReason 'a payment ("pay")'` gives
         /// it another of PokiCore's reasons, for the screenshots of each kind's question.
         static var approval: PendingApproval {
-            PendingApproval(id: "sample", app: "WhatsApp", summary: String(localized: "Send “Running 10 min late. Save me a seat!” to Mom"),
+            PendingApproval(id: "sample", app: "WhatsApp", summary: AppLocalization.text(LocalizedStringResource("Send “Running 10 min late. Save me a seat!” to Mom")),
                             reason: reason, expires: Date().addingTimeInterval(48))
         }
         static var reason: String { UserDefaults.standard.string(forKey: "pokiApprovalReason") ?? "sending a message (\"send\")" }
@@ -838,7 +852,7 @@ final class ChatModel {
             if state == nil { plan.at = Date().addingTimeInterval(-58); plan.ended = Date(); plan.app = Sample.app(scene); plan.total = texts.count }
             return plan
         }
-        let onIt = ChatEntry(.poki(String(localized: "On it.")))
+        let onIt = ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("On it."))))
         switch scene {
         case "working":
             // Poki has the phone: two steps done, the third under way, the last still to come.
@@ -853,16 +867,16 @@ final class ChatModel {
             modelPlan = Sample.coffeeSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.coffee, delivered: true)), onIt, steps(Sample.coffeeSteps, done: 2, then: .waiting)]
         case "failed":
-            var plan = ChatEntry(.plan([PlanStep(String(localized: "Open Notification Center"), state: .done),
-                                        PlanStep(String(localized: "Tap Clear All"), state: .failed)]))
-            plan.title = String(localized: "Clear notifications")
+            var plan = ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Notification Center")), state: .done),
+                                        PlanStep(AppLocalization.text(LocalizedStringResource("Tap Clear All")), state: .failed)]))
+            plan.title = AppLocalization.text(LocalizedStringResource("Clear notifications"))
             plan.ended = Date(); plan.total = 3
-            entries = [ChatEntry(.time(start)), ChatEntry(.you(String(localized: "Clear my notifications"), delivered: true)), onIt, plan,
-                       ChatEntry(.note(.problem(String(localized: "I tripped. I lost my grip on your phone at step 2, so I stopped before touching anything else."))))]
+            entries = [ChatEntry(.time(start)), ChatEntry(.you(AppLocalization.text(LocalizedStringResource("Clear my notifications")), delivered: true)), onIt, plan,
+                       ChatEntry(.note(.problem(AppLocalization.text(LocalizedStringResource("I tripped. I lost my grip on your phone at step 2, so I stopped before touching anything else.")))))]
         default:
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.mom, delivered: true)), onIt, steps(Sample.momSteps, done: 4, then: nil),
                        ChatEntry(.note(.approved(start.addingTimeInterval(60)))),
-                       ChatEntry(.poki(String(localized: "Sent. Mom has it. Anything else?")))]
+                       ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Sent. Mom has it. Anything else?"))))]
         }
     }
 
@@ -891,7 +905,7 @@ final class ChatModel {
             guard await wait(1.1), let self else { return }
             self.awaitingModel = false
             self.markDelivered(youID)
-            self.entries.append(ChatEntry(.poki(String(localized: "On it."))))
+            self.entries.append(ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("On it.")))))
             self.modelPlan = Sample.demoSteps
             guard await wait(0.7) else { return }
             self.updatePlan { $0.append(PlanStep(Sample.demoSteps[0])) }
@@ -923,7 +937,7 @@ final class ChatModel {
             guard !Task.isCancelled, let self else { return }
             self.finishPlan()
             self.running = false
-            self.entries.append(ChatEntry(.poki(approved ? String(localized: "Sent. Mom has it. Anything else?") : String(localized: "Okay, I didn’t send it."))))
+            self.entries.append(ChatEntry(.poki(approved ? AppLocalization.text(LocalizedStringResource("Sent. Mom has it. Anything else?")) : AppLocalization.text(LocalizedStringResource("Okay, I didn’t send it.")))))
         }
     }
 
@@ -934,7 +948,7 @@ final class ChatModel {
         guard running else { return }
         finishPlan()
         running = false
-        entries.append(ChatEntry(.poki(String(localized: "Stopped."))))
+        entries.append(ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))))
     }
 }
 

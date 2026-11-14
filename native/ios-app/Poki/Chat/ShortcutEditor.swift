@@ -131,7 +131,7 @@ struct ShortcutEditor: View {
         .accessibilityIdentifier("shortcut.edit")
     }
 
-    private var appName: String { apps.first { $0.id == app }?.name ?? String(localized: "None") }
+    private var appName: String { apps.first { $0.id == app }?.name ?? AppLocalization.text(LocalizedStringResource("None")) }
 
     /// The app row: its name, the app chosen with its icon, and the arrow that opens the choices under it.
     private var appRow: some View {
@@ -150,7 +150,7 @@ struct ShortcutEditor: View {
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    choice("", name: String(localized: "None"))
+                    choice("", name: AppLocalization.text(LocalizedStringResource("None")))
                     ForEach(apps, id: \.id) { choice($0.id, name: $0.name) }
                 }
             }
