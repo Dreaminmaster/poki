@@ -326,6 +326,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let since_start = || SystemTime::now().duration_since(started).unwrap_or_default();
     let mut last_good: Option<Duration> = None;
     let mut last_text: Option<u64> = None;
+    let points: Option<Vec<(f64, f64)>> = request["direct_points"].as_array().map(|points| points.iter().filter_map(|point| Some((point[0].as_f64()?, point[1].as_f64()?))).collect());
     let mut ended = "finished";
     loop {
         if RUN.load(Ordering::SeqCst) != me {
@@ -344,6 +345,12 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 stats.connections += 1;
             }
             let open = device.as_mut().unwrap();
+            // With points to hit test, the app is found the way the screen shows it and read whole;
+            // the service's own dump can name the wrong app.
+            if let Some(points) = &points {
+                let (tree, trace) = ax::direct::read_front(&mut open.adapter, &open.rsd, points).await;
+                return tree.ok_or_else(|| Failure::new(format!("no tree at {}: {}", trace.stage, trace.error.unwrap_or_default())).code("read"));
+            }
             let (tree, attempts) = ax::read_tree_traced(&mut open.adapter, &open.rsd, false, &windows).await;
             tree.ok_or_else(|| no_tree(&attempts))
         }

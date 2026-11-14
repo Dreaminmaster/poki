@@ -112,7 +112,10 @@ final class HistoryProbe: ObservableObject {
             note("not paired: finish Setup > Pairing first", keep: false)
             return nil
         }
-        return ["op": op, "device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki"]
+        // Where the hit test looks for the app in front: the middle of the screen first.
+        let screen = UIScreen.main.bounds
+        let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
+        return ["op": op, "device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki", "direct_points": points]
     }
 
     /// What was true around the read, for the tester's report.
@@ -215,11 +218,6 @@ final class HistoryProbe: ObservableObject {
         let picture = FileManager.default.temporaryDirectory.appendingPathComponent("history-front-\(UUID().uuidString).png")
         request["screenshot_path"] = picture.path
         if endSleepScreen { request["end_sleep_screen"] = true }
-        if direct {
-            // Where the hit test looks for the app in front: the middle of the screen first.
-            let screen = UIScreen.main.bounds
-            request["direct_points"] = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
-        }
         note("front app check in \(delay) s, Poki is pid \(ProcessInfo.processInfo.processIdentifier): \(context(model: model))", keep: false)
         if keepAwake { try? keepAlive.start() }
         let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-front")

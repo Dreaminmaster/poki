@@ -241,7 +241,7 @@ impl Direct {
         let mut objects = update.value.as_dictionary().unwrap()["$objects"].as_array().unwrap().clone();
         let token = add(&mut objects, token.clone());
         let options = dictionary([
-            ("attributes", Value::Array([2001, 2003, 2004, 5019, 2006, 3002].into_iter().map(Value::from).collect())),
+            ("attributes", Value::Array([2001, 2003, 2004, 5019, 2006, 3002, 3003].into_iter().map(Value::from).collect())),
             ("maxDepth", 48.into()),
             ("maxChildren", 512.into()),
             ("maxArrayCount", 512.into()),
@@ -390,7 +390,7 @@ fn flatten(
             return Err("Truncated snapshot children".into());
         }
         let mut node = Node::default();
-        for (number, name) in [(2001, "label"), (5019, "identifier"), (2006, "value")] {
+        for (number, name) in [(2001, "label"), (5019, "identifier"), (2006, "value"), (3003, "bundle_id")] {
             if let Some(value) = attribute(a, attrs, number).and_then(|v| a.string(v)) {
                 node.fields.insert(name.into(), value.into());
             }
