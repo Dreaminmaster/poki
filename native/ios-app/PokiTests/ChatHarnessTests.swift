@@ -200,13 +200,18 @@ final class FakeCompletions: @unchecked Sendable {
     private let queue = DispatchQueue(label: "fake-completions")
     private let lock = NSLock()
     private var replies: [String]
+    private var responseStatuses: [Int]
     private var bodies: [[String: Any]] = []
+    /// Only harmless routing/identity fields are recorded. Never capture Authorization or cookies.
+    private var routingHeaders: [[String: String]] = []
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
+    var requestHeaders: [[String: String]] { lock.withLock { routingHeaders } }
 
-    init(replies: [String]) throws {
+    init(replies: [String], responseStatuses: [Int] = []) throws {
         self.replies = replies
+        self.responseStatuses = responseStatuses
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -228,29 +233,46 @@ final class FakeCompletions: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
             guard let self else { return }
             let received = received + (data ?? Data())
-            if let body = Self.body(received) { return self.answer(connection, body) }
+            if let request = Self.decodedRequest(received) {
+                return self.answer(connection, request.body, headers: request.headers)
+            }
             if done || error != nil { return connection.cancel() }
             self.read(connection, received)
         }
     }
 
     /// The request's body once all of it is in.
-    private static func body(_ data: Data) -> Data? {
+    private static func decodedRequest(_ data: Data) -> (body: Data, headers: [String: String])? {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
         let head = String(decoding: data[..<end.lowerBound], as: UTF8.self).lowercased()
         let length = head.split(separator: "\r\n").first { $0.hasPrefix("content-length:") }
             .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
         let body = data[end.upperBound...]
-        return body.count >= length ? Data(body.prefix(length)) : nil
+        guard body.count >= length else { return nil }
+        let allowed: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+        var headers: [String: String] = [:]
+        for line in head.split(separator: "\r\n").dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon])
+            if allowed.contains(name) {
+                headers[name] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return (Data(body.prefix(length)), headers)
     }
 
-    private func answer(_ connection: NWConnection, _ body: Data) {
-        let events = lock.withLock { () -> String in
+    private func answer(_ connection: NWConnection, _ body: Data, headers: [String: String]) {
+        let (code, payload) = lock.withLock { () -> (Int, String) in
+            routingHeaders.append(headers)
             if let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] { bodies.append(json) }
-            return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            let code = responseStatuses.isEmpty ? 200 : responseStatuses.removeFirst()
+            let scripted = replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            return (code, code == 200 ? scripted : #"{"error":{"message":"synthetic rejection"}}"#)
         }
-        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
-        connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+        let status = code == 200 ? "200 OK" : "\(code) Bad Request"
+        let type = code == 200 ? "text/event-stream" : "application/json"
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type)\r\nContent-Length: \(payload.utf8.count)\r\nConnection: close\r\n\r\n"
+        connection.send(content: Data((head + payload).utf8), completion: .contentProcessed { _ in connection.cancel() })
     }
 
     private static func event(_ delta: [String: Any], finish: String) -> String {
