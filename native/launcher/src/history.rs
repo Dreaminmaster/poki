@@ -198,6 +198,9 @@ async fn front(request: &Value) -> Result<Value, Failure> {
     let pids: Vec<u64> = attempts.iter().flat_map(|attempt| &attempt.apps).filter_map(|app| app["pid"].as_u64()).collect();
     answer["attempts"] = json!(attempts);
     answer["services"] = json!(accessibility_services(&device));
+    if request["walk"].as_bool() == Some(true) {
+        answer["walk"] = json!(ax::walk(&mut device.adapter, &device.rsd, 25, Duration::from_millis(1500)).await);
+    }
     match ended {
         Some(Ok(count)) => answer["sleep_screen_ended"] = count.into(),
         Some(Err(error)) => answer["sleep_screen_error"] = error.into(),

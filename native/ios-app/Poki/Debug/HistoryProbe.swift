@@ -208,13 +208,14 @@ final class HistoryProbe: ObservableObject {
     /// What the phone says about the app in front without its contents, after `delay` seconds so the
     /// owner can put another app in front: two overlapping subscriptions, the processes behind the
     /// apps they name, and one screenshot read as text on this phone. The picture is deleted at once.
-    func front(model: AppModel, delay: Int = 10, endSleepScreen: Bool = false) async {
+    func front(model: AppModel, delay: Int = 10, endSleepScreen: Bool = false, walk: Bool = false) async {
         guard !reading, !running, var request = makeRequest("front", model: model) else { return }
         reading = true
         defer { reading = false }
         let picture = FileManager.default.temporaryDirectory.appendingPathComponent("history-front-\(UUID().uuidString).png")
         request["screenshot_path"] = picture.path
         if endSleepScreen { request["end_sleep_screen"] = true }
+        if walk { request["walk"] = true }
         note("front app check in \(delay) s, Poki is pid \(ProcessInfo.processInfo.processIdentifier): \(context(model: model))", keep: false)
         if keepAwake { try? keepAlive.start() }
         let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-front")
@@ -243,6 +244,15 @@ final class HistoryProbe: ObservableObject {
                 note("tree \(Self.apps(value)), \(number("elements")) elements, \(number("text_lines")) text lines", keep: false)
             } else {
                 note("no tree from either subscription", keep: false)
+            }
+            if let walked = value["walk"] as? [String: Any] {
+                let selectors = (walked["selectors"] as? [String: Int] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key) x\($0.value)" }.joined(separator: " ")
+                let elements = walked["elements"] as? [[String: Any]] ?? []
+                note("element walk: service \(walked["listed"] as? Bool == true ? "listed" : "not listed"), \(walked["messages"] as? Int ?? 0) messages, \(elements.count) elements, \(selectors.isEmpty ? "no selectors" : selectors)", keep: false)
+                if let error = walked["error"] as? String { note("element walk failed: \(error)", keep: false) }
+                for (index, element) in elements.prefix(12).enumerated() {
+                    note("element \(index + 1): \(element["strings"] as? Int ?? 0) strings, \(element["characters"] as? Int ?? 0) characters, starts \(element["starts"] as? String ?? "none")", keep: false)
+                }
             }
             if let error = value["instruments_error"] as? String { note("instruments failed: \(error)", keep: false) }
             if let error = value["processes_error"] as? String { note("process list failed: \(error)", keep: false) }
@@ -447,6 +457,8 @@ struct HistoryTestSection: View {
             Button("Check Front App in 10 Seconds") { Task { await probe.front(model: model) } }
                 .disabled(probe.reading || probe.running)
             Button("End Sleep Screen and Check in 10 Seconds") { Task { await probe.front(model: model, endSleepScreen: true) } }
+                .disabled(probe.reading || probe.running)
+            Button("Walk Elements in 10 Seconds") { Task { await probe.front(model: model, walk: true) } }
                 .disabled(probe.reading || probe.running)
             Stepper(value: $probe.seconds, in: 1...60) {
                 LabeledContent("Seconds Between Reads") { Text(verbatim: "\(probe.seconds)").monospacedDigit() }
