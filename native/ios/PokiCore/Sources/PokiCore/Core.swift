@@ -132,6 +132,8 @@ public protocol CoreHost: AnyObject, Sendable {
     func accessHashes() -> [String]
     /// A JPEG of the PNG screenshot, `width` pixels wide.
     func jpeg(fromPNG png: Data, width: Int, quality: Double) throws -> Data
+    /// The last known state, without waking or retrying phone automation.
+    var currentRunner: RunnerState { get }
     func runnerState() -> RunnerState
     func restartRunner()
     /// An agent connected (MCP initialize): get ready for its first look now, not during it.
@@ -151,6 +153,7 @@ public protocol CoreHost: AnyObject, Sendable {
 }
 
 extension CoreHost {
+    public var currentRunner: RunnerState { runnerState() }
     public func screenshotWithoutRunner() async -> Data? { nil }
     public func approveConnection(client: String, callback: String, connector: String) async -> Bool { false }
 }
@@ -618,7 +621,7 @@ public final class PokiCore: @unchecked Sendable {
     }
 
     func status() -> ToolResult {
-        var lines = ["runner: \(host?.runnerState().describe ?? "unknown")"]
+        var lines = ["runner: \(host?.currentRunner.describe ?? "unknown")"]
         if let relay { lines.append("relay: \(relay.stateDescription)") }
         if let p = approvals.pending { lines.append("approval waiting on the phone: \(p.summary) (\(p.reason), id \(p.id))") }
         if let line = computer.handoffLine(clear: false) { lines.append(line) }

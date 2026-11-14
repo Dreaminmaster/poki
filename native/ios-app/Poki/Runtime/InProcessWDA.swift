@@ -29,6 +29,8 @@ extension PKInProcess: InProcessAutomation, @unchecked Sendable {}
 
 /// Poki's own automation session, once the launcher has mounted the disk image (ESP-152).
 enum InProcessSession: Equatable {
+    case idle
+    case closing(reopen: Bool)
     case opening
     case open
     /// prepare answered no: its code and detail.
@@ -41,6 +43,8 @@ enum InProcessSession: Equatable {
     /// What PokiCore reads while the launcher runs. A failure is answered at once, with its fix.
     var agentState: RunnerState {
         switch self {
+        case .idle: return .starting("ready for a phone task; the automation session is not open")
+        case .closing: return .starting("finishing the previous automation session")
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:
@@ -145,6 +149,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             "GET /source": { [unowned self] _, _ in
                 var code: NSString?
                 guard let xml = self.native.sourceXML(nil, maxDepth: self.maxDepth, maxChildren: self.maxChildren, code: &code) else { throw Refusal("unknown error", "no element tree: \(code ?? "unknown")") }
+                let readAt = ProcessInfo.processInfo.systemUptime
+                Task { @MainActor in AppLog.shared.add("session-timing", String(format: "screen_read_succeeded uptime=%.6f", readAt)) }
                 return .string(xml)
             },
             "GET /element/active": { [unowned self] _, _ in
