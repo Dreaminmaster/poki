@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 import notify
 
 /// iPhone History's capture loop and its privacy controls (issue 356).
@@ -25,7 +26,7 @@ final class HistoryCapture: ObservableObject {
 
     // MARK: Settings (kept in UserDefaults)
 
-    @Published var enabled: Bool { didSet { save(enabled, "history.enabled"); settingsChanged() } }
+    @Published var enabled: Bool { didSet { save(enabled, "history.enabled"); settingsChanged(); remind() } }
     /// Until when reading is paused. The distant future is "until turned on again".
     @Published var pausedUntil: Date? { didSet { save(pausedUntil?.timeIntervalSince1970, "history.pausedUntil"); settingsChanged() } }
     @Published var showIndicator: Bool { didSet { save(showIndicator, "history.showIndicator") } }
@@ -39,6 +40,8 @@ final class HistoryCapture: ObservableObject {
     /// Calendar weekdays, 1 for Sunday.
     @Published var weekdays: [Int] { didSet { save(weekdays, "history.weekdays"); settingsChanged() } }
     @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); HistoryStore.shared.prune(days: retentionDays) } }
+    /// How often the owner is reminded to draw insights from the tape, in days. 0 is never.
+    @Published var insightDays: Int { didSet { save(insightDays, "history.insightDays"); remind() } }
     @Published var seconds: Int { didSet { save(seconds, "history.seconds"); restart() } }
 
     // MARK: State
@@ -77,7 +80,8 @@ final class HistoryCapture: ObservableObject {
         startMinute = defaults.object(forKey: "history.startMinute") as? Int ?? 8 * 60
         endMinute = defaults.object(forKey: "history.endMinute") as? Int ?? 22 * 60
         weekdays = defaults.array(forKey: "history.weekdays") as? [Int] ?? Array(1...7)
-        retentionDays = defaults.object(forKey: "history.retentionDays") as? Int ?? 3
+        retentionDays = max(3, defaults.object(forKey: "history.retentionDays") as? Int ?? 14)
+        insightDays = defaults.object(forKey: "history.insightDays") as? Int ?? 0
         seconds = defaults.object(forKey: "history.seconds") as? Int ?? 5
         loading = false
     }
@@ -103,6 +107,30 @@ final class HistoryCapture: ObservableObject {
         let text = rest.joined(separator: ", ").trimmingCharacters(in: .whitespacesAndNewlines)
         let app = parts[0].trimmingCharacters(in: .whitespaces)
         return app.isEmpty || text.isEmpty ? nil : (app.localizedCapitalized, text)
+    }
+
+    /// Poki's own screens are never kept, whatever the lists say.
+    static func isPoki(_ app: String) -> Bool {
+        app.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "nz.zheha.poki") == .orderedSame || app.caseInsensitiveCompare("Poki") == .orderedSame
+    }
+
+    /// Sets or removes the repeating reminder to draw insights before tape is erased.
+    private func remind() {
+        guard !loading else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["backtape.insights"])
+        guard insightDays > 0, enabled else { return }
+        let days = insightDays
+        let title = AppLocalization.text("Backtape")
+        let body = AppLocalization.text("Look back at your tape and keep what matters before it is erased.")
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Double(days) * 86_400, repeats: true)
+            center.add(UNNotificationRequest(identifier: "backtape.insights", content: content, trigger: trigger))
+        }
     }
 
     private func save(_ value: Any?, _ key: String) {
@@ -160,7 +188,8 @@ final class HistoryCapture: ObservableObject {
 
     /// Whether reads of this app are kept, by the list the owner chose.
     func keeps(_ app: String) -> Bool {
-        switch listMode {
+        if Self.isPoki(app) { return false }
+        return switch listMode {
         case .exclude: !excluded.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
         case .include: included.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
         }

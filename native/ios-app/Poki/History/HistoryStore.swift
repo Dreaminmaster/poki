@@ -60,6 +60,7 @@ final class HistoryStore: @unchecked Sendable {
         CREATE INDEX IF NOT EXISTS entries_at ON entries (at);
         CREATE TABLE IF NOT EXISTS record (id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS record_at ON record (at);
+        CREATE TABLE IF NOT EXISTS notes (start REAL PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL);
         """
         guard sqlite3_exec(handle, schema, nil, nil, nil) == SQLITE_OK else {
             sqlite3_close(handle)
@@ -146,6 +147,7 @@ final class HistoryStore: @unchecked Sendable {
         queue.async {
             let now = Date().timeIntervalSince1970
             self.run("DELETE FROM entries WHERE at < ?", [.real(now - Double(days) * 86_400)])
+            self.run("DELETE FROM notes WHERE start < ?", [.real(now - Double(days) * 86_400)])
             self.run("DELETE FROM record WHERE at < ?", [.real(now - 30 * 86_400)])
             var rounds = 0
             while self.bytesNow() > Int64(megabytes) * 1_048_576, rounds < 20 {
@@ -157,21 +159,48 @@ final class HistoryStore: @unchecked Sendable {
     }
 
     func delete(entry id: Int64) async {
-        await perform { self.run("DELETE FROM entries WHERE id = ?", [.integer(id)]) }
+        await perform {
+            self.run("DELETE FROM entries WHERE id = ?", [.integer(id)])
+            self.run("DELETE FROM notes")
+        }
     }
 
     func delete(from start: Date, to end: Date) async {
-        await perform { self.run("DELETE FROM entries WHERE at >= ? AND at < ?", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)]) }
+        await perform {
+            self.run("DELETE FROM entries WHERE at >= ? AND at < ?", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)])
+            self.run("DELETE FROM notes WHERE start >= ? AND start < ?", [.real(start.timeIntervalSince1970 - 600), .real(end.timeIntervalSince1970)])
+        }
     }
 
     func delete(app: String) async {
-        await perform { self.run("DELETE FROM entries WHERE app = ?", [.text(app)]) }
+        await perform {
+            self.run("DELETE FROM entries WHERE app = ?", [.text(app)])
+            self.run("DELETE FROM notes")
+        }
     }
 
     func deleteEverything() async {
         await perform {
             self.run("DELETE FROM entries")
+            self.run("DELETE FROM notes")
             self.run("VACUUM")
+        }
+    }
+
+    // MARK: Notes
+
+    /// Keeps the note written for the block that starts at `start`.
+    func keep(_ note: BacktapeNote, start: Date) {
+        queue.async {
+            self.run("INSERT OR REPLACE INTO notes (start, title, body) VALUES (?, ?, ?)", [.real(start.timeIntervalSince1970), .text(note.title), .text(note.body)])
+        }
+    }
+
+    func note(start: Date) async -> BacktapeNote? {
+        await fetch {
+            self.rows("SELECT title, body FROM notes WHERE start = ?", [.real(start.timeIntervalSince1970)]) {
+                BacktapeNote(title: Self.string($0, 0), body: Self.string($0, 1))
+            }.first
         }
     }
 
