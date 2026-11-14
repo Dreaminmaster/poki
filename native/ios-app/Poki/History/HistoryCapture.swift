@@ -277,10 +277,10 @@ final class HistoryCapture: ObservableObject {
         guard status == .reading, !lockedOrDark,
               let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               line["ok"] as? Bool == true,
-              let lines = line["text"] as? [String], !lines.isEmpty else { return }
+              let read = line["text"] as? [String], !read.isEmpty else { return }
         var app = line["app"] as? String ?? ""
         var title = line["title"] as? String ?? ""
-        var lines = lines
+        var lines = read
         // System overlays are not something the owner was doing, so they are never kept.
         if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return }
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame {
