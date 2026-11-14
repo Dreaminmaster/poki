@@ -103,17 +103,11 @@ final class SelfSigner {
     private var foregroundObserver: NSObjectProtocol?
 
     var installMessage: String? {
-        switch installFinish {
-        case .idle: nil
-        case .installing: installFraction == nil
-            ? AppLocalization.text(LocalizedStringResource("Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki."))
-                + "\n\n" + AppLocalization.text(LocalizedStringResource("You can return to the Home Screen and wait."))
-            : AppLocalization.text(LocalizedStringResource("Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."))
-        case .waitingForExit: AppLocalization.text(LocalizedStringResource("The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki."))
-        case .needsReopen(let installed): installed
-            ? AppLocalization.text(LocalizedStringResource("The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."))
-            : AppLocalization.text(LocalizedStringResource("To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki."))
+        guard installFinish != .idle else { return nil }
+        if exitRequest == .unconfirmed && !needsReopen {
+            return AppLocalization.text(LocalizedStringResource("Installing the update. Features are unavailable until you reopen Poki."))
         }
+        return AppLocalization.text(LocalizedStringResource("If the update has not finished after a few seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."))
     }
 
     var needsReopen: Bool {
