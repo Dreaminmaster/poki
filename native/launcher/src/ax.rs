@@ -23,6 +23,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
+#[path = "ax_direct.rs"]
+pub mod direct;
+
 // The first DTX auxiliary argument carries the archived NSData payload.
 // The handshake advertises capabilities before subscribing to accessibility:
 // capabilities {DTXBlockCompression:0, DTXConnection:1}, then clientNeedsAccessibility:true.
@@ -317,126 +320,6 @@ pub async fn read_tree_overlapped(
     (late.or(early), vec![one, two])
 }
 
-/// The older audit service: an inspector focus that is moved from element to element.
-pub const INSPECTOR_SERVICE: &str = "com.apple.accessibility.axAuditDaemon.remoteserver.shim.remote";
-
-/// What moving the inspector focus `steps` times brought back.
-#[derive(Default, serde::Serialize)]
-pub struct Walk {
-    pub listed: bool,
-    pub messages: u32,
-    pub selectors: BTreeMap<String, u32>,
-    /// One per element the focus landed on: how many strings it carried, their characters, and the
-    /// first few characters of the longest (enough to tell which app it belongs to).
-    pub elements: Vec<Json>,
-    /// Moves no element answered.
-    pub silent: u32,
-    /// Distinct strings the other events carried.
-    pub other: Vec<String>,
-    /// How far the walk got: connect, check-in, capabilities, moving.
-    pub stage: &'static str,
-    pub error: Option<String>,
-}
-
-/// `variant` picks one of the ways of asking the phone not to draw the inspector's highlight.
-pub async fn walk(adapter: &mut AdapterHandle, rsd: &RsdHandshake, steps: usize, wait: Duration, variant: u64) -> Walk {
-    let mut walk = Walk::default();
-    let Some(service) = rsd.services.get(INSPECTOR_SERVICE) else { return walk };
-    walk.listed = true;
-    if let Err(error) = walk_on(adapter, service.port, steps, wait, variant, &mut walk).await {
-        walk.error = Some(error.to_string());
-    }
-    walk
-}
-
-async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Duration, variant: u64, walk: &mut Walk) -> Result<()> {
-    let passthrough = |value: Value| {
-        let mut wrapped = plist::Dictionary::new();
-        wrapped.insert("ObjectType".into(), "passthrough".into());
-        wrapped.insert("Value".into(), value);
-        Value::Dictionary(wrapped)
-    };
-    // A shim service: it wants the check-in exchange before anything else.
-    walk.stage = "connect";
-    let stream: Box<dyn ReadWrite> = Box::new(adapter.connect(port).await?);
-    walk.stage = "check-in";
-    let mut checked = idevice::Idevice::new(stream, "poki");
-    checked.rsd_checkin().await?;
-    let mut socket = checked.get_socket().ok_or("the inspector connection was lost at check-in")?;
-    walk.stage = "capabilities";
-    let mut capabilities = plist::Dictionary::new();
-    capabilities.insert("com.apple.private.DTXBlockCompression".into(), 0.into());
-    capabilities.insert("com.apple.private.DTXConnection".into(), 1.into());
-    call(&mut socket, 1, "_notifyOfPublishedCapabilities:", Value::Dictionary(capabilities), false).await?;
-    // Variant 1 is the walk that read elements on iOS 27.3 (and drew the highlight). The others
-    // change one thing each: 2 sends the highlight setting as a boolean, 3 asks for event type 0 as
-    // the reference client does, 4 sends the highlight setting before monitoring starts as well.
-    let hidden = || if variant == 2 { Value::Boolean(false) } else { 0.into() };
-    if variant == 4 {
-        call(&mut socket, 8, "deviceInspectorShowVisuals:", hidden(), false).await?;
-    }
-    call(&mut socket, 2, "deviceSetAppMonitoringEnabled:", 1.into(), false).await?;
-    call(&mut socket, 3, "deviceInspectorSetMonitoredEventType:", (if variant == 3 { 0 } else { 2 }).into(), false).await?;
-    call(&mut socket, 4, "deviceInspectorShowVisuals:", hidden(), false).await?;
-    walk.stage = "moving";
-    for step in 0..steps {
-        let mut options = plist::Dictionary::new();
-        options.insert("allowNonAX".into(), passthrough(false.into()));
-        // 4 is the next element.
-        options.insert("direction".into(), passthrough(4.into()));
-        options.insert("includeContainers".into(), passthrough(true.into()));
-        call(&mut socket, 10 + step as u32, "deviceInspectorMoveWithOptions:", passthrough(Value::Dictionary(options)), false).await?;
-        let landed = tokio::time::timeout(wait, async {
-            loop {
-                let message = Message::from_reader(&mut socket).await?;
-                acknowledge(&mut socket, &message).await?;
-                walk.messages += 1;
-                let selector = message.data.as_ref().and_then(Value::as_string).unwrap_or("none").chars().take(60).collect::<String>();
-                *walk.selectors.entry(selector.clone()).or_default() += 1;
-                let mut strings = Vec::new();
-                if let Some(AuxValue::Array(bytes)) = message.aux.as_ref().and_then(|aux| aux.values.first()) {
-                    if let Ok(archive) = Archive::parse(bytes) {
-                        archive.strings(&mut strings);
-                        if let Some(inner) = archive.data(archive.root()).and_then(|data| Archive::parse(data).ok()) {
-                            inner.strings(&mut strings);
-                        }
-                    }
-                }
-                if selector != "hostInspectorCurrentElementChanged:" {
-                    // What the other events say (app state changes name apps): a few distinct strings.
-                    for text in strings {
-                        let text: String = text.chars().take(40).collect();
-                        if walk.other.len() < 12 && !walk.other.contains(&text) {
-                            walk.other.push(text);
-                        }
-                    }
-                    continue;
-                }
-                return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(strings);
-            }
-        })
-        .await;
-        match landed {
-            Ok(Ok(strings)) => {
-                let longest = strings.iter().max_by_key(|text| text.chars().count()).map(|text| text.chars().take(16).collect::<String>());
-                walk.elements.push(json!({"strings": strings.len(), "characters": strings.iter().map(|text| text.chars().count()).sum::<usize>(), "starts": longest}));
-            }
-            Ok(Err(error)) => return Err(error),
-            // No element answered this move; a few silent moves in a row end the walk.
-            Err(_) => {
-                walk.silent += 1;
-                if walk.silent >= 4 {
-                    break;
-                }
-            }
-        }
-    }
-    let _ = call(&mut socket, 899, "deviceInspectorShowVisuals:", hidden(), false).await;
-    let _ = call(&mut socket, 900, "deviceSetAppMonitoringEnabled:", 0.into(), false).await;
-    let _ = socket.shutdown().await;
-    Ok(())
-}
-
 // AX archives contain custom classes. Keep UIDs intact and resolve only fields
 // we consume; a generic NSObject decoder loses the translation-object graph.
 struct Archive {
@@ -454,17 +337,6 @@ impl Archive {
             return Err("AX message is not a keyed archive".into());
         }
         Ok(Self { value })
-    }
-    /// The text an archive carries, without the names of its own keys and types.
-    fn strings(&self, into: &mut Vec<String>) {
-        let objects = self.value.as_dictionary().unwrap()["$objects"].as_array().unwrap();
-        for object in objects {
-            let Some(text) = object.as_string() else { continue };
-            if text.is_empty() || text.starts_with('$') || text.ends_with("_v1") || ["ObjectType", "Value", "passthrough"].contains(&text) {
-                continue;
-            }
-            into.push(text.to_string());
-        }
     }
     fn resolve<'a>(&'a self, mut value: &'a Value) -> &'a Value {
         let objects = self.value.as_dictionary().unwrap()["$objects"]

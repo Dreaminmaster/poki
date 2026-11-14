@@ -195,11 +195,21 @@ async fn front(request: &Value) -> Result<Value, Failure> {
         None => json!({}),
     };
     answer["tree"] = answer.get("elements").is_some().into();
-    let pids: Vec<u64> = attempts.iter().flat_map(|attempt| &attempt.apps).filter_map(|app| app["pid"].as_u64()).collect();
+    let mut pids: Vec<u64> = attempts.iter().flat_map(|attempt| &attempt.apps).filter_map(|app| app["pid"].as_u64()).collect();
     answer["attempts"] = json!(attempts);
     answer["services"] = json!(accessibility_services(&device));
-    if request["walk"].as_bool() == Some(true) {
-        answer["walk"] = json!(ax::walk(&mut device.adapter, &device.rsd, 10, Duration::from_millis(2000), request["walk_variant"].as_u64().unwrap_or(1)).await);
+    // The front app found by a hit test, then read whole: see ax_direct.rs.
+    let mut hit_pid = None;
+    if let Some(points) = request["direct_points"].as_array() {
+        let points: Vec<(f64, f64)> = points.iter().filter_map(|point| Some((point[0].as_f64()?, point[1].as_f64()?))).collect();
+        let asked = Instant::now();
+        let (tree, trace) = ax::direct::read_front(&mut device.adapter, &device.rsd, &points).await;
+        hit_pid = trace.pid;
+        let mut direct = json!({"trace": trace, "ms": milliseconds(asked.elapsed())});
+        if let Some(tree) = tree {
+            direct["summary"] = summarize(&tree, false);
+        }
+        answer["direct"] = direct;
     }
     match ended {
         Some(Ok(count)) => answer["sleep_screen_ended"] = count.into(),
@@ -207,6 +217,7 @@ async fn front(request: &Value) -> Result<Value, Failure> {
         None => {}
     }
 
+    pids.extend(hit_pid);
     let path = request["screenshot_path"].as_str().map(String::from);
     instruments(&mut device, &pids, path.as_deref(), &mut answer).await;
     Ok(answer)

@@ -205,20 +205,21 @@ final class HistoryProbe: ObservableObject {
         }
     }
 
-    /// How the element walk asks the phone not to draw its highlight (1 to 4).
-    @Published var walkVariant = 1
-
     /// What the phone says about the app in front without its contents, after `delay` seconds so the
     /// owner can put another app in front: two overlapping subscriptions, the processes behind the
     /// apps they name, and one screenshot read as text on this phone. The picture is deleted at once.
-    func front(model: AppModel, delay: Int = 10, endSleepScreen: Bool = false, walk: Bool = false) async {
+    func front(model: AppModel, delay: Int = 10, endSleepScreen: Bool = false, direct: Bool = false) async {
         guard !reading, !running, var request = makeRequest("front", model: model) else { return }
         reading = true
         defer { reading = false }
         let picture = FileManager.default.temporaryDirectory.appendingPathComponent("history-front-\(UUID().uuidString).png")
         request["screenshot_path"] = picture.path
         if endSleepScreen { request["end_sleep_screen"] = true }
-        if walk { request["walk"] = true; request["walk_variant"] = walkVariant }
+        if direct {
+            // Where the hit test looks for the app in front: the middle of the screen first.
+            let screen = UIScreen.main.bounds
+            request["direct_points"] = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
+        }
         note("front app check in \(delay) s, Poki is pid \(ProcessInfo.processInfo.processIdentifier): \(context(model: model))", keep: false)
         if keepAwake { try? keepAlive.start() }
         let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-front")
@@ -248,15 +249,23 @@ final class HistoryProbe: ObservableObject {
             } else {
                 note("no tree from either subscription", keep: false)
             }
-            if let walked = value["walk"] as? [String: Any] {
-                let selectors = (walked["selectors"] as? [String: Int] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key) x\($0.value)" }.joined(separator: " ")
-                let elements = walked["elements"] as? [[String: Any]] ?? []
-                note("element walk: service \(walked["listed"] as? Bool == true ? "listed" : "not listed"), \(walked["messages"] as? Int ?? 0) messages, \(elements.count) elements, \(selectors.isEmpty ? "no selectors" : selectors)", keep: false)
-                note("element walk variant \(walkVariant)", keep: false)
-                note("element walk: \(walked["silent"] as? Int ?? 0) moves with no answer, other events say \((walked["other"] as? [String] ?? []).joined(separator: " | "))", keep: false)
-                if let error = walked["error"] as? String { note("element walk failed at \(walked["stage"] as? String ?? "start"): \(error)", keep: false) }
-                for (index, element) in elements.prefix(12).enumerated() {
-                    note("element \(index + 1): \(element["strings"] as? Int ?? 0) strings, \(element["characters"] as? Int ?? 0) characters, starts \(element["starts"] as? String ?? "none")", keep: false)
+            if let read = value["direct"] as? [String: Any] {
+                let trace = read["trace"] as? [String: Any] ?? [:]
+                func traced(_ key: String) -> String { (trace[key] as? Int).map { "\($0)" } ?? "none" }
+                for hit in trace["hits"] as? [[String: Any]] ?? [] {
+                    let where_ = "\(Int(hit["x"] as? Double ?? 0)), \(Int(hit["y"] as? Double ?? 0))"
+                    if let error = hit["error"] as? String {
+                        note("hit test at \(where_) failed in \(hit["ms"] as? Int ?? 0) ms: \(error)", keep: false)
+                    } else {
+                        note("hit test at \(where_): pid \((hit["pid"] as? Int).map { "\($0)" } ?? "none") in \(hit["ms"] as? Int ?? 0) ms", keep: false)
+                    }
+                }
+                note("direct read reached \(trace["stage"] as? String ?? "start"): subscribe \(traced("subscribe_ms")) ms, application \(traced("application_ms")) ms, snapshot \(traced("snapshot_ms")) ms, \(traced("snapshot_bytes")) bytes, orientation \(traced("orientation")), all \(read["ms"] as? Int ?? 0) ms", keep: false)
+                if let error = trace["error"] as? String { note("direct read failed: \(error)", keep: false) }
+                if let summary = read["summary"] as? [String: Any] {
+                    note("FRONT APP TREE: \(summary["elements"] as? Int ?? 0) elements, \(summary["text_lines"] as? Int ?? 0) text lines, \(summary["text_characters"] as? Int ?? 0) characters, \(summary["secure_fields_left_out"] as? Int ?? 0) secure fields left out", keep: false)
+                } else {
+                    note("NO FRONT APP TREE", keep: false)
                 }
             }
             if let error = value["instruments_error"] as? String { note("instruments failed: \(error)", keep: false) }
@@ -463,11 +472,7 @@ struct HistoryTestSection: View {
                 .disabled(probe.reading || probe.running)
             Button("End Sleep Screen and Check in 10 Seconds") { Task { await probe.front(model: model, endSleepScreen: true) } }
                 .disabled(probe.reading || probe.running)
-            Stepper(value: $probe.walkVariant, in: 1...4) {
-                LabeledContent("Walk Variant") { Text(verbatim: "\(probe.walkVariant)").monospacedDigit() }
-            }
-            .disabled(probe.reading || probe.running)
-            Button("Walk Elements in 10 Seconds") { Task { await probe.front(model: model, walk: true) } }
+            Button("Read Front App Tree in 10 Seconds") { Task { await probe.front(model: model, direct: true) } }
                 .disabled(probe.reading || probe.running)
             Stepper(value: $probe.seconds, in: 1...60) {
                 LabeledContent("Seconds Between Reads") { Text(verbatim: "\(probe.seconds)").monospacedDigit() }

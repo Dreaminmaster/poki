@@ -33327,34 +33327,18 @@
         }
       }
     },
-    "Walk Elements in 10 Seconds" : {
+    "Read Front App Tree in 10 Seconds" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "10 秒后逐个读取元素"
+            "value" : "10 秒后读取前台 App 的界面树"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "10 秒後逐一讀取元素"
-          }
-        }
-      }
-    },
-    "Walk Variant" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读取方式"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "讀取方式"
+            "value" : "10 秒後讀取前景 App 的介面樹"
           }
         }
       }
