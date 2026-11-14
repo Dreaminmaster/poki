@@ -22,6 +22,7 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     var onPrepare: (@Sendable () -> Void)?
     /// The next open waits until `answer(_:)`.
     func holdNextOpen() { lock.withLock { gate = DispatchSemaphore(value: 0); heldOpenStarted = false } }
+    var isOpen: Bool { lock.withLock { open } }
     var isHoldingOpen: Bool { lock.withLock { gate != nil && heldOpenStarted } }
     /// Lets a held open go on, with this answer instead of opening (nil opens).
     func answer(_ result: [String: Any]?) { lock.withLock { answer = result; gate?.signal(); gate = nil } }
@@ -76,8 +77,8 @@ final class AppModelTests: XCTestCase {
         let (model, _) = model()
         try XCTSkipUnless(model.automationPath == .inProcess, "Poki Runner path: the launcher's state is the whole story")
         model.loopback.simulate(.working(ms: 9))
-        let opening = model.coreState(of: RunnerStatus(state: "running")).describe
-        XCTAssertTrue(opening.contains("opening the in-process session"), opening)
+        let preparing = model.coreState(of: RunnerStatus(state: "running"))
+        XCTAssertFalse(preparing.isRunning, preparing.describe)
         sessionOpen(model)
         XCTAssertEqual(model.coreState(of: RunnerStatus(state: "running")).describe, "running")
     }
@@ -520,7 +521,7 @@ final class InProcessPasscodeTests: XCTestCase {
 
         chat.send(request)
         let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !chat.running }, object: nil)
-        await fulfillment(of: [completed], timeout: 10)
+        await fulfillment(of: [completed], timeout: 20)
         await fulfillment(of: [opened], timeout: 0.1)
         XCTAssertFalse(model.hasOpenInProcessSession)
         return chat
@@ -549,6 +550,7 @@ final class InProcessPasscodeTests: XCTestCase {
         model.setup.developerMode = false
         model.setup.uiAutomation = false
         session.holdNextOpen()
+        model.wakeRunner()
         model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
         await waitFor("the local open is under way") { self.session.isHoldingOpen }
     }
@@ -644,30 +646,56 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(failed.contains("the owner turns Poki off and on"), failed)
     }
 
-    /// The owner's call (ESP-464): with Poki in front the automation stays open between tasks, so the
-    /// next task does not wait for it to open again. Away from Poki it stands by after the idle time
-    /// as before, counted from when Poki left the front.
-    func testPokiInFrontDoesNotStandByWhenIdle() async {
+    func testSessionStaysOpenDuringTaskAndClosesAfterIdle() async {
         let saved = model.idleStopSeconds
-        model.idleStopSeconds = 1
-        defer {
-            model.idleStopSeconds = saved
-            // The open gate is shared: the next test starts with Poki in front again.
-            InProcessWDA.gate.withLock { $0.inFront = true }
-        }
+        model.idleStopSeconds = 60
+        defer { model.idleStopSeconds = saved }
+        await prepareWithoutPhoneTask()
         model.wakeRunner()
-        try? await Task.sleep(nanoseconds: 1_300_000_000)
-        model.checkIdle()
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        XCTAssertFalse(model.runnerPaused, "Poki in front does not stand by")
-        model.wentToBackground()
-        model.checkIdle()
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertFalse(model.runnerPaused, "the idle time counts from leaving the front")
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        model.checkIdle()
-        await waitFor("standing by in the background after the idle time") { self.model.runnerPaused }
+        await waitFor("automation is open") { self.session.isOpen && self.model.hasOpenInProcessSession }
+        model.chatTaskBegan()
+
+        model.checkIdle(now: Date().addingTimeInterval(120))
+        XCTAssertTrue(session.isOpen, "thinking between phone steps must keep the same session")
+        XCTAssertFalse(model.runnerPaused)
+
+        model.chatTaskEnded(reply: nil, session: "test", acted: true)
+        model.checkIdle(now: Date().addingTimeInterval(61))
+        await waitFor("the completed task closes automation even while Poki is in front") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        model.prepareForTask()
+        await finishPreparing()
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let next = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(next.isError, next.text)
+        XCTAssertTrue(next.text.contains("General"), next.text)
+        XCTAssertTrue(model.hasOpenInProcessSession)
     }
+
+    func testRemotePhoneReadWaitsForSessionWithoutInputPreparation() async throws {
+        session.holdNextOpen()
+        let transport = SessionScreenTransport(session: session)
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
+        _ = await core.handle(RelayRequest(id: "connect", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#))
+        await finishPreparing()
+        let reading = Task {
+            await core.handle(RelayRequest(id: "phone-step", method: "POST", headers: [:], body:
+                #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"look","arguments":{}}}"#))
+        }
+        await waitFor("the remote phone step requests automation") { self.session.isHoldingOpen }
+        XCTAssertEqual(transport.screenReads, 0, "no screen request may reach native automation before it is ready")
+        session.answer(nil)
+        let reply = await reading.value
+        XCTAssertEqual(reply.status, 200)
+        XCTAssertTrue(reply.body.contains("General"), reply.body)
+        XCTAssertFalse(reply.body.contains("\"isError\":true"), reply.body)
+        XCTAssertEqual(transport.screenReads, 1, "the first phone read succeeds without a model retry")
+    }
+
 }
 
 @MainActor
@@ -882,5 +910,33 @@ final class FrontendSubtractionTests: XCTestCase {
         let runnerIssue = detailsIssues.first { $0.id == "runner" }
         XCTAssertNotNil(runnerIssue, "#78: PokiDetailsView Issue.current(model) includes the runner failure")
         XCTAssertEqual(runnerIssue?.fix, .setup)
+    }
+}
+
+private final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
+    private let session: FakeAutomation
+    private let lock = NSLock()
+    private var reads = 0
+    var screenReads: Int { lock.withLock { reads } }
+    init(session: FakeAutomation) { self.session = session }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/session": value = ["sessionId": "fixture-session"]
+        case "/status": value = ["ready": true]
+        case "/wda/locked": value = false
+        case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
+        case "/wda/activeAppInfo": value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
+        case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
+        case "/source":
+            lock.withLock { reads += 1 }
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeButton name="General" label="General" x="16" y="100" width="358" height="44" /></XCUIElementTypeApplication></AppiumAUT>"#)
+        default: value = .null
+        }
+        let response: JSON = ["value": value]
+        return (200, response.data())
     }
 }

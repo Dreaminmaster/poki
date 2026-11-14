@@ -30,6 +30,7 @@ extension PKInProcess: InProcessAutomation, @unchecked Sendable {}
 /// Poki's own automation session, once the launcher has mounted the disk image (ESP-152).
 enum InProcessSession: Equatable {
     case idle
+    case closing(reopen: Bool)
     case opening
     case open
     /// prepare answered no: its code and detail.
@@ -43,6 +44,7 @@ enum InProcessSession: Equatable {
     var agentState: RunnerState {
         switch self {
         case .idle: return .starting("ready for a phone task; the automation session is not open")
+        case .closing: return .starting("finishing the previous automation session")
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:

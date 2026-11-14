@@ -21876,44 +21876,6 @@
         }
       }
     },
-    "Hide Banner When Idle" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空闲时隐藏横幅"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空閒時隱藏橫幅"
-          }
-        }
-      }
-    },
-    "Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体停止时结束自动化会话并隐藏 iOS 横幅（实验性）。若此后智能体无法读取屏幕，请关闭此项并重开 Poki。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體停止時結束自動化工作階段並隱藏 iOS 橫幅（實驗性）。若此後智慧體無法讀取螢幕，請關閉此項並重開 Poki。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the automation session and hides the iOS banner when the agent stops (experimental). If agents lose screen view afterward, turn this off and reopen Poki."
-          }
-        }
-      }
-    },
     "Set your relay in Agents to get this connector’s address." : {
       "localizations" : {
         "zh-Hans" : {
@@ -31716,29 +31678,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請在「設定 › Poki」中開啟麥克風與語音辨識權限。"
-          }
-        }
-      }
-    },
-    "Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested: if the agent can’t see the screen after this, turn it off and open Poki again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the automation session and hides the iOS banner when the agent stops (experimental). If agents lose screen view afterward, turn this off and reopen Poki."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体停止时结束自动化会话并隐藏 iOS 横幅（实验性）。若此后智能体无法读取屏幕，请关闭此项并重开 Poki。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體停止時結束自動化工作階段並隱藏 iOS 橫幅（實驗性）。若此後智慧體無法讀取螢幕，請關閉此項並重開 Poki。"
           }
         }
       }
