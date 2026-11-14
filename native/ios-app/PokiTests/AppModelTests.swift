@@ -507,11 +507,162 @@ final class InProcessPasscodeTests: XCTestCase {
     }
 
     func testPureChatCompletesWithoutAutomation() async throws {
-        let server = try FakeCompletions(replies: [FakeCompletions.text("The answer is four.")])
-        let chat = try await chatWithoutAutomation(on: server, request: "What is two plus two?")
+        try await exerciseChatEntry(.send)
+    }
 
-        XCTAssertTrue(chat.entries.contains { if case .poki(let text) = $0.kind { text == "The answer is four." } else { false } })
-        XCTAssertTrue(chat.savedCalls.isEmpty)
+    func testInputFocusPreparesWithoutOpeningAutomation() async throws {
+        try await exerciseChatEntry(.focus)
+    }
+
+    func testDictationButtonPreparesWithoutOpeningAutomation() async throws {
+        try await exerciseChatEntry(.dictation)
+    }
+
+    func testHomeShortcutPreparesWithoutOpeningAutomation() async throws {
+        try await exerciseChatEntry(.shortcut)
+    }
+
+    private enum ChatEntryPoint: String { case focus, dictation, shortcut, send }
+
+    private func exerciseChatEntry(_ entry: ChatEntryPoint) async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiDraft", "pokiDictationButton"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        let server = try FakeCompletions(replies: Array(repeating: FakeCompletions.text("The answer is four."), count: 3))
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        UserDefaults.standard.set(entry == .send ? "What is two plus two?" : "", forKey: "pokiDraft")
+        UserDefaults.standard.set(true, forKey: "pokiDictationButton")
+        await prepareWithoutPhoneTask()
+        model.pauseRunner(byOwner: false)
+        await withCheckedContinuation { done in model.closeInProcess("entry fixture") { done.resume() } }
+        XCTAssertTrue(model.runnerPaused)
+        let chat = ChatModel(app: model, kind: .handoff, requester: "Test agent")
+        let accessibility = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        defer { dlclose(accessibility) }
+        let isEnabled = unsafeBitCast(try XCTUnwrap(dlsym(accessibility, "_AXSAutomationEnabled")), to: (@convention(c) () -> Int32).self)
+        let setEnabled = unsafeBitCast(try XCTUnwrap(dlsym(accessibility, "_AXSSetAutomationEnabled")), to: (@convention(c) (Int32) -> Void).self)
+        let previous = isEnabled()
+        setEnabled(1)
+        defer { setEnabled(previous) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
+        window.makeKeyAndVisible()
+        UIAccessibility.post(notification: .screenChanged, argument: window.rootViewController?.view)
+        defer { window.endEditing(true); window.isHidden = true }
+        await drawEntry(window)
+        _ = try XCTUnwrap(Self.entryField(in: window))
+        let opened = expectation(description: "\(entry.rawValue) prepares dependencies without enabling Automation Mode")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+
+        try await activateEntry(entry, window: window, chat: chat)
+        await waitFor("the UI entry resumes prerequisites") { !self.model.runnerPaused }
+        await finishPreparing()
+        try await activateEntry(entry, window: window, chat: chat)
+        await fulfillment(of: [opened], timeout: 0.2)
+        XCTAssertFalse(session.isOpen)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        session.onPrepare = nil
+        let transport = SessionScreenTransport(session: session)
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
+        let read = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(read.isError, read.text)
+        XCTAssertTrue(read.text.contains("General"), read.text)
+        XCTAssertEqual(transport.screenReads, 1)
+        let reopened = expectation(description: "repeated UI entry keeps the existing session")
+        reopened.isInverted = true
+        session.onPrepare = { reopened.fulfill() }
+        try await activateEntry(entry, window: window, chat: chat)
+        await fulfillment(of: [reopened], timeout: 0.2)
+        XCTAssertTrue(session.isOpen)
+    }
+
+    private func activateEntry(_ entry: ChatEntryPoint, window: UIWindow, chat: ChatModel) async throws {
+        window.makeKeyAndVisible()
+        await drawEntry(window)
+        let field = try XCTUnwrap(Self.entryField(in: window))
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("OnDemandEvidence")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        try XCTUnwrap(image.pngData()).write(to: folder.appendingPathComponent("entry-\(entry.rawValue).png"))
+        switch entry {
+        case .focus:
+            field.resignFirstResponder()
+            await drawEntry(window)
+            XCTAssertTrue(field.becomeFirstResponder())
+            await drawEntry(window)
+        case .dictation:
+            let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.dictate" }))
+            XCTAssertTrue(button.accessibilityActivate(), "activate the actual dictation button")
+            await drawEntry(window)
+        case .shortcut:
+            field.resignFirstResponder()
+            await drawEntry(window)
+            let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0.hasPrefix("home.idea.") }))
+            XCTAssertTrue(button.accessibilityActivate(), "activate an actual home shortcut")
+            await drawEntry(window)
+            XCTAssertFalse(field.plainText.isEmpty, "the shortcut fills the composer")
+        case .send:
+            if field.plainText.isEmpty {
+                field.insertText("What is two plus two?")
+                field.delegate?.textViewDidChange?(field)
+                await drawEntry(window)
+            }
+            let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.main" }))
+            XCTAssertTrue(button.accessibilityActivate(), "activate the actual send button")
+            let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !chat.running && chat.entries.contains { if case .poki(let text) = $0.kind { text == "The answer is four." } else { false } }
+            }, object: nil)
+            await fulfillment(of: [completed], timeout: 20)
+            XCTAssertTrue(chat.savedCalls.isEmpty)
+        }
+    }
+
+    private func drawEntry(_ window: UIWindow) async {
+        window.layoutIfNeeded()
+        let drawn = expectation(description: "the entry UI rendered")
+        let frames = SessionEvidenceFrames { drawn.fulfill() }
+        let display = CADisplayLink(target: frames, selector: #selector(SessionEvidenceFrames.tick))
+        display.add(to: .main, forMode: .common)
+        await fulfillment(of: [drawn], timeout: 5)
+        display.invalidate()
+    }
+
+    private static func entryField(in view: UIView) -> CapsuleTextView? {
+        if let field = view as? CapsuleTextView { return field }
+        return view.subviews.lazy.compactMap { entryField(in: $0) }.first
+    }
+
+    private static func entryElement(in root: NSObject, matching matches: (String) -> Bool) -> NSObject? {
+        var pending = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if let identifier, matches(identifier) {
+                let frame = item.accessibilityFrame
+                let visible = (root as? UIView).map { $0.convert($0.bounds, to: nil) } ?? .zero
+                let button = item.accessibilityTraits.contains(.button)
+                if button && visible.contains(CGPoint(x: frame.midX, y: frame.midY)) && !frame.isEmpty { return item }
+            }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for index in 0..<count {
+                    if let child = item.accessibilityElement(at: index) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
     }
 
     func testBrowserOnlyChatCompletesWithoutAutomation() async throws {
