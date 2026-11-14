@@ -205,6 +205,9 @@ final class HistoryProbe: ObservableObject {
         }
     }
 
+    /// How the element walk asks the phone not to draw its highlight (1 to 3).
+    @Published var walkVariant = 1
+
     /// What the phone says about the app in front without its contents, after `delay` seconds so the
     /// owner can put another app in front: two overlapping subscriptions, the processes behind the
     /// apps they name, and one screenshot read as text on this phone. The picture is deleted at once.
@@ -215,7 +218,7 @@ final class HistoryProbe: ObservableObject {
         let picture = FileManager.default.temporaryDirectory.appendingPathComponent("history-front-\(UUID().uuidString).png")
         request["screenshot_path"] = picture.path
         if endSleepScreen { request["end_sleep_screen"] = true }
-        if walk { request["walk"] = true }
+        if walk { request["walk"] = true; request["walk_variant"] = walkVariant }
         note("front app check in \(delay) s, Poki is pid \(ProcessInfo.processInfo.processIdentifier): \(context(model: model))", keep: false)
         if keepAwake { try? keepAlive.start() }
         let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-front")
@@ -249,6 +252,7 @@ final class HistoryProbe: ObservableObject {
                 let selectors = (walked["selectors"] as? [String: Int] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key) x\($0.value)" }.joined(separator: " ")
                 let elements = walked["elements"] as? [[String: Any]] ?? []
                 note("element walk: service \(walked["listed"] as? Bool == true ? "listed" : "not listed"), \(walked["messages"] as? Int ?? 0) messages, \(elements.count) elements, \(selectors.isEmpty ? "no selectors" : selectors)", keep: false)
+                note("element walk variant \(walkVariant)", keep: false)
                 note("element walk: \(walked["silent"] as? Int ?? 0) moves with no answer, other events say \((walked["other"] as? [String] ?? []).joined(separator: " | "))", keep: false)
                 if let error = walked["error"] as? String { note("element walk failed at \(walked["stage"] as? String ?? "start"): \(error)", keep: false) }
                 for (index, element) in elements.prefix(12).enumerated() {
@@ -459,6 +463,10 @@ struct HistoryTestSection: View {
                 .disabled(probe.reading || probe.running)
             Button("End Sleep Screen and Check in 10 Seconds") { Task { await probe.front(model: model, endSleepScreen: true) } }
                 .disabled(probe.reading || probe.running)
+            Stepper(value: $probe.walkVariant, in: 1...3) {
+                LabeledContent("Walk Variant") { Text(verbatim: "\(probe.walkVariant)").monospacedDigit() }
+            }
+            .disabled(probe.reading || probe.running)
             Button("Walk Elements in 10 Seconds") { Task { await probe.front(model: model, walk: true) } }
                 .disabled(probe.reading || probe.running)
             Stepper(value: $probe.seconds, in: 1...60) {

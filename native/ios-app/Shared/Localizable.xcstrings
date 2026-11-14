@@ -33343,6 +33343,22 @@
         }
       }
     },
+    "Walk Variant" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取方式"
+          }
+        }
+      }
+    },
     "Text files must be 100 KB or smaller." : {
       "localizations" : {
         "zh-Hans" : {

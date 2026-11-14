@@ -199,7 +199,7 @@ async fn front(request: &Value) -> Result<Value, Failure> {
     answer["attempts"] = json!(attempts);
     answer["services"] = json!(accessibility_services(&device));
     if request["walk"].as_bool() == Some(true) {
-        answer["walk"] = json!(ax::walk(&mut device.adapter, &device.rsd, 16, Duration::from_millis(2000)).await);
+        answer["walk"] = json!(ax::walk(&mut device.adapter, &device.rsd, 10, Duration::from_millis(2000), request["walk_variant"].as_u64().unwrap_or(1)).await);
     }
     match ended {
         Some(Ok(count)) => answer["sleep_screen_ended"] = count.into(),

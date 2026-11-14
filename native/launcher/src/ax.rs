@@ -338,17 +338,20 @@ pub struct Walk {
     pub error: Option<String>,
 }
 
-pub async fn walk(adapter: &mut AdapterHandle, rsd: &RsdHandshake, steps: usize, wait: Duration) -> Walk {
+/// `variant` is how the phone is told not to draw the inspector's highlight: 1 the number 0 (as the
+/// reference client sends it), 2 a boolean, 3 the number wrapped as a passthrough value. Every
+/// variant sends it before monitoring starts and again after each move.
+pub async fn walk(adapter: &mut AdapterHandle, rsd: &RsdHandshake, steps: usize, wait: Duration, variant: u64) -> Walk {
     let mut walk = Walk::default();
     let Some(service) = rsd.services.get(INSPECTOR_SERVICE) else { return walk };
     walk.listed = true;
-    if let Err(error) = walk_on(adapter, service.port, steps, wait, &mut walk).await {
+    if let Err(error) = walk_on(adapter, service.port, steps, wait, variant, &mut walk).await {
         walk.error = Some(error.to_string());
     }
     walk
 }
 
-async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Duration, walk: &mut Walk) -> Result<()> {
+async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Duration, variant: u64, walk: &mut Walk) -> Result<()> {
     let passthrough = |value: Value| {
         let mut wrapped = plist::Dictionary::new();
         wrapped.insert("ObjectType".into(), "passthrough".into());
@@ -367,17 +370,23 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
     capabilities.insert("com.apple.private.DTXBlockCompression".into(), 0.into());
     capabilities.insert("com.apple.private.DTXConnection".into(), 1.into());
     call(&mut socket, 1, "_notifyOfPublishedCapabilities:", Value::Dictionary(capabilities), false).await?;
-    call(&mut socket, 2, "deviceSetAppMonitoringEnabled:", 1.into(), false).await?;
-    call(&mut socket, 3, "deviceInspectorSetMonitoredEventType:", 2.into(), false).await?;
-    call(&mut socket, 4, "deviceInspectorShowVisuals:", 0.into(), false).await?;
+    let hidden = || match variant {
+        2 => Value::Boolean(false),
+        3 => passthrough(0.into()),
+        _ => 0.into(),
+    };
+    call(&mut socket, 2, "deviceInspectorShowVisuals:", hidden(), false).await?;
+    call(&mut socket, 3, "deviceSetAppMonitoringEnabled:", 1.into(), false).await?;
+    call(&mut socket, 4, "deviceInspectorSetMonitoredEventType:", 0.into(), false).await?;
     walk.stage = "moving";
     for step in 0..steps {
         let mut options = plist::Dictionary::new();
-        options.insert("allowNonAX".into(), passthrough(false.into()));
+        options.insert("allowNonAX".into(), passthrough(0.into()));
         // 4 is the next element.
         options.insert("direction".into(), passthrough(4.into()));
-        options.insert("includeContainers".into(), passthrough(true.into()));
-        call(&mut socket, 5 + step as u32, "deviceInspectorMoveWithOptions:", passthrough(Value::Dictionary(options)), false).await?;
+        options.insert("includeContainers".into(), passthrough(1.into()));
+        call(&mut socket, 10 + 2 * step as u32, "deviceInspectorMoveWithOptions:", passthrough(Value::Dictionary(options)), false).await?;
+        call(&mut socket, 11 + 2 * step as u32, "deviceInspectorShowVisuals:", hidden(), false).await?;
         let landed = tokio::time::timeout(wait, async {
             loop {
                 let message = Message::from_reader(&mut socket).await?;
@@ -423,6 +432,7 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
             }
         }
     }
+    let _ = call(&mut socket, 899, "deviceInspectorShowVisuals:", hidden(), false).await;
     let _ = call(&mut socket, 900, "deviceSetAppMonitoringEnabled:", 0.into(), false).await;
     let _ = socket.shutdown().await;
     Ok(())
