@@ -103,8 +103,10 @@ final class SelfSigner {
     var installMessage: String? {
         switch installFinish {
         case .idle: nil
-        case .installing: String(localized: "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki.")
-            + "\n\n" + String(localized: "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer.")
+        case .installing: installFraction == nil
+            ? String(localized: "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki.")
+                + "\n\n" + String(localized: "You can return to the Home Screen and wait.")
+            : String(localized: "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki.")
         case .waitingForExit: String(localized: "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.")
         case .needsReopen(let installed): installed
             ? String(localized: "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki.")
@@ -439,8 +441,7 @@ final class SelfSigner {
         }
     }
 
-    /// iOS has not ended Poki after the install. Until the install returns, Poki carries the upload
-    /// and the upgrade request, so nothing asks the owner to close it before then.
+    /// An install result is required before foreground return or the timer can claim success.
     private func exitWaitEnded() {
         guard installFinish == .waitingForExit else { return }
         requireReopen()
@@ -461,9 +462,7 @@ final class SelfSigner {
         switch progress["kind"] as? String {
         case "step":
             working = progress["title"] as? String ?? working; fraction = nil
-            // The install itself has begun (the build is on the phone): the last step, where Poki
-            // must exit for iOS to finish. The owner is told now rather than at a percentage that a
-            // fast or stalled install may never report.
+            // This step precedes upload. Only part/install comes from the system upgrade callback.
             if progress["id"] as? String == "install" { stepAside() }
         case "part":
             fraction = progress["fraction"] as? Double

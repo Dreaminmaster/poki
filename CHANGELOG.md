@@ -7,6 +7,13 @@ native/ios-app/CHANGELOG-round.md; this file is what goes into a release and the
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 Build numbers are the GitHub Actions run number of the release workflow.
 
+## [0.4.1] - Unreleased
+
+### Fixed
+- When an in-app update reaches system installation, Poki explains how to close and reopen it if the update has not finished after 5 seconds. The instructions are available in English, Simplified Chinese, and Traditional Chinese. While the update is still uploading, Poki continues to ask you not to close it.
+
+If you are updating from 0.4.0 and Poki stays on "Finishing the Update" after you tap "Install Update", swipe up on Poki in the app switcher to close it, then open Poki again.
+
 ## [0.4.0] Beta - 2026-11-14
 
 Poki 0.4.0 replaces the whole interface of the iPhone app. Upgrading from 0.3.1 keeps your conversations: on the first launch after the update they move once to Archived Conversations in Settings.
