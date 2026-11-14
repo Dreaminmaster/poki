@@ -69,3 +69,8 @@ jobs:
           bash -n .github/scripts/publish-rolling.sh
           python3 -m py_compile .github/scripts/promotion.py
           python3 -c "import json; json.load(open('.github/channels.json'))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Signed release publication contract
+        run: node --test test/publish-r2.test.mjs

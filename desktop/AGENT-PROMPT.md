@@ -3,7 +3,7 @@ Install Poki on my iPhone (or iPad). Poki is an app that lets AI agents see and 
 The tool
 - macOS: "/Applications/Poki Setup.app/Contents/MacOS/poki-setup"
 - Windows: "$env:LOCALAPPDATA\Poki Setup\poki-setup.exe"
-If it is not there, ask me to install Poki Setup from https://github.com/JosssphZhou/poki/releases (the Alpha release) and open it once. Below, `poki-setup` means that path, in quotes.
+If it is not there, ask me to install Poki Setup from https://github.com/JosssphZhou/poki/releases (the newest Beta release) and open it once. Below, `poki-setup` means that path, in quotes.
 
 How to work
 1. Run `poki-setup next --json`. It reads this computer's state and lists what is done and what is next. Each step has `who` ("agent" or "person"), `command` (run it as is) and `say` (tell me this, in your own words, when a person has to act). Do the first step that is not done, then run `next` again. Stop when `next` says Poki is ready.

@@ -1,7 +1,6 @@
 # Publishes a merged promotion (propose-promotion.yml, promotion-gate.yml): the record in
-# .github/channels.json whose tag does not exist yet. The IPA is the one already built, renamed
-# without the build number (inside, CFBundleVersion keeps it):
-#   beta    Poki-external-0.3.0-beta.1.ipa on app-0.3.0-beta.1, a prerelease, with the Gym scorecards
+# .github/channels.json whose tag does not exist yet. Beta keeps the numeric build in its IPA name:
+#   beta    Poki-external-0.3.0-712.ipa on app-0.3.0-beta.1, a prerelease, with the Gym scorecards
 #   stable  Poki-external-0.3.0.ipa on app-0.3.0, a full release (never marked Latest: GitHub's
 #           Latest is Poki MCP's v* release, which the Mac server's update check reads)
 # Poki Setup files come along from the source release. Created as a draft, checked, then published.
@@ -14,6 +13,11 @@ on:
     branches: [main]
     paths: ['.github/channels.json']
   workflow_dispatch:
+    inputs:
+      verify_r2:
+        description: Verify a signed catalog in an isolated R2 path, then delete it; skip promotion
+        type: boolean
+        default: false
 
 concurrency:
   group: publish-promotion
@@ -24,6 +28,7 @@ permissions:
 
 jobs:
   read:
+    if: inputs.verify_r2 != true
     runs-on: ubuntu-latest
     outputs:
       rec: ${{ steps.r.outputs.rec }}
@@ -41,6 +46,38 @@ jobs:
           channel="$(echo "$rec" | jq -r '.channel // empty')"
           case "$channel" in beta|stable|'') ;; *) echo "unknown channel: $channel" >&2; exit 1 ;; esac
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+  verify-r2:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_r2 == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.POKI_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.POKI_R2_SECRET_ACCESS_KEY }}
+      POKI_R2_ENDPOINT: ${{ secrets.POKI_R2_ENDPOINT }}
+      POKI_R2_BUCKET: poki-releases
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Upload and verify only an isolated signed catalog
+        env:
+          POKI_RELEASE_SIGNING_KEY: ${{ secrets.POKI_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node scripts/release/publish-r2.mjs --verify-upload --output evidence | tee evidence/verification.log
+      - name: Ensure the test object is removed
+        if: always()
+        run: node scripts/release/publish-r2.mjs --cleanup-verification --output evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r2-upload-verification
+          path: evidence/
+          if-no-files-found: ignore
 
   publish:
     needs: read
@@ -72,7 +109,7 @@ jobs:
             run="$(gh run list --workflow prealpha.yml --commit "$SHA" --status success --json databaseId --jq '.[0].databaseId')"
             [ -n "$run" ] || { echo "::error::no Pre-alpha run built $SHA"; exit 1; }
             gh run download "$run" --name Poki-unsigned --dir src
-            cp src/Poki-external-unsigned.ipa "dist/Poki-external-$LABEL.ipa"
+            cp src/Poki-external-unsigned.ipa "dist/Poki-external-$BASE-$BUILD.ipa"
             cp src/Poki-signing.zip dist/
             gh release download app-alpha-latest --dir dist --pattern 'PokiSetup-*' --pattern 'SHA256SUMS-desktop.txt' || echo "::warning::no Poki Setup files on app-alpha-latest"
             # The Gym scorecards from the merged PR's gate, the baseline for the next beta.
@@ -133,3 +170,11 @@ jobs:
           else
             gh api "repos/$GH_REPO/git/refs" -f ref="refs/heads/$branch" -f sha="$SHA" >/dev/null && echo "Created $branch at $SHA" || echo "::warning::could not create $branch"
           fi
+
+  mirror-beta:
+    needs: [read, publish]
+    if: needs.read.outputs.channel == 'beta'
+    uses: ./.github/workflows/publish-r2.yml
+    with:
+      tag: ${{ fromJSON(needs.read.outputs.rec).tag }}
+    secrets: inherit

@@ -76,6 +76,11 @@ struct SignerActivityRows: View {
         if let error = signer.lastError {
             Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
         }
+        if let error = signer.updateCheckError {
+            Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+        } else if let notice = signer.latest?.source_notice {
+            Section { Label(notice, systemImage: "info.circle") }
+        }
     }
 }
 
@@ -209,28 +214,14 @@ struct SigningOptionsPage: View {
     @State private var checked = false
     private var signer: SelfSigner { model.signer }
 
-    /// Shown most stable first, as the person reads them.
-    private var channels: [SelfSigner.Channel] {
-        let order = ["stable", "beta", "alpha", "pre-alpha"]
-        return (signer.status?.channels ?? []).sorted { (order.firstIndex(of: $0.id) ?? 9) < (order.firstIndex(of: $1.id) ?? 9) }
-    }
-
     var body: some View {
         Form {
             Section {
-                Picker("Release Channel", selection: Binding(get: { signer.status?.channel ?? "stable" }, set: { id in Task { await signer.setChannel(id) } })) {
-                    ForEach(channels) { Text($0.title).tag($0.id) }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } header: {
-                Text("Release Channel")
-            } footer: {
-                Text("Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel.")
+                LabeledContent("Updates") { Text(verbatim: "Beta") }
             }
             Section {
                 LabeledContent("Installed") { Text(verbatim: "\(signer.installedVersion) (\(signer.installedBuild))") }
-                LabeledContent("Newest on This Channel") {
+                LabeledContent("Newest Beta") {
                     if let latest = signer.latest {
                         Text(verbatim: "\(latest.version) (\(latest.build))")
                     } else {
@@ -243,7 +234,7 @@ struct SigningOptionsPage: View {
             } header: {
                 Text("Version")
             } footer: {
-                Text("Poki looks on GitHub for the newest build on the chosen channel.")
+                Text("Poki checks R2 for Beta updates and uses GitHub if R2 is unavailable.")
             }
             .task(id: signer.status?.channel) {
                 checked = false

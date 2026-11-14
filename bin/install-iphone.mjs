@@ -31,7 +31,7 @@ Commands:
 
 Options:
   --update-only       Update an existing Poki without changing its configuration (alone or with run).
-  --channel <name>    stable, beta, alpha (default) or pre-alpha.
+  --channel <name>    Beta updates. Legacy channel names also use Beta.
   --udid <udid>       The iPhone to use when several are plugged in.
   --dry-run           Download and check the real Poki Setup, start its real helper, then simulate the
                       iPhone and the Apple Account. Nothing touches a device or Apple.
@@ -156,7 +156,7 @@ switch (opts.help ? 'help' : opts['update-only'] ? 'update-only' : command) {
     break;
   case 'run':
     if (opts['model-key'] !== undefined && !PROVIDERS.includes(opts['model-key'])) { console.error(`--model-key is one of ${PROVIDERS.join(', ')}.`); process.exitCode = 1; break; }
-    process.exitCode = await run({ modelKey: opts['model-key'], modelKeyItem: opts['model-key-item'], state, setupHome, channel: opts.channel ?? 'alpha', udid: opts.udid, dryRun, json: opts.json, bridge: opts.bridge && resolve(opts.bridge), appDir, reinstall: opts.reinstall });
+    process.exitCode = await run({ modelKey: opts['model-key'], modelKeyItem: opts['model-key-item'], state, setupHome, channel: opts.channel ?? 'beta', udid: opts.udid, dryRun, json: opts.json, bridge: opts.bridge && resolve(opts.bridge), appDir, reinstall: opts.reinstall });
     break;
   case 'code':
     if (arg !== undefined) { console.error(`Do not put the Apple code on the command line. Run: ${codeCommand(state)} (and type it at the hidden prompt).`); process.exitCode = 1; break; }

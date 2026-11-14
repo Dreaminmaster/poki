@@ -22,16 +22,25 @@ test('ios-* and desktop-* tags keep their channels', () => {
   assert.equal(channelOf('v0.1.1', false), null);
 });
 
-test('a channel without its own Poki Setup takes the next less stable channel, as release.rs does', async t => {
-  const release = (tag_name, ...names) => ({ tag_name, prerelease: true, draft: false, assets: names.map(name => ({ name, browser_download_url: `https://github.com/x/${tag_name}/${name}`, url: `https://api.github.com/x/${tag_name}/${name}` })) });
-  t.mock.method(globalThis, 'fetch', async () => Response.json([
-    release('ios-beta-0.4.0-1226', 'Poki-external-0.4.0-1226.ipa', 'SHA256SUMS'),
-    release('app-prealpha-latest', 'PokiSetup-0.2.3-700-macos.dmg', 'SHA256SUMS-desktop.txt'),
-    release('app-alpha-latest', 'PokiSetup-0.2.2-661-macos.dmg', 'SHA256SUMS-desktop.txt'),
+test('every saved channel selects Beta and never a newer preview', async t => {
+  const release = (tag_name, prerelease, name) => ({ tag_name, prerelease, draft: false, assets: [name, 'SHA256SUMS-desktop.txt'].map(name => ({ name, browser_download_url: `https://github.com/example/${tag_name}/${name}` })) });
+  t.mock.method(globalThis, 'fetch', async url => new URL(url).hostname !== 'api.github.com' ? new Response('', { status: 503 }) : Response.json([
+    release('app-0.4.0', false, 'PokiSetup-0.4.0-100-macos.dmg'),
+    release('app-0.4.2-beta.200', true, 'PokiSetup-0.4.2-200-macos.dmg'),
+    release('app-0.5.0-alpha.300', true, 'PokiSetup-0.5.0-300-macos.dmg'),
+    release('app-0.6.0-prealpha.400', true, 'PokiSetup-0.6.0-400-macos.dmg'),
   ]));
-  for (const channel of ['stable', 'beta', 'alpha']) {
-    const setup = await latestSetup(channel);
-    assert.deepEqual([setup.tag, setup.name], ['app-alpha-latest', 'PokiSetup-0.2.2-661-macos.dmg'], channel);
+  for (const channel of ['stable', 'beta', 'alpha', 'pre-alpha']) {
+    assert.equal((await latestSetup(channel)).name, 'PokiSetup-0.4.2-200-macos.dmg', channel);
   }
-  assert.equal((await latestSetup('pre-alpha')).name, 'PokiSetup-0.2.3-700-macos.dmg');
+});
+
+test('a missing Beta installer does not silently install a preview', async t => {
+  t.mock.method(globalThis, 'fetch', async url => new URL(url).hostname !== 'api.github.com' ? new Response('', { status: 503 }) : Response.json([
+    { tag_name: 'app-alpha-latest', prerelease: true, assets: [
+      { name: 'PokiSetup-0.5.0-300-macos.dmg', browser_download_url: 'https://github.com/example/installer' },
+      { name: 'SHA256SUMS-desktop.txt', browser_download_url: 'https://github.com/example/sums' },
+    ] },
+  ]));
+  await assert.rejects(latestSetup('beta'), /No Poki Setup/);
 });
