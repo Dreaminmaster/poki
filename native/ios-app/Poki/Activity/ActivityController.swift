@@ -141,22 +141,24 @@ final class ActivityController {
 
     /// Ends the Live Activity at once, after the updates already on their way, so nothing is left on
     /// the Lock Screen or in the island.
-    func end() {
+    @discardableResult
+    func end(dismissalPolicy: ActivityUIDismissalPolicy? = nil) -> Task<Void, Never>? {
         wanted = nil
         finishTimer?.cancel(); foldTimer?.cancel(); eventTimer?.cancel()
         if Self.runPhases.contains(state.phase) { logRun("cut off by ending the Live Activity") }
         worker?.cancel(); worker = nil; plainWaiting = false
-        guard let activity else { return }
+        guard let activity else { return tail }
         self.activity = nil
         // A finished run or a problem stays on the Lock Screen with its final content for a while (HIG:
         // end at once, keep the outcome readable); anything else goes at once.
         let final: ActivityContent<PokiState>? = state.phase == .done || state.phase == .problem
             ? ActivityContent(state: state, staleDate: nil, relevanceScore: 0) : nil
-        let policy: ActivityUIDismissalPolicy = final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60))
+        let policy = dismissalPolicy ?? (final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60)))
         state.guide = nil; state.pin = nil; state.since = nil; state.event = nil; state.previous = nil
         state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.decision = nil; state.plan = nil
         let previous = tail
         tail = Task { await previous?.value; await activity.end(final, dismissalPolicy: policy) }
+        return tail
     }
 
     /// Takes the activity off the screen but keeps it wanted: the next work brings it back.

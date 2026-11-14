@@ -245,7 +245,7 @@ final class AppModel {
         signer.isIdle = { [weak self] in self?.signingIdle ?? false }
         signer.whyUnreachable = { [weak self] in self?.signerUnreachable ?? .loopback }
         signer.busyReason = { [weak self] in self?.signingBusyReason }
-        signer.beforeInstall = { [weak self] in self?.windDownForUpdate() }
+        signer.beforeExit = { [weak self] in await self?.windDownForUpdate() }
         signer.start()
     }
 
@@ -1001,14 +1001,28 @@ final class AppModel {
         }
     }
 
-    /// The owner tapped Install: Poki winds down for iOS to replace it. The automation session (and
-    /// its banner) closes, the Live Activity ends, the log is written; the loopback stays, since the
-    /// install runs over it. `wantsOn` is kept, so Poki turns on again when it reopens.
-    func windDownForUpdate() {
-        log.add("signing", "installing the update: winding down (Poki closes, then reopens from the notice)")
-        if automationPath == .inProcess { closeInProcess("the update") }
-        activity.end()
+    /// The update is accepted by iOS. Keep the loopback and wantsOn for the replacement app.
+    func windDownForUpdate() async {
+        sessionStartTask?.cancel()
+        idleTimer?.invalidate(); idleTimer = nil
+        sessionOn = false
+        background.stop()
+        voice.stop()
+        pairer.cancel()
+        pairingKeepAlive.stop()
+        background.releasePairing()
+        if automationPath == .inProcess {
+            await withCheckedContinuation { continuation in
+                closeInProcess("the update") { continuation.resume() }
+            }
+        } else if !Self.onSimulator {
+            await RunnerProbe.shutdown()
+        }
+        core.stop()
+        launcher.stop()
+        await activity.end(dismissalPolicy: .immediate)?.value
         AttentionNotice.clear()
+        log.add("signing", "update runtime stopped")
     }
 
     func stopSession() {

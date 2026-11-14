@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 // The standalone signer fixture has no iOS App Group.
 enum SharedContainer { static let defaults = UserDefaults.standard }
@@ -29,11 +30,20 @@ final class Timer: @unchecked Sendable {
     }
 }
 
+typealias UIBackgroundTaskIdentifier = Int
+extension Int { static let invalid = -1 }
+
 final class UIApplication {
     static let shared = UIApplication()
     static let willEnterForegroundNotification = Notification.Name("willEnterForeground")
-    func beginBackgroundTask(withName: String) -> Int { 1 }
-    func endBackgroundTask(_ id: Int) {}
+    private var nextTask = 0
+    var backgroundTasks: Set<Int> = []
+    func beginBackgroundTask(withName: String) -> Int {
+        nextTask += 1
+        backgroundTasks.insert(nextTask)
+        return nextTask
+    }
+    func endBackgroundTask(_ id: Int) { backgroundTasks.remove(id) }
     func perform(_ selector: Selector) {}
 }
 final class UIDevice { static let current = UIDevice(); let name = "Test iPhone" }
@@ -90,7 +100,74 @@ enum SignerBridge {
     }
 }
 
+enum UpdateResources {
+    nonisolated(unsafe) static var voiceAudio = true
+    nonisolated(unsafe) static var pairingListener = true
+    nonisolated(unsafe) static var audio = true
+    nonisolated(unsafe) static var pairingAudio = true
+    nonisolated(unsafe) static var location = true
+    nonisolated(unsafe) static var continuedRun = true
+    nonisolated(unsafe) static var activity = true
+    nonisolated(unsafe) static var automation = true
+    nonisolated(unsafe) static var savedAfterStop = false
+    nonisolated(unsafe) static var holdClose = false
+    nonisolated(unsafe) static var finishClose: (@MainActor () -> Void)?
+    nonisolated(unsafe) static var holdActivity = false
+    nonisolated(unsafe) static var finishActivity: CheckedContinuation<Void, Never>?
+    static var stopped: Bool { !voiceAudio && !pairingListener && !audio && !pairingAudio && !location && !continuedRun && !activity && !automation }
+}
+final class BackgroundKeeper {
+    func stop() { UpdateResources.audio = false; UpdateResources.continuedRun = false }
+    func releasePairing() { UpdateResources.location = false }
+}
+final class KeepAlive { func stop() { UpdateResources.pairingAudio = false } }
+enum ActivityUIDismissalPolicy { case immediate }
+final class ActivityController {
+    @discardableResult func end(dismissalPolicy: ActivityUIDismissalPolicy? = nil) -> Task<Void, Never>? {
+        Task {
+            if UpdateResources.holdActivity {
+                await withCheckedContinuation { UpdateResources.finishActivity = $0 }
+            }
+            UpdateResources.activity = false
+        }
+    }
+}
+final class Launcher { func stop() {} }
+final class VoiceModel { func stop() { UpdateResources.voiceAudio = false } }
+final class Pairer { func cancel() { UpdateResources.pairingListener = false } }
+enum RunnerProbe { static func shutdown() async { UpdateResources.automation = false } }
+enum AttentionNotice { static func clear() {} }
+final class SessionStore {
+    static let shared = SessionStore()
+    func flush() { UpdateResources.savedAfterStop = UpdateResources.stopped && UIApplication.shared.backgroundTasks.isEmpty }
+}
+enum ProcessExit {
+    nonisolated(unsafe) static var attempts: [Int32] = []
+    nonisolated(unsafe) static var real = false
+    nonisolated(unsafe) static var safe = false
+    static func terminate(_ code: Int32) {
+        attempts.append(code)
+        safe = UpdateResources.stopped && UpdateResources.savedAfterStop && UIApplication.shared.backgroundTasks.isEmpty
+        if real {
+            guard safe, code == 0 else { Darwin.exit(93) }
+            print("PASS: confirmed update terminates the process with status 0")
+            Darwin.exit(code)
+        }
+    }
+}
+final class DispatchQueue {
+    static let main = DispatchQueue()
+    private var pending: [() -> Void] = []
+    func asyncAfter(deadline: DispatchTime, execute: @escaping () -> Void) { pending.append(execute) }
+    func runPending() {
+        let actions = pending
+        pending = []
+        for action in actions { action() }
+    }
+}
+
 final class FakeCore {
+    func stop() {}
     func tool(_ name: String, arguments: String) async -> (text: String, isError: Bool) {
         ("UNEXPECTED: task reached the closed automation session", false)
     }
@@ -113,7 +190,7 @@ final class FakeCore {
     }
 
     @MainActor static func drain() async {
-        for _ in 0..<20 { await Task.yield() }
+        for _ in 0..<20 { DispatchQueue.main.runPending(); await Task.yield() }
     }
 
     nonisolated(unsafe) static var failures = 0
@@ -181,17 +258,59 @@ final class FakeCore {
         SignerBridge.holdsInstall = false
         SignerBridge.finishInstall?.resume()
         await install.value
-        Timer.advance(by: 14, oldProcessAlive: true)
+        Timer.advance(by: 4, oldProcessAlive: true)
         await drain()
-        let afterFourteen = slow.installMessage
+        let afterFour = slow.installMessage
         Timer.advance(by: 1, oldProcessAlive: true)
         await drain()
-        check(afterFourteen == "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." && slow.working == expected,
-              "the 15-second wait starts when the install returns", actual: "\(afterFourteen ?? "nil") | then: \(slow.working ?? "nil")")
+        check(afterFour == "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." && slow.working == expected,
+              "the confirmed exit falls back after 5 seconds", actual: "\(afterFour ?? "nil") | then: \(slow.working ?? "nil")")
+
+        ProcessExit.attempts = []
+        ProcessExit.real = CommandLine.arguments.contains("--exit-process")
+        UpdateResources.holdClose = true
+        UpdateResources.holdActivity = true
+        SignerBridge.holdsInstall = true
+        let closing = await prepared()
+        let model = AppModel(signer: closing)
+        model.wireSigner()
+        let updating = Task { @MainActor in await closing.install() }
+        await withCheckedContinuation { SignerBridge.installHeld = $0 }
+        await drain()
+        closing.finishNoticeAnswered()
+        await drain()
+        check(ProcessExit.attempts.isEmpty, "confirming before upload completes does not exit")
+        SignerBridge.installProgress?(["kind": "part", "id": "install", "fraction": 0.4])
+        await drain()
+        check(ProcessExit.attempts.isEmpty && !UpdateResources.savedAfterStop,
+              "pending automation close prevents saving and exit")
+        UpdateResources.finishClose?()
+        UpdateResources.finishClose = nil
+        await drain()
+        check(ProcessExit.attempts.isEmpty && !UpdateResources.savedAfterStop,
+              "pending Live Activity dismissal prevents saving and exit")
+        UpdateResources.finishActivity?.resume()
+        UpdateResources.finishActivity = nil
+        await drain()
+        check(ProcessExit.attempts == [0] && ProcessExit.safe,
+              "confirmed system installation stops keep-alives, saves state, and exits normally",
+              actual: "exit codes \(ProcessExit.attempts), resources stopped \(UpdateResources.stopped), saved after stop \(UpdateResources.savedAfterStop), background tasks \(UIApplication.shared.backgroundTasks.count)")
+        closing.finishNoticeAnswered()
+        await drain()
+        check(ProcessExit.attempts.count <= 1, "duplicate confirmation does not repeat exit")
+        Timer.advance(by: 5, oldProcessAlive: true)
+        await drain()
+        check(closing.needsReopen && closing.installMessage?.contains("If the update is still available, try again.") == true,
+              "surviving process gets fallback without claiming install success", actual: closing.installMessage)
+        SignerBridge.holdsInstall = false
+        SignerBridge.finishInstall?.resume()
+        await updating.value
+        check(closing.needsReopen && closing.installMessage == expected,
+              "late install result preserves fallback and reports confirmed success", actual: closing.installMessage)
 
         SignerBridge.fails = true
         let failed = await installed()
         check(failed.lastError == "Installation failed." && failed.working?.contains("If the update is still available, try again.") == true, "failed installation does not claim the update is installed", actual: failed.working)
-        exit(failures == 0 ? 0 : 1)
+        Darwin.exit(failures == 0 ? 0 : 1)
     }
 }
