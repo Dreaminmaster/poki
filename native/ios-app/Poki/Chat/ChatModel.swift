@@ -131,6 +131,7 @@ final class ChatModel {
     private var toolCalls = 0
     private var taskResult: TaskResult?
     private var client: ModelClient?
+    private var restoredContext: String?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
     private var modelPlan: [String]?
 
@@ -215,6 +216,7 @@ final class ChatModel {
         if isDemo { entries = [ChatEntry(.time(Date()))] + greeting.dropFirst(); return }
         loop = nil
         client = nil
+        restoredContext = nil
         calls = []
         planID = nil; noteID = nil; modelPlan = nil
         sessionID = UUID().uuidString.lowercased()
@@ -230,6 +232,7 @@ final class ChatModel {
         planID = nil; noteID = nil; modelPlan = nil
         sessionID = session.id
         calls = session.calls
+        restoredContext = session.modelContext
         entries = session.entries.isEmpty ? greeting : session.entries
     }
 
@@ -341,7 +344,7 @@ final class ChatModel {
         planID = nil; noteID = nil; modelPlan = nil
         taskApp = nil
         taskApps = TaskApps(); taskRequest = text; toolRoute = nil
-        let instructions = Harness.instructions(for: text)
+        let instructions = [Harness.instructions(for: text), restoredContext].compactMap { $0 }.joined(separator: "\n\n")
         let images = lastImages
         if Self.direct, provider == .anthropic || provider == .openai {
             // Another model starts a new conversation on the model's side; the chat on screen stays.
