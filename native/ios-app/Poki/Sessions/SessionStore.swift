@@ -128,6 +128,8 @@ final class SessionStore {
     var connectorAgent: ((String) -> String?)?
     /// The connector each outside agent session came through: id → sha256 of its secret.
     private var connectors: [String: String] = [:]
+    /// The conversation each outside MCP session's calls are kept in: session id → conversation id.
+    private var conversations: [String: String] = [:]
     /// The session whose call is running, for approvals and hand-offs (they carry no session).
     private var currentSession: String?
     /// The outside agent session whose call is running, if any.
@@ -337,14 +339,14 @@ final class SessionStore {
             }
             if let connector { connectors[id] = connector }
         case .session(.ended(let id)):
-            if var session = session(id), session.live {
+            if var session = session(conversations[id] ?? id), session.live {
                 session.live = false
                 session.outcome = session.outcome ?? .done
                 session.updated = Date()
                 put(session)
             }
         case .toolStarted(_, let summary, let id?):
-            currentSession = id
+            currentSession = conversation(for: id)
             update(agent: id) { session in
                 session.entries.append(ChatEntry(.step(summary, ok: nil)))
             }
@@ -377,11 +379,26 @@ final class SessionStore {
         }
     }
 
-    /// The outside agent's session, made on its first call; a session idle for 10 minutes is over.
+    // Some clients initialize a new MCP session for each call. Keep those calls in the same
+    // recent conversation without merging older saved conversations or reopening archived ones.
+    private func conversation(for id: String) -> String {
+        if let known = conversations[id] { return known }
+        var kept = id
+        if session(id) == nil {
+            let client = clients[id] ?? AppLocalization.text(LocalizedStringResource("An agent")), connector = connectors[id], now = Date()
+            let recent = sessions.filter { $0.kind == .agent && $0.archived == nil && $0.client == client && $0.connector == connector && now.timeIntervalSince($0.updated) <= Self.agentIdle }
+            kept = recent.max { $0.updated < $1.updated }?.id ?? id
+        }
+        conversations[id] = kept
+        return kept
+    }
+
+    /// The outside agent's conversation, made on its first call; one idle for 10 minutes is over.
     private func update(agent id: String, _ change: (inout SavedSession) -> Void) {
+        let conversation = self.conversation(for: id)
         let client = clients[id] ?? AppLocalization.text(LocalizedStringResource("An agent"))
-        var session = self.session(id) ?? SavedSession(id: id, kind: .agent, client: client, title: client, started: Date(), updated: Date(), live: true,
-                                                         outcome: nil, entries: [ChatEntry(.time(Date()))], calls: [])
+        var session = self.session(conversation) ?? SavedSession(id: conversation, kind: .agent, client: client, title: client, started: Date(), updated: Date(), live: true,
+                                                                   outcome: nil, entries: [ChatEntry(.time(Date()))], calls: [])
         // A hand-off's own session is the in-app agent's (its steps come from ChatModel).
         guard session.kind == .agent else { return }
         session.live = true
@@ -402,9 +419,9 @@ final class SessionStore {
         }
     }
 
-    /// The hand-off's chat takes the outside session's id, so the agent's own calls and its hand-off
-    /// stay apart: the hand-off gets its own row.
-    func handoffID(for agentSession: String?) -> String { "\(agentSession ?? "agent")-ask-\(UUID().uuidString.prefix(8).lowercased())" }
+    /// The hand-off's chat takes the id of the outside session's conversation, so the agent's own calls
+    /// and its hand-off stay apart: the hand-off gets its own row.
+    func handoffID(for agentSession: String?) -> String { "\(agentSession.map(conversation(for:)) ?? "agent")-ask-\(UUID().uuidString.prefix(8).lowercased())" }
 
     func client(of agentSession: String?) -> String {
         if let id = agentSession, let name = clients[id] { return name }
