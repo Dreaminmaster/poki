@@ -203,6 +203,13 @@ final class AppModel {
     private let pairer: DevicePairing
     private let pairingKeepAlive = KeepAlive()
     private let activity = ActivityController()
+
+    /// Presentation-only refresh: no session, runner, approval or conversation is restarted.
+    func languageChanged() {
+        ApprovalNotice.registerActions()
+        activity.languageChanged()
+    }
+
     /// The Live Activity during a talk with Poki: what the talk is doing, and End.
     private var talkActivity: TalkActivity?
     let log = AppLog.shared
@@ -219,13 +226,13 @@ final class AppModel {
     /// session was turned off mid-step, or the call hung) stops counting after two minutes, so a
     /// lost event cannot keep Install off for good.
     var signingBusyReason: String? {
-        if !approvals.isEmpty { return String(localized: "An approval is waiting for you.") }
-        if sessionStarting { return String(localized: "Poki is turning on.") }
+        if !approvals.isEmpty { return AppLocalization.text(LocalizedStringResource("An approval is waiting for you.")) }
+        if sessionStarting { return AppLocalization.text(LocalizedStringResource("Poki is turning on.")) }
         if let step = stepUnderWay, sessionOn, Date().timeIntervalSince(step.started) < 120 {
-            return String(localized: "The agent is doing a step, \(step.summary).")
+            return AppLocalization.text(LocalizedStringResource("The agent is doing a step, \(step.summary)."))
         }
         let since = Date().timeIntervalSince(lastStepAt)
-        if since < 60 { return String(localized: "The agent acted \(Int(since)) s ago. Install opens a minute after its last step.") }
+        if since < 60 { return AppLocalization.text(LocalizedStringResource("The agent acted \(Int(since)) s ago. Install opens a minute after its last step.")) }
         return nil
     }
 
@@ -689,7 +696,7 @@ final class AppModel {
         // PIN: setup's pairing page with a sample code, as if Settings had asked for one.
         if scene == "PIN" { pairing = .pin("482913"); return }
         let now = Date()
-        let messages = String(localized: "Messages")
+        let messages = AppLocalization.text(LocalizedStringResource("Messages"))
         // The sample relay is not saved. Sample agents go into the keychain, so only a simulator gets them.
         if relayAddress == nil { relayAddress = RelayAddress("https://your-relay.example") }
         #if targetEnvironment(simulator)
@@ -707,19 +714,19 @@ final class AppModel {
             runnerPaused = true
             runner = RunnerStatus(state: "standby", detail: "It starts when an agent asks.")
             recentSteps = (0..<12).map { i in
-                RecentStep(text: String(localized: "Tap “Send”"), app: messages, at: now.addingTimeInterval(Double(i - 11) * 84 / 11 - 300))
+                RecentStep(text: AppLocalization.text(LocalizedStringResource("Tap “Send”")), app: messages, at: now.addingTimeInterval(Double(i - 11) * 84 / 11 - 300))
             }
             return
         }
         runner = RunnerStatus(state: "running")
         recentSteps = [
-            RecentStep(text: String(localized: "Open Messages"), app: String(localized: "Home Screen"), at: now.addingTimeInterval(-70)),
-            RecentStep(text: String(localized: "Tap the chat with Mom"), app: messages, at: now.addingTimeInterval(-52)),
-            RecentStep(text: String(localized: "Type “On my way”"), app: messages, at: now.addingTimeInterval(-41)),
+            RecentStep(text: AppLocalization.text(LocalizedStringResource("Open Messages")), app: AppLocalization.text(LocalizedStringResource("Home Screen")), at: now.addingTimeInterval(-70)),
+            RecentStep(text: AppLocalization.text(LocalizedStringResource("Tap the chat with Mom")), app: messages, at: now.addingTimeInterval(-52)),
+            RecentStep(text: AppLocalization.text(LocalizedStringResource("Type “On my way”")), app: messages, at: now.addingTimeInterval(-41)),
             RecentStep(text: "Tap at 212, 640", app: messages, failure: "failed: nothing changed", at: now.addingTimeInterval(-30)),
         ]
-        activityText = String(localized: "Tap “Send”")
-        approvals = [PendingApproval(id: "sample", app: messages, summary: String(localized: "Send “On my way” to Mom"),
+        activityText = AppLocalization.text(LocalizedStringResource("Tap “Send”"))
+        approvals = [PendingApproval(id: "sample", app: messages, summary: AppLocalization.text(LocalizedStringResource("Send “On my way” to Mom")),
                                      reason: "sending a message (\"send\")", expires: now.addingTimeInterval(25))]
     }
 
@@ -746,7 +753,7 @@ final class AppModel {
 
     func askToConnect(client: String, callback: String, connector: String) async -> Bool {
         answerConnection(false) // one at a time: an older ask is declined
-        let name = identity.secrets.first { $0.hash == connector }?.name ?? String(localized: "a connector")
+        let name = identity.secrets.first { $0.hash == connector }?.name ?? AppLocalization.text(LocalizedStringResource("a connector"))
         let ask = ConnectionAsk(client: client, callback: callback, connector: name)
         log.add("relay", "\(client) at \(callback) asks to sign in through \(name): waiting for the owner")
         ConnectionNotice.post(ask)
@@ -820,7 +827,7 @@ final class AppModel {
                 // record from a computer (Poki Setup) fails its TLS session here every time.
                 if SetupStep.onDevicePairing, text.contains("device socket io failed"), Self.isLockdownRecord(path) {
                     if self.pairingTrouble == nil { self.log.add("pairing", "check: the computer's pairing file does not open the loopback on this iOS; pair on this iPhone") }
-                    self.pairingTrouble = String(localized: "the pairing file from a computer does not work over the loopback on this iOS version. Pair this iPhone here once; the pairing stays.")
+                    self.pairingTrouble = AppLocalization.text(LocalizedStringResource("the pairing file from a computer does not work over the loopback on this iOS version. Pair this iPhone here once; the pairing stays."))
                     return false
                 }
                 self.log.add("pairing", "check could not finish: \(text) [\(self.networkNote)]")
@@ -952,8 +959,8 @@ final class AppModel {
         exitingAfterStop = true
         log.add("session", "turned off: Poki exits, and opening it again starts the next task")
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Open Poki Again to Start Another Task")
-        content.body = String(localized: "Poki closed after you stopped it. Open it to turn it on again.")
+        content.title = AppLocalization.text(LocalizedStringResource("Open Poki Again to Start Another Task"))
+        content.body = AppLocalization.text(LocalizedStringResource("Poki closed after you stopped it. Open it to turn it on again."))
         content.interruptionLevel = .timeSensitive
         content.userInfo = ["poki_link": "poki://chat"]
         content.sound = .default
@@ -982,8 +989,8 @@ final class AppModel {
         log.add("session", "turning on after the automation session was closed: Poki restarts so agents can see the screen")
         wantsOn = true
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Tap to Open Poki")
-        content.body = String(localized: "Poki restarted so agents can see the screen again. It turns on when it opens.")
+        content.title = AppLocalization.text(LocalizedStringResource("Tap to Open Poki"))
+        content.body = AppLocalization.text(LocalizedStringResource("Poki restarted so agents can see the screen again. It turns on when it opens."))
         content.interruptionLevel = .timeSensitive
         content.userInfo = ["poki_link": "poki://chat"]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "nz.zheha.poki.relaunch", content: content,
@@ -1172,8 +1179,8 @@ final class AppModel {
         activity.update { $0.runnerPaused = false; $0.phase = .working; $0.headline = "Starting the runner"; $0.since = Date() }
         if automationPath == .inProcess, inProcessUsedUp {
             log.add("runner", "an agent asked, but the session of this launch was closed: open Poki to start it again")
-            problem = String(localized: "Open Poki so agents can see the screen again: it restarts once.")
-            AttentionNotice.post(title: String(localized: "Open Poki"), body: String(localized: "An agent is waiting. Open Poki so it can see the screen again."))
+            problem = AppLocalization.text(LocalizedStringResource("Open Poki so agents can see the screen again: it restarts once."))
+            AttentionNotice.post(title: AppLocalization.text(LocalizedStringResource("Open Poki")), body: AppLocalization.text(LocalizedStringResource("An agent is waiting. Open Poki so it can see the screen again.")))
         }
         if automationPath == .inProcess, runner.isRunning { warmInProcess(asked); return }
         launchRunner()
@@ -1562,15 +1569,15 @@ final class AppModel {
     private func record(_ approval: PendingApproval, approved: Bool?) {
         let detail: String
         if ApprovalClassifier.modelAnswered(approval.id), let verdict = ApprovalClassifier.verdicts[approval.id] {
-            detail = (approved == true ? String(localized: "Allowed automatically") : String(localized: "Not allowed automatically")) + (verdict.reason.isEmpty ? "" : ": \(verdict.reason)")
+            detail = (approved == true ? AppLocalization.text(LocalizedStringResource("Allowed automatically")) : AppLocalization.text(LocalizedStringResource("Not allowed automatically"))) + (verdict.reason.isEmpty ? "" : ": \(verdict.reason)")
         } else if ApprovalClassifier.mode == .off, !ApprovalClassifier.requiresOwner(approval) {
-            detail = String(localized: "Allowed, asking is off")
+            detail = AppLocalization.text(LocalizedStringResource("Allowed, asking is off"))
 
         } else {
             switch approved {
-            case true?: detail = String(localized: "You allowed it")
-            case false?: detail = String(localized: "You did not allow it")
-            case nil: detail = String(localized: "Ran out before an answer")
+            case true?: detail = AppLocalization.text(LocalizedStringResource("You allowed it"))
+            case false?: detail = AppLocalization.text(LocalizedStringResource("You did not allow it"))
+            case nil: detail = AppLocalization.text(LocalizedStringResource("Ran out before an answer"))
             }
         }
         let chat = AskPoki.chat
@@ -1729,7 +1736,7 @@ final class AppModel {
         SetupVault.storePairing(data)
         setup.pairingFile = AppFiles.pairingFile.path
         pairingTrouble = nil; pairingVerifiedAt = nil
-        pairingNote = String(localized: "Pairing file received.")
+        pairingNote = AppLocalization.text(LocalizedStringResource("Pairing file received."))
         log.add("pairing", "pairing file \(how)")
     }
 
@@ -1742,7 +1749,7 @@ final class AppModel {
     /// opened from AirDrop or Files. Returns the setup step to show, or nil when the link was none of these.
     func open(link url: URL) -> SetupStep? {
         if url.isFileURL {
-            do { try importPairingFile(from: url) } catch { pairingNote = String(localized: "Invalid Pairing File. \(error.localizedDescription)") }
+            do { try importPairingFile(from: url) } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
             try? FileManager.default.removeItem(at: url)
             return .pairing
         }
@@ -1751,21 +1758,21 @@ final class AppModel {
         switch url.host() {
         case "pairing":
             if let text = item("data"), let data = Data(base64URL: text) {
-                do { try importPairingFile(data, how: "received by link") } catch { pairingNote = String(localized: "Invalid Pairing File. \(error.localizedDescription)") }
+                do { try importPairingFile(data, how: "received by link") } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
             } else if let from = item("url").flatMap(URL.init(string:)), ["http", "https"].contains(from.scheme ?? "") {
                 let expected = item("sha256")?.lowercased()
-                pairingNote = String(localized: "Fetching the pairing file from \(from.host() ?? String(localized: "your computer"))…")
+                pairingNote = AppLocalization.text(LocalizedStringResource("Fetching the pairing file from \(from.host() ?? AppLocalization.text("your computer"))…"))
                 Task {
                     do {
                         let (data, _) = try await URLSession.shared.data(from: from)
                         if let expected, SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() != expected {
-                            throw NSError(domain: "poki", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "the file does not match the link")])
+                            throw NSError(domain: "poki", code: 1, userInfo: [NSLocalizedDescriptionKey: AppLocalization.text(LocalizedStringResource("the file does not match the link"))])
                         }
                         try importPairingFile(data, how: "fetched from \(from.host() ?? "?")")
-                    } catch { pairingNote = String(localized: "Could not get the pairing file. \(error.localizedDescription)") }
+                    } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Could not get the pairing file. \(error.localizedDescription)")) }
                 }
             } else {
-                pairingNote = String(localized: "The pairing link carried no file.")
+                pairingNote = AppLocalization.text(LocalizedStringResource("The pairing link carried no file."))
             }
             return .pairing
         case "setup" where item("step") != nil:
@@ -1966,11 +1973,11 @@ final class AppModel {
         case .opening, .open, .waitingForPasscode, .failed("open_poki_first", _), .failed("open_under_way", _):
             return nil
         case .passcodeMissed, .failed("passcode_declined", _):
-            return (String(localized: "iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode."), false)
+            return (AppLocalization.text(LocalizedStringResource("iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode.")), false)
         case .failed(let code, _) where loopback.cellularOnly:
-            return (String(localized: "Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again."), false)
+            return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again.")), false)
         case .failed(let code, _):
-            return (String(localized: "Poki could not open its own automation session (\(code)), and the loopback refused the connection. Check the loopback in Setup, then try again."), true)
+            return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)), and the loopback refused the connection. Check the loopback in Setup, then try again.")), true)
         }
     }
 

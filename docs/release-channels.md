@@ -6,8 +6,8 @@ releases Poki Setup installs and renews with.
 
 | Channel | Tag | Title | GitHub release | Who it is for |
 | --- | --- | --- | --- | --- |
-| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release (not marked Latest) | everyone |
-| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease | testers |
+| Stable | `app-X.Y.Z` | Poki v0.3.0 | its own full release | everyone |
+| Beta | `app-X.Y.Z-beta.K` | Poki v0.3.0 Beta 1 | its own prerelease, which can be made a full release marked Latest | testers |
 | Alpha | `app-X.Y.Z-alpha.N` | Poki v0.3.0 (712) Alpha | rolling `app-alpha-latest`, prerelease | early testers |
 | Pre-alpha | `app-X.Y.Z-prealpha.N` | Poki v0.3.0 (712) Pre-alpha | rolling `app-prealpha-latest`, prerelease | developers |
 
@@ -15,14 +15,31 @@ A channel includes the channels above it: Beta installs the newest Stable or Bet
 the newest Stable, Beta or Alpha, and Pre-alpha the newest release of any kind. Poki Setup's own
 updates (`desktop-v*`, `desktop-alpha-*` and `desktop-prealpha-*` tags) follow the same channel.
 If no installable release exists in a channel or any more stable channel it includes, Poki Setup
-tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. Stable and Beta
-therefore fall back to Alpha while neither offers a release. This is `pick` in
+tries the next less stable channel, in the order Stable, Beta, Alpha, Pre-alpha. This is `pick` in
 `desktop/core/src/release.rs`, not a change to the saved channel.
 
+**When Stable and Beta have no release of their own, they fall back to Alpha.** A person on Stable
+or Beta then installs and renews with the newest Alpha build until a Beta or Stable release is
+published, and keeps the channel they chose.
+
 The checkout installer defaults to Alpha (`bin/install-iphone.mjs`); Poki Setup without a saved
-choice defaults to Stable. On November 13, 2026, Alpha offered Poki 0.4.0 (1130), and Beta and
-Stable had no app release of their own. Read current release metadata on each run. Do not pin
-that snapshot or silently switch an existing user's channel.
+choice defaults to Stable. Read current release metadata on each run, and do not silently switch
+an existing user's channel.
+
+## When GitHub refuses the release list
+
+Poki Setup, the checkout installer and the iPhone app read the release list from `api.github.com`
+without signing in. GitHub limits these anonymous requests per network address, and everyone
+behind the same address shares that limit. Over it, GitHub answers 403 or 429, and the error reads
+`Could not read Poki's releases from GitHub` with the status. The error does not say whether it was
+the limit or another refusal, but a 403 or 429 here is usually the limit. The phone shows Not Found
+as the newest version on its channel instead.
+
+Retrying at once does not help, because each attempt is another request against the same limit. Switch to
+another network or proxy node and try again, or wait an hour. In Poki Setup, Install from an IPA
+File installs a `Poki-external-*.ipa` and the `Poki-signing.zip` beside it downloaded from the
+release page in a browser, which does not read the list. Use it only over a Poki signed with the
+same Apple Account.
 
 Poki Setup orders versions so that `0.3.0-beta.1 < 0.3.0-beta.2 < 0.3.0 < 0.3.0-712`: a pre-release
 suffix sorts below the plain version, a build number above it.
@@ -72,6 +89,65 @@ Every publish creates a draft first, checks its file count, then publishes. Rele
 `Poki-external-<name>.ipa`, `Poki-signing.zip`, `poki-relay-worker.js` (the relay Worker Poki Setup
 deploys) and `SHA256SUMS`, plus Poki Setup's `PokiSetup-*` installers and `SHA256SUMS-desktop.txt`.
 
+## Installed clients
+
+A Poki or Poki Setup that is already installed picks its update with the code it shipped with, so a
+release has to suit that code as published. Two of its rules decide the layout. Both are in every
+Poki published so far and in Poki Setup 0.2.2 (661).
+
+- **The file name is the build.** The picker reads the version and build from the IPA's name
+  (`installable` in `desktop/core/src/release.rs`). Poki on the iPhone installs an update only once
+  the copy it signed reports that same version and build (`updateNotReady` in
+  `native/ios-app/Poki/Signing/SelfSigner.swift`). A Beta's `Poki-external-0.4.0-beta.1.ipa` is
+  offered as build `beta.1`, the signed copy reports its number, and Install never starts. Poki
+  Setup's Renew has no such check and installs the file.
+- **One `Poki-signing.zip` per tag.** `fetch` keeps downloads in a folder named after the release
+  tag and uses a `Poki-signing.zip` that is already there. On a rolling tag, a new build is signed
+  with the entitlements cached from an earlier one. This is harmless while the entitlements do not
+  change; `publish-compat.sh` prints a digest to compare.
+
+Until people have a Poki without these rules, a Beta gets two more releases, made by hand from the
+same Pre-alpha files:
+
+| Release | Tag | Made | Picked by |
+| --- | --- | --- | --- |
+| The Alpha, on its own | `app-X.Y.Z-alpha.N`, the tag Promote to Alpha made | after Promote to Alpha | Alpha users, in place of the rolling release (same build, published later) |
+| The Beta, under its build number | `ios-beta-X.Y.Z-N` | public just before the Beta is approved | Stable and Beta users, in place of `app-X.Y.Z-beta.K` (a build number sorts above `beta.K`) |
+
+Both carry `Poki-external-X.Y.Z-N.ipa`, `Poki-signing.zip`, `poki-relay-worker.js` and `SHA256SUMS`.
+`scripts/release/publish-compat.sh` makes them in three steps:
+
+1. `check` (the default) downloads the Pre-alpha run's files and verifies them. Run it before
+   Promote to Alpha too: it prints the digest of the entitlements in `Poki-signing.zip`, and a
+   changed digest has to be known before a rolling tag hands the new build to clients that cached
+   the old zip.
+2. `draft` uploads a draft release, which no client can see.
+3. `public --confirm <tag>` checks the draft again, file by file, against the same Pre-alpha files,
+   and only then makes it public. A draft with a file missing, a file from another build or another
+   title stays a draft: delete it and run `draft` again. Without `--confirm` it prints the tag and
+   the files and publishes nothing.
+
+`draft` and `public` are not behind an environment approval. Only the repository owner runs them, or
+someone the owner has told to for that build; agents do not, and a draft that exists is not that
+permission. Releases of a later version sort above both. A Stable's `Poki-external-X.Y.Z.ipa` is
+offered with an empty build and will need the same second release; the script does not make that
+one yet.
+
+To take a Beta back, return `app-X.Y.Z-beta.K` to a draft first and `ios-beta-X.Y.Z-N` second. In
+the other order Stable and Beta users are offered the beta-named file alone and stay on an update
+they cannot install. Afterwards all three channels fall back to the Alpha, which is the same build:
+taking releases back does not take a build away from people, and a Poki that installed it does not
+go back. A bad build is replaced by publishing a newer one.
+
+Before publishing, `node scripts/release/first-hop-check.mjs <plan> --build N` prints what Poki 0.3.1
+and Poki Setup 0.2.2 (661) pick on each channel after every step of a plan in
+`scripts/release/plans/`, and fails when a channel ends on another build or on an update it cannot
+install. `--live` reads today's releases from GitHub in place of the saved copy; with
+`plans/as-published.json` it shows where a release stands after each real publish.
+`plans/withdraw-beta.json` replays taking a Beta back.
+`scripts/release/oracle.sh` runs the picker cut from the `app-0.3.1-alpha.752` source over the same
+releases and fails when the script's port of it answers differently.
+
 ## Branches
 
 - `main`: protected trunk; PRs only. Every merge is a pre-alpha.
@@ -104,9 +180,9 @@ the 5 macOS runners: Poki Setup's core tests, the Rust lockfiles, and the workfl
 It starts with cold caches (about 20 minutes) and will be
 removed once the pipeline above has shipped a few builds.
 
-The Mac server's update notice (`src/update-check.mjs`) reads `releases/latest` and only understands
-Poki MCP's `vX.Y.Z` tags, so app releases are never marked Latest: Latest stays on Poki MCP's newest
-release.
+App releases can be marked Latest, for example a Beta published as a full release. The Mac
+server's update notice (`src/update-check.mjs`) only understands Poki MCP's `vX.Y.Z` tags, and links
+to Poki MCP's prebuilt package name its `vX.Y.Z` release instead of `releases/latest`.
 
 ## Approval coverage
 

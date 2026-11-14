@@ -1,6 +1,367 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %@, make sure it is connected with the loopback on, then come back; this page updates by itself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %@, make sure it is connected with the loopback on, then come back; this page updates by itself."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择 %@，但 10.7.0.1 目前没有响应。请打开 %@，确认已连接并开启回环，然后返回；此页面会自动更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已選擇 %@，但 10.7.0.1 目前沒有回應。請打開 %@，確認已連線並開啟迴路，然後返回；此頁面會自動更新。"
+          }
+        }
+      }
+    },
+    "%@ · Coming in an update" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Coming in an update"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 将在后续更新中提供"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 將在後續更新中提供"
+          }
+        }
+      }
+    },
+    "%@ · Text chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Text chat"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天"
+          }
+        }
+      }
+    },
+    "%@ · Text chat and live voice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Text chat and live voice"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天和实时语音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 文字聊天和即時語音"
+          }
+        }
+      }
+    },
+    "Agents' actions go through" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agents' actions go through"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理操作可正常执行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理操作可正常執行"
+          }
+        }
+      }
+    },
+    "As reported by users of %@; not checked against its documentation. The status on the Loopback page tells whether it works." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As reported by users of %@; not checked against its documentation. The status on the Loopback page tells whether it works."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据 %@ 用户反馈整理，尚未核对其文档。是否可用请查看“回环”页面的状态。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根據 %@ 使用者回報整理，尚未核對其文件。是否可用請查看「迴路」頁面的狀態。"
+          }
+        }
+      }
+    },
+    "Background Hold" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background Hold"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台保持"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "背景保持"
+          }
+        }
+      }
+    },
+    "Dictation to %@; Poki reads the answer aloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dictation to %@; Poki reads the answer aloud"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写发送给 %@；Poki 会朗读回复"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聽寫傳送給 %@；Poki 會朗讀回覆"
+          }
+        }
+      }
+    },
+    "Follow System" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow System"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随系统"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟隨系統"
+          }
+        }
+      }
+    },
+    "Language" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语言"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語言"
+          }
+        }
+      }
+    },
+    "Memory holds the routines and notes every agent shares. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memory holds the routines and notes every agent shares. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记忆保存供所有代理共享的流程和笔记。诊断包含日志、检查、后台保持、地址和实时活动预览。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記憶儲存供所有代理共用的流程與筆記。診斷包含日誌、檢查、背景保持、位址與即時動態預覽。"
+          }
+        }
+      }
+    },
+    "Optional, for live voice without an OpenAI key on this iPhone: run bin/voice-bridge.mjs on your Mac and enter the address it gives." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Optional, for live voice without an OpenAI key on this iPhone: run bin/voice-bridge.mjs on your Mac and enter the address it gives."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选：如需在此 iPhone 未配置 OpenAI 密钥时使用实时语音，请在 Mac 上运行 bin/voice-bridge.mjs，并输入其提供的地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選用：如需在此 iPhone 未設定 OpenAI 金鑰時使用即時語音，請在 Mac 上執行 bin/voice-bridge.mjs，並輸入其提供的位址。"
+          }
+        }
+      }
+    },
+    "Pairing on the phone itself needs iOS 27; this iPhone runs iOS %@. Pair it from a computer instead." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pairing on the phone itself needs iOS 27; this iPhone runs iOS %@. Pair it from a computer instead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在手机上配对需要 iOS 27；此 iPhone 运行的是 iOS %@。请改用电脑配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在手機上配對需要 iOS 27；此 iPhone 執行的是 iOS %@。請改用電腦配對。"
+          }
+        }
+      }
+    },
+    "Poki could not reach the voice service. Check the network, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法连接语音服务。请检查网络后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法連線語音服務。請檢查網路後再試。"
+          }
+        }
+      }
+    },
+    "Poki keeps this key; chatting with %@ comes in an update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki keeps this key; chatting with %@ comes in an update."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会保存此密钥；与 %@ 聊天的功能将在后续更新中提供。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會儲存此金鑰；與 %@ 聊天的功能將在後續更新中提供。"
+          }
+        }
+      }
+    },
+    "That file could not be imported: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That file could not be imported: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法导入此文件：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法匯入此檔案：%@"
+          }
+        }
+      }
+    },
     "!" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3250,6 +3611,12 @@
     },
     "Dismissed %@’s cookie banner: “%@”" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已關閉 %1$@ 的 Cookie 提示：「%2$@」"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3260,6 +3627,12 @@
     },
     "Dismissed %@’s privacy notice: “%@”" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已關閉 %1$@ 的私隱通知：「%2$@」"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3270,6 +3643,12 @@
     },
     "Dismissed %@’s terms notice: “%@”" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已關閉 %1$@ 的條款通知：「%2$@」"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -3486,28 +3865,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "結束對話"
-          }
-        }
-      }
-    },
-    "Ends the session and disconnects agents until you turn Poki on again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "结束会话并断开智能体连接，直到重新开启 Poki。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the session and disconnects agents until you turn Poki back on."
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "結束工作階段並中斷智慧體連線，直到重新開啟 Poki。"
           }
         }
       }
@@ -3894,6 +4251,12 @@
     },
     "Forward" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前進"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -5574,6 +5937,12 @@
     },
     "Look for “%@”" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尋找「%@」"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -7286,6 +7655,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟 WhatsApp"
+          }
+        }
+      }
+    },
+    "Open the GitHub app on this iPhone, go to the JosssphZhou/poki repository, and star it. If the app is not installed, stop and ask me to install it from the App Store. Do not use a browser. If I am not signed in, stop on the login screen and let me sign in myself. If I have already starred the repository, tell me and leave it starred." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the GitHub app on this iPhone, go to the JosssphZhou/poki repository, and star it. If the app is not installed, stop and ask me to install it from the App Store. Do not use a browser. If I am not signed in, stop on the login screen and let me sign in myself. If I have already starred the repository, tell me and leave it starred."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开这台 iPhone 上的 GitHub 应用，进入 JosssphZhou/poki 仓库页，点 Star。如果没有安装 GitHub 应用，就停下并提示我先去 App Store 安装，不要使用浏览器。如果我没有登录，就停在登录页，交给我自己登录。如果我已经点过 Star，就告诉我，不要取消。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開這台 iPhone 上的 GitHub 應用程式，進入 JosssphZhou/poki 儲存庫頁面，點 Star。如果沒有安裝 GitHub 應用程式，就停下並提示我先去 App Store 安裝，不要使用瀏覽器。如果我沒有登入，就停在登入頁，交給我自己登入。如果我已經點過 Star，就告訴我，不要取消。"
           }
         }
       }
@@ -9338,6 +9729,12 @@
     },
     "Read the page" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取頁面"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -9364,6 +9761,12 @@
     },
     "Reload" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新載入"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -9972,6 +10375,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "即時語音對話，Poki 回答並操作"
+          }
+        }
+      }
+    },
+    "Star Poki" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Star Poki"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给 Poki 点 Star"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "給 Poki 點 Star"
           }
         }
       }
@@ -11145,6 +11570,12 @@
     },
     "Stop Task" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止任務"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -11647,6 +12078,12 @@
     },
     "The page Poki is using. Double-tap to take over." : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在使用的網頁。點兩下接管。"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -12814,6 +13251,38 @@
         }
       }
     },
+    "The voice bridge answered %lld: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音桥接返回错误（%lld），%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語音橋接返回錯誤（%lld），%@"
+          }
+        }
+      }
+    },
+    "The voice connection took too long. Check the network, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音连接超时。请检查网络后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "語音連線逾時。請檢查網路後再試。"
+          }
+        }
+      }
+    },
     "This Anthropic key can’t use %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -13224,28 +13693,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隧道已開，無應答"
-          }
-        }
-      }
-    },
-    "Turn Off Poki" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关闭 Poki"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Turn Off Poki"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "關閉 Poki"
           }
         }
       }
@@ -13672,6 +14119,12 @@
     },
     "Type “%@” in “%@”" : {
       "localizations" : {
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「%2$@」中輸入「%1$@」"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -13915,6 +14368,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "夜深了，"
+          }
+        }
+      }
+    },
+    "Waking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在唤醒"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在喚醒"
+          }
+        }
+      }
+    },
+    "WebRTC made no connection offer." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebRTC 未能发起连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebRTC 未能發起連線。"
           }
         }
       }
@@ -14944,6 +15429,22 @@
         }
       }
     },
+    "no reason given" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未说明原因"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未說明原因"
+          }
+        }
+      }
+    },
     "pi has no model %@ for %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -15189,6 +15690,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "聽寫"
+          }
+        }
+      }
+    },
+    "Dictation & Mute" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写与静音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聽寫與靜音"
           }
         }
       }
@@ -32220,6 +32737,29 @@
         }
       }
     },
+    "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新。如果 5 秒后仍未完成，请在多任务界面向上划掉 Poki，然后重新打开。重新打开 Poki 前，功能暂不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成更新。如果 5 秒後仍未完成，請在多工處理畫面向上滑掉 Poki，然後重新開啟。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
     "Finishing the Update" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32266,25 +32806,25 @@
         }
       }
     },
-    "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer." : {
+    "You can return to the Home Screen and wait." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer."
+            "value" : "You can return to the Home Screen and wait."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可以回到主屏幕等待。更新安装完成后，Poki 会自动关闭，之后请重新打开 Poki。如果一直没有变化，请用电脑上的 Poki Setup 更新。"
+            "value" : "可以回到主屏幕等待。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可以回到主畫面等待。更新安裝完成後，Poki 會自動關閉，之後請重新開啟 Poki。如果一直沒有變化，請用電腦上的 Poki Setup 更新。"
+            "value" : "可以回到主畫面等待。"
           }
         }
       }

@@ -24,3 +24,8 @@ Ele.me its 淘宝闪购 artwork; fetch them again with Taobao, Pinduoduo and JD.
 
 Every icon here is the light one: the App Store has no dark artwork. The list of apps, their bundle IDs
 and which file each uses is `native/ios-app/Poki/App/KnownApps.swift`.
+
+GitHub, for the home page's pill that stars Poki in Poki's browser: not an App Store icon. `github.png`
+is the GitHub mark from Octicons (`github-mark.svg`, @primer/octicons 19.15.0, MIT, license in
+`third_party/LICENSE.octicons`), white at 59% of a 180 x 180 #1F2328 square, drawn with rsvg-convert.
+The mark is GitHub's trademark, used only to name GitHub.

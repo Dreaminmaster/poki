@@ -16,6 +16,8 @@ struct HomeShortcut: Identifiable, Equatable {
     var prompt: String
     /// The owner changed it (long press, Edit): it keeps its place and words whatever the ranking does.
     var edited = false
+    /// The icon for a pill with no app, a PNG in Poki/AppIcons (`AppIconView.carried`); nil draws Poki's.
+    var icon: String?
     var id: String { key }
 }
 
@@ -107,14 +109,20 @@ enum HomeShortcuts {
     /// At least this many, and as many as there are default examples.
     static let shown = 6
 
-    static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], forgotten: Set<String>,
-                     edits: [Edit] = [], now: Date) -> [HomeShortcut] {
+    /// `pinned` (`HomeIdea.star`) goes second, after the first of the others: the top row opens a
+    /// little way along, with its first pill half off the screen. It adds to the number shown, so it
+    /// pushes none of the owner's pills off, and Forget works on it as on any pill.
+    static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], pinned: [HomeShortcut] = [],
+                     forgotten: Set<String>, edits: [Edit] = [], now: Date) -> [HomeShortcut] {
         var out: [HomeShortcut] = []
         // A request the owner already has as an edit (once they send its sentence) is not a second pill.
         func taken(_ key: String) -> Bool {
             key.isEmpty || forgotten.contains { similar($0, key) } || out.contains { similar($0.key, key) }
                 || edits.contains { similar(normalize($0.sentence), key) && !similar($0.replaces, key) }
         }
+
+        let pins = pinned.filter { !taken($0.key) }
+        out += pins
 
         let remembered = routines.filter { !isPrivate($0.text) }
             .map { (routine: $0, key: normalize($0.text), score: frecency(Double(max($0.runs, 1)), last: $0.at, now: now)) }
@@ -130,8 +138,9 @@ enum HomeShortcuts {
         }
 
         for example in examples where !taken(example.key) { out.append(example) }
-        let limit = max(shown, examples.count)
-        var pills = Array(out.prefix(limit))
+        let limit = max(shown, examples.count) + pins.count
+        var pills = Array(out.prefix(limit).dropFirst(pins.count))
+        pills.insert(contentsOf: pins, at: min(1, pills.count))
 
         // The owner's edits: each in the place of the pill it replaced, or at the end when that pill is
         // no longer worked out; the others make room for them.
@@ -276,7 +285,7 @@ final class HomeShortcutStore {
             return nil
         }
         let routes = routines.map { HomeShortcuts.Remembered(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
-        let basis = [requests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
+        let basis = [AppLocalization.language, requests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
                      routes.map { "\($0.text)\($0.runs)" }.joined(separator: ","), forgotten.sorted().joined(separator: ",")]
         guard basis != self.basis else { return }
         (self.basis, self.routes, self.requests) = (basis, routes, requests)
@@ -304,7 +313,7 @@ final class HomeShortcutStore {
     }
 
     private func rank(now: Date) {
-        shortcuts = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, forgotten: forgotten,
-                                       edits: edits, now: now)
+        shortcuts = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, pinned: [HomeIdea.star],
+                                       forgotten: forgotten, edits: edits, now: now)
     }
 }

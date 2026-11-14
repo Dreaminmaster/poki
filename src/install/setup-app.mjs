@@ -51,18 +51,23 @@ async function github(path) {
   return response.json();
 }
 
-// The newest macOS installer a channel offers, with the release that carries it.
+// The newest macOS installer a channel offers, with the release that carries it. A channel with no
+// installer of its own takes the next less stable channel's, as Poki Setup does (release.rs pick_desktop).
 export async function latestSetup(channel) {
-  const allowed = ORDER.slice(0, ORDER.indexOf(channel) + 1);
-  if (!allowed.length) throw new SetupError('unknown', `Unknown channel ${channel}; use ${ORDER.join(', ')}`);
+  const at = ORDER.indexOf(channel);
+  if (at < 0) throw new SetupError('unknown', `Unknown channel ${channel}; use ${ORDER.join(', ')}`);
+  const releases = (await github('/releases?per_page=40')).filter(release => !release.draft);
   let best = null;
-  for (const release of await github('/releases?per_page=40')) {
-    if (release.draft || !allowed.includes(channelOf(release.tag_name, release.prerelease))) continue;
-    for (const asset of release.assets) {
-      const match = /^PokiSetup-(.+)-(\d+)-macos\.dmg$/.exec(asset.name);
-      if (!match || (best && Number(match[2]) <= best.build)) continue;
-      const sums = release.assets.find(a => a.name === 'SHA256SUMS-desktop.txt');
-      best = { tag: release.tag_name, name: asset.name, version: match[1], build: Number(match[2]), url: asset.browser_download_url, apiUrl: asset.url, sums: sums?.browser_download_url, sumsApiUrl: sums?.url };
+  for (let level = at; level < ORDER.length && !best; level++) {
+    const allowed = ORDER.slice(0, level + 1);
+    for (const release of releases) {
+      if (!allowed.includes(channelOf(release.tag_name, release.prerelease))) continue;
+      for (const asset of release.assets) {
+        const match = /^PokiSetup-(.+)-(\d+)-macos\.dmg$/.exec(asset.name);
+        if (!match || (best && Number(match[2]) <= best.build)) continue;
+        const sums = release.assets.find(a => a.name === 'SHA256SUMS-desktop.txt');
+        best = { tag: release.tag_name, name: asset.name, version: match[1], build: Number(match[2]), url: asset.browser_download_url, apiUrl: asset.url, sums: sums?.browser_download_url, sumsApiUrl: sums?.url };
+      }
     }
   }
   if (!best) throw new SetupError('setup_download_failed', `No Poki Setup for macOS on the ${channel} channel`);

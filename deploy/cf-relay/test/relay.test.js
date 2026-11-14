@@ -1,5 +1,5 @@
 // The Worker in workerd (Miniflare): a fake phone on the WebSocket, an MCP client over HTTP.
-import { SELF, env } from 'cloudflare:test';
+import { SELF, env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import worker, { base32 } from '../src/index.js';
 
@@ -117,6 +117,30 @@ describe('phone connection', () => {
 });
 
 describe('OAuth and MCP', () => {
+  it('keeps the connector and token working after reconnect while the old socket is closing', async () => {
+    const c = await connected();
+    expect((await call(c.mcp, c.token)).status).toBe(200);
+    const replacement = await phone(c.id, [c.secret], { answer: echo });
+    expect(await replacement.next('ready')).toBeTruthy();
+    expect(await c.p.closed).toBe(4000);
+
+    const device = env.DEVICE.get(env.DEVICE.idFromName(c.id.label));
+    const states = await runInDurableObject(device, (_instance, ctx) =>
+      ctx.getWebSockets('phone').map(ws => ws.readyState));
+    expect(states).toContain(WebSocket.CLOSING);
+    expect(states).toContain(WebSocket.OPEN);
+
+    const response = await call(c.mcp, c.token);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('mcp-session-id')).toBe('s1');
+    expect(await response.json()).toMatchObject({ jsonrpc: '2.0', id: 7, result: { echoed: 'POST' } });
+    expect(replacement.frames.some(frame => frame.t === 'req')).toBe(true);
+
+    replacement.ws.send(JSON.stringify({ t: 'access', access: [] }));
+    expect(await replacement.next('ready')).toBeTruthy();
+    expect((await call(c.mcp, c.token)).status).toBe(404);
+  });
+
   it('signs in with PKCE and relays a request with only the allowed headers', async () => {
     const c = await connected();
     expect(c.token).toBeTruthy();

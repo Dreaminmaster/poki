@@ -146,8 +146,7 @@ struct ChatView: View {
         }
         .opacity(bare ? 0 : 1)
         // The conversation passes under the top bar's floating controls through the system's soft
-        // edge, with no line under them (ESP-468).
-        .softTopEdge()
+        // scroll edge (`topBar`), with no line under them.
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
@@ -222,7 +221,7 @@ struct ChatView: View {
 
     /// The app's own hand-over wordings in the phone's language; the model's own words as they are.
     private static func local(_ text: String) -> String {
-        Bundle.main.localizedString(forKey: text, value: text, table: nil)
+        AppLocalization.bundle.localizedString(forKey: text, value: text, table: nil)
     }
 
     /// How far the task is, for the ring around Stop: the finished steps out of the model's plan, or
@@ -259,8 +258,8 @@ struct ChatView: View {
     private var currentSetupHint: SetupIssueHint? {
         if sampleScene == "setupHint" {
             return SetupIssueHint(
-                message: String(localized: "Poki can’t tap Send yet: UI Automation is off."),
-                link: String(localized: "Turn On UI Automation ›"),
+                message: AppLocalization.text(LocalizedStringResource("Poki can’t tap Send yet: UI Automation is off.")),
+                link: AppLocalization.text(LocalizedStringResource("Turn On UI Automation ›")),
                 target: .step(.automation)
             )
         }
@@ -284,17 +283,22 @@ extension View {
         }
     }
 
-    /// The chat's own top bar: a safe-area bar on iOS 26, so the conversation fades under it as under
-    /// the system's bars; an inset before it.
+    /// A page's own top bar (the chat's, the conversations'): a safe-area bar on iOS 26, so what
+    /// scrolls passes under it through the system's soft scroll edge, as under the system's bars; an
+    /// inset before it. The bar draws no ground of its own: a ground would cover the edge effect and
+    /// leave a hard line where it ends.
     @ViewBuilder func topBar<Bar: View>(@ViewBuilder _ bar: () -> Bar) -> some View {
         if #available(iOS 26.0, *) {
-            safeAreaBar(edge: .top, spacing: 0) { bar() }
+            safeAreaBar(edge: .top, spacing: 0) { bar() }.softTopEdge()
         } else {
             safeAreaInset(edge: .top, spacing: 0) { bar() }
         }
     }
 
-    /// The system's soft scroll edge at the top on iOS 26 and later; nothing before.
+    /// The one place the top scroll edge's style is set, for every scroll view under this view: the
+    /// system's soft edge, a blur that thins out from the bar down, on iOS 26 and later. `automatic`
+    /// leaves the style to the system, which may draw the hard edge, a nearly opaque band with a
+    /// straight line under it (Apple's `ScrollEdgeEffectStyle`). Nothing before iOS 26.
     @ViewBuilder func softTopEdge() -> some View {
         if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .top) } else { self }
     }
@@ -325,8 +329,8 @@ struct SetupIssueHint: Equatable {
     @MainActor static func runnerIssue(model: AppModel) -> SetupIssueHint? {
         if let trouble = model.pairingTrouble {
             return SetupIssueHint(
-                message: String(localized: "The phone no longer accepts Poki’s pairing (\(trouble)). Pair again in Setup, it takes a minute."),
-                link: String(localized: "Pair This iPhone ›"),
+                message: AppLocalization.text(LocalizedStringResource("The phone no longer accepts Poki’s pairing (\(trouble)). Pair again in Setup, it takes a minute.")),
+                link: AppLocalization.text(LocalizedStringResource("Pair This iPhone ›")),
                 target: .step(.pairing)
             )
         }
@@ -334,47 +338,47 @@ struct SetupIssueHint: Equatable {
         if runner.state == "failed" || model.servicesSilent {
             let code = runner.code ?? (model.servicesSilent ? "handshake" : nil)
             let headline = AppModel.problemText(code: code, fix: runner.fix ?? "Can’t Reach iPhone")
-            let localizedHeadline = Bundle.main.localizedString(forKey: headline, value: headline, table: "LiveActivity")
+            let localizedHeadline = AppLocalization.bundle.localizedString(forKey: headline, value: headline, table: "LiveActivity")
             let rawFix = runner.fix ?? ""
             let detail = rawFix.isEmpty
                 ? localizedHeadline
-                : Bundle.main.localizedString(forKey: rawFix, value: rawFix, table: nil)
+                : AppLocalization.bundle.localizedString(forKey: rawFix, value: rawFix, table: nil)
             let message = detail.contains(localizedHeadline) ? detail : "\(localizedHeadline): \(detail)"
             switch code {
             case "unreachable", "handshake", "loopback":
                 return SetupIssueHint(
                     message: message,
-                    link: String(localized: "Turn On Local Connection ›"),
+                    link: AppLocalization.text(LocalizedStringResource("Turn On Local Connection ›")),
                     target: .step(.loopback)
                 )
             case "pairing":
                 return SetupIssueHint(
                     message: message,
-                    link: String(localized: "Pair This iPhone ›"),
+                    link: AppLocalization.text(LocalizedStringResource("Pair This iPhone ›")),
                     target: .step(.pairing)
                 )
             case "developer_mode", "no_cryptexd":
                 return SetupIssueHint(
                     message: message,
-                    link: String(localized: "Turn On Developer Mode ›"),
+                    link: AppLocalization.text(LocalizedStringResource("Turn On Developer Mode ›")),
                     target: .step(.developerMode)
                 )
             case "runner_blocked":
                 return SetupIssueHint(
                     message: message,
-                    link: String(localized: "Turn On UI Automation ›"),
+                    link: AppLocalization.text(LocalizedStringResource("Turn On UI Automation ›")),
                     target: .step(.automation)
                 )
             case "runner":
                 return SetupIssueHint(
                     message: message,
-                    link: String(localized: "Install Poki Runner ›"),
+                    link: AppLocalization.text(LocalizedStringResource("Install Poki Runner ›")),
                     target: .step(.runner)
                 )
             default:
                 return SetupIssueHint(
                     message: message,
-                    link: String(localized: "Open Setup ›"),
+                    link: AppLocalization.text(LocalizedStringResource("Open Setup ›")),
                     target: .setup
                 )
             }
@@ -398,38 +402,38 @@ struct SetupIssueHint: Equatable {
                 switch step {
                 case .runner:
                     return SetupIssueHint(
-                        message: String(localized: "Poki can’t act yet: Poki Runner isn’t installed."),
-                        link: String(localized: "Install Poki Runner ›"),
+                        message: AppLocalization.text(LocalizedStringResource("Poki can’t act yet: Poki Runner isn’t installed.")),
+                        link: AppLocalization.text(LocalizedStringResource("Install Poki Runner ›")),
                         target: .step(.runner)
                     )
                 case .developerMode:
                     return SetupIssueHint(
-                        message: String(localized: "Poki can’t act yet: Developer Mode is off."),
-                        link: String(localized: "Turn On Developer Mode ›"),
+                        message: AppLocalization.text(LocalizedStringResource("Poki can’t act yet: Developer Mode is off.")),
+                        link: AppLocalization.text(LocalizedStringResource("Turn On Developer Mode ›")),
                         target: .step(.developerMode)
                     )
                 case .loopback:
                     return SetupIssueHint(
-                        message: String(localized: "Poki can’t connect yet: Local Connection is off."),
-                        link: String(localized: "Turn On Local Connection ›"),
+                        message: AppLocalization.text(LocalizedStringResource("Poki can’t connect yet: Local Connection is off.")),
+                        link: AppLocalization.text(LocalizedStringResource("Turn On Local Connection ›")),
                         target: .step(.loopback)
                     )
                 case .pairing:
                     return SetupIssueHint(
-                        message: String(localized: "Poki can’t act yet: this iPhone isn’t paired."),
-                        link: String(localized: "Pair This iPhone ›"),
+                        message: AppLocalization.text(LocalizedStringResource("Poki can’t act yet: this iPhone isn’t paired.")),
+                        link: AppLocalization.text(LocalizedStringResource("Pair This iPhone ›")),
                         target: .step(.pairing)
                     )
                 case .automation:
                     return SetupIssueHint(
-                        message: String(localized: "Poki can’t tap Send yet: UI Automation is off."),
-                        link: String(localized: "Turn On UI Automation ›"),
+                        message: AppLocalization.text(LocalizedStringResource("Poki can’t tap Send yet: UI Automation is off.")),
+                        link: AppLocalization.text(LocalizedStringResource("Turn On UI Automation ›")),
                         target: .step(.automation)
                     )
                 case .background:
                     return SetupIssueHint(
-                        message: String(localized: "Poki can’t stay on in the background yet."),
-                        link: String(localized: "Turn On Background ›"),
+                        message: AppLocalization.text(LocalizedStringResource("Poki can’t stay on in the background yet.")),
+                        link: AppLocalization.text(LocalizedStringResource("Turn On Background ›")),
                         target: .step(.background)
                     )
                 }
@@ -437,8 +441,8 @@ struct SetupIssueHint: Equatable {
         }
         if !ModelKeys.hasUsableKey {
             return SetupIssueHint(
-                message: String(localized: "Poki needs a model account before it can reply."),
-                link: String(localized: "Add an Account ›"),
+                message: AppLocalization.text(LocalizedStringResource("Poki needs a model account before it can reply.")),
+                link: AppLocalization.text(LocalizedStringResource("Add an Account ›")),
                 target: .model
             )
         }
@@ -447,7 +451,7 @@ struct SetupIssueHint: Equatable {
 
     /// Poki's own session did not open on the mounted image (ESP-448).
     @MainActor static func localSessionIssue(model: AppModel) -> SetupIssueHint? {
-        model.localSessionTrouble.map { SetupIssueHint(message: $0.text, link: String(localized: "Open Setup ›"), target: .setup) }
+        model.localSessionTrouble.map { SetupIssueHint(message: $0.text, link: AppLocalization.text(LocalizedStringResource("Open Setup ›")), target: .setup) }
     }
 }
 
@@ -458,8 +462,8 @@ extension SetupIssueHint {
     @MainActor static func homeLine(model: AppModel, looks: Bool = false) -> SetupIssueHint? {
         if let now = runnerIssue(model: model) ?? localSessionIssue(model: model) { return now }
         if let warning = ExpiryWarning(expiry: model.signer.expiry) {
-            return SetupIssueHint(message: String(localized: "Poki’s signing ends soon") + "\n" + warning.message,
-                                  link: String(localized: "Open Updates ›"), target: .updates)
+            return SetupIssueHint(message: AppLocalization.text(LocalizedStringResource("Poki’s signing ends soon")) + "\n" + warning.message,
+                                  link: AppLocalization.text(LocalizedStringResource("Open Updates ›")), target: .updates)
         }
         return first(model: model, looks: looks) ?? relayIssue(model: model)
     }
@@ -477,8 +481,8 @@ extension SetupIssueHint {
     @MainActor static func relayIssue(model: AppModel) -> SetupIssueHint? {
         guard model.relayStatus.isOffline else { return nil }
         return SetupIssueHint(
-            message: String(localized: "MCP Relay is offline: agents can’t reach this iPhone."),
-            link: String(localized: "Agents ›"),
+            message: AppLocalization.text(LocalizedStringResource("MCP Relay is offline: agents can’t reach this iPhone.")),
+            link: AppLocalization.text(LocalizedStringResource("Agents ›")),
             target: .agents
         )
     }
@@ -580,8 +584,6 @@ struct ChatTranscript<Footer: View>: View {
 
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
-    /// Where the bars over the conversation end: the top bar's controls, or the status bar.
-    @State private var topEdge: CGFloat = 0
 
     /// Your newest message: when it changes you have just sent one.
     private var lastSent: UUID? {
@@ -618,6 +620,10 @@ struct ChatTranscript<Footer: View>: View {
         // Opens at the newest message; a short chat starts under the top bar, as the boards draw it
         // (ESP-376). A frame fixed to the screen's height here cut off everything above it.
         .scrollPosition($position)
+        // No vertical scroll bar: dragging the drawer open and back moves the whole chat, and the bar
+        // the drag's vertical part showed could stay on the screen as a grey line over the messages.
+        // The newest button below brings you back down.
+        .scrollIndicators(.hidden, axes: .vertical)
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.top, for: .alignment)
         // At the newest message, every reply, step, card and keyboard keeps it in view; read back and
@@ -646,10 +652,9 @@ struct ChatTranscript<Footer: View>: View {
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
         }
-        // Messages fade out before they reach the top bar's picture, name and buttons, which have no
-        // ground of their own: under them the page shows, not a bubble cut in two.
-        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentInsets.top }) { _, top in topEdge = top }
-        .unless(.chatNoFade) { $0.mask { TopFade(edge: topEdge).ignoresSafeArea() } }
+        // Under the bars the system's soft scroll edge takes the messages (`softTopEdge`). No mask of
+        // our own here: one made the messages vanish in a short straight ramp above the bar, which
+        // read as a hard edge, and left the system's effect nothing to blur.
         .overlay(alignment: .bottom) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }
@@ -762,7 +767,7 @@ struct ChatTranscript<Footer: View>: View {
             default: continue
             }
         }
-        return (taskTitle ?? String(localized: "Task"), taskAsker)
+        return (taskTitle ?? AppLocalization.text(LocalizedStringResource("Task")), taskAsker)
     }
 
     /// No plan follows entry `i`: it is the task under way, if one is.
@@ -834,20 +839,6 @@ enum ChatFollow: Equatable {
     }
 }
 
-/// The conversation's mask: nothing above the bars' end but the last stretch, where it fades in, and
-/// all of it below.
-private struct TopFade: View {
-    var edge: CGFloat
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Color.clear.frame(height: max(0, edge - 26))
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 34)
-            Color.black
-        }
-    }
-}
-
 /// Back to the newest message, over the bottom of a conversation you have scrolled up in.
 private struct NewestButton: View {
     var action: () -> Void
@@ -875,14 +866,14 @@ extension ChatTranscript where Footer == EmptyView {
 enum ChatTime {
     static func header(_ date: Date) -> AttributedString {
         let calendar = Calendar.current
-        let time = date.formatted(date: .omitted, time: .shortened)
+        let time = date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))
         let day: String
-        if calendar.isDateInToday(date) { day = String(localized: "Today") }
-        else if calendar.isDateInYesterday(date) { day = String(localized: "Yesterday") }
+        if calendar.isDateInToday(date) { day = AppLocalization.text(LocalizedStringResource("Today")) }
+        else if calendar.isDateInYesterday(date) { day = AppLocalization.text(LocalizedStringResource("Yesterday")) }
         else if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: Date())).day, days < 7 {
-            day = date.formatted(.dateTime.weekday(.wide))
+            day = date.formatted(.dateTime.weekday(.wide).locale(AppLocalization.locale))
         } else {
-            day = date.formatted(.dateTime.month(.abbreviated).day())
+            day = date.formatted(.dateTime.month(.abbreviated).day().locale(AppLocalization.locale))
         }
         var bold = AttributedString(day)
         bold.font = .caption.weight(.semibold)
@@ -892,12 +883,12 @@ enum ChatTime {
     /// The Sessions list's right-hand time: "9:41 AM", "Yesterday", "Monday", "10/3/26".
     static func row(_ date: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
-        if calendar.isDateInYesterday(date) { return String(localized: "Yesterday") }
+        if calendar.isDateInToday(date) { return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale)) }
+        if calendar.isDateInYesterday(date) { return AppLocalization.text(LocalizedStringResource("Yesterday")) }
         if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: Date())).day, days < 7 {
-            return date.formatted(.dateTime.weekday(.wide))
+            return date.formatted(.dateTime.weekday(.wide).locale(AppLocalization.locale))
         }
-        return date.formatted(date: .numeric, time: .omitted)
+        return date.formatted(Date.FormatStyle(date: .numeric, time: .omitted).locale(AppLocalization.locale))
     }
 }
 
@@ -1060,17 +1051,17 @@ private struct NoteLine: View {
 
     private var text: String {
         switch note {
-        case .waiting: String(localized: "Waiting for your approval")
-        case .approved(let at): String(localized: "Approved, \(at.formatted(date: .omitted, time: .shortened))")
-        case .declined: String(localized: "Not approved, so Poki skipped that step")
-        case .expired: String(localized: "The approval ran out, so Poki skipped that step")
+        case .waiting: AppLocalization.text(LocalizedStringResource("Waiting for your approval"))
+        case .approved(let at): AppLocalization.text(LocalizedStringResource("Approved, \(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale)))"))
+        case .declined: AppLocalization.text(LocalizedStringResource("Not approved, so Poki skipped that step"))
+        case .expired: AppLocalization.text(LocalizedStringResource("The approval ran out, so Poki skipped that step"))
         case .problem(let text): text
         case .approval(let note): ActivityWords.label(note.summary)
-        case .modelChecking: String(localized: "The model is checking this step")
-        case .modelApproved(let why): why.isEmpty ? String(localized: "Approved by model") : String(localized: "Approved by model, \(why)")
+        case .modelChecking: AppLocalization.text(LocalizedStringResource("The model is checking this step"))
+        case .modelApproved(let why): why.isEmpty ? AppLocalization.text(LocalizedStringResource("Approved by model")) : AppLocalization.text(LocalizedStringResource("Approved by model, \(why)"))
         case .modelDeclined(let why):
-            why.isEmpty ? String(localized: "Not approved by model. Say yes in the chat to allow it.")
-                : String(localized: "Not approved by model, \(why). Say yes in the chat to allow it.")
+            why.isEmpty ? AppLocalization.text(LocalizedStringResource("Not approved by model. Say yes in the chat to allow it."))
+                : AppLocalization.text(LocalizedStringResource("Not approved by model, \(why). Say yes in the chat to allow it."))
         }
     }
 }
@@ -1081,13 +1072,13 @@ struct ApprovalNoteCard: View {
 
     private var title: String {
         switch (note.state, note.byModel) {
-        case (.asking, true): String(localized: "Checking This Step")
-        case (.asking, false): String(localized: "Waiting for Your Approval")
-        case (.allowed, true): String(localized: "Approved Automatically")
-        case (.allowed, false): String(localized: "You Approved")
-        case (.refused, true): String(localized: "Not Approved")
-        case (.refused, false): String(localized: "You Did Not Approve")
-        case (.expired, _): String(localized: "Approval Ran Out")
+        case (.asking, true): AppLocalization.text(LocalizedStringResource("Checking This Step"))
+        case (.asking, false): AppLocalization.text(LocalizedStringResource("Waiting for Your Approval"))
+        case (.allowed, true): AppLocalization.text(LocalizedStringResource("Approved Automatically"))
+        case (.allowed, false): AppLocalization.text(LocalizedStringResource("You Approved"))
+        case (.refused, true): AppLocalization.text(LocalizedStringResource("Not Approved"))
+        case (.refused, false): AppLocalization.text(LocalizedStringResource("You Did Not Approve"))
+        case (.expired, _): AppLocalization.text(LocalizedStringResource("Approval Ran Out"))
         }
     }
 
@@ -1125,7 +1116,7 @@ struct ApprovalNoteCard: View {
                 if note.state == .asking, note.byModel {
                     ProgressView().controlSize(.mini)
                 } else if let at = note.answered {
-                    Text(at.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                    Text(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).font(.caption2).foregroundStyle(Color(.secondaryLabel))
                 }
             }
             Text(verbatim: ActivityWords.label(note.summary)).font(.subheadline).foregroundStyle(Color(.label))
@@ -1134,7 +1125,7 @@ struct ApprovalNoteCard: View {
                 Text(verbatim: context).font(.caption).foregroundStyle(Color(.secondaryLabel))
             }
             if !note.reason.isEmpty {
-                Text(verbatim: Bundle.main.localizedString(forKey: note.reason, value: note.reason, table: nil)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: AppLocalization.bundle.localizedString(forKey: note.reason, value: note.reason, table: nil)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if note.state == .refused, note.reply {
@@ -1468,7 +1459,7 @@ struct ComposerInputView: View {
     private func addPhotos(_ items: [PhotosPickerItem]) async {
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self) else {
-                problem = String(localized: "Couldn’t read this file.")
+                problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
                 continue
             }
             add { try AttachmentReader.photo(data) }
@@ -1482,9 +1473,9 @@ struct ComposerInputView: View {
             let item = try read()
             withAnimation(.snappy) { attachments.append(item) }
         } catch AttachmentReader.Failure.unsupported {
-            problem = String(localized: "Only photos and PDFs can be added.")
+            problem = AppLocalization.text(LocalizedStringResource("Only photos and PDFs can be added."))
         } catch {
-            problem = String(localized: "Couldn’t read this file.")
+            problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
         }
     }
 
@@ -1589,7 +1580,7 @@ final class FieldDictation {
         Task {
             guard await Dictation.allowed() else {
                 starting = false
-                problem = String(localized: "Poki needs the microphone and speech recognition. Allow them in Settings › Poki.")
+                problem = AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition. Allow them in Settings › Poki."))
                 return
             }
             guard starting else { return }
@@ -1656,7 +1647,7 @@ struct LiveVoiceTranscript: View {
                     }
                 }
                 if voice.phase == .hearing, lines.last?.role != .you {
-                    MessageBubble(direction: .outgoing, text: String(localized: "Listening…"), tail: true).opacity(hearing)
+                    MessageBubble(direction: .outgoing, text: AppLocalization.text(LocalizedStringResource("Listening…")), tail: true).opacity(hearing)
                 }
             }
             .animation(PlanMotion.enter, value: voice.lines)

@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Observation
 import PokiCore
+import WebKit
 import XCTest
 @testable import Poki
 
@@ -13,8 +14,65 @@ import XCTest
 /// was tapped into the page, so a test reads the page to see whether a tap happened.
 @MainActor
 final class BrowserGuardTests: XCTestCase {
+    private var language = AppLocalization.system
+
+    /// The steps' words follow Poki's language; these tests read the English ones.
+    override func setUp() async throws {
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+    }
+
     override func tearDown() async throws {
         PokiBrowser.shared.close()
+        AppLocalization.shared.preference = language
+    }
+
+    /// A step is worded in the language chosen in Poki when it starts, whatever the iPhone's language.
+    /// Steps already listed keep their words, and what the model reads stays as it was.
+    func testNewStepsUseTheChosenLanguageAndListedStepsKeepTheirs() async throws {
+        let server = try PageServer(pages: ["/": "<html><title>Notes</title><body>Public notes</body></html>"])
+        let opened = await WebTools.perform("web_open", arguments: Self.json(["url": "http://127.0.0.1:\(server.port)/"]))
+        XCTAssertFalse(opened.isError, opened.text)
+
+        AppLocalization.shared.preference = "zh-Hans"
+        let read = await WebTools.perform("web_read", arguments: "{}")
+        XCTAssertTrue(read.text.contains("Public notes"), read.text)
+        let found = await WebTools.perform("web_read", arguments: Self.json(["find": "notes"]))
+        XCTAssertFalse(found.isError, found.text)
+        let refused = await WebTools.perform("web_click", arguments: "{}")
+        XCTAssertEqual(refused.text, "web_click needs a ref from the latest page read.")
+
+        AppLocalization.shared.preference = "zh-Hant"
+        _ = await WebTools.perform("web_read", arguments: "{}")
+        XCTAssertEqual(PokiBrowser.shared.steps.map(\.text), ["Open 127.0.0.1", "读取页面", "查找“notes”", "讀取頁面"])
+    }
+
+    func testCloseThenOpenReadsTheNewPageAndCloseClearsIt() async throws {
+        let pages = try PageServer(pages: [
+            "/first": "<html><title>First fixture</title><body>First result</body></html>",
+            "/second": "<html><title>Second fixture</title><body>Second result</body></html>",
+        ])
+        let browser = PokiBrowser.shared
+        for index in 0..<20 {
+            let path = index.isMultiple(of: 2) ? "/first" : "/second"
+            let expected = index.isMultiple(of: 2) ? "First result" : "Second result"
+            print("Browser reopen cycle \(index + 1): opening \(path)")
+            let answer = await WebTools.perform("web_open", arguments: Self.json(["url": "http://127.0.0.1:\(pages.port)\(path)"]))
+            XCTAssertFalse(answer.isError, answer.text)
+            XCTAssertTrue(answer.text.contains(expected), answer.text)
+            browser.close()
+            print("Browser reopen cycle \(index + 1): complete")
+        }
+
+        let cleared = expectation(description: "Closing replaces the page with an empty document")
+        let observation = browser.webView.observe(\.isLoading, options: [.initial, .new]) { view, _ in
+            if !view.isLoading, view.url?.absoluteString == "about:blank" { cleared.fulfill() }
+        }
+        await fulfillment(of: [cleared], timeout: 5)
+        observation.invalidate()
+        XCTAssertFalse(browser.isOpen)
+        let text = try await browser.webView.evaluateJavaScript("document.body.innerText") as? String
+        XCTAssertEqual(text, "")
     }
 
     func testWikipediaTaskKeepsPhoneAutomationOff() async throws {

@@ -142,8 +142,12 @@ final class AppIconStore {
     /// catalog is generated (scripts/make-assets.sh), and a build from a catalog made before an icon was
     /// added shipped without it (Taobao on 0.3.1 (865)).
     private static func bundled(_ id: String?) -> UIImage? {
-        guard let file = id.flatMap({ KnownApps.byID[$0.lowercased()]?.icon }), let path = Bundle.main.path(forResource: file, ofType: "png"),
-              let image = UIImage(contentsOfFile: path)?.cgImage else { return nil }
+        id.flatMap { KnownApps.byID[$0.lowercased()]?.icon }.flatMap(carried)
+    }
+
+    /// One of the PNGs in Poki/AppIcons by its file name, at the Home Screen's 3x.
+    static func carried(_ file: String) -> UIImage? {
+        guard let path = Bundle.main.path(forResource: file, ofType: "png"), let image = UIImage(contentsOfFile: path)?.cgImage else { return nil }
         return UIImage(cgImage: image, scale: 3, orientation: .up)
     }
 }
@@ -155,11 +159,14 @@ struct AppIconView: View {
     /// The icon in its light look whatever the page's: the home page's pills (the owner: their icons
     /// should not change with dark mode).
     var alwaysLight = false
+    /// A bundled PNG keeps the icon available even when its app is not installed.
+    var carried: String?
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-        let image = PerfSwitch.on(.iconsPlaceholder) ? nil : AppIconStore.shared.icon(app, dark: !alwaysLight && scheme == .dark)
+        let image = PerfSwitch.on(.iconsPlaceholder) ? nil
+            : carried.flatMap(AppIconStore.carried) ?? AppIconStore.shared.icon(app, dark: !alwaysLight && scheme == .dark)
         Group {
             if let image {
                 Image(uiImage: image).resizable().interpolation(.high).scaledToFill()

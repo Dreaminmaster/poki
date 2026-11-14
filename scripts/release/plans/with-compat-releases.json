@@ -1,0 +1,105 @@
+{
+  "title": "The Beta with two extra releases for installed clients",
+  "repo": "JosssphZhou/poki",
+  "base": "releases-2026-11-13.json",
+  "firstPublishAt": "2026-11-14T00:00:00Z",
+  "installed": {
+    "version": "0.3.1",
+    "build": "752",
+    "setup": "0.2.2-661"
+  },
+  "requiredChannels": [
+    "stable",
+    "beta",
+    "alpha"
+  ],
+  "publishedEntitlements": "c38bcbe3e3e0915c27edc11f8ab59a4fcf7b995b0b78f6ed0195d439a0b5de93",
+  "candidate": {
+    "version": "0.4.0",
+    "build": "{N}"
+  },
+  "steps": [
+    {
+      "name": "Pre-alpha, automatic when the candidate merges into main (prealpha.yml)",
+      "releases": [
+        {
+          "tag": "app-prealpha-latest",
+          "ipa": "Poki-external-0.4.0-{N}.ipa",
+          "content": "candidate"
+        },
+        {
+          "tag": "ios-prealpha-latest",
+          "ipa": "Poki-external-0.4.0-{N}.ipa",
+          "content": "candidate"
+        }
+      ]
+    },
+    {
+      "name": "Alpha, after approval (promote-alpha.yml): the rolling releases, and the tag app-0.4.0-alpha.{N}",
+      "releases": [
+        {
+          "tag": "app-alpha-latest",
+          "ipa": "Poki-external-0.4.0-{N}.ipa",
+          "content": "candidate"
+        },
+        {
+          "tag": "ios-alpha-latest",
+          "ipa": "Poki-external-0.4.0-{N}.ipa",
+          "content": "candidate"
+        }
+      ]
+    },
+    {
+      "name": "One-time: the Alpha as a release of its own on the existing tag app-0.4.0-alpha.{N}",
+      "releases": [
+        {
+          "tag": "app-0.4.0-alpha.{N}",
+          "ipa": "Poki-external-0.4.0-{N}.ipa",
+          "content": "candidate"
+        }
+      ]
+    },
+    {
+      "name": "One-time: the Beta under its build number, ios-beta-0.4.0-{N}, made public just before the Beta is approved",
+      "releases": [
+        {
+          "tag": "ios-beta-0.4.0-{N}",
+          "ipa": "Poki-external-0.4.0-{N}.ipa",
+          "content": "candidate"
+        }
+      ]
+    },
+    {
+      "name": "Beta, when the promotion PR merges and is approved (publish-promotion.yml)",
+      "releases": [
+        {
+          "tag": "app-0.4.0-beta.1",
+          "ipa": "Poki-external-0.4.0-beta.1.ipa",
+          "content": "candidate",
+          "setupFrom": "app-alpha-latest"
+        }
+      ]
+    },
+    {
+      "name": "Pre-alpha 0.4.1, built from the promotion PR's VERSION change",
+      "releases": [
+        {
+          "tag": "app-prealpha-latest",
+          "ipa": "Poki-external-0.4.1-{N+1}.ipa",
+          "content": {
+            "version": "0.4.1",
+            "build": "{N+1}"
+          }
+        },
+        {
+          "tag": "ios-prealpha-latest",
+          "ipa": "Poki-external-0.4.1-{N+1}.ipa",
+          "content": {
+            "version": "0.4.1",
+            "build": "{N+1}"
+          }
+        }
+      ]
+    }
+  ]
+}

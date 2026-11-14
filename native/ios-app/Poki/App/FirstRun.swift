@@ -86,28 +86,28 @@ struct FirstRunGuide: View {
 
     private var title: String {
         switch page {
-        case .hello: String(localized: "Hello, I’m Poki")
-        case .phone: String(localized: "Set Up This iPhone")
-        case .model: String(localized: "Pick a Model")
-        case .voice: String(localized: "Talk Instead of Typing")
-        case .ready: ready ? String(localized: "All Set") : String(localized: "Nearly There")
+        case .hello: AppLocalization.text(LocalizedStringResource("Hello, I’m Poki"))
+        case .phone: AppLocalization.text(LocalizedStringResource("Set Up This iPhone"))
+        case .model: AppLocalization.text(LocalizedStringResource("Pick a Model"))
+        case .voice: AppLocalization.text(LocalizedStringResource("Talk Instead of Typing"))
+        case .ready: ready ? AppLocalization.text(LocalizedStringResource("All Set")) : AppLocalization.text(LocalizedStringResource("Nearly There"))
         }
     }
 
     private var words: String {
         switch page {
         case .hello:
-            return String(localized: "Tell me what you need, by text or by voice, and I do it on your iPhone while you watch.")
+            return AppLocalization.text(LocalizedStringResource("Tell me what you need, by text or by voice, and I do it on your iPhone while you watch."))
         case .phone:
-            return String(localized: "\(SetupStep.shown.count) switches, each turned on once. They tick themselves as you go.")
+            return AppLocalization.text(LocalizedStringResource("\(SetupStep.shown.count) switches, each turned on once. They tick themselves as you go."))
         case .model:
-            return String(localized: "I think with a model from your own account. Sign in or add a key. You can change it any time.")
+            return AppLocalization.text(LocalizedStringResource("I think with a model from your own account. Sign in or add a key. You can change it any time."))
         case .voice:
-            return String(localized: "To hear you, I need the microphone and speech recognition.")
+            return AppLocalization.text(LocalizedStringResource("To hear you, I need the microphone and speech recognition."))
         case .ready:
             return ready
-                ? String(localized: "Try “Order my usual coffee”. Type it, or say it.")
-                : String(localized: "Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Automation › Setup.")
+                ? AppLocalization.text(LocalizedStringResource("Try “Order my usual coffee”. Type it, or say it."))
+                : AppLocalization.text(LocalizedStringResource("Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Automation › Setup."))
         }
     }
 
@@ -344,17 +344,23 @@ struct FirstRunGuide: View {
 
 /// Settings' way back into the first run: a blue text button that opens the pages over everything.
 /// It carries its own cover, so whichever settings page lists the setup items places it with one line.
-/// `wide` stretches it to the page width with a 44-point row, for pages that are not a List.
+/// `wide` stretches it to the page width with a 44-point row, for pages that are not a List; `row`
+/// draws it as a settings row, with the icon the rows beside it have.
 struct FirstRunAgain: View {
     var wide = false
+    var row = false
     @State private var welcoming = false
 
     var body: some View {
         Button { welcoming = true } label: {
-            Text("Show Welcome Pages Again")
-                .foregroundStyle(Tint.blueText)
-                .frame(maxWidth: wide ? .infinity : nil, minHeight: wide ? 44 : nil)
-                .contentShape(.rect)
+            if row {
+                SettingsRow(title: "Show Welcome Pages Again", symbol: "hand.wave").contentShape(.rect)
+            } else {
+                Text("Show Welcome Pages Again")
+                    .foregroundStyle(Tint.blueText)
+                    .frame(maxWidth: wide ? .infinity : nil, minHeight: wide ? 44 : nil)
+                    .contentShape(.rect)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("setup.firstRun")

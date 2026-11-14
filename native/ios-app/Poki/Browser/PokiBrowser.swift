@@ -41,6 +41,8 @@ final class PokiBrowser: NSObject {
     @ObservationIgnored private let world = WKContentWorld.world(name: "PokiBrowser")
     /// The page under way has replaced the last one (its document is the one scripts see).
     @ObservationIgnored private var committed = true
+    @ObservationIgnored private var activeNavigation: WKNavigation?
+    @ObservationIgnored private let supersededNavigations = NSHashTable<WKNavigation>.weakObjects()
     @ObservationIgnored private var loadWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var ownerWaiters: [CheckedContinuation<Bool, Never>] = []
 
@@ -85,9 +87,7 @@ final class PokiBrowser: NSObject {
 
     func open(_ url: URL) async {
         isOpen = true
-        // Not readable until the new page commits (the first load can take a moment to start).
-        committed = false
-        webView.load(URLRequest(url: url))
+        trackNavigation(webView.load(URLRequest(url: url)))
         await waitForLoad()
         _ = await settle()
     }
@@ -107,7 +107,7 @@ final class PokiBrowser: NSObject {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { @MainActor in
                 await withCheckedContinuation { c in
-                    if self.webView.isLoading { self.loadWaiters.append(c) } else { c.resume() }
+                    if self.isLoading || !self.committed { self.loadWaiters.append(c) } else { c.resume() }
                 }
             }
             group.addTask { @MainActor in
@@ -127,6 +127,14 @@ final class PokiBrowser: NSObject {
         let waiters = loadWaiters
         loadWaiters = []
         waiters.forEach { $0.resume() }
+    }
+
+    private func trackNavigation(_ navigation: WKNavigation?) {
+        guard let navigation, navigation !== activeNavigation else { return }
+        if let activeNavigation { supersededNavigations.add(activeNavigation) }
+        activeNavigation = navigation
+        committed = false
+        isLoading = true
     }
 
     /// Calls one of the page reader's functions in Poki's content world, loading the reader first.
@@ -187,7 +195,7 @@ final class PokiBrowser: NSObject {
         steps = []
         url = nil
         title = ""
-        webView.load(URLRequest(url: URL(string: "about:blank")!))
+        trackNavigation(webView.load(URLRequest(url: URL(string: "about:blank")!)))
     }
 
     func markWaiting(_ id: UUID) {
@@ -198,17 +206,19 @@ final class PokiBrowser: NSObject {
 
 extension PokiBrowser: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        committed = false
-        isLoading = true
+        guard let navigation, !supersededNavigations.contains(navigation) else { return }
+        trackNavigation(navigation)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard navigation === activeNavigation else { return }
         committed = true
         url = webView.url
         title = webView.title ?? ""
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard navigation === activeNavigation else { return }
         isLoading = false
         url = webView.url
         title = webView.title ?? ""
@@ -216,11 +226,13 @@ extension PokiBrowser: WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard navigation === activeNavigation else { return }
         isLoading = false
         finishLoads()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard navigation === activeNavigation else { return }
         committed = true
         isLoading = false
         finishLoads()
@@ -229,7 +241,7 @@ extension PokiBrowser: WKNavigationDelegate, WKUIDelegate {
     /// Links that open a new window open here instead: the panel has one page.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil { webView.load(navigationAction.request) }
+        if navigationAction.targetFrame == nil { trackNavigation(webView.load(navigationAction.request)) }
         return nil
     }
 

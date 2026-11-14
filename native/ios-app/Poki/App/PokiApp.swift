@@ -15,6 +15,7 @@ struct PokiApp: App {
         // Settings an update, a reinstall or a re-sign lost come back from the Keychain, before anything
         // reads them; from here on every change is mirrored there.
         SettingsVault.restore()
+        AppLocalization.publish()
         SettingsVault.watch()
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
@@ -44,6 +45,13 @@ struct PokiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model).environment(chat)
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)
+                .background(LanguageNavigationFonts())
+                .onChange(of: AppLocalization.shared.preference) { _, _ in
+                    model.languageChanged()
+                    chat.languageChanged()
+                }
         }
     }
 }
@@ -121,7 +129,7 @@ struct RootView: View {
         case .setup: openDetails([DetailsRoute.connection])
         case .model: openDetails([DetailsRoute.model])
         case .agents: openDetails([DetailsRoute.agents])
-        case .updates: openDetails([DetailsRoute.connection, DetailsRoute.updates])
+        case .updates: openDetails([DetailsRoute.updates])
         }
     }
 
@@ -200,6 +208,9 @@ struct RootView: View {
     /// expression was more than the compiler would type-check in its time limit (main #145).
     private var navigation: some View {
         mainNavigation
+            // Every page's top scroll edge is the system's soft one: the chat, the conversations, and
+            // the pages pushed over them under the system's bar.
+            .softTopEdge()
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
             .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
@@ -217,10 +228,6 @@ struct RootView: View {
 
     private var profilePage: some View {
         PokiDetailsView(
-            openVoice: {
-                detailsOpen = false
-                openLiveVoice()
-            },
             openSetup: {
                 var next = NavigationPath()
                 next.append(DetailsRoute.connection)
@@ -235,6 +242,9 @@ struct RootView: View {
             onSearchJumpApplied: consumeSearchJump,
             path: $detailsPath
         )
+        // Presented on its own, so it says the edge's style itself rather than counting on the
+        // presenting page's.
+        .softTopEdge()
     }
 
     var body: some View {
@@ -247,7 +257,7 @@ struct RootView: View {
         }
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
-        .alert(model.connectionAsk.map { String(localized: "Allow \($0.client) to connect?") } ?? "",
+        .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
                presenting: model.connectionAsk) { _ in
             Button("Don’t Allow", role: .cancel) { model.answerConnection(false) }
@@ -413,15 +423,15 @@ struct RootView: View {
         case "hands", "connection":
             openDetails([DetailsRoute.connection])
         case "rules", "approvals":
-            openDetails([DetailsRoute.connection, DetailsRoute.approvals])
+            openDetails([DetailsRoute.approvals])
         case "health", "advanced":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced])
+            openDetails([DetailsRoute.advanced])
         case "connect", "settings", "agents":
             openDetails([DetailsRoute.agents])
         case "debug":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics])
         case "activity":
-            openDetails([DetailsRoute.connection, DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
+            openDetails([DetailsRoute.advanced, SettingsRoute.diagnostics, SettingsRoute.activityPreview])
         case "connector":
             if let first = model.identity.secrets.first {
                 openDetails([DetailsRoute.agents, SettingsRoute.connector(first)])
@@ -434,6 +444,14 @@ struct RootView: View {
             openDetails([SettingsRoute.memory])
         case "appearance":
             openDetails([DetailsRoute.appearance])
+        case "language":
+            openDetails([DetailsRoute.language])
+        case "voiceSettings":
+            openDetails([DetailsRoute.voice])
+        case "conversations":
+            openDetails([DetailsRoute.conversations])
+        case "updates":
+            openDetails([DetailsRoute.updates])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break

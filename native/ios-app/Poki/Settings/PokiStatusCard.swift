@@ -32,52 +32,19 @@ enum PokiStatusCopy {
     /// can do now and what starts it.
     static func line(_ power: PowerTile) -> String {
         switch power {
-        case .turnOn: String(localized: "Poki is off. Agents can’t connect to this iPhone until you turn it on.")
-        case .resume: String(localized: "Poki is paused. It resumes automatically upon a new task or agent request.")
-        case .pause: String(localized: "Poki can tap and type on this iPhone when you send a task or an agent requests it.")
+        case .turnOn: AppLocalization.text(LocalizedStringResource("Poki is off. Agents can’t connect to this iPhone until you turn it on."))
+        case .resume: AppLocalization.text(LocalizedStringResource("Poki is paused. It resumes automatically upon a new task or agent request."))
+        case .pause: AppLocalization.text(LocalizedStringResource("Poki can tap and type on this iPhone when you send a task or an agent requests it."))
         }
     }
 }
 
 extension PowerTile {
-    /// The cards' button by what Poki is: off, Turn On; paused by you, Resume; otherwise Pause.
+    /// Where Poki stands for the settings card's status words: off, paused by you, or on. The card has no
+    /// button for it; Connection's Automation switch turns Poki on and pauses it.
     @MainActor static func card(model: AppModel) -> PowerTile {
         if !(model.sessionOn || model.wantsOn) { return .turnOn }
         return model.ownerPaused ? .resume : .pause
-    }
-
-    var title: LocalizedStringKey {
-        switch self {
-        case .pause: "Pause"
-        case .resume: "Resume"
-        case .turnOn: "Turn On"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .pause: "pause.fill"
-        case .resume: "play.fill"
-        case .turnOn: "power"
-        }
-    }
-
-    /// The accessibility identifier's last part, as the profile's tiles had them.
-    var name: String {
-        switch self {
-        case .pause: "pause"
-        case .resume: "resume"
-        case .turnOn: "turnOn"
-        }
-    }
-
-    @MainActor func act(model: AppModel, chat: ChatModel) {
-        switch self {
-        // Your pause, also while the runner stands by: Poki shows asleep until you or an agent wakes it.
-        case .pause: chat.stop(); model.pauseByOwner()
-        case .resume: model.wakeRunner()
-        case .turnOn: model.startSession()
-        }
     }
 }
 

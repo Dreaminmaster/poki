@@ -112,7 +112,7 @@ final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
     func listen() throws {
         speaker.stopSpeaking(at: .immediate)
         heard = ""
-        guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else { throw VoiceError.realtime(0, String(localized: "Speech recognition is not available right now.")) }
+        guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else { throw VoiceError.realtime(0, AppLocalization.text(LocalizedStringResource("Speech recognition is not available right now."))) }
         let audio = AVAudioSession.sharedInstance()
         try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .duckOthers])
         try audio.setActive(true)

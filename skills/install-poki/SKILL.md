@@ -16,7 +16,7 @@ Pick one branch:
 - **Update.** Poki is on the iPhone and the user asks to update it, or Poki's own update failed, could not download or stopped moving. Follow "Update an installed Poki". Poki's own update downloads from GitHub on the iPhone, and that download sometimes cannot reach GitHub; this branch is the backup, where the Mac downloads the build and installs it over USB.
 - **Stuck on "Finishing the update".** Follow "When Poki's own update stalls".
 
-In Poki 0.4.0, open the conversations drawer and tap the Settings button at the bottom. Paths below such as Settings > General > Updates start there.
+In Poki 0.4.0, open the conversations drawer and tap the Settings button at the bottom. Paths below such as Settings > General > Updates start there. Current builds group these pages under Settings > Connection: Settings > General > Updates is Settings > Connection > Signing & Updates, and Settings > Automation > Setup is Settings > Connection. Give the user the path their build shows.
 
 ## Before you start
 
@@ -33,7 +33,7 @@ The installer installs the newest build on its channel: Alpha, unless you pass `
 - The `channel` step prints `<channel>: Poki <version> (<build>)`, the release this run installs. For a Beta or Stable release the part in brackets is the release name (`beta.1`) or empty, not the build number.
 - The `install` step prints `Poki <version> (<build>) installed`, with the build number from the app itself.
 
-On November 13, 2026, the published Alpha asset was Poki 0.4.0 (1130), and neither Beta nor Stable had its own app release. This is a dated snapshot, not a version to pin. Resolve the selected channel again for each installation. If it offers an older version than requested, stop and report the release mismatch.
+Resolve the selected channel again for each installation. If it offers an older version than requested, stop and report the release mismatch.
 
 With Poki Setup installed, `"<tool>" release --all --json` lists current releases and `"<tool>" channel --json` reads its saved channel without changing it. The tool paths are under "Without Node.js, or on Windows". Release names such as `beta.1` are not numeric build numbers. Before an update, download the selected IPA and its SHA256SUMS from the same release, verify the checksum, and read `CFBundleShortVersionString` and `CFBundleVersion` from `Payload/*.app/Info.plist`. Do not install when the numeric build cannot be established. A dry run simulates the phone and is not version or data-preservation proof.
 
@@ -54,7 +54,7 @@ Each line is one JSON event with an `at` time:
 - `{"event":"result","ok":true,"check":{...}}` is the last line only when the checks passed without manual steps left unverified.
 - A result with `ok:false` and `unverified` exits with code 3. Relay every entry's `say`, including instructions from skipped steps. Have the user finish them in Poki and confirm each result. Report what was manually confirmed and what remains unverified; do not call the phone ready just because the app was installed. Older Poki Setup without Xcode can require manual model-key entry and loopback setup.
 
-Some helper prompts still name older pages. After relaying the prompt, give the 0.4.0 path: Setup > Connect to this iPhone means Settings > Automation > Setup > Local Connection; Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
+Some helper prompts still name older pages. After relaying the prompt, give the 0.4.0 path: Setup > Connect to this iPhone means Settings > Connection > Local Connection (Settings > Automation > Setup > Local Connection in older 0.4.0 builds); Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
 
 Several iPhones plugged in: list them with `node bin/install-iphone.mjs phones` and add `--udid <udid>`.
 
@@ -158,7 +158,7 @@ The installer exits with code 2. The last `error` event has `code`, `reason` and
 
 | Code | Meaning | What you do |
 |---|---|---|
-| `setup_download_failed` | GitHub did not serve a release asset or its metadata. | Each request makes at most 3 attempts. Asset requests switch to the release asset API after a 5xx or connection failure. Report the failed URL/status and rerun later if both routes fail. |
+| `setup_download_failed` | GitHub did not serve a release asset or its metadata. | A 403 or 429 from `api.github.com` is usually GitHub's hourly limit on anonymous requests, shared by everyone on the same network, and is not retried: ask the user to switch to another network or proxy node and run the same command again, or to wait an hour. Other failures make at most 3 attempts per request, and asset requests switch to the release asset API after a 5xx or connection failure. Report the failed URL/status and rerun later if both routes fail. |
 | `setup_checksum_mismatch` | The DMG does not match `SHA256SUMS-desktop.txt`. | Fetched again once. Then stop and report. Never open the file. |
 | `setup_signature_invalid` | Poki Setup is not signed by team `Q64ZL36CJN` or not notarized. | Stop. Do not run it. Report it. |
 | `setup_app_missing` | `phones` or `diagnose` cannot find Poki Setup.app. | Run `run`, which installs it, or pass `--app-dir` or `--bridge`. |
@@ -173,7 +173,7 @@ The installer exits with code 2. The last `error` event has `code`, `reason` and
 | `apple_code_wrong` | Apple refused the code. | The window asks again; without windows, the user runs the `code` command again with the newest code. |
 | `apple_server_busy` | Apple or the anisette server answered with an error. | Retried by itself on another server. |
 | `apple_account_limit` | A free-account limit: 10 App IDs a week, 3 apps, or one certificate already held by AltStore, SideStore, Xcode or another computer. | Stop. Tell the user which limit Apple named. The way out is their decision. |
-| `network` | A request failed, also while signing in. | Retried by itself with what the user already typed. Then report. |
+| `network` | A request failed, also while signing in. | Retried by itself with what the user already typed. When the reason says Poki's releases could not be read from GitHub with 403 or 429, it is usually the same hourly limit as `setup_download_failed`; the `channel` step does not retry it and the `install` step tries 3 more times: ask the user to switch network or proxy node and run again, or to wait an hour. Otherwise report. |
 | `sign_failed` | Signing failed. | Stop and run `diagnose`. |
 | `ddi_refused` | Apple rejected the developer disk image with STATUS=94 or a signing-server refusal. The image may be too old for the phone's iOS. | Relay the detected Xcode and iOS versions from the error. Update Xcode to support that iOS version (iOS 27 requires Xcode 27), open Xcode once, and wait for its components to finish installing. Rerun the same command. Poki does not need to be reinstalled. If `prepare-device` used `--image`, replace that image with the updated Xcode image. |
 | `install_failed` | iOS refused the install. | Retried once. Then run `diagnose`. If the error says Poki is installed from another Apple ID, stop: deleting Poki deletes its data, so report the identity mismatch and stop. |

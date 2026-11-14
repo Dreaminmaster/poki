@@ -25,7 +25,8 @@ test('an installed update gives restart instructions when the old process surviv
       init(signer: SelfSigner) { self.signer = signer }
       ${app.slice(begin, end)}
     }`);
-    await exec('swiftc', ['-parse-as-library', join(dir, 'SelfSigner.swift'), join(dir, 'AppModel.swift'),
+    await exec('swiftc', ['-parse-as-library', '-D', 'POKI_APP',
+      fileURLToPath(new URL('../native/ios-app/Shared/AppLocalization.swift', import.meta.url)), join(dir, 'SelfSigner.swift'), join(dir, 'AppModel.swift'),
       fileURLToPath(new URL('./fixtures/update-finish/Runtime.swift', import.meta.url)),
       '-o', join(dir, 'check')]);
     const result = await exec(join(dir, 'check'), { timeout: 60_000 });

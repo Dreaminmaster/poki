@@ -26,12 +26,19 @@ final class ModelServerStub: URLProtocol {
 @MainActor
 final class ConnectionCheckTests: XCTestCase {
     private let key = "placeholder-test-key"
+    private var language = AppLocalization.system
 
-    override func setUp() { URLProtocol.registerClass(ModelServerStub.self) }
+    /// The result's words follow Poki's language; these tests read the English ones.
+    override func setUp() {
+        URLProtocol.registerClass(ModelServerStub.self)
+        language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+    }
 
     override func tearDown() {
         URLProtocol.unregisterClass(ModelServerStub.self)
         ModelServerStub.answer = nil
+        AppLocalization.shared.preference = language
     }
 
     private func check(_ answer: (status: Int, body: String)?) async -> ConnectionCheck.Result {
@@ -56,6 +63,10 @@ final class ConnectionCheckTests: XCTestCase {
 
         let late = await check(nil)
         XCTAssertEqual(late.words, "No answer within 10 seconds. Check the address and the network, then try again.")
+
+        AppLocalization.shared.preference = "zh-Hant"
+        XCTAssertEqual(works.words, "連線正常，回應模型：house-model-2026-11")
+        XCTAssertEqual(rejected.words, "金鑰無效，請確認金鑰已完整複製。")
 
         for result in [works, rejected, noModel, late] {
             XCTAssertFalse(result.words.contains(key))

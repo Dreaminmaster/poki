@@ -103,12 +103,14 @@ final class SelfSigner {
     var installMessage: String? {
         switch installFinish {
         case .idle: nil
-        case .installing: String(localized: "Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki.")
-            + "\n\n" + String(localized: "You can return to the Home Screen and wait. Poki closes by itself when the update is installed. Open Poki again afterwards. If nothing changes, update Poki from Poki Setup on your computer.")
-        case .waitingForExit: String(localized: "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.")
+        case .installing: installFraction == nil
+            ? AppLocalization.text(LocalizedStringResource("Installing the update. Do not close Poki in the app switcher. Features are unavailable until you reopen Poki."))
+                + "\n\n" + AppLocalization.text(LocalizedStringResource("You can return to the Home Screen and wait."))
+            : AppLocalization.text(LocalizedStringResource("Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."))
+        case .waitingForExit: AppLocalization.text(LocalizedStringResource("The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki."))
         case .needsReopen(let installed): installed
-            ? String(localized: "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki.")
-            : String(localized: "To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki.")
+            ? AppLocalization.text(LocalizedStringResource("The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."))
+            : AppLocalization.text(LocalizedStringResource("To finish the update, swipe up on Poki in the app switcher to close it, then open Poki again. If the update is still available, try again. Features are unavailable until you reopen Poki."))
         }
     }
 
@@ -144,7 +146,7 @@ final class SelfSigner {
     /// Why Poki cannot download the update by itself, when it cannot. Nil when it can.
     var updateBlocker: String? {
         guard updateNotReady else { return nil }
-        if !signedIn { return String(localized: "To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac.") }
+        if !signedIn { return AppLocalization.text(LocalizedStringResource("To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac.")) }
         if phone() == nil { return unreachable }
         return nil
     }
@@ -320,8 +322,8 @@ final class SelfSigner {
             }
             self.ready[kind] = p
             self.log.add("signing", "prepared \(kind): \(p.version) (\(p.build)), profile until \(p.expires)")
-            self.notify(title: kind == "update" ? String(localized: "Poki Update Ready") : String(localized: "Poki Refresh Ready"),
-                        body: String(localized: "Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task."))
+            self.notify(title: kind == "update" ? AppLocalization.text(LocalizedStringResource("Poki Update Ready")) : AppLocalization.text(LocalizedStringResource("Poki Refresh Ready")),
+                        body: AppLocalization.text(LocalizedStringResource("Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task.")))
         }
     }
 
@@ -332,7 +334,7 @@ final class SelfSigner {
         log.add("signing", "install tapped: \(p.kind) \(p.version) (\(p.build))")
         guard isIdle() else {
             let why = busyReason() ?? ""
-            lastError = String(localized: "Poki is running a task. Install when it has finished.") + (why.isEmpty ? "" : " " + why)
+            lastError = AppLocalization.text(LocalizedStringResource("Poki is running a task. Install when it has finished.")) + (why.isEmpty ? "" : " " + why)
             log.add("signing", "install waits: \(why)")
             return
         }
@@ -392,9 +394,9 @@ final class SelfSigner {
 
     private var unreachable: String {
         switch whyUnreachable() {
-        case .unpaired: String(localized: "Pair this iPhone first (Setup).")
+        case .unpaired: AppLocalization.text(LocalizedStringResource("Pair this iPhone first (Setup)."))
         case .cellular: LoopbackMonitor.needsWiFi
-        case .loopback: String(localized: "Poki can't reach this iPhone. Turn on the loopback, then try again.")
+        case .loopback: AppLocalization.text(LocalizedStringResource("Poki can't reach this iPhone. Turn on the loopback, then try again."))
         }
     }
 
@@ -420,12 +422,12 @@ final class SelfSigner {
         guard !steppedAside else { return }
         log.add("signing", "the install's last step: telling the owner Poki will close to finish")
         steppedAside = true
-        working = String(localized: "Finishing the update: Poki will close to finish it")
+        working = AppLocalization.text(LocalizedStringResource("Finishing the update: Poki will close to finish it"))
         // The last step: the owner is told Poki will close (the alert's OK steps aside, and iOS ends
         // Poki by itself otherwise); the notice says it again in case the alert was missed.
         finishNotice = true
-        notify(title: String(localized: "Poki Will Close to Finish the Update"),
-               body: String(localized: "Poki will close by itself. Open it again once the update is in."))
+        notify(title: AppLocalization.text(LocalizedStringResource("Poki Will Close to Finish the Update")),
+               body: AppLocalization.text(LocalizedStringResource("Poki will close by itself. Open it again once the update is in.")))
     }
     /// The last install step's alert: Poki has to exit for the update to finish.
     var finishNotice = false
@@ -439,8 +441,7 @@ final class SelfSigner {
         }
     }
 
-    /// iOS has not ended Poki after the install. Until the install returns, Poki carries the upload
-    /// and the upgrade request, so nothing asks the owner to close it before then.
+    /// An install result is required before foreground return or the timer can claim success.
     private func exitWaitEnded() {
         guard installFinish == .waitingForExit else { return }
         requireReopen()
@@ -461,9 +462,7 @@ final class SelfSigner {
         switch progress["kind"] as? String {
         case "step":
             working = progress["title"] as? String ?? working; fraction = nil
-            // The install itself has begun (the build is on the phone): the last step, where Poki
-            // must exit for iOS to finish. The owner is told now rather than at a percentage that a
-            // fast or stalled install may never report.
+            // This step precedes upload. Only part/install comes from the system upgrade callback.
             if progress["id"] as? String == "install" { stepAside() }
         case "part":
             fraction = progress["fraction"] as? Double
@@ -484,7 +483,7 @@ final class SelfSigner {
     }
 
     private func scheduleReopenNotice(id: String) {
-        notify(title: String(localized: "Poki Was Updated"), body: String(localized: "Tap to open Poki again."), id: id, after: 20)
+        notify(title: AppLocalization.text(LocalizedStringResource("Poki Was Updated")), body: AppLocalization.text(LocalizedStringResource("Tap to open Poki again.")), id: id, after: 20)
     }
 
     /// Once a day in the last two days: the build is ready (or can't be made) and nothing installed it.
@@ -493,9 +492,9 @@ final class SelfSigner {
         let key = "signing.reminded"
         if let last = UserDefaults.standard.object(forKey: key) as? Date, Date().timeIntervalSince(last) < 20 * 3600 { return }
         UserDefaults.standard.set(Date(), forKey: key)
-        let when = expiry.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? ""
-        notify(title: String(localized: "Poki Expires Soon"),
-               body: next != nil ? String(localized: "A refreshed Poki is ready. Open Setup and tap Install before \(when).") : String(localized: "Open Setup to refresh Poki before \(when)."))
+        let when = expiry.map { $0.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale)) } ?? ""
+        notify(title: AppLocalization.text(LocalizedStringResource("Poki Expires Soon")),
+               body: next != nil ? AppLocalization.text(LocalizedStringResource("A refreshed Poki is ready. Open Setup and tap Install before \(when).")) : AppLocalization.text(LocalizedStringResource("Open Setup to refresh Poki before \(when).")))
     }
 
     /// `-pokiSigningDays 1`: a simulator has no profile, so a screenshot gives Poki one that ends then.
