@@ -95,15 +95,16 @@ final class AppCoreHost: CoreHost, @unchecked Sendable {
 
     func update(key: Curve25519.Signing.PrivateKey?, hashes: [String]) { lock.withLock { self.key = key; self.hashes = hashes } }
     func update(runner: RunnerState) { lock.withLock { self.runner = runner } }
-    /// Status queries must not wake or retry automation.
+    /// The state as last given, without the wake side effect of `runnerState()` (tests).
     var currentRunner: RunnerState { lock.withLock { runner } }
     func onRestart(_ action: @escaping @Sendable () -> Void) { lock.withLock { restart = action } }
     func onWake(_ action: @escaping @Sendable () -> Void) { lock.withLock { wake = action } }
     func onWarmUp(_ action: @escaping @Sendable () -> Void) { lock.withLock { warm = action } }
     /// A tool call found automation failed or not open yet: the app may try again (the in-process session, ESP-152).
     func onRetry(_ action: @escaping @Sendable () -> Void) { lock.withLock { retry = action } }
-    /// A connection prepares dependencies without requesting phone automation.
+    /// MCP initialize: a paused runner starts now, and the app gets the session ready.
     func warmUp() {
+        _ = runnerState()
         lock.withLock { warm }?()
     }
     /// The runner was stopped while idle (or by the owner): the next tool call starts it again.

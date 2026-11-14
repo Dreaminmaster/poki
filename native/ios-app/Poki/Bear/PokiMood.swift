@@ -89,9 +89,6 @@ struct PokiStatus: Equatable {
             return PokiStatus(DoneLinger.shared.showing ? .done : .ready)
         }
         if let sample = sample() { return sample }
-        if model.preparingPhone, model.approvals.isEmpty, model.handoffText == nil {
-            return PokiStatus(.thinking, word: AppLocalization.text("Preparing"))
-        }
         let voice = model.voice
         // During a talk the picture stays the three-dimensional bear, with the talk's word beside it: the
         // flat listening and speaking faces carry sound waves the model does not have.

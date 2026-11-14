@@ -124,7 +124,7 @@ struct VoicePage: View {
                 if !holding {
                     holding = true
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    if voice.canTalk { model.prepareForTask(); Task { await voice.press() } } else { openModel() }
+                    if voice.canTalk { Task { await voice.press() } } else { openModel() }
                 }
                 cancelling = value.translation.height < -60
             }
