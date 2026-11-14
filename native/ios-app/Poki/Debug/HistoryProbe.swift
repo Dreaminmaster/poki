@@ -205,7 +205,7 @@ final class HistoryProbe: ObservableObject {
         }
     }
 
-    /// How the element walk asks the phone not to draw its highlight (1 to 3).
+    /// How the element walk asks the phone not to draw its highlight (1 to 4).
     @Published var walkVariant = 1
 
     /// What the phone says about the app in front without its contents, after `delay` seconds so the
@@ -463,7 +463,7 @@ struct HistoryTestSection: View {
                 .disabled(probe.reading || probe.running)
             Button("End Sleep Screen and Check in 10 Seconds") { Task { await probe.front(model: model, endSleepScreen: true) } }
                 .disabled(probe.reading || probe.running)
-            Stepper(value: $probe.walkVariant, in: 1...3) {
+            Stepper(value: $probe.walkVariant, in: 1...4) {
                 LabeledContent("Walk Variant") { Text(verbatim: "\(probe.walkVariant)").monospacedDigit() }
             }
             .disabled(probe.reading || probe.running)
