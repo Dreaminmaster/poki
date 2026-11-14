@@ -620,6 +620,48 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
     }
 
+    func testStoppedConversationReachesModelAfterReload() async throws {
+        let waiting = expectation(description: "model received the published plan")
+        let ended = expectation(description: "stopped task ended")
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Inspect Wi-Fi", "Report the result"], "currentStep": 2]),
+        ], holdAfter: 1) { request in
+            if (request["messages"] as? [[String: Any]])?.contains(where: { $0["role"] as? String == "tool" }) == true {
+                waiting.fulfill()
+            }
+        }
+        _ = chat(on: server)
+        let app = try XCTUnwrap(self.app)
+        let original = ChatModel(app: app)
+        original.newConversation()
+        let request = "Open Settings and inspect Wi-Fi, then report what was found."
+        ChatModel.afterTask = { _ in ended.fulfill() }
+        original.send(request)
+        await fulfillment(of: [waiting], timeout: 10)
+        original.stop()
+        await fulfillment(of: [ended], timeout: 10)
+        ChatModel.afterTask = nil
+        SessionStore.shared.flush()
+
+        let disk = SessionStore(folder: SessionStore.defaultFolder, defaults: .standard)
+        let saved = try XCTUnwrap(disk.session(original.sessionID))
+        XCTAssertEqual(saved.outcome, .stopped)
+        XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
+
+        let received = expectation(description: "continuation reached model")
+        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { _ in received.fulfill() }
+        ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
+        let restored = ChatModel(app: app)
+        restored.restore(saved)
+        restored.send("继续早晨的任务")
+        await fulfillment(of: [received], timeout: 10)
+        let payload = try JSONSerialization.data(withJSONObject: try XCTUnwrap(next.requests.first))
+        let sent = String(decoding: payload, as: UTF8.self)
+        XCTAssertTrue(sent.contains(request), "the restored task must reach the model, not only the screen")
+        XCTAssertTrue(sent.contains("Inspect Wi-Fi"), "the model needs the interrupted plan")
+        restored.stop()
+    }
+
     func testThePromptNamesOnlyToolsTheModelHas() throws {
         let tools = Set(Harness.tools.map(\.name))
         let regex = try NSRegularExpression(pattern: "\\b[a-z]+(?:_[a-z]+)+\\b")
@@ -658,14 +700,20 @@ final class FakeCompletions: @unchecked Sendable {
     private var bodies: [[String: Any]] = []
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
+    private var held: [NWConnection] = []
+    private let holdAfter: Int?
+    private let onRequest: (@Sendable ([String: Any]) -> Void)?
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
 
-    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil) throws {
+    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
+         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
         self.replies = replies
         self.responseStatus = responseStatus
         self.holdFirstReply = holdFirstReply
+        self.holdAfter = holdAfter
+        self.onRequest = onRequest
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -676,7 +724,7 @@ final class FakeCompletions: @unchecked Sendable {
         guard ready.wait(timeout: .now() + 5) == .success else { throw URLError(.cannotConnectToHost) }
     }
 
-    deinit { listener.cancel() }
+    deinit { listener.cancel(); held.forEach { $0.cancel() } }
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -704,9 +752,15 @@ final class FakeCompletions: @unchecked Sendable {
     }
 
     private func answer(_ connection: NWConnection, _ body: Data) {
+        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         let events = lock.withLock { () -> String in
-            if let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] { bodies.append(json) }
+            bodies.append(json)
             return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+        }
+        onRequest?(json)
+        if let holdAfter, requests.count > holdAfter {
+            lock.withLock { held.append(connection) }
+            return
         }
         let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
         if requests.count == 1, let holdFirstReply {
