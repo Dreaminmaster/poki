@@ -335,18 +335,11 @@ enum HomeIdea {
 
     static var examples: [HomeShortcut] { examples(for: .current) }
 
-    /// Starring Poki on GitHub, second on the home page from the first open, for a new owner and one
-    /// who updates alike: the list is worked out again at each launch, so nothing is stored for it.
-    /// Like every pill it reads as an icon, a name in bold and an action (GitHub's mark, GitHub,
-    /// starring Poki), but it has no app this iPhone opens: the task runs in Poki's own browser. Signed
-    /// out, the owner is handed GitHub's sign-in page itself, not the repository with a note to find
-    /// it. Its key does not change with the language, so Forget holds after the iPhone's language changes.
+    /// The fixed key keeps Forget stable across language changes. The carried mark also appears
+    /// when GitHub is not installed, so the task can explain how to install it.
     static var star: HomeShortcut {
         HomeShortcut(key: "starpokiongithub", app: "", appName: "GitHub", text: AppLocalization.text(LocalizedStringResource("Star Poki")),
-                     prompt: String(localized: """
-                     Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to \
-                     GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me
-                     """), icon: "github")
+                     prompt: AppLocalization.text(LocalizedStringResource("Open the GitHub app on this iPhone, go to the JosssphZhou/poki repository, and star it. If the app is not installed, stop and ask me to install it from the App Store. Do not use a browser. If I am not signed in, stop on the login screen and let me sign in myself. If I have already starred the repository, tell me and leave it starred.")), icon: "github")
     }
 
     static func examples(for language: AppLanguage) -> [HomeShortcut] {
