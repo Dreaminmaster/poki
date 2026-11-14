@@ -8,6 +8,8 @@
 //! - `read_once`: one read. Answers with the seconds it took, the apps on screen and the number of
 //!   elements. The screen's text is counted, and returned only when `include_text` is set.
 //! - `watch`: one subscription kept open for `seconds`. Answers with every tree dump as it arrived.
+//! - `front`: two overlapping subscriptions, the processes behind the apps they name, and one
+//!   screenshot through the instruments service, for the app to read as text.
 //! - `run`: a read every `interval_ms` for `duration_s`. Reports each read as it is made, then the
 //!   reads made, the failures and the longest gap between two reads.
 //!
@@ -100,6 +102,7 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
     match request["op"].as_str().unwrap_or("") {
         "read_once" => read_once(&request).await,
         "watch" => watch(&request).await,
+        "front" => front(&request).await,
         "run" => run(&request, emit).await,
         other => Err(Failure::new(format!("unknown history request \"{other}\"")).code("config")),
     }
@@ -169,6 +172,87 @@ async fn watch(request: &Value) -> Result<Value, Failure> {
     answer["attempts"] = json!(attempts);
     answer["services"] = json!(accessibility_services(&device));
     Ok(answer)
+}
+
+/// What can be learned about the app in front without its contents: two overlapping subscriptions,
+/// the processes behind the apps the service names, and one screenshot (saved to `screenshot_path`
+/// for the app to read as text, when given).
+async fn front(request: &Value) -> Result<Value, Failure> {
+    let target = Target::from(request)?;
+    let mut device = target.open().await?;
+    let (tree, attempts) = ax::read_tree_overlapped(&mut device.adapter, &device.rsd, Duration::from_secs(3), Duration::from_secs(5)).await;
+    let mut answer = match tree {
+        Some(tree) => summarize(&tree, false),
+        None => json!({}),
+    };
+    answer["tree"] = answer.get("elements").is_some().into();
+    let pids: Vec<u64> = attempts.iter().flat_map(|attempt| &attempt.apps).filter_map(|app| app["pid"].as_u64()).collect();
+    answer["attempts"] = json!(attempts);
+    answer["services"] = json!(accessibility_services(&device));
+
+    let path = request["screenshot_path"].as_str().map(String::from);
+    instruments(&mut device, &pids, path.as_deref(), &mut answer).await;
+    Ok(answer)
+}
+
+/// The instruments side of `front`: who the processes are, and one screenshot.
+/// Run in place on this thread: the compiler cannot prove this future is Send (the instruments
+/// connection is only a service for one lifetime of its stream), and it does not need to move.
+async fn instruments(device: &mut crate::device::Device, pids: &[u64], screenshot_path: Option<&str>, answer: &mut Value) {
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(instruments_inner(device, pids, screenshot_path, answer)))
+}
+
+async fn instruments_inner(device: &mut crate::device::Device, pids: &[u64], screenshot_path: Option<&str>, answer: &mut Value) {
+    use idevice::{
+        ReadWrite,
+        dvt::{application_listing::ApplicationListingClient, device_info::DeviceInfoClient, remote_server::RemoteServerClient, screenshot::ScreenshotClient},
+    };
+    let asked = Instant::now();
+    let mut server: RemoteServerClient<Box<dyn ReadWrite>> = match device.connect().await {
+        Ok(server) => server,
+        Err(error) => {
+            answer["instruments_error"] = error.to_string().into();
+            return;
+        }
+    };
+    answer["instruments_connect_ms"] = milliseconds(asked.elapsed()).into();
+    // The processes behind the apps the tree named, and the installed app each belongs to.
+    let processes = async {
+        let running = DeviceInfoClient::new(&mut server).await?.running_processes().await?;
+        let installed = ApplicationListingClient::new(&mut server).await?.installed_applications().await?;
+        Ok::<_, idevice::IdeviceError>((running, installed))
+    }
+    .await;
+    match processes {
+        Ok((running, installed)) => {
+            let text = |app: &plist::Dictionary, key: &str| app.get(key).and_then(plist::Value::as_string).map(String::from);
+            let named: Vec<Value> = pids
+                .iter()
+                .map(|pid| {
+                    let Some(process) = running.iter().find(|process| process.pid as u64 == *pid) else { return json!({"pid": pid, "running": false}) };
+                    let app = installed.iter().find(|app| ["ExecutableName", "CFBundleExecutable"].iter().any(|key| text(app, key).as_deref() == Some(process.name.as_str())));
+                    json!({"pid": pid, "running": true, "name": process.name, "app_name": process.real_app_name, "is_application": process.is_application, "bundle_id": app.and_then(|app| text(app, "CFBundleIdentifier"))})
+                })
+                .collect();
+            answer["processes"] = json!(named);
+            answer["running_applications"] = running.iter().filter(|process| process.is_application).count().into();
+            answer["installed_applications"] = installed.len().into();
+            answer["application_keys"] = json!(installed.first().map(|app| app.keys().take(40).collect::<Vec<_>>()));
+        }
+        Err(error) => answer["processes_error"] = error.to_string().into(),
+    }
+    let asked = Instant::now();
+    let picture = async { ScreenshotClient::new(&mut server).await?.take_screenshot().await }.await;
+    match picture {
+        Ok(bytes) => {
+            answer["screenshot_ms"] = milliseconds(asked.elapsed()).into();
+            answer["screenshot_bytes"] = bytes.len().into();
+            if let Some(path) = screenshot_path {
+                answer["screenshot_saved"] = std::fs::write(path, &bytes).is_ok().into();
+            }
+        }
+        Err(error) => answer["screenshot_error"] = error.to_string().into(),
+    }
 }
 
 async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {

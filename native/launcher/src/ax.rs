@@ -165,6 +165,14 @@ async fn subscribe(
     hold: bool,
     attempt: &mut Attempt,
 ) -> Result<Option<Json>> {
+    let mut socket = open(adapter, rsd).await?;
+    let result = drain(&mut socket, include_offscreen, wait, hold, attempt).await;
+    close(socket).await;
+    result
+}
+
+/// Connects to the service and says this client needs accessibility.
+async fn open(adapter: &mut AdapterHandle, rsd: &RsdHandshake) -> Result<impl ReadWrite + use<>> {
     let port = rsd
         .services
         .get(SERVICE)
@@ -190,6 +198,30 @@ async fn subscribe(
         true,
     )
     .await?;
+    Ok(socket)
+}
+
+/// Says this client no longer needs accessibility and ends the connection.
+async fn close(mut socket: impl ReadWrite) {
+    let _ = call(
+        &mut socket,
+        3,
+        "clientNeedsAccessibility:",
+        false.into(),
+        true,
+    )
+    .await;
+    let _ = socket.shutdown().await;
+}
+
+/// Reads what the service sends for `wait`, or until a tree is there unless `hold`.
+async fn drain(
+    socket: &mut impl ReadWrite,
+    include_offscreen: bool,
+    wait: Duration,
+    hold: bool,
+    attempt: &mut Attempt,
+) -> Result<Option<Json>> {
     let mut tree = Tree {
         include_offscreen,
         ..Tree::default()
@@ -197,8 +229,8 @@ async fn subscribe(
     let asked = tokio::time::Instant::now();
     let result = tokio::time::timeout(wait, async {
         loop {
-            let message = Message::from_reader(&mut socket).await?;
-            acknowledge(&mut socket, &message).await?;
+            let message = Message::from_reader(&mut *socket).await?;
+            acknowledge(&mut *socket, &message).await?;
             attempt.messages += 1;
             if let Some(selector) = message.data.as_ref().and_then(Value::as_string) {
                 if attempt.selectors.len() < 8 && !attempt.selectors.iter().any(|s| s == selector) {
@@ -237,23 +269,52 @@ async fn subscribe(
         }
     })
     .await;
+    attempt.took_ms = asked.elapsed().as_millis() as u64;
     attempt.apps = tree.apps();
     // A held subscription ends with its time; what it gathered by then is the answer.
-    let result = match result {
+    match result {
         Ok(Ok(())) => Ok(Some(tree.json())),
         Ok(Err(error)) => Err(error),
         Err(_) => Ok((hold && tree.ready()).then(|| tree.json())),
+    }
+}
+
+/// Two subscriptions at once: the first is kept open, so the phone still has a client that needs
+/// accessibility, while a second one is made `first` later and read for `second`. Tells whether the
+/// tree an app gives depends on accessibility having been asked for a moment before.
+pub async fn read_tree_overlapped(
+    adapter: &mut AdapterHandle,
+    rsd: &RsdHandshake,
+    first: Duration,
+    second: Duration,
+) -> (Option<Json>, Vec<Attempt>) {
+    let mut one = Attempt { window_ms: first.as_millis() as u64, ..Attempt::default() };
+    let mut socket = match open(adapter, rsd).await {
+        Ok(socket) => socket,
+        Err(error) => {
+            one.error = Some(error.to_string());
+            return (None, vec![one]);
+        }
     };
-    let _ = call(
-        &mut socket,
-        3,
-        "clientNeedsAccessibility:",
-        false.into(),
-        true,
-    )
-    .await;
-    let _ = socket.shutdown().await;
-    result
+    let early = match drain(&mut socket, false, first, true, &mut one).await {
+        Ok(tree) => tree,
+        Err(error) => {
+            one.error = Some(error.to_string());
+            None
+        }
+    };
+    one.answered = early.is_some();
+    let mut two = Attempt { window_ms: second.as_millis() as u64, ..Attempt::default() };
+    let late = match subscribe(adapter, rsd, false, second, true, &mut two).await {
+        Ok(tree) => tree,
+        Err(error) => {
+            two.error = Some(error.to_string());
+            None
+        }
+    };
+    two.answered = late.is_some();
+    close(socket).await;
+    (late.or(early), vec![one, two])
 }
 
 // AX archives contain custom classes. Keep UIDs intact and resolve only fields

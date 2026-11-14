@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import Vision
+import ImageIO
 
 /// poki_history_* through the C ABI (native/launcher/src/history.rs): the screen read as text through
 /// the accessibility audit service, on a tunnel of its own and with no XCTest session.
@@ -203,6 +205,89 @@ final class HistoryProbe: ObservableObject {
         }
     }
 
+    /// What the phone says about the app in front without its contents, after `delay` seconds so the
+    /// owner can put another app in front: two overlapping subscriptions, the processes behind the
+    /// apps they name, and one screenshot read as text on this phone. The picture is deleted at once.
+    func front(model: AppModel, delay: Int = 10) async {
+        guard !reading, !running, var request = makeRequest("front", model: model) else { return }
+        reading = true
+        defer { reading = false }
+        let picture = FileManager.default.temporaryDirectory.appendingPathComponent("history-front-\(UUID().uuidString).png")
+        request["screenshot_path"] = picture.path
+        note("front app check in \(delay) s, Poki is pid \(ProcessInfo.processInfo.processIdentifier): \(context(model: model))", keep: false)
+        if keepAwake { try? keepAlive.start() }
+        let hold = UIApplication.shared.beginBackgroundTask(withName: "poki-history-front")
+        defer {
+            keepAlive.stop()
+            if hold != .invalid { UIApplication.shared.endBackgroundTask(hold) }
+            try? FileManager.default.removeItem(at: picture)
+        }
+        try? await Task.sleep(for: .seconds(delay))
+        do {
+            let data = try await HistoryBridge.call(request)
+            let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            func number(_ key: String) -> String { (value[key] as? Int).map { "\($0)" } ?? "none" }
+            let attempts = value["attempts"] as? [[String: Any]] ?? []
+            for line in Self.attempts(attempts) { note(line, keep: false) }
+            for (index, attempt) in attempts.enumerated() {
+                for app in attempt["apps"] as? [[String: Any]] ?? [] {
+                    let id = app["bundle_id"] as? String ?? "unnamed"
+                    let children = (app["children"] as? Int).map { "\($0)" } ?? "none"
+                    note("subscription \(index + 1) app \(id) pid \(app["pid"] as? Int ?? 0), children \(children)", keep: false)
+                }
+            }
+            if value["tree"] as? Bool == true {
+                note("tree \(Self.apps(value)), \(number("elements")) elements, \(number("text_lines")) text lines", keep: false)
+            } else {
+                note("no tree from either subscription", keep: false)
+            }
+            if let error = value["instruments_error"] as? String { note("instruments failed: \(error)", keep: false) }
+            if let error = value["processes_error"] as? String { note("process list failed: \(error)", keep: false) }
+            for process in value["processes"] as? [[String: Any]] ?? [] {
+                let pid = process["pid"] as? Int ?? 0
+                if process["running"] as? Bool == true {
+                    note("pid \(pid) is \(process["name"] as? String ?? "unnamed"), app name \(process["app_name"] as? String ?? "none"), bundle \(process["bundle_id"] as? String ?? "not found"), application \(process["is_application"] as? Bool == true ? "yes" : "no")", keep: false)
+                } else {
+                    note("pid \(pid) is not in the process list", keep: false)
+                }
+            }
+            if value["processes"] != nil {
+                note("instruments connect \(number("instruments_connect_ms")) ms, \(number("running_applications")) apps running, \(number("installed_applications")) installed", keep: false)
+                if let keys = value["application_keys"] as? [String] { note("app keys \(keys.joined(separator: " "))", keep: false) }
+            }
+            if let error = value["screenshot_error"] as? String {
+                note("screenshot failed: \(error)", keep: false)
+            } else if value["screenshot_ms"] != nil {
+                note("screenshot \(number("screenshot_ms")) ms, \(number("screenshot_bytes")) bytes", keep: false)
+                let asked = Date()
+                let read = await Task.detached(priority: .userInitiated) { HistoryProbe.readText(at: picture) }.value
+                let took = String(format: "%.2f", Date().timeIntervalSince(asked))
+                if let read {
+                    note("text from the picture in \(took) s: \(read.lines) lines, \(read.characters) characters, \(read.width) x \(read.height) pixels", keep: false)
+                } else {
+                    note("the picture could not be read as text (\(took) s)", keep: false)
+                }
+            }
+            note("after: \(context(model: model)). Did iOS show a banner, an indicator or a prompt?", keep: false)
+        } catch {
+            let failure = error as? HistoryBridge.Failure
+            note("front app check failed (\(failure?.code ?? "error")): \(error.localizedDescription)", keep: false)
+            if let fix = failure?.fix { note(fix, keep: false) }
+        }
+    }
+
+    /// Counts only: the words themselves are not kept or logged.
+    nonisolated private static func readText(at url: URL) -> (lines: Int, characters: Int, width: Int, height: Int)? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+        request.automaticallyDetectsLanguage = true
+        do { try VNImageRequestHandler(cgImage: image, options: [:]).perform([request]) } catch { return nil }
+        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.filter { !$0.isEmpty }
+        return (lines.count, lines.reduce(0) { $0 + $1.count }, image.width, image.height)
+    }
+
     private func answerOnce(_ request: [String: Any], model: AppModel) async {
         do {
             let data = try await HistoryBridge.call(request)
@@ -355,6 +440,8 @@ struct HistoryTestSection: View {
             Button("Read in 10 Seconds") { Task { await probe.readOnce(model: model, delay: 10) } }
                 .disabled(probe.reading || probe.running)
             Button("Watch Screen for 30 Seconds") { Task { await probe.watch(model: model) } }
+                .disabled(probe.reading || probe.running)
+            Button("Check Front App in 10 Seconds") { Task { await probe.front(model: model) } }
                 .disabled(probe.reading || probe.running)
             Stepper(value: $probe.seconds, in: 1...60) {
                 LabeledContent("Seconds Between Reads") { Text(verbatim: "\(probe.seconds)").monospacedDigit() }
