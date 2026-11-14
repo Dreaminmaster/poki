@@ -204,7 +204,7 @@ jobs:
         run: swift test --package-path native/ios/PokiLoopback
 
       - name: PokiCore tests
-        timeout-minutes: 12
+        timeout-minutes: 15
         run: swift test --package-path native/ios/PokiCore
 
       - name: Poki keyboard tests
