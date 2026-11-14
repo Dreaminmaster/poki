@@ -64,9 +64,21 @@ final class HomeShortcutsTests: XCTestCase {
         let shown = pills(routines: [routine], requests: busy + history)
         XCTAssertEqual(shown.map(\.text), ["Order oat milk again", "Star Poki", "看看电池", "拍一张照片", "记一条待办",
                                             "看看购物车", "看看购物车"])
-        XCTAssertEqual(shown[1].prompt, "Open https://github.com/JosssphZhou/poki in the built-in browser and star it. If I am not signed in to GitHub, open https://github.com/login?return_to=/JosssphZhou/poki and hand that page to me")
         XCTAssertEqual(shown[1].appName, "GitHub", "a name in bold before the action, as on every pill")
         XCTAssertNotNil(shown[1].icon.flatMap(AppIconStore.carried), "GitHub's mark, carried in the app")
+
+        for (language, title, prompt) in [
+            ("en", "Star Poki", "Open the GitHub app on this iPhone, go to the JosssphZhou/poki repository, and star it. If the app is not installed, stop and ask me to install it from the App Store. Do not use a browser. If I am not signed in, stop on the login screen and let me sign in myself. If I have already starred the repository, tell me and leave it starred."),
+            ("zh-Hans", "给 Poki 点 Star", "打开这台 iPhone 上的 GitHub 应用，进入 JosssphZhou/poki 仓库页，点 Star。如果没有安装 GitHub 应用，就停下并提示我先去 App Store 安装，不要使用浏览器。如果我没有登录，就停在登录页，交给我自己登录。如果我已经点过 Star，就告诉我，不要取消。"),
+            ("zh-Hant", "給 Poki 點 Star", "打開這台 iPhone 上的 GitHub 應用程式，進入 JosssphZhou/poki 儲存庫頁面，點 Star。如果沒有安裝 GitHub 應用程式，就停下並提示我先去 App Store 安裝，不要使用瀏覽器。如果我沒有登入，就停在登入頁，交給我自己登入。如果我已經點過 Star，就告訴我，不要取消。")
+        ] {
+            AppLocalization.shared.preference = language
+            let star = pills(routines: [routine], requests: busy + history)[1]
+            XCTAssertEqual(star.text, title, language)
+            XCTAssertEqual(star.prompt, prompt, language)
+            XCTAssertEqual(star.key, shown[1].key, "Forget keeps the same key across languages")
+        }
+        AppLocalization.shared.preference = "en"
 
         XCTAssertEqual(texts(forgotten: [HomeIdea.star.key]), ["Tell the team I’m late", "Text Mom I’m on my way", "Book a ride home",
                                                                "Order my usual coffee", "Add milk to my list", "Post today’s photo"])
