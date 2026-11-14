@@ -327,6 +327,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut last_good: Option<Duration> = None;
     let mut last_text: Option<u64> = None;
     let points: Option<Vec<(f64, f64)>> = request["direct_points"].as_array().map(|points| points.iter().filter_map(|point| Some((point[0].as_f64()?, point[1].as_f64()?))).collect());
+    let mut direct: Option<ax::direct::Direct> = None;
     let mut ended = "finished";
     loop {
         if RUN.load(Ordering::SeqCst) != me {
@@ -348,8 +349,13 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             // With points to hit test, the app is found the way the screen shows it and read whole;
             // the service's own dump can name the wrong app.
             if let Some(points) = &points {
-                let (tree, trace) = ax::direct::read_front(&mut open.adapter, &open.rsd, points).await;
-                return tree.ok_or_else(|| Failure::new(format!("no tree at {}: {}", trace.stage, trace.error.unwrap_or_default())).code("read"));
+                // One subscription serves every read of the run; a read that fails ends it.
+                let mut trace = ax::direct::Trace::default();
+                if direct.is_none() {
+                    trace.stage = "subscribe";
+                    direct = Some(ax::direct::Direct::connect(&mut open.adapter, &open.rsd).await.map_err(|error| Failure::new(format!("no tree at subscribe: {error}")).code("read"))?);
+                }
+                return direct.as_mut().unwrap().front(points, &mut trace).await.map_err(|error| Failure::new(format!("no tree at {}: {error}", trace.stage)).code("read"));
             }
             let (tree, attempts) = ax::read_tree_traced(&mut open.adapter, &open.rsd, false, &windows).await;
             tree.ok_or_else(|| no_tree(&attempts))
@@ -373,6 +379,9 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             }
             Err(failure) => {
                 // A tunnel that failed once is not used again; the next read opens a new one.
+                if let Some(mut old) = direct.take() {
+                    let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
+                }
                 device = None;
                 stats.failures += 1;
                 stats.last_error = Some(failure.detail.clone());
@@ -387,6 +396,9 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         while asked.elapsed() < interval && RUN.load(Ordering::SeqCst) == me {
             tokio::time::sleep(interval.saturating_sub(asked.elapsed()).min(Duration::from_millis(250))).await;
         }
+    }
+    if let Some(mut open) = direct.take() {
+        let _ = tokio::time::timeout(Duration::from_secs(1), open.close()).await;
     }
     let mut answer = stats.json();
     answer["ended"] = ended.into();

@@ -269,6 +269,29 @@ impl Direct {
         flatten(&update, result, pid, object_id, self.orientation.unwrap_or(1))
     }
 
+    /// The tree of the app shown at the first of `points` that hits a process, on this connection.
+    pub async fn front(&mut self, points: &[(f64, f64)], trace: &mut Trace) -> Result<Json> {
+        trace.stage = "hit test";
+        trace.orientation = self.orientation;
+        for (x, y) in points {
+            let asked = std::time::Instant::now();
+            let hit = self.hit(*x, *y).await;
+            let ms = asked.elapsed().as_millis() as u64;
+            match hit {
+                Ok(pid) => {
+                    trace.hits.push(json!({"x": x, "y": y, "pid": pid, "ms": ms}));
+                    if let Some(pid) = pid {
+                        trace.pid = Some(pid);
+                        break;
+                    }
+                }
+                Err(error) => trace.hits.push(json!({"x": x, "y": y, "error": error.to_string(), "ms": ms})),
+            }
+        }
+        let pid = trace.pid.ok_or("no point of the screen answered the hit test")?;
+        self.tree_of(pid, trace).await
+    }
+
     pub async fn close(&mut self) {
         let id = self.next_id;
         let _ = call(&mut self.socket, id, "clientNeedsAccessibility:", false.into(), true).await;
@@ -289,27 +312,7 @@ pub async fn read_front(adapter: &mut AdapterHandle, rsd: &RsdHandshake, points:
     };
     trace.subscribe_ms = asked.elapsed().as_millis() as u64;
     trace.orientation = direct.orientation;
-    let outcome = async {
-        trace.stage = "hit test";
-        for (x, y) in points {
-            let asked = std::time::Instant::now();
-            let hit = direct.hit(*x, *y).await;
-            let ms = asked.elapsed().as_millis() as u64;
-            match hit {
-                Ok(pid) => {
-                    trace.hits.push(json!({"x": x, "y": y, "pid": pid, "ms": ms}));
-                    if let Some(pid) = pid {
-                        trace.pid = Some(pid);
-                        break;
-                    }
-                }
-                Err(error) => trace.hits.push(json!({"x": x, "y": y, "error": error.to_string(), "ms": ms})),
-            }
-        }
-        let pid = trace.pid.ok_or("no point of the screen answered the hit test")?;
-        direct.tree_of(pid, &mut trace).await
-    }
-    .await;
+    let outcome = direct.front(points, &mut trace).await;
     direct.close().await;
     match outcome {
         Ok(tree) => {
@@ -349,9 +352,10 @@ fn flatten(
     let token = a
         .field(root, "UIAccessibilitySnapshotKeyElement")
         .ok_or("Direct snapshot unavailable")?;
-    if a.field(token, "objectID").and_then(|v| a.integer(v)) != Some(expected_id) {
-        return Err("Direct snapshot root changed".into());
-    }
+    // Some apps answer with a root whose identity differs from the application element that was
+    // asked (seen on an iPhone, iOS 27.3). The snapshot is still that process's, so its own root is
+    // taken as the root.
+    let expected_id = a.field(token, "objectID").and_then(|v| a.integer(v)).unwrap_or(expected_id);
     let attrs = a
         .field(root, "UIAccessibilitySnapshotKeyAttributes")
         .ok_or("No root attributes")?;
@@ -366,8 +370,9 @@ fn flatten(
     };
     let mut pending = vec![(root, 0)];
     while let Some((record, depth)) = pending.pop() {
-        if depth > 48 || tree.nodes.len() >= 512 {
-            return Err("Direct snapshot exceeds bounds".into());
+        // A very large screen is cut short, not refused: what was read so far is still the screen.
+        if depth > 64 || tree.nodes.len() >= 4000 {
+            continue;
         }
         let token = a
             .field(record, "UIAccessibilitySnapshotKeyElement")
@@ -494,9 +499,10 @@ mod tests {
         }
     }
     #[test]
-    fn direct_snapshot_rejects_wrong_root_and_truncated_children() {
+    fn direct_snapshot_takes_its_own_root_and_rejects_truncated_children() {
         let (archive, mut root) = fixture(true);
-        assert!(flatten(&archive, &root, 42, 11, 3).is_err());
+        // A root with another identity than the one asked for is read as it is.
+        assert_eq!(flatten(&archive, &root, 42, 11, 3).unwrap()["elements"].as_array().unwrap().len(), 2);
         root.as_dictionary_mut()
             .unwrap()
             .insert("UIAccessibilitySnapshotKeyChildrenCount".into(), 2.into());
