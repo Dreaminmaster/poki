@@ -56,6 +56,53 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(Set(relaunched.archivedSessions.map(\.id)), ["old-1", "old-2"], "the archive is kept on disk")
     }
 
+    func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
+        let old = String(repeating: "old transcript filler ", count: 280)
+        let entries = (0..<60).map { index in
+            ChatEntry(.poki("earlier \(index): \(old)"))
+        } + [
+            ChatEntry(.you("Inspect the current Settings page before proceeding", delivered: true)),
+            ChatEntry(.step("The final read failed; delivery remains unknown", ok: false))
+        ]
+        let oversized = String(repeating: "old provider response ", count: 20_000)
+        let calls = (0..<11).map { index in
+            CallRecord(name: "look", arguments: #"{"screen":"Settings"}"#,
+                       answer: oversized, ms: 120, ok: true)
+        } + [
+            CallRecord(name: "look", arguments: #"{"screen":"Settings"}"#,
+                       answer: "Important recent output: FAILED_READ, no confirmation",
+                       ms: 200, ok: false)
+        ]
+        let saved = SavedSession(id: "bounded", kind: .poki, client: nil, title: "Settings work",
+                                 started: Date(), updated: Date(), live: false, outcome: .stopped,
+                                 entries: entries, calls: calls)
+        let context = saved.modelContext
+        XCTAssertLessThan(context.count, 28_000, "restoring historical records must not inflate the model request")
+        XCTAssertTrue(context.contains("Inspect the current Settings page"))
+        XCTAssertTrue(context.contains("The final read failed; delivery remains unknown"))
+        XCTAssertTrue(context.contains("Important recent output: FAILED_READ, no confirmation"))
+        XCTAssertTrue(context.contains("[older tool output abbreviated]"), "imported oversized results must be shortened")
+        XCTAssertTrue(context.contains("Last outcome: stopped"))
+        XCTAssertFalse(context.contains("earlier 0:"), "oldest transcript rows should yield to recent ones")
+        XCTAssertTrue(context.contains("an omitted result is unknown, not success"))
+    }
+
+    func testRestoredModelContextDoesNotDropOrdinaryShortHistory() {
+        let entries = [
+            ChatEntry(.you("Open Safari", delivered: true)),
+            ChatEntry(.step("Safari opened", ok: true))
+        ]
+        let calls = [CallRecord(name: "look", arguments: "{}", answer: "Current app: Safari",
+                                ms: 12, ok: true)]
+        let saved = SavedSession(id: "short", kind: .poki, client: nil, title: "Safari",
+                                 started: Date(), updated: Date(), live: false, outcome: .stopped,
+                                 entries: entries, calls: calls)
+        let context = saved.modelContext
+        XCTAssertTrue(context.contains("Owner: Open Safari"))
+        XCTAssertTrue(context.contains("Step (succeeded): Safari opened"))
+        XCTAssertTrue(context.contains("Result (ok): Current app: Safari"))
+    }
+
     func testFreshInstallArchivesNothing() throws {
         let installed = launch()
         XCTAssertTrue(installed.sessions.isEmpty)
