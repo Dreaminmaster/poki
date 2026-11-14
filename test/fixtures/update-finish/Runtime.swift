@@ -204,7 +204,22 @@ final class FakeCore {
     }
 
     @MainActor static func main() async {
-        let expected = "The update is installed. Swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+        let language = CommandLine.arguments.first { ["en", "zh-Hans", "zh-Hant"].contains($0) } ?? "en"
+        AppLocalization.shared.preference = language
+        let expected: String
+        let beforeConfirmation: String
+        switch language {
+        case "zh-Hans":
+            expected = "如果几秒内没完成，请从多任务界面划掉 Poki 再打开。重新打开 Poki 前，功能暂不可用。"
+            beforeConfirmation = "正在安装更新。重新打开 Poki 前，功能暂不可用。"
+        case "zh-Hant":
+            expected = "如果幾秒內沒完成，請從多工處理畫面滑掉 Poki 再開啟。重新開啟 Poki 前，功能暫不可用。"
+            beforeConfirmation = "正在安裝更新。重新開啟 Poki 前，功能暫不可用。"
+        default:
+            expected = "If the update has not finished after a few seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+            beforeConfirmation = "Installing the update. Features are unavailable until you reopen Poki."
+        }
+        print("Language: \(language)")
         let timedOut = await installed()
         Timer.advance(by: 15, oldProcessAlive: true)
         await drain()
@@ -218,7 +233,7 @@ final class FakeCore {
 
         let waiting = await installed()
         let task = await AppModel(signer: waiting).phoneTool("look", arguments: "{}")
-        check(task.isError && task.text == "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki.", "task during update is refused with an explanation", actual: task.text)
+        check(task.isError && task.text == expected, "task during update is refused with an explanation", actual: task.text)
         let afterTimeout = await AppModel(signer: timedOut).phoneTool("look", arguments: "{}")
         check(afterTimeout.isError && afterTimeout.text == expected, "task after timeout receives restart instructions", actual: afterTimeout.text)
 
@@ -241,18 +256,19 @@ final class FakeCore {
         await withCheckedContinuation { SignerBridge.installHeld = $0 }
         await drain()
         check(slow.finishNotice, "a running install announces that Poki will close")
+        check(slow.installMessage == beforeConfirmation, "unconfirmed install does not offer an early manual close", actual: slow.installMessage)
         slow.finishNoticeAnswered()
+        check(slow.installMessage == expected, "confirmed install without percentage shows restart instructions", actual: slow.installMessage)
         NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
         await drain()
-        check(!slow.needsReopen && slow.installMessage?.hasPrefix("Installing the update.") == true, "foreground return during a running install keeps the installing message", actual: slow.installMessage)
+        check(!slow.needsReopen && slow.installMessage == expected, "foreground return without percentage preserves restart instructions", actual: slow.installMessage)
         Timer.advance(by: 15, oldProcessAlive: true)
         await drain()
-        check(!slow.needsReopen && slow.installMessage?.contains("Do not close Poki in the app switcher.") == true, "15 seconds before system installation keeps the upload protected", actual: slow.installMessage)
-        let finishing = "Finishing the update. If it has not finished after 5 seconds, swipe up on Poki in the app switcher to close it, then open Poki again. Features are unavailable until you reopen Poki."
+        check(!slow.needsReopen && slow.installMessage == expected, "missing percentage after 15 seconds preserves restart instructions", actual: slow.installMessage)
         for fraction in [0.0, 0.4, 0.9] {
             SignerBridge.installProgress?(["kind": "part", "id": "install", "fraction": fraction])
             await drain()
-            check(slow.installMessage == finishing && !slow.needsReopen,
+            check(slow.installMessage == expected && !slow.needsReopen,
                   "system installation at \(fraction) offers conditional exit guidance without claiming success", actual: slow.installMessage)
         }
         SignerBridge.holdsInstall = false
@@ -263,7 +279,7 @@ final class FakeCore {
         let afterFour = slow.installMessage
         Timer.advance(by: 1, oldProcessAlive: true)
         await drain()
-        check(afterFour == "The update is installed. Waiting for Poki to close. Features are unavailable until you reopen Poki." && slow.working == expected,
+        check(afterFour == expected && slow.needsReopen && slow.working == expected,
               "the confirmed exit falls back after 5 seconds", actual: "\(afterFour ?? "nil") | then: \(slow.working ?? "nil")")
 
         ProcessExit.attempts = []
@@ -300,17 +316,17 @@ final class FakeCore {
         check(ProcessExit.attempts.count <= 1, "duplicate confirmation does not repeat exit")
         Timer.advance(by: 5, oldProcessAlive: true)
         await drain()
-        check(closing.needsReopen && closing.installMessage?.contains("If the update is still available, try again.") == true,
+        check(closing.needsReopen && closing.installMessage == expected,
               "surviving process gets fallback without claiming install success", actual: closing.installMessage)
         SignerBridge.holdsInstall = false
         SignerBridge.finishInstall?.resume()
         await updating.value
         check(closing.needsReopen && closing.installMessage == expected,
-              "late install result preserves fallback and reports confirmed success", actual: closing.installMessage)
+              "late install result preserves restart instructions", actual: closing.installMessage)
 
         SignerBridge.fails = true
         let failed = await installed()
-        check(failed.lastError == "Installation failed." && failed.working?.contains("If the update is still available, try again.") == true, "failed installation does not claim the update is installed", actual: failed.working)
+        check(failed.lastError == "Installation failed." && failed.working == expected, "failed installation does not claim the update is installed", actual: failed.working)
         Darwin.exit(failures == 0 ? 0 : 1)
     }
 }
