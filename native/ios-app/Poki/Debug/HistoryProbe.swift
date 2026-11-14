@@ -93,7 +93,8 @@ final class HistoryProbe: ObservableObject {
     private var wasDark = false
     private var expectedEmpty = 0
     private var unexplained = 0
-    private let file = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("history-test-log.txt")
+    @Published var copied = false
+    let file = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("history-test-log.txt")
     private static let limit = 400
 
     init() {
@@ -112,6 +113,18 @@ final class HistoryProbe: ObservableObject {
         guard keep, let data = (entry + "\n").data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: file) { handle.seekToEndOfFile(); handle.write(data); try? handle.close() }
         else { try? data.write(to: file) }
+    }
+
+    /// The whole log of the last test, from the file when there is one, since the screen keeps only the latest lines.
+    var fullLog: String {
+        if let text = try? String(contentsOf: file, encoding: .utf8), !text.isEmpty { return text }
+        return lines.joined(separator: "\n")
+    }
+
+    func copyLog() {
+        UIPasteboard.general.string = fullLog
+        copied = true
+        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
     }
 
     private func makeRequest(_ op: String, model: AppModel) -> [String: Any]? {
@@ -539,6 +552,8 @@ struct HistoryTestSection: View {
                 .disabled(probe.running || probe.reading)
             Button("Stop", role: .destructive) { probe.stopRun() }.disabled(!probe.running)
             if !probe.lines.isEmpty {
+                Button(probe.copied ? "Copied" : "Copy Log") { probe.copyLog() }
+                ShareLink("Share Log", item: probe.fullLog)
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(probe.lines.indices, id: \.self) { i in Text(verbatim: probe.lines[i]).font(.caption2.monospaced()) }
                 }
