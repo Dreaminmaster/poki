@@ -107,18 +107,44 @@ jobs:
           if [ "$CHANNEL" = beta ]; then
             # The alpha's IPA is the Pre-alpha run's artifact for its commit.
             run="$(gh run list --workflow prealpha.yml --commit "$SHA" --status success --json databaseId --jq '.[0].databaseId')"
-            [ -n "$run" ] || { echo "::error::no Pre-alpha run built $SHA"; exit 1; }
-            gh run download "$run" --name Poki-unsigned --dir src
-            cp src/Poki-external-unsigned.ipa "dist/Poki-external-$BASE-$BUILD.ipa"
+            if [ -n "$run" ]; then
+              echo "IPA source: Pre-alpha run $run ($SHA)"
+              gh run download "$run" --name Poki-unsigned --dir src
+              cp src/Poki-external-unsigned.ipa "dist/Poki-external-$BASE-$BUILD.ipa"
+            else
+              release="$SOURCE"
+              if ! gh release view "$release" --json tagName >/dev/null; then
+                # Alpha's immutable tag may have its files on the rolling release.
+                release=app-alpha-latest
+              fi
+              source_sha="$(gh api "repos/$GH_REPO/commits/$release" --jq .sha)"
+              [ "$source_sha" = "$SHA" ] || { echo "::error::Alpha release $release is not the promoted commit"; exit 1; }
+              echo "IPA source: Alpha release $release ($SOURCE, $SHA)"
+              ipa="Poki-external-$BASE-$BUILD.ipa"
+              gh release download "$release" --dir src --pattern "$ipa" --pattern Poki-signing.zip --pattern SHA256SUMS
+              awk -v name="$ipa" '$2 == name { print; found=1 } END { exit !found }' src/SHA256SUMS > src/IPA-SHA256SUMS
+              (cd src && sha256sum --check IPA-SHA256SUMS)
+              # Older Alpha manifests omit the signing archive; GitHub supplies its digest.
+              signing_digest="$(gh api "repos/$GH_REPO/releases/tags/$release" --jq '.assets[] | select(.name == "Poki-signing.zip") | .digest')"
+              [[ "$signing_digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "::error::missing signing archive SHA-256"; exit 1; }
+              (cd src && printf '%s  Poki-signing.zip\n' "${signing_digest#sha256:}" | sha256sum --check -)
+              cp "src/$ipa" "dist/$ipa"
+            fi
             cp src/Poki-signing.zip dist/
             gh release download app-alpha-latest --dir dist --pattern 'PokiSetup-*' --pattern 'SHA256SUMS-desktop.txt' || echo "::warning::no Poki Setup files on app-alpha-latest"
             # The Gym scorecards from the merged PR's gate, the baseline for the next beta.
             pr_head="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA/pulls" --jq '.[0].head.sha')"
             gate="$(gh run list --workflow promotion-gate.yml --commit "$pr_head" --json databaseId --jq '.[].databaseId' | while read -r id; do
-              gh api "repos/$GH_REPO/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx gym-scorecard && { echo "$id"; break; }; done)"
-            for name in gym-scorecard gym-scorecard-inprocess; do
-              gh run download "$gate" --name "$name" --dir "src/$name" && cp "src/$name/$name.txt" dist/ || echo "::warning::$name not found"
-            done
+              names="$(gh api "repos/$GH_REPO/actions/runs/$id/artifacts" --jq '.artifacts[].name')" || exit 1
+              if grep -qx gym-scorecard <<< "$names"; then echo "$id"; break; fi
+            done)"
+            if [ -n "$gate" ]; then
+              for name in gym-scorecard gym-scorecard-inprocess; do
+                gh run download "$gate" --name "$name" --dir "src/$name" && cp "src/$name/$name.txt" dist/ || echo "::warning::$name not found"
+              done
+            else
+              echo "::warning::No Gym scorecard artifact is available for promotion head $pr_head"
+            fi
           else
             gh release download "$SOURCE" --dir src
             cp src/Poki-external-*.ipa "dist/Poki-external-$LABEL.ipa"
