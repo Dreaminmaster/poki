@@ -51,8 +51,8 @@ targets:
         # follows the iPhone's language.
         CFBundleDevelopmentRegion: en
         CFBundleLocalizations: [en, zh-Hans, zh-Hant]
-        # Every page is the website's blue (or the night blue): white status bar text throughout.
-        UIStatusBarStyle: UIStatusBarStyleLightContent
+        # The status bar follows the system appearance: dark text in Light Mode, white in Dark Mode.
+        UIStatusBarStyle: UIStatusBarStyleDefault
         # Display links may run at the display's full rate (120 a second on ProMotion iPhones): the
         # home page's suggestion rows move once a frame.
         CADisableMinimumFrameDurationOnPhone: true
