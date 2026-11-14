@@ -244,7 +244,7 @@ final class SessionStore {
             if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
         }
         // Nothing is live after a relaunch.
-        for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = loaded[i].outcome ?? .stopped }
+        for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = .stopped }
         sessions = loaded.sorted { $0.updated > $1.updated }
         trim()
         return complete
