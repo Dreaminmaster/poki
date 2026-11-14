@@ -455,7 +455,7 @@ final class InProcessPasscodeTests: XCTestCase {
         opened.isInverted = true
         session.onPrepare = { opened.fulfill() }
 
-        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        await prepareWithoutPhoneTask()
         model.becameActive()
 
         await fulfillment(of: [opened], timeout: 0.5)
@@ -466,7 +466,6 @@ final class InProcessPasscodeTests: XCTestCase {
         let opened = expectation(description: "Connecting an agent does not enable Automation Mode")
         opened.isInverted = true
         session.onPrepare = { opened.fulfill() }
-        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
         let core = PokiCore(config: CoreConfig(), host: model.host)
 
         let reply = await core.handle(RelayRequest(id: "initialize", method: "POST", headers: [:], body:
@@ -474,6 +473,7 @@ final class InProcessPasscodeTests: XCTestCase {
 
         XCTAssertEqual(reply.status, 200)
         XCTAssertNotNil(reply.headers["mcp-session-id"])
+        await finishPreparing()
         await fulfillment(of: [opened], timeout: 0.5)
         XCTAssertFalse(model.hasOpenInProcessSession)
     }
@@ -514,7 +514,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let opened = expectation(description: "A task without phone tools leaves Automation Mode off")
         opened.isInverted = true
         session.onPrepare = { opened.fulfill() }
-        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        await prepareWithoutPhoneTask()
         model.becameActive()
         let chat = ChatModel(app: model, kind: .handoff, requester: "Test agent")
 
@@ -524,6 +524,18 @@ final class InProcessPasscodeTests: XCTestCase {
         await fulfillment(of: [opened], timeout: 0.1)
         XCTAssertFalse(model.hasOpenInProcessSession)
         return chat
+    }
+
+    private func prepareWithoutPhoneTask() async {
+        let core = PokiCore(config: CoreConfig(), host: model.host)
+        _ = await core.handle(RelayRequest(id: "prepare", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#))
+        await finishPreparing()
+    }
+
+    private func finishPreparing() async {
+        await waitFor("the simulator's prerequisite check finished") { ["failed", "running"].contains(self.model.runner.state) }
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
     }
 
     /// On cellular the launcher reports `local_ddi`: the image is mounted, and nothing reached the
