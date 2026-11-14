@@ -127,6 +127,24 @@ final class HistoryProbe: ObservableObject {
         return all.isEmpty ? "no app named" : "apps on screen \(all.joined(separator: ", "))"
     }
 
+    /// One line per subscription of a read: what the service sent back, in numbers and names only.
+    private static func attempts(_ value: Any?) -> [String] {
+        (value as? [[String: Any]] ?? []).enumerated().map { index, attempt in
+            func number(_ key: String) -> Int { attempt[key] as? Int ?? 0 }
+            func counts(_ key: String) -> String {
+                let all = attempt[key] as? [String: Any] ?? [:]
+                return all.keys.sorted().map { "\($0)x\(all[$0] as? Int ?? 0)" }.joined(separator: " ")
+            }
+            var line = "try \(index + 1) \(attempt["answered"] as? Bool == true ? "answered" : "no answer") in \(number("took_ms")) of \(number("window_ms")) ms, \(number("messages")) messages, \(number("bytes")) bytes, \(number("archives")) archives, \(number("dumps")) dumps, \(number("roots")) roots, \(number("nodes")) nodes"
+            let types = counts("request_types"), entries = counts("dump_entries")
+            if !types.isEmpty { line += ", types \(types)" }
+            if !entries.isEmpty { line += ", entries \(entries)" }
+            if let selectors = attempt["selectors"] as? [String], !selectors.isEmpty { line += ", selectors \(selectors.joined(separator: " "))" }
+            if let error = attempt["error"] as? String { line += ", error \(error)" }
+            return line
+        }
+    }
+
     /// One read, after `delay` seconds (time to leave Poki and put another app in front).
     func readOnce(model: AppModel, delay: Int = 0) async {
         guard !reading, !running, var request = makeRequest("read_once", model: model) else { return }
@@ -150,6 +168,15 @@ final class HistoryProbe: ObservableObject {
             let data = try await HistoryBridge.call(request)
             let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             func ms(_ key: String) -> String { (value[key] as? Int).map { String(format: "%.2f s", Double($0) / 1000) } ?? "none" }
+            let attempts = Self.attempts(value["attempts"])
+            guard value["tree"] as? Bool == true else {
+                note("NO TREE: connect \(ms("connect_ms")), waited \(ms("read_ms"))", keep: false)
+                for line in attempts { note(line, keep: false) }
+                note("services: \((value["services"] as? [String] ?? []).joined(separator: ", "))", keep: false)
+                note("after: \(context(model: model)). Did iOS show a banner, an indicator or a prompt?", keep: false)
+                return
+            }
+            for line in attempts { note(line, keep: false) }
             note("read ok: connect \(ms("connect_ms")), read \(ms("read_ms")), second read \(ms("second_read_ms"))", keep: false)
             note("\(Self.apps(value)), \(value["elements"] as? Int ?? 0) elements, \(value["text_lines"] as? Int ?? 0) text lines, \(value["text_characters"] as? Int ?? 0) characters, \(value["secure_fields_left_out"] as? Int ?? 0) password fields left out", keep: false)
             note("after: \(context(model: model)). Did iOS show a banner, an indicator or a prompt?", keep: false)

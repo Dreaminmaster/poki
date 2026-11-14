@@ -32,6 +32,7 @@ const SECURE_TRAIT: u64 = 1 << 24;
 const KEY_TRAIT: u64 = 1 << 5;
 
 const OPEN_WITHIN: Duration = Duration::from_secs(20);
+/// One subscription of a run's read.
 const DEFAULT_READ_WITHIN: Duration = Duration::from_secs(10);
 
 /// The run in progress. A new run, or `cancel`, moves it on, and the older run ends at its next look.
@@ -72,8 +73,16 @@ fn milliseconds(duration: Duration) -> u64 {
     duration.as_millis() as u64
 }
 
-fn read_failure(error: Box<dyn std::error::Error + Send + Sync>) -> Failure {
-    Failure::new(error.to_string()).code("read")
+/// No subscription gave a tree: the last one's own error, or what it counted.
+fn no_tree(attempts: &[ax::Attempt]) -> Failure {
+    let detail = match attempts.last() {
+        Some(last) => match &last.error {
+            Some(error) => error.clone(),
+            None => format!("no tree in {} subscriptions; the last got {} messages, {} dumps, {} roots, {} nodes", attempts.len(), last.messages, last.dumps, last.roots, last.nodes),
+        },
+        None => "no subscription was made".into(),
+    };
+    Failure::new(detail).code("read")
 }
 
 /// Runs one request. `emit` gets a line for every read of a run.
@@ -85,24 +94,50 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
     }
 }
 
+/// The waits of one read's subscriptions. The reader on a computer gives each subscription two
+/// seconds and then makes a new one. On the phone itself, with no automation session, accessibility
+/// may first have to start, so a short wait is tried twice and then a long one.
+const READ_WINDOWS: [Duration; 3] = [Duration::from_secs(2), Duration::from_secs(2), Duration::from_secs(15)];
+
+fn windows(request: &Value) -> Vec<Duration> {
+    match request["windows_ms"].as_array() {
+        Some(list) if !list.is_empty() => list.iter().filter_map(Value::as_u64).map(|ms| Duration::from_millis(ms.clamp(200, 60_000))).take(8).collect(),
+        _ => READ_WINDOWS.to_vec(),
+    }
+}
+
+/// The accessibility services this iPhone lists, for a read that got no tree.
+fn accessibility_services(device: &Device) -> Vec<&String> {
+    let mut names: Vec<&String> = device.rsd.services.keys().filter(|name| name.to_lowercase().contains("accessib") || name.contains("axAudit")).collect();
+    names.sort();
+    names
+}
+
 async fn read_once(request: &Value) -> Result<Value, Failure> {
     let target = Target::from(request)?;
-    let wait = request["wait_ms"].as_u64().map(Duration::from_millis).unwrap_or(DEFAULT_READ_WITHIN);
+    let windows = windows(request);
     let include_text = request["include_text"].as_bool().unwrap_or(false);
     let asked = Instant::now();
     let mut device = target.open().await?;
     let connect_ms = milliseconds(asked.elapsed());
     let asked = Instant::now();
-    let tree = ax::read_tree_with_timeout(&mut device.adapter, &device.rsd, false, wait).await.map_err(read_failure)?;
+    let (tree, attempts) = ax::read_tree_traced(&mut device.adapter, &device.rsd, false, &windows).await;
     let read_ms = milliseconds(asked.elapsed());
+    let Some(tree) = tree else {
+        // Not a failure of the request: what the phone did send is the answer the test is for.
+        return Ok(json!({"tree": false, "connect_ms": connect_ms, "read_ms": read_ms, "attempts": attempts, "services": accessibility_services(&device)}));
+    };
     // A second read on the open tunnel: what a read costs once the connection is up, as a loop pays.
     let asked = Instant::now();
-    let again = ax::read_tree_with_timeout(&mut device.adapter, &device.rsd, false, wait).await;
-    let again_ms = again.is_ok().then(|| milliseconds(asked.elapsed()));
+    let (again, second) = ax::read_tree_traced(&mut device.adapter, &device.rsd, false, &windows).await;
+    let again_ms = again.is_some().then(|| milliseconds(asked.elapsed()));
     let mut answer = summarize(&tree, include_text);
+    answer["tree"] = true.into();
     answer["connect_ms"] = connect_ms.into();
     answer["read_ms"] = read_ms.into();
     answer["second_read_ms"] = json!(again_ms);
+    answer["attempts"] = json!(attempts);
+    answer["second_attempts"] = json!(second);
     Ok(answer)
 }
 
@@ -110,7 +145,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let target = Target::from(request)?;
     let interval = Duration::from_millis(request["interval_ms"].as_u64().unwrap_or(5000).clamp(1000, 600_000));
     let duration = Duration::from_secs(request["duration_s"].as_u64().unwrap_or(1800).clamp(10, 86_400));
-    let wait = DEFAULT_READ_WITHIN.min(interval.max(Duration::from_secs(4)));
+    let windows = match request["windows_ms"].as_array() {
+        Some(_) => windows(request),
+        None => vec![DEFAULT_READ_WITHIN],
+    };
     let me = RUN.fetch_add(1, Ordering::SeqCst) + 1;
     let mut stats = RunStats::default();
     let mut device: Option<Device> = None;
@@ -137,7 +175,8 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 stats.connections += 1;
             }
             let open = device.as_mut().unwrap();
-            ax::read_tree_with_timeout(&mut open.adapter, &open.rsd, false, wait).await.map_err(read_failure)
+            let (tree, attempts) = ax::read_tree_traced(&mut open.adapter, &open.rsd, false, &windows).await;
+            tree.ok_or_else(|| no_tree(&attempts))
         }
         .await;
         let took = milliseconds(asked.elapsed());
@@ -354,6 +393,18 @@ mod tests {
         assert_eq!(summary["elements"], 0);
         assert_eq!(summary["text_lines"], 0);
         assert!(front_name(&summary).is_null());
+    }
+
+    #[test]
+    fn a_read_without_a_tree_says_what_the_last_subscription_got() {
+        let quiet = ax::Attempt { messages: 2, ..Default::default() };
+        assert!(no_tree(&[quiet.clone(), quiet]).detail.contains("no tree in 2 subscriptions; the last got 2 messages"));
+        let broken = ax::Attempt { error: Some("connection reset".into()), ..Default::default() };
+        assert_eq!(no_tree(&[broken]).detail, "connection reset");
+        assert_eq!(windows(&json!({})), READ_WINDOWS.to_vec());
+        assert_eq!(windows(&json!({"windows_ms": [50, 3000]})), [Duration::from_millis(200), Duration::from_secs(3)]);
+        let line = serde_json::to_value(ax::Attempt::default()).unwrap();
+        assert_eq!(line["answered"], false);
     }
 
     #[test]

@@ -3,8 +3,9 @@
 //! opened, so this read does not turn Automation Mode on. iPhone History reads the screen this way
 //! (GitHub issue 356).
 //!
-//! The reader is the one in native/bridge/src/ax.rs, kept the same so a fix in one applies to the
-//! other; roles.json and traits.json are copies of the bridge's.
+//! The reader is the one in native/bridge/src/ax.rs; roles.json and traits.json are copies of the
+//! bridge's. What differs here: every subscription is counted (`Attempt`), so a read that gets no
+//! tree can say what the phone did send, and the caller chooses how long each subscription waits.
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -44,7 +45,7 @@ pub async fn read_tree_with_timeout(
     let deadline = tokio::time::Instant::now() + wait;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let answer = subscribe(adapter, rsd, include_offscreen, remaining.min(ANSWER_WITHIN)).await?;
+        let answer = subscribe(adapter, rsd, include_offscreen, remaining.min(ANSWER_WITHIN), &mut Attempt::default()).await?;
         if let Some(tree) = answer {
             return Ok(tree);
         }
@@ -58,12 +59,82 @@ pub async fn read_tree_with_timeout(
     }
 }
 
+/// What one subscription got back, in numbers and names only: no screen content.
+#[derive(Default, Debug, Clone, serde::Serialize)]
+pub struct Attempt {
+    pub window_ms: u64,
+    pub took_ms: u64,
+    pub answered: bool,
+    /// Messages the service sent, and the bytes of their first argument.
+    pub messages: u32,
+    pub bytes: u64,
+    /// Arguments that were keyed archives, and those that held a tree dump (request type 11).
+    pub archives: u32,
+    pub dumps: u32,
+    /// The request type of every answer, and of every entry inside the dumps, with how many.
+    pub request_types: BTreeMap<String, u32>,
+    pub dump_entries: BTreeMap<String, u32>,
+    /// The selectors the service called, first eight.
+    pub selectors: Vec<String>,
+    pub roots: usize,
+    pub nodes: usize,
+    pub error: Option<String>,
+}
+
+impl Attempt {
+    fn count(&mut self, a: &Archive) {
+        let root = a.root();
+        let kind = a.field(root, "associatedRequestType").and_then(|v| a.integer(v));
+        *self.request_types.entry(kind.map(|k| k.to_string()).unwrap_or_else(|| "none".into())).or_default() += 1;
+        if kind != Some(11) {
+            return;
+        }
+        let Some(dump) = a.field(root, "resultData").and_then(|result| a.field(result, "treeDump")) else { return };
+        self.dumps += 1;
+        for response in a.array(dump) {
+            let kind = a.field(response, "associatedRequestType").and_then(|v| a.integer(v));
+            *self.dump_entries.entry(kind.map(|k| k.to_string()).unwrap_or_else(|| "none".into())).or_default() += 1;
+        }
+    }
+}
+
+/// Reads the tree with one subscription per entry of `windows`, each waiting that long, until one
+/// answers. Returns the tree, if any, and what every subscription got back.
+pub async fn read_tree_traced(
+    adapter: &mut AdapterHandle,
+    rsd: &RsdHandshake,
+    include_offscreen: bool,
+    windows: &[Duration],
+) -> (Option<Json>, Vec<Attempt>) {
+    let mut attempts = vec![];
+    for window in windows {
+        let mut attempt = Attempt { window_ms: window.as_millis() as u64, ..Attempt::default() };
+        let asked = tokio::time::Instant::now();
+        let answer = subscribe(adapter, rsd, include_offscreen, *window, &mut attempt).await;
+        attempt.took_ms = asked.elapsed().as_millis() as u64;
+        let tree = match answer {
+            Ok(tree) => tree,
+            Err(error) => {
+                attempt.error = Some(error.to_string());
+                None
+            }
+        };
+        attempt.answered = tree.is_some();
+        attempts.push(attempt);
+        if tree.is_some() {
+            return (tree, attempts);
+        }
+    }
+    (None, attempts)
+}
+
 // One subscription; None when it was not answered within `wait`.
 async fn subscribe(
     adapter: &mut AdapterHandle,
     rsd: &RsdHandshake,
     include_offscreen: bool,
     wait: Duration,
+    attempt: &mut Attempt,
 ) -> Result<Option<Json>> {
     let port = rsd
         .services
@@ -98,11 +169,23 @@ async fn subscribe(
         loop {
             let message = Message::from_reader(&mut socket).await?;
             acknowledge(&mut socket, &message).await?;
+            attempt.messages += 1;
+            if let Some(selector) = message.data.as_ref().and_then(Value::as_string) {
+                if attempt.selectors.len() < 8 && !attempt.selectors.iter().any(|s| s == selector) {
+                    attempt.selectors.push(selector.chars().take(80).collect());
+                }
+            }
             if let Some(aux) = message.aux.as_ref() {
                 if let Some(AuxValue::Array(bytes)) = aux.values.first() {
+                    attempt.bytes += bytes.len() as u64;
                     if let Ok(archive) = Archive::parse(bytes) {
+                        attempt.archives += 1;
                         if let Some(data) = archive.data(archive.root()) {
-                            tree.update(&Archive::parse(data)?)?;
+                            let inner = Archive::parse(data)?;
+                            attempt.count(&inner);
+                            tree.update(&inner)?;
+                            attempt.roots = tree.roots.len();
+                            attempt.nodes = tree.nodes.len();
                             if tree.ready() {
                                 return Ok::<Json, Box<dyn std::error::Error + Send + Sync>>(
                                     tree.json(),
