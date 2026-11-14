@@ -223,6 +223,19 @@ final class ChatHarnessTests: XCTestCase {
         restored.stop()
     }
 
+    func testUnknownContinuationAsksBeforeStartingTheModel() throws {
+        let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["launch": "com.apple.Preferences"])])
+        _ = chat(on: server)
+        let chat = ChatModel(app: try XCTUnwrap(app))
+        chat.newConversation()
+        chat.send("继续那个没有记录的任务")
+        defer { chat.stop() }
+        XCTAssertFalse(chat.running, "an unidentified task must not start a model turn")
+        XCTAssertTrue(chat.entries.contains { if case .poki(let text) = $0.kind { text.contains("Which task") } else { false } },
+                      "ask the owner instead of using a remembered routine")
+        XCTAssertTrue(chat.savedCalls.isEmpty)
+    }
+
     /// The system prompt names no tool the model does not have (the app has no unlock_device or
     /// handle_alert).
     func testThePromptNamesOnlyToolsTheModelHas() throws {
@@ -293,6 +306,12 @@ final class FakeCompletions: @unchecked Sendable {
 
     private func answer(_ connection: NWConnection, _ body: Data) {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        if json["tools"] == nil {
+            let response = #"{"choices":[{"message":{"role":"assistant","content":"Test conversation"}}]}"#
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + response).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
         let events = lock.withLock { () -> String in
             bodies.append(json)
             return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
