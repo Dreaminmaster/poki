@@ -249,7 +249,7 @@ final class HistoryProbe: ObservableObject {
                 let selectors = (walked["selectors"] as? [String: Int] ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key) x\($0.value)" }.joined(separator: " ")
                 let elements = walked["elements"] as? [[String: Any]] ?? []
                 note("element walk: service \(walked["listed"] as? Bool == true ? "listed" : "not listed"), \(walked["messages"] as? Int ?? 0) messages, \(elements.count) elements, \(selectors.isEmpty ? "no selectors" : selectors)", keep: false)
-                if let error = walked["error"] as? String { note("element walk failed: \(error)", keep: false) }
+                if let error = walked["error"] as? String { note("element walk failed at \(walked["stage"] as? String ?? "start"): \(error)", keep: false) }
                 for (index, element) in elements.prefix(12).enumerated() {
                     note("element \(index + 1): \(element["strings"] as? Int ?? 0) strings, \(element["characters"] as? Int ?? 0) characters, starts \(element["starts"] as? String ?? "none")", keep: false)
                 }

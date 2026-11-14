@@ -329,6 +329,8 @@ pub struct Walk {
     /// One per element the focus landed on: how many strings it carried, their characters, and the
     /// first few characters of the longest (enough to tell which app it belongs to).
     pub elements: Vec<Json>,
+    /// How far the walk got: connect, check-in, capabilities, moving.
+    pub stage: &'static str,
     pub error: Option<String>,
 }
 
@@ -349,7 +351,14 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
         wrapped.insert("Value".into(), value);
         Value::Dictionary(wrapped)
     };
-    let mut socket = adapter.connect(port).await?;
+    // A shim service: it wants the check-in exchange before anything else.
+    walk.stage = "connect";
+    let stream: Box<dyn ReadWrite> = Box::new(adapter.connect(port).await?);
+    walk.stage = "check-in";
+    let mut checked = idevice::Idevice::new(stream, "poki");
+    checked.rsd_checkin().await?;
+    let mut socket = checked.get_socket().ok_or("the inspector connection was lost at check-in")?;
+    walk.stage = "capabilities";
     let mut capabilities = plist::Dictionary::new();
     capabilities.insert("com.apple.private.DTXBlockCompression".into(), 0.into());
     capabilities.insert("com.apple.private.DTXConnection".into(), 1.into());
@@ -357,6 +366,7 @@ async fn walk_on(adapter: &mut AdapterHandle, port: u16, steps: usize, wait: Dur
     call(&mut socket, 2, "deviceSetAppMonitoringEnabled:", 1.into(), false).await?;
     call(&mut socket, 3, "deviceInspectorSetMonitoredEventType:", 2.into(), false).await?;
     call(&mut socket, 4, "deviceInspectorShowVisuals:", 0.into(), false).await?;
+    walk.stage = "moving";
     for step in 0..steps {
         let mut options = plist::Dictionary::new();
         options.insert("allowNonAX".into(), passthrough(false.into()));
