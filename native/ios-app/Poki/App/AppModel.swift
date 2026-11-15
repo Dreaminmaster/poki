@@ -511,9 +511,10 @@ final class AppModel {
         }
     }
 
-    /// Mounting developer services does not enable Automation Mode.
+    /// Mounting developer services does not enable Automation Mode. A probe-driven model already
+    /// has the session the probe opened, so it starts no other.
     func prepareForTask() {
-        guard automationPath == .inProcess, setup.loopback != .none else { return }
+        guard automationPath == .inProcess, setup.loopback != .none, !probeDriven else { return }
         if !sessionOn { startSession() }
         guard sessionOn, runnerPaused else { return }
         runnerPaused = false

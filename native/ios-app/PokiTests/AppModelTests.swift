@@ -438,6 +438,9 @@ final class InProcessPasscodeTests: XCTestCase {
 
     override func setUp() async throws {
         try XCTSkipUnless(AutomationPath.current == .inProcess, "Poki Runner path")
+        // The open gate is process-wide: a suite that sent Poki to the background before this one
+        // must not leave each open here refused as "open Poki first".
+        InProcessWDA.gate.withLock { $0 = InProcessWDA.OpenGate() }
         saved = (UserDefaults.standard.string(forKey: "relayAddress"), UserDefaults.standard.object(forKey: "relayEnabled"), SetupState.load())
         session = FakeAutomation()
         launcher = FakeLauncher()
