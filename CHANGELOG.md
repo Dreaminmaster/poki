@@ -7,6 +7,39 @@ native/ios-app/CHANGELOG-round.md; this file is what goes into a release and the
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 Build numbers are the GitHub Actions run number of the release workflow.
 
+## [0.4.2] - Unreleased
+
+### Automation
+- The "Automation Running" watermark now shows only while Poki is operating your phone, and goes away when the task ends. Poki opens its automation session when a task needs the phone and closes it when the work is done. Thanks to @ZhehanZhang (#357).
+- If the passcode explanation does not appear when you turn on automation, Settings > Connection shows it with Continue and Cancel, so you can still finish turning automation on (#378).
+- When the developer tools Poki needs cannot load, Connection says why and how to recover with Poki Setup. Automation confirmations now appear over Settings instead of replacing the Connection page (#368).
+- A failed connection to the phone while the developer image is being mounted now shows as Stopped with the reason, instead of looking as though Poki is waiting for the network. Thanks to @ScottH1122 (#371).
+
+### Chat
+- Settings > Interface Size: follow the system text size, or choose one of seven standard and five accessibility sizes for chat and Settings, with a preview. Thanks to @ScottH1122 (#284).
+- Attach JSON, Markdown and plain text files up to 100 KB each. The file shows its name and size and opens to the full text. It is kept with its message and sent again when you tap Retry. Thanks to @ScottH1122 (#370).
+- The message field stays on one line when you tap into it.
+- If you stop a task and switch to another conversation right away, the task's last steps and its stop message stay in the conversation where it ran. Thanks to @ScottH1122 (#253).
+- When an agent cancels a task it handed to Poki, Poki's chat for that task stops too. Thanks to @ScottH1122 (#252).
+- A task started while Poki is in the background shows its Live Activity once you return to Poki. Thanks to @ScottH1122 (#374).
+
+### iPhone Duo
+- Work in two apps side by side. If rotating the phone hides the workspace, Poki waits, with Stop still available, and resumes the same task once it sees the same two apps in the same layout. Your conversation and unsent draft are kept between full screen and split widths. Thanks to @Ryanwu316 (#354).
+
+### Approvals and the relay
+- Buttons whose sensitive word comes late in a long label, such as "Complete purchase of 3 items", now wait for your approval. Traditional Chinese words for purchase, subscription, transfer, delete, message and call are recognized as well. Thanks to @ScottH1122 (#372).
+- Every new connection authorized through the relay now asks for your consent on the iPhone first. Refusing or not answering grants nothing, and existing connections keep working. If you run your own relay, deploy the updated Worker: an iPhone on an earlier Poki cannot approve new connections through it. Thanks to @ScottH1122 (#373).
+
+### Poki Setup 0.2.3
+- Runs natively on Intel Macs as well as Apple silicon (#365).
+- Signed by a new Developer ID team. The install script accepts both the old and the new team (#381).
+- When the same iPhone is connected over both USB and Wi-Fi, Poki Setup uses USB. Thanks to @ScottH1122 (#209).
+- Signing in with an Apple Account no longer fails with "A Mac with macOS version 10.13 or later is required", and an anisette server that does not answer is skipped. Apple may ask for the sign-in code again the first time (#309).
+
+Before you update from Poki Setup 0.2.2:
+- macOS may ask for your Mac's login password to let Poki Setup use its keychain items. Enter the password and choose Always Allow.
+- Poki Setup 0.2.2 cannot update itself to 0.2.3. When the disk image opens, drag the new Poki Setup into Applications to replace the old one. Updates after 0.2.3 install on their own.
+
 ## [0.4.1] - Unreleased
 
 ### Fixed
