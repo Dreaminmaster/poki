@@ -16,6 +16,7 @@ final class FakeLauncher: RunnerLauncher, @unchecked Sendable {
 final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     private let lock = NSLock()
     private var open = false
+    var isOpen: Bool { lock.withLock { open } }
     private var gate: DispatchSemaphore?
     private var heldOpenStarted = false
     private var answer: [String: Any]?
@@ -583,12 +584,16 @@ final class InProcessPasscodeTests: XCTestCase {
 @MainActor
 final class FrontendSubtractionTests: XCTestCase {
     private var savedSetup: SetupState!
+    private var savedLanguage = AppLocalization.system
 
     override func setUp() {
         savedSetup = SetupState.load()
+        savedLanguage = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
     }
 
     override func tearDown() {
+        AppLocalization.shared.preference = savedLanguage
         savedSetup.save()
     }
 

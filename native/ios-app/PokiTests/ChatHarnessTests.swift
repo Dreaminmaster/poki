@@ -454,21 +454,97 @@ final class ChatHarnessTests: XCTestCase {
     func testStopEndsTheStepUnderWayAtItsNextAction() async throws {
         let waits = Array(repeating: ["wait": 1000], count: 15)
         let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["actions": waits]), FakeCompletions.text("Done.")])
-        // The waits run in PokiCore. Keep the surrounding screen reads independent of XCTest's screenshot authorization.
-        let chat = chat(on: server, transport: RotatingWorkspace())
+        let gate = ChatTransportGate()
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let transport = SessionScreenTransport(session: session) { await gate.holdFirstRequest() }
+        let chat = chat(on: server, transport: transport)
+        defer { Task { await gate.release() } }
         func said() -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
 
         chat.send("Wait on the phone")
-        while chat.awaitingModel { try await Task.sleep(for: .milliseconds(50)) }
+        try await waitForTransport(gate, chat: chat)
         let stopped = ContinuousClock.now
         chat.stop()
-        XCTAssertEqual(said().last, "Stopping…")
+        XCTAssertEqual(said().last, AppLocalization.text(LocalizedStringResource("Stopping…")))
+        await gate.release()
         while chat.savedCalls.isEmpty, ContinuousClock.now - stopped < .seconds(20) { try await Task.sleep(for: .milliseconds(100)) }
         let after = ContinuousClock.now - stopped
         XCTAssertLessThan(after, .seconds(3), "the do call ended \(after) after Stop")
-        while said().last != "Stopped.", ContinuousClock.now - stopped < .seconds(10) { try await Task.sleep(for: .milliseconds(100)) }
-        XCTAssertEqual(said().last, "Stopped.")
-        XCTAssertFalse(said().contains("Stopping…"))
+        while said().last != AppLocalization.text(LocalizedStringResource("Stopped.")), ContinuousClock.now - stopped < .seconds(10) { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(said().last, AppLocalization.text(LocalizedStringResource("Stopped.")))
+        XCTAssertFalse(said().contains(AppLocalization.text(LocalizedStringResource("Stopping…"))))
+    }
+
+    func testStoppedTaskKeepsItsReceiptWhenCreatingAConversation() async throws {
+        try await checkStoppedTaskReceipt(switchToSavedChat: false)
+    }
+
+    func testStoppedTaskKeepsItsReceiptWhenSwitchingConversations() async throws {
+        try await checkStoppedTaskReceipt(switchToSavedChat: true)
+    }
+
+    private func checkStoppedTaskReceipt(switchToSavedChat: Bool) async throws {
+        let waits = Array(repeating: ["wait": 1000], count: 15)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": waits]),
+            FakeCompletions.text("New reply."),
+        ])
+        let gate = ChatTransportGate()
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let transport = SessionScreenTransport(session: session) { await gate.holdFirstRequest() }
+        let chat = chat(on: server, transport: transport)
+        defer { Task { await gate.release() } }
+        var records: [TaskRecord] = []
+        ChatModel.afterTask = { records.append($0) }
+        let store = SessionStore.shared
+        let original = chat.sessionID
+        defer { store.delete(original); store.delete(chat.sessionID) }
+
+        chat.send("Old task")
+        let deadline = ContinuousClock.now + .seconds(15)
+        try await waitForTransport(gate, chat: chat)
+        chat.stop()
+        XCTAssertEqual(store.session(original)?.lastLine, AppLocalization.text(LocalizedStringResource("Stopping…")))
+
+        if switchToSavedChat {
+            let saved = SavedSession(id: UUID().uuidString, kind: .poki, client: nil, title: "Existing chat",
+                                     started: Date(), updated: Date(), live: false, outcome: nil,
+                                     entries: [ChatEntry(.you("Existing message", delivered: true))], calls: [])
+            chat.restore(saved)
+            XCTAssertEqual(chat.sessionID, saved.id)
+        } else {
+            chat.newConversation()
+        }
+        let destination = chat.sessionID
+        XCTAssertNotEqual(destination, original)
+        chat.send("New task")
+        await gate.release()
+        while ContinuousClock.now < deadline {
+            if records.count == 2, store.session(original)?.lastLine == AppLocalization.text(LocalizedStringResource("Stopped.")) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertEqual(records.map(\.session), [original, destination])
+        XCTAssertEqual(records.map(\.task), ["Old task", "New task"])
+        XCTAssertEqual(records.first?.calls.map(\.name), ["do"])
+        XCTAssertEqual(records.last?.calls.count, 0)
+        XCTAssertEqual(store.record(original).map(\.name), ["do"])
+        XCTAssertTrue(store.record(destination).isEmpty)
+        XCTAssertTrue(chat.savedCalls.isEmpty)
+        XCTAssertEqual(store.session(original)?.outcome, .stopped)
+        XCTAssertEqual(store.session(original)?.lastLine, AppLocalization.text(LocalizedStringResource("Stopped.")))
+        XCTAssertEqual(store.session(destination)?.outcome, .done)
+    }
+
+    private func waitForTransport(_ gate: ChatTransportGate, chat: ChatModel) async throws {
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !(await gate.entered), chat.running, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let entered = await gate.entered
+        _ = try XCTUnwrap(entered ? true : nil, "The tool must reach the runner transport. Replies: \(chat.savedCalls.map(\.answer))")
     }
 
     func testSplitViewRefusesInputBeforeAnExplicitPaneRead() async throws {
@@ -506,6 +582,24 @@ final class ChatHarnessTests: XCTestCase {
 
 /// An OpenAI chat completions endpoint on 127.0.0.1: each request is kept and answered with the next
 /// scripted turn as one server-sent event.
+private actor ChatTransportGate {
+    private(set) var entered = false
+    private var released = false
+    private var pending: CheckedContinuation<Void, Never>?
+
+    func holdFirstRequest() async {
+        guard !entered, !released else { return }
+        entered = true
+        await withCheckedContinuation { pending = $0 }
+    }
+
+    func release() {
+        released = true
+        pending?.resume()
+        pending = nil
+    }
+}
+
 final class FakeCompletions: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "fake-completions")
@@ -694,5 +788,35 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
             default: return reply(["error": "unknown command", "message": .string(path)], status: 404)
             }
         }
+    }
+}
+
+final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
+    private let session: FakeAutomation
+    private let beforeRequest: (@Sendable () async -> Void)?
+    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil) {
+        self.session = session
+        self.beforeRequest = beforeRequest
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        await beforeRequest?()
+        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/session": value = ["sessionId": "fixture-session"]
+        case "/status": value = ["ready": true]
+        case "/wda/locked": value = false
+        case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
+        case "/wda/activeAppInfo":
+            value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
+        case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
+        case "/source":
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeButton name="General" label="General" x="16" y="100" width="358" height="44" /></XCUIElementTypeApplication></AppiumAUT>"#)
+        default: value = .null
+        }
+        let response: JSON = ["value": value]
+        return (200, response.data())
     }
 }

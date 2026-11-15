@@ -138,6 +138,7 @@ final class ChatModel {
     /// For the log's line at the end of each task: when it began, the tool calls, finish_task's verdict.
     private var taskStart = Date()
     private var toolCalls = 0
+    private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
     private var client: ModelClient?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
@@ -296,7 +297,6 @@ final class ChatModel {
         return entries.contains { if case .you = $0.kind { return true }; return false }
     }
 
-    private var lastOwnerText: String?
     /// What the model reads when the owner sent pictures without words.
     private static let picturesOnly = "(The owner sent the attached pictures without a message.)"
     /// The pictures of the owner's last message, sent again with it by Try Again.
@@ -347,7 +347,6 @@ final class ChatModel {
             entries.append(you)
         }
         let message = you.requestText
-        lastOwnerText = message
         usesSplitView = inSplitView
         splitViewSession = inSplitView ? UUID().uuidString : nil
         expectedSplitViewApps = nil
@@ -362,6 +361,7 @@ final class ChatModel {
                                        : AppLocalization.text(LocalizedStringResource("Add a model key first. Open Settings, then Models."))))
             return
         }
+        let runSession = sessionID
         let model = ModelKeys.selectedModel
         // The first message names the chat: a few words from the chat's own model, in the background.
         if kind == .poki, !again, entries.filter({ if case .you = $0.kind { return true }; return false }).count == 1,
@@ -397,7 +397,7 @@ final class ChatModel {
                 await self.run(client, instructions: instructions, delivered: you.id, token: token)
                 let current = self.runToken == token
                 if !current { self.app.finishTask() }
-                self.logEnd("direct", outcome: nil, stopped: !current)
+                self.logEnd("direct", outcome: nil, session: runSession, text: text, stopped: !current)
                 if current { self.running = false; self.awaitingModel = false }
             }
             return
@@ -454,7 +454,7 @@ final class ChatModel {
                         let words = Self.splitViewSetupMessage(pair[0], pair[1])
                         let outcome = PiLoop.Outcome.failed(words)
                         self.ended(outcome, delivered: you.id)
-                        self.logEnd("pi", outcome: outcome)
+                        self.logEnd("pi", outcome: outcome, session: runSession, text: text, stopped: false)
                         self.running = false
                         self.awaitingModel = false
                         self.lastOutcome = outcome
@@ -478,7 +478,7 @@ final class ChatModel {
             }
             let current = self.runToken == token
             if current { self.ended(outcome, delivered: you.id) } else if splitSession == nil { self.app.finishTask() }
-            self.logEnd("pi", outcome: outcome, stopped: !current)
+            self.logEnd("pi", outcome: outcome, session: runSession, text: text, stopped: !current)
             guard current else { return }
             self.running = false
             self.awaitingModel = false
@@ -612,20 +612,21 @@ final class ChatModel {
 
     private func began(_ engine: String, _ provider: ModelProvider, _ model: String, splitViewSession: String? = nil) {
         taskStart = Date(); toolCalls = 0; taskResult = nil
+        taskCalls.removeAll()
         app.chatTaskBegan(splitViewSession: splitViewSession)
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
-    private func logEnd(_ engine: String, outcome: PiLoop.Outcome?, stopped: Bool = false) {
+    private func logEnd(_ engine: String, outcome: PiLoop.Outcome?, session: String, text: String, stopped: Bool) {
         let stopAsked = stopped || self.stopAsked
         let seconds = String(format: "%.1f", Date().timeIntervalSince(taskStart))
         let verdict = taskResult.map { $0.success ? "success" : "failure" } ?? "not called"
         let ending = outcome.map { if case .failed = $0 { "failed" } else { "\($0)" } } ?? (stopAsked ? "stopped" : "ended")
         AppLog.shared.add("chat", "task ended: \(engine), \(ending) after \(seconds) s, \(toolCalls) tool calls, finish_task \(verdict)")
-        let record = TaskRecord(session: sessionID, task: lastOwnerText ?? "", calls: Array(calls.suffix(toolCalls)), result: taskResult,
+        let record = TaskRecord(session: session, task: text, calls: taskCalls, result: taskResult,
                                 seconds: Date().timeIntervalSince(taskStart))
         Self.afterTask?(record)
-        SessionStore.shared.taskEnded(sessionID, success: taskResult?.success, stopped: stopAsked)
+        SessionStore.shared.taskEnded(session, success: taskResult?.success, stopped: stopAsked)
         if kind == .poki, taskResult?.success == true { Haptics.done() }
     }
 
@@ -703,12 +704,18 @@ final class ChatModel {
         guard phoneStepUnderWay else { add(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))); return }
         let stopping = ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopping…"))))
         entries.append(stopping)
+        let session = sessionID
         let stopped = task
         Task { [weak self] in
             await stopped?.value
             _ = await self?.app.phoneSettles(within: 30)
-            guard let self, let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
-            self.entries[i].kind = .poki(AppLocalization.text(LocalizedStringResource("Stopped.")))
+            let text = AppLocalization.text(LocalizedStringResource("Stopped."))
+            guard let self, self.sessionID == session else {
+                SessionStore.shared.finishStopping(stopping.id, in: session, text: text)
+                return
+            }
+            guard let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
+            self.entries[i].kind = .poki(text)
             self.persist()
         }
     }
@@ -764,16 +771,24 @@ final class ChatModel {
 
     /// The phone's tools go to PokiCore; the harness's two are answered here, as task-runner.mjs answers them.
     private func perform(_ call: ToolCall) async -> PokiCore.ToolAnswer {
+        let session = sessionID
+        let token = runToken
         awaitingModel = false
         let started = Date()
         let answer = await performCall(call)
+        let record = CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError)
+        taskCalls.append(record)
+        guard sessionID == session else {
+            SessionStore.shared.appendCall(record, to: session)
+            return answer
+        }
         // A launch that went through says which app the task is for; a refused one says nothing.
-        if call.name == "do", !answer.isError {
+        if runToken == token, call.name == "do", !answer.isError {
             for app in TaskApps.launches(inArguments: call.arguments) { taskApps.launch(app) }
             taskApp = taskApps.target(request: taskRequest)
         }
-        calls.append(CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError))
-        if !stopAsked, running { awaitingModel = true }
+        calls.append(record)
+        if runToken == token, !stopAsked, running { awaitingModel = true }
         persist()
         return answer
     }

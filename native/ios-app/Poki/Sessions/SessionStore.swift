@@ -233,6 +233,18 @@ final class SessionStore {
         put(session)
     }
 
+    func appendCall(_ call: CallRecord, to id: String) {
+        guard var session = session(id) else { return }
+        session.calls.append(call)
+        put(session)
+    }
+
+    func finishStopping(_ entry: UUID, in id: String, text: String) {
+        guard var session = session(id), let index = session.entries.firstIndex(where: { $0.id == entry }) else { return }
+        session.entries[index].kind = .poki(text)
+        put(session)
+    }
+
     func taskEnded(_ id: String, success: Bool?, stopped: Bool) {
         guard var session = session(id) else { return }
         session.live = false
