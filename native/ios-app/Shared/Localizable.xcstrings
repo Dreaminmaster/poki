@@ -17927,6 +17927,29 @@
         }
       }
     },
+    "Apple refused the Mac identity Poki signs in with (it asks for macOS 10.13 or later). Update Poki and Poki Setup to the latest version, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple refused the Mac identity Poki signs in with (it asks for macOS 10.13 or later). Update Poki and Poki Setup to the latest version, then try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 拒绝了 Poki 登录时使用的 Mac 身份（要求 macOS 10.13 或更高版本）。请把 Poki 和 Poki Setup 更新到最新版本后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 拒絕了 Poki 登入時使用的 Mac 身分（要求 macOS 10.13 或更新版本）。請將 Poki 和 Poki Setup 更新至最新版本後再試。"
+          }
+        }
+      }
+    },
     "Continue with ChatGPT" : {
       "localizations" : {
         "zh-Hans" : {

@@ -4,6 +4,10 @@
 //! and signs the one-time passwords; the server never sees the Apple ID or its password.
 //!
 //! Protocol and header set from SideStore's omnisette (MPL-2.0) and Sideloader (GPL-3.0).
+//!
+//! The client info override (`CLIENT_INFO_OVERRIDE`) and re-provisioning when it changes are taken
+//! from AltStore pull request 1853 (https://github.com/altstoreio/AltStore/pull/1853, AGPL-3.0),
+//! with the values iloader 2.4.1 uses (https://github.com/nab138/iloader, MIT).
 use crate::{Error, Result, paths};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -11,12 +15,18 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 pub const DEFAULT_REMOTE: &str = "https://new.ani.sidestore.io";
-/// Servers tried in turn when Apple refuses one (ec -80045). Checked Nov 7 2026: these hand out
+/// Servers tried in turn when Apple refuses one (ec -80045) or one does not answer. Checked Nov 7 2026: these hand out
 /// data that matches their client info; the old ani.sidestore.io does not (Mac info, Android data).
 pub const FALLBACK_REMOTES: &[&str] = &["https://new.ani.sidestore.io", "https://mac-ani.jkcoxson.com", "https://ani2.stikstore.app"];
 /// Retired: Apple has refused it since October 2026.
 const RETIRED_REMOTES: &[&str] = &["https://ani.sidestore.io"];
 pub const ROUTING_INFO: &str = "17106176";
+/// The client a remote anisette identity is provisioned and used as, in place of the server's own
+/// `/v3/client_info`. Since November 2026 Apple refuses the Mac OS X 10.12.6 the SideStore servers
+/// report, with -23782 ("A Mac with macOS version 10.13 or later is required"); akd on macOS 27 is
+/// accepted. `None` goes back to the server's values once servers report ones Apple accepts.
+pub const CLIENT_INFO_OVERRIDE: Option<(&str, &str)> =
+    Some(("<Mac15,7> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>", "akd/1.0 CFNetwork/811.5.4"));
 
 /// One set of headers, good for about a minute.
 #[derive(Debug, Clone)]
@@ -69,6 +79,8 @@ pub struct Provider {
     source: Source,
     remote: Option<remote::Client>,
     last: Option<Headers>,
+    /// `FALLBACK_REMOTES`; a test sets its own.
+    fallbacks: Vec<String>,
 }
 
 impl Provider {
@@ -77,23 +89,24 @@ impl Provider {
             Source::Remote { url } if RETIRED_REMOTES.contains(&url.trim_end_matches('/')) => Source::Remote { url: DEFAULT_REMOTE.into() },
             other => other,
         };
-        Provider { source, remote: None, last: None }
+        Provider { source, remote: None, last: None, fallbacks: FALLBACK_REMOTES.iter().map(|u| u.to_string()).collect() }
     }
 
-    /// Moves to the next fallback server after Apple refused this one. False when none is left.
+    /// Moves to the next fallback server after Apple refused this one or it did not answer. False
+    /// when none is left.
     pub fn rotate(&mut self) -> bool {
         let current = match &self.source {
             Source::Remote { url } => url.trim_end_matches('/').to_string(),
             Source::System => String::new(),
         };
-        let next = match FALLBACK_REMOTES.iter().position(|u| *u == current) {
-            Some(i) => FALLBACK_REMOTES.get(i + 1),
-            None => FALLBACK_REMOTES.first(),
+        let next = match self.fallbacks.iter().position(|u| *u == current) {
+            Some(i) => self.fallbacks.get(i + 1),
+            None => self.fallbacks.first(),
         };
-        match next {
+        match next.cloned() {
             Some(u) => {
-                tracing::warn!("Apple refused the anisette from {current}; trying {u}");
-                self.source = Source::Remote { url: (*u).into() };
+                tracing::warn!("the anisette from {current} did not work; trying {u}");
+                self.source = Source::Remote { url: u };
                 self.remote = None;
                 self.last = None;
                 true
@@ -126,15 +139,28 @@ impl Provider {
                 }
             }
         }
-        let map = match &self.source {
-            Source::System => unreachable!(),
-            Source::Remote { url } => {
-                if self.remote.is_none() {
-                    self.remote = Some(remote::Client::new(url.clone()).await?);
+        // A server that does not answer is skipped for the next fallback, as one Apple refuses is.
+        let mut silent = Vec::new();
+        while self.remote.is_none() {
+            let Source::Remote { url } = &self.source else { unreachable!() };
+            match remote::Client::new(url.clone()).await {
+                Ok(client) => self.remote = Some(client),
+                Err(e) => {
+                    tracing::warn!("{e}");
+                    silent.push(url.trim_end_matches('/').to_string());
+                    if !self.rotate() || silent.len() > self.fallbacks.len() {
+                        if silent.len() == 1 {
+                            return Err(e);
+                        }
+                        return Err(Error::msg(format!(
+                            "None of the anisette servers answered ({}). Check this computer's internet connection, or set another server in Settings. Last error: {e}",
+                            silent.join(", ")
+                        )));
+                    }
                 }
-                self.remote.as_mut().unwrap().headers().await?
             }
-        };
+        }
+        let map = self.remote.as_mut().unwrap().headers().await?;
         let h = Headers { map: with_time(map), made_at: std::time::Instant::now() };
         self.last = Some(h.clone());
         Ok(h)
@@ -170,6 +196,10 @@ pub mod remote {
         pub keychain_identifier: Vec<u8>,
         #[serde(default, with = "b64opt")]
         pub adi_pb: Option<Vec<u8>>,
+        /// The client info `adi_pb` was provisioned as. An identity from another client info is
+        /// not accepted with this one, so a change provisions a new identity.
+        #[serde(default)]
+        pub client_info: Option<String>,
     }
 
     mod b64 {
@@ -220,7 +250,17 @@ pub mod remote {
             use rand::RngCore;
             let mut id = vec![0u8; 16];
             rand::thread_rng().fill_bytes(&mut id);
-            Ok(State { keychain_identifier: id, adi_pb: None })
+            Ok(State { keychain_identifier: id, adi_pb: None, client_info: None })
+        }
+        /// This identity if it was provisioned as `client_info`, else a new one to provision.
+        pub(super) fn for_client(self, client_info: &str) -> State {
+            if self.adi_pb.is_some() && self.client_info.as_deref() == Some(client_info) {
+                return self;
+            }
+            use rand::RngCore;
+            let mut id = vec![0u8; 16];
+            rand::thread_rng().fill_bytes(&mut id);
+            State { keychain_identifier: id, adi_pb: None, client_info: Some(client_info.to_string()) }
         }
         fn save(&self, url: &str) -> Result<()> {
             if let Some(v) = crate::vault::installed() {
@@ -251,7 +291,7 @@ pub mod remote {
             let _ = rustls::crypto::ring::default_provider().install_default();
             let url = url.trim_end_matches('/').to_string();
             let http = crate::apple::with_extra_roots(reqwest::Client::builder()).add_root_certificate(reqwest::Certificate::from_der(crate::apple::APPLE_ROOT_CA)?).http1_title_case_headers().timeout(std::time::Duration::from_secs(30)).build()?;
-            let info: ClientInfo = http
+            let mut info: ClientInfo = http
                 .get(format!("{url}/v3/client_info"))
                 .send()
                 .await
@@ -259,7 +299,10 @@ pub mod remote {
                 .error_for_status()?
                 .json()
                 .await?;
-            let state = State::load_or_new(&url)?;
+            if let Some((client_info, user_agent)) = CLIENT_INFO_OVERRIDE {
+                info = ClientInfo { client_info: client_info.into(), user_agent: user_agent.into() };
+            }
+            let state = State::load_or_new(&url)?.for_client(&info.client_info);
             Ok(Client { url, info, state, http })
         }
 
@@ -458,5 +501,43 @@ pub mod system {
     #[cfg(not(target_os = "macos"))]
     pub fn headers() -> Result<HashMap<String, String>> {
         Err(Error::msg("System anisette is only available on macOS. Choose an anisette server in Settings."))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_identity_provisioned_as_another_client_is_provisioned_again() {
+        let (client_info, _) = CLIENT_INFO_OVERRIDE.unwrap();
+        // Saved before the override: no client_info, an adi.pb from the server's Mac OS X 10.12.6.
+        let old: remote::State = serde_json::from_str(r#"{"keychain_identifier":"AAAAAAAAAAAAAAAAAAAAAA==","adi_pb":"AQID"}"#).unwrap();
+        let fresh = old.for_client(client_info);
+        assert_eq!(fresh.adi_pb, None);
+        assert_ne!(fresh.keychain_identifier, vec![0u8; 16]);
+        assert_eq!(fresh.client_info.as_deref(), Some(client_info));
+        // Provisioned as this client: kept.
+        let mut done = fresh;
+        done.adi_pb = Some(vec![1, 2, 3]);
+        let id = done.keychain_identifier.clone();
+        let kept = done.for_client(client_info);
+        assert_eq!((kept.keychain_identifier, kept.adi_pb), (id, Some(vec![1, 2, 3])));
+    }
+
+    #[tokio::test]
+    async fn a_server_that_does_not_answer_is_skipped_for_the_next_fallback() {
+        // Three local ports nothing listens on: each connection is refused at once.
+        let mut urls = Vec::new();
+        for _ in 0..3 {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            urls.push(format!("http://127.0.0.1:{}", l.local_addr().unwrap().port()));
+        }
+        let mut p = Provider::new(Source::Remote { url: urls[0].clone() });
+        p.fallbacks = urls.clone();
+        let e = p.headers().await.unwrap_err().to_string();
+        assert_eq!(p.source(), &Source::Remote { url: urls[2].clone() });
+        assert!(e.starts_with("None of the anisette servers answered"), "{e}");
+        assert!(urls.iter().all(|u| e.contains(u.as_str())), "{e}");
     }
 }

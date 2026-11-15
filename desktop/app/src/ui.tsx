@@ -28,7 +28,7 @@ export function Pill({ children, tone = "" }: { children: ReactNode; tone?: "" |
 }
 
 export function ErrorBox({ error }: { error: string | null }) {
-  return error ? <div className="error">{error}</div> : null;
+  return error ? <div className="error">{t(error)}</div> : null;
 }
 
 export function Qr({ svg }: { svg: string }) {

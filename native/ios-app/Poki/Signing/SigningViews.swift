@@ -74,7 +74,8 @@ struct SignerActivityRows: View {
             }
         }
         if let error = signer.lastError {
-            Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+            // The signer's words are English; those the strings table knows are shown in the owner's language.
+            Section { Label(Bundle.main.localizedString(forKey: error, value: error, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
         }
         if let error = signer.updateCheckError {
             Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
