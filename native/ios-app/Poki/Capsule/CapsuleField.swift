@@ -8,6 +8,8 @@ struct CapsuleField: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     var maxLines = 6
+    var maxHeight: CGFloat = 200
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Whether the message is scrolled away from its first line, for a swipe down on the field: that
     /// swipe scrolls the message back, it does not put the keyboard away.
     var scroll: CapsuleScroll? = nil
@@ -32,6 +34,7 @@ struct CapsuleField: UIViewRepresentable {
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityIdentifier = "capsule.field"
         view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
+        view.updateFont(for: UIContentSizeCategory(typeSize))
         view.setPlain(text)
         let swipe = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.swiped(_:)))
         swipe.delegate = context.coordinator
@@ -42,7 +45,8 @@ struct CapsuleField: UIViewRepresentable {
 
     func updateUIView(_ view: CapsuleTextView, context: Context) {
         context.coordinator.parent = self
-        view.accessibilityLabel = AppLocalization.text("Message Poki")
+        view.updateFont(for: UIContentSizeCategory(typeSize))
+        view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
         // A write from outside (a recommendation, dictation, Send emptying the field): render it whole,
         // caret at the end.
         if view.plainText != text { view.setPlain(text) }
@@ -58,7 +62,7 @@ struct CapsuleField: UIViewRepresentable {
         let fit = view.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
         let font = view.font ?? CapsuleTextView.bodyFont
         let most = (font.lineHeight * CGFloat(maxLines) + view.textContainerInset.top + view.textContainerInset.bottom).rounded(.up)
-        return CGSize(width: width, height: min(fit, most))
+        return CGSize(width: width, height: min(fit, most, max(maxHeight, font.lineHeight + view.textContainerInset.top + view.textContainerInset.bottom)))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -125,13 +129,33 @@ final class CapsuleScroll {
 
 final class CapsuleTextView: UITextView {
     static var bodyFont: UIFont { .preferredFont(forTextStyle: .body) }
+    private var requestedCategory: UIContentSizeCategory?
+    private var needsFontRefresh = false
+
+    func updateFont(for category: UIContentSizeCategory) {
+        requestedCategory = category
+        refreshFont()
+    }
+
+    private func refreshFont() {
+        guard markedTextRange == nil else { needsFontRefresh = true; return }
+        let traits = traitCollection.modifyingTraits {
+            $0.preferredContentSizeCategory = requestedCategory ?? traitCollection.preferredContentSizeCategory
+        }
+        let next = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+        guard needsFontRefresh || font != next else { return }
+        needsFontRefresh = false
+        font = next
+        redraw()
+        invalidateIntrinsicContentSize()
+    }
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
         // The pills are pictures drawn for one appearance and one text size: draw them again.
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitPreferredContentSizeCategory.self]) { (view: CapsuleTextView, _: UITraitCollection) in
-            view.font = .preferredFont(forTextStyle: .body, compatibleWith: view.traitCollection)
-            view.redraw()
+            view.needsFontRefresh = true
+            view.refreshFont()
         }
     }
 
@@ -169,6 +193,7 @@ final class CapsuleTextView: UITextView {
     /// keyboard is still composing (Pinyin before it commits), so the composition is never disturbed.
     func reconcile() {
         guard markedTextRange == nil else { return }
+        if needsFontRefresh { refreshFont() }
         let wanted = CapsuleText.segments(plainText)
         guard wanted != segments() else { return }
         replaceKeepingSelection(with: wanted)

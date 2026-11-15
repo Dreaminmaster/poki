@@ -103,21 +103,26 @@ enum TestAttachment {
 struct AttachmentStrip: View {
     var attachments: [ChatAttachment]
     var remove: (ChatAttachment) -> Void
+    @ScaledMetric(relativeTo: .body) private var thumbnailSide = 72.0
+    @ScaledMetric(relativeTo: .caption2) private var removeMarkSide = 18.0
+
+    private var markSide: CGFloat { min(30, removeMarkSide) }
+    private var cornerOffset: CGFloat { (44 - markSide) / 2 }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(attachments) { item in
-                    AttachmentThumb(data: item.thumbnail, side: 72, pdf: item.kind != .photo)
+                    AttachmentThumb(data: item.thumbnail, side: min(104, thumbnailSide), pdf: item.kind != .photo)
                         .overlay(alignment: .topTrailing) { removeButton(item) }
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel(Text(item.label))
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, 4).padding(.top, 6).padding(.bottom, 2)
+            .padding(.horizontal, 4).padding(.top, cornerOffset).padding(.bottom, 2)
             // Room for the corner buttons, which stand out of the pictures.
-            .padding(.trailing, 8)
+            .padding(.trailing, cornerOffset)
         }
         .scrollClipDisabled()
         .accessibilityIdentifier("composer.attachments")
@@ -126,17 +131,20 @@ struct AttachmentStrip: View {
     private func removeButton(_ item: ChatAttachment) -> some View {
         Button { remove(item) } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .font(.system(size: markSide / 2, weight: .bold)).foregroundStyle(.white)
+                .frame(width: markSide, height: markSide)
                 .background(Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.85), in: .circle)
                 .overlay(Circle().strokeBorder(.white, lineWidth: 2).padding(-2))
                 // The touch is larger than the mark.
-                .frame(width: 36, height: 36).contentShape(.rect)
+                .frame(width: 44, height: 44).contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .offset(x: 11, y: -11)
+        .offset(x: cornerOffset, y: -cornerOffset)
         .accessibilityLabel(Text("Remove"))
         .accessibilityIdentifier("composer.attachment.remove")
+        .accessibilityShowsLargeContentViewer {
+            Label("Remove", systemImage: "xmark")
+        }
     }
 }
 
@@ -145,6 +153,7 @@ struct AttachmentThumb: View {
     var data: Data
     var side: CGFloat
     var pdf = false
+    @ScaledMetric(relativeTo: .caption2) private var pdfLabelSize = 9.0
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: side * 16 / 72, style: .continuous)
@@ -161,7 +170,7 @@ struct AttachmentThumb: View {
         .shadow(color: Color(red: 24 / 255, green: 56 / 255, blue: 120 / 255).opacity(0.12), radius: 6, y: 4)
         .overlay(alignment: .bottomLeading) {
             if pdf {
-                Text(verbatim: "PDF").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                Text(verbatim: "PDF").font(.system(size: min(18, pdfLabelSize), weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(Color(.systemRed), in: .capsule)
                     .padding(6)

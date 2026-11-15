@@ -123,6 +123,7 @@ final class ActionLog {
 /// Agents › Activity Log: every action and approval, newest first, by day and by run. A run opens to
 /// its steps; the filters narrow it to approvals, failures or one agent; a tap opens the run's chat.
 struct ActionLogView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     var openSession: (String) -> Void
     private var log: ActionLog { ActionLog.shared }
 
@@ -285,11 +286,12 @@ struct ActionLogView: View {
         var parts = [AppLocalization.text(LocalizedStringResource("\(count) entries"))]
         if run.failed > 0 { parts.append(AppLocalization.text(LocalizedStringResource("\(run.failed) failed"))) }
         if run.approvals > 0 { parts.append(AppLocalization.text(LocalizedStringResource("\(run.approvals) approvals"))) }
-        return HStack(alignment: .center, spacing: 10) {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             badge(run.caller, ok: run.failed == 0, approval: false)
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: title(run)).foregroundStyle(Color(.label)).lineLimit(1)
-                Text(verbatim: parts.joined(separator: ", ")).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                Text(verbatim: title(run)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                Text(verbatim: parts.joined(separator: ", ")).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
             Spacer(minLength: 4)
             if let first = run.entries.first {
@@ -299,16 +301,17 @@ struct ActionLogView: View {
     }
 
     private func row(_ entry: ActionLog.Entry) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             badge(entry.caller, ok: entry.ok, approval: entry.kind == .approval)
             VStack(alignment: .leading, spacing: 2) {
-                Text(ActivityWords.label(entry.text)).foregroundStyle(Color(.label)).lineLimit(2)
+                Text(ActivityWords.label(entry.text)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
                 if let detail = entry.detail {
-                    Text(verbatim: detail).font(.footnote).foregroundStyle(entry.ok ? Color(.secondaryLabel) : Color.orange).lineLimit(2)
+                    Text(verbatim: detail).font(.footnote).foregroundStyle(entry.ok ? Color(.secondaryLabel) : Color.orange).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
                 }
                 let context = [AppName.display(entry.app), entry.session.flatMap { SessionStore.shared.session($0)?.name }].compactMap { $0 }.joined(separator: ", ")
                 if !context.isEmpty {
-                    Text(context).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                    Text(context).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 }
             }
             Spacer(minLength: 4)

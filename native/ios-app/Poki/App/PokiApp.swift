@@ -85,6 +85,8 @@ struct RootView: View {
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
     @State private var welcomeLink: SetupStep?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @AppStorage(AppInterfaceSize.defaultsKey) private var interfaceSize = AppInterfaceSize.system
     @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
     @Namespace private var profile
 
@@ -277,7 +279,25 @@ struct RootView: View {
         .onChange(of: appearance, initial: true) { _, value in
             let style = (Appearance(rawValue: value) ?? .automatic).style
             for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-                for window in scene.windows { window.overrideUserInterfaceStyle = style }
+                for window in scene.windows where window.overrideUserInterfaceStyle != style {
+                    window.overrideUserInterfaceStyle = style
+                }
+            }
+        }
+        .task(id: interfaceSize) {
+            // Apply outside the current layout pass. Coalesce events within roughly one frame,
+            // while the preview and the rest of the window inherit the same native category.
+            try? await Task.sleep(for: .milliseconds(16))
+            guard !Task.isCancelled else { return }
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { AppInterfaceSize.apply(interfaceSize, to: window) }
+            }
+        }
+        .task(id: typeSize) {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { AppInterfaceSize.updateNavigationFonts(in: window) }
             }
         }
         .onAppear(perform: openLaunchScreen)
@@ -417,6 +437,8 @@ struct RootView: View {
             openDetails([DetailsRoute.model])
         case "memory":
             openDetails([SettingsRoute.memory])
+        case "interfaceSize":
+            openDetails([DetailsRoute.interfaceSize])
         case "appearance":
             openDetails([DetailsRoute.appearance])
         case "language":

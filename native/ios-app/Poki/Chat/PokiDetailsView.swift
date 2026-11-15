@@ -58,11 +58,12 @@ struct PokiDetailsView: View {
                 // What Poki works with.
                 Section {
                     NavigationLink(value: DetailsRoute.connection) {
-                        SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue, warns: !setupDone)
+                        SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue,
+                                    valueIsAction: !isSample && !model.setupComplete)
                     }
                     .accessibilityIdentifier("details.hands")
                     NavigationLink(value: DetailsRoute.model) {
-                        SettingsRow(title: "Models", symbol: "sparkles", value: brainValue, warns: !hasModel)
+                        SettingsRow(title: "Models", symbol: "sparkles", value: brainValue, valueIsAction: !hasModel)
                             .id(modelVersion)
                     }
                     .accessibilityIdentifier("details.accountsAndModels")
@@ -113,6 +114,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: AppLocalization.text(appearance.title))
                     }
                     .accessibilityIdentifier("details.appearance")
+                    NavigationLink(value: DetailsRoute.interfaceSize) {
+                        SettingsRow(title: "Interface Size", symbol: "textformat.size")
+                    }
+                    .accessibilityIdentifier("general.interfaceSize")
                     NavigationLink(value: DetailsRoute.language) {
                         SettingsRow(title: "Language", symbol: "globe", value: LanguageSettingsView.selectionTitle)
                     }
@@ -173,12 +178,14 @@ struct PokiDetailsView: View {
                     ApprovalsSettingsView()
                 case .appearance:
                     AppearanceView()
+                case .interfaceSize:
+                    InterfaceSizeSettingsView()
                 case .language:
                     LanguageSettingsView()
                 } }
                 .settingsPage()
             }
-            .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0) }
+            .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).settingsPage() }
             .navigationDestination(for: SettingsRoute.self) { route in
                 SettingsDestination(route: route, push: { path.append($0) }, pop: { if !path.isEmpty { path.removeLast() } })
                     .settingsPage()
@@ -190,16 +197,14 @@ struct PokiDetailsView: View {
     private var hasModel: Bool { isSample || ModelKeys.hasUsableKey }
     private var brainValue: String {
         if isSample { return "GPT-6.1 Terra" }
-        return hasModel ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add"))
+        return hasModel ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add Model"))
     }
 
-    private var setupDone: Bool { isSample || model.setupComplete }
     /// Setup first, then whether Poki is on.
     private var connectionValue: String {
         if isSample { return AppLocalization.text(LocalizedStringResource("On")) }
         if !model.setupComplete {
-            let steps = SetupStep.shown
-            return AppLocalization.text(LocalizedStringResource("\(steps.filter(model.isDone).count) of \(steps.count)"))
+            return AppLocalization.text(LocalizedStringResource("Finish Setup"))
         }
         if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Off")) }
         return model.ownerPaused ? AppLocalization.text(LocalizedStringResource("Paused")) : AppLocalization.text(LocalizedStringResource("On"))
@@ -227,7 +232,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance, language
+    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey
@@ -307,27 +312,26 @@ private struct ConversationsSettingsView: View {
 /// The first row of Settings: the bear's face where the rows under it have their icon, and Poki's name.
 private struct PokiNameRow: View {
     var mood: PokiMood
-    @ScaledMetric(relativeTo: .body) private var face = 34.0
+    @ScaledMetric(relativeTo: .body) private var face = SettingsRowMetrics.iconSize
+    @ScaledMetric(relativeTo: .body) private var iconSpacing = SettingsRowMetrics.iconSpacing
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: min(18, iconSpacing)) {
             Group {
                 if let image = PokiMood.cutout(mood, small: true) {
                     Image(uiImage: image).resizable().interpolation(.high).scaledToFit()
                 }
             }
-            .frame(width: face, height: face)
+            .frame(width: min(SettingsRowMetrics.maximumIconSize, face), height: min(SettingsRowMetrics.maximumIconSize, face))
             .background(mood == .paused ? Tint.night : Tint.portrait, in: .circle)
             .clipShape(.circle)
             .overlay(Circle().strokeBorder(Tint.ring, lineWidth: 1))
-            // As the rows' icons: the face does not make the row taller.
-            .padding(.vertical, -4)
+            .padding(.vertical, SettingsRowMetrics.iconLineInset)
             .accessibilityHidden(true)
             Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
         }
-        .padding(.vertical, 6)
         .animation(.easeInOut(duration: 0.3), value: mood)
     }
 }
@@ -541,26 +545,96 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .dark: .dark
         }
     }
+
+    @MainActor
+    func select(reduceMotion: Bool, updatePreference: () -> Void) {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive }
+            .flatMap(\.windows)
+            .filter { $0.isKeyWindow && !$0.isHidden }
+        let transitions = reduceMotion ? [] : windows.compactMap { AppearanceFade(window: $0) }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updatePreference)
+        UIView.performWithoutAnimation {
+            for window in windows {
+                window.overrideUserInterfaceStyle = style
+                window.layoutIfNeeded()
+            }
+        }
+        transitions.forEach { $0.start() }
+    }
+}
+
+@MainActor
+private final class AppearanceFade: UIView {
+    // Keep the outgoing frame opaque until SwiftUI has rendered the new list selection and UIKit
+    // has presented the new traits. Layout alone does not commit a frame to the display.
+    private var framesUntilReveal = 3
+
+    init?(window: UIWindow) {
+        guard let snapshot = window.snapshotView(afterScreenUpdates: false) else { return nil }
+        super.init(frame: window.bounds)
+        for case let previous as AppearanceFade in window.subviews { previous.removeFromSuperview() }
+        autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        isUserInteractionEnabled = false
+        accessibilityElementsHidden = true
+        snapshot.frame = bounds
+        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(snapshot)
+        window.addSubview(self)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func start() {
+        CADisplayLink(target: self, selector: #selector(reveal(_:))).add(to: .main, forMode: .common)
+    }
+
+    @objc private func reveal(_ link: CADisplayLink) {
+        guard superview != nil else { link.invalidate(); return }
+        framesUntilReveal -= 1
+        guard framesUntilReveal == 0 else { return }
+        link.invalidate()
+        UIView.animate(withDuration: 0.24, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+            self.alpha = 0
+        } completion: { _ in
+            self.removeFromSuperview()
+        }
+    }
 }
 
 /// Settings › Appearance: Automatic, Light or Dark.
 struct AppearanceView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(Appearance.key) private var choice = Appearance.automatic.rawValue
 
     var body: some View {
         List {
             Section {
                 ForEach(Appearance.allCases) { option in
-                    Button { choice = option.rawValue } label: {
+                    Button {
+                        guard choice != option.rawValue else { return }
+                        option.select(reduceMotion: reduceMotion) { choice = option.rawValue }
+                    } label: {
                         HStack {
                             Text(verbatim: AppLocalization.text(option.title)).foregroundStyle(Color(.label))
                             Spacer()
-                            if option.rawValue == choice {
-                                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
-                            }
+                            // Keep the same view and layout when the selection moves. A list row
+                            // can animate an inserted symbol independently of the window's fade.
+                            Image(systemName: "checkmark")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(option.rawValue == choice ? Tint.blueText : Color.clear)
+                                .transaction {
+                                    $0.animation = nil
+                                    $0.disablesAnimations = true
+                                }
+                                .accessibilityHidden(true)
                         }
                         .contentShape(.rect)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityAddTraits(option.rawValue == choice ? .isSelected : [])
                     .accessibilityIdentifier("appearance.\(option == .automatic ? "automatic" : option.rawValue)")
                 }
@@ -816,10 +890,10 @@ struct GroupedSection<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13)).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
+            Text(title).font(.footnote).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
             VStack(spacing: 0) { content }.groupCard()
             if let footer {
-                Text(footer).font(.system(size: 13)).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
+                Text(footer).font(.footnote).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -827,7 +901,7 @@ struct GroupedSection<Content: View>: View {
 }
 
 struct Chevron: View {
-    var body: some View { Text(verbatim: "›").font(.system(size: 17, weight: .semibold)).foregroundStyle(Color(.tertiaryLabel)) }
+    var body: some View { Text(verbatim: "›").font(.body.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel)) }
 }
 
 private struct DetailsIssueRow: View {
@@ -868,7 +942,17 @@ enum PowerTile: Equatable {
 /// The provider's letter on its coloured tile.
 struct ProviderTile: View {
     var provider: ModelProvider
-    var size: CGFloat = 29
+    @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = 29
+    private let baseSize: CGFloat
+
+    init(provider: ModelProvider, size: CGFloat = 29) {
+        self.provider = provider
+        baseSize = size
+        _scaledSize = ScaledMetric(wrappedValue: size, relativeTo: .body)
+    }
+
+    private var size: CGFloat { min(baseSize * 1.5, max(baseSize * 0.9, scaledSize)) }
+
     var body: some View {
         Group {
             if let logo = provider.logo {

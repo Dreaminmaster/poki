@@ -36,9 +36,9 @@ enum Prominent {
         return .custom(name(weight), size: size, relativeTo: style)
     }
 
-    static func uiFont(_ style: UIFont.TextStyle, _ weight: Font.Weight) -> UIFont? {
+    static func uiFont(_ style: UIFont.TextStyle, _ weight: Font.Weight, compatibleWith traits: UITraitCollection? = nil) -> UIFont? {
         guard usesGeist, let base = UIFont(name: name(weight), size: baseSize(style)) else { return nil }
-        return UIFontMetrics(forTextStyle: style).scaledFont(for: base)
+        return UIFontMetrics(forTextStyle: style).scaledFont(for: base, compatibleWith: traits)
     }
 }
 

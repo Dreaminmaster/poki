@@ -167,9 +167,9 @@ struct FirstRunGuide: View {
             .sheet(item: $keyFor, onDismiss: refresh) { KeyEntry(provider: $0) }
             .sheet(isPresented: $signingIn, onDismiss: refresh) { ChatGPTSignIn() }
         }
-        // Past this size a row's name breaks into single letters and the button's words are cut.
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .interactiveDismissDisabled()
+        // Keep the existing limit until the guide's rows and buttons are verified at AX3–AX5.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 
     private var dots: some View {

@@ -18,6 +18,7 @@ struct ShortcutEditor: View {
     var save: (_ sentence: String, _ app: String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sentence: String
     /// A bundle ID, or empty for none.
@@ -25,6 +26,7 @@ struct ShortcutEditor: View {
     /// The app row is open to the choices.
     @State private var choosing = false
     @State private var shown = false
+    @State private var cardFrame = CGRect.null
     @FocusState private var writing: Bool
     /// Every app Poki knows by name, by its name on this iPhone.
     private let apps: [(id: String, name: String)]
@@ -48,15 +50,27 @@ struct ShortcutEditor: View {
             Color.black.opacity(shown ? (scheme == .dark ? 0.45 : 0.25) : 0)
                 .ignoresSafeArea()
                 .contentShape(.rect)
-                .onTapGesture { if writing || choosing { writing = false; choosing = false } else { close() } }
+                .onTapGesture(perform: tapOutside)
                 .accessibilityLabel(Text("Close"))
                 .accessibilityAddTraits(.isButton)
-            card
-                .padding(.horizontal, 24)
-                .scaleEffect(shown || reduceMotion ? 1 : 0.92)
-                .opacity(shown ? 1 : 0)
-                .accessibilityAddTraits(.isModal)
-                .accessibilityAction(.escape) { close() }
+            ScrollView {
+                card
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("shortcut.editor")) } action: { cardFrame = $0 }
+                    .padding(.vertical, 24)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .defaultScrollAnchor(.center, for: .alignment)
+            .padding(.horizontal, 24)
+            .contentShape(.rect)
+            .coordinateSpace(name: "shortcut.editor")
+            .simultaneousGesture(SpatialTapGesture(coordinateSpace: .named("shortcut.editor")).onEnded { tap in
+                guard !cardFrame.isNull, !cardFrame.contains(tap.location) else { return }
+                tapOutside()
+            })
+            .scaleEffect(shown || reduceMotion ? 1 : 0.92)
+            .opacity(shown ? 1 : 0)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { close() }
         }
         .presentationBackground(.clear)
         .onAppear { withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.18)) { shown = true } }
@@ -75,6 +89,15 @@ struct ShortcutEditor: View {
         .onChange(of: writing) { _, writing in
             if writing { choosing = false }
             typing(writing)
+        }
+    }
+
+    private func tapOutside() {
+        if writing || choosing {
+            writing = false
+            choosing = false
+        } else {
+            close()
         }
     }
 
@@ -104,7 +127,8 @@ struct ShortcutEditor: View {
             // No glass on glass: the two rows are a plain fill inside the card.
             .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .clipShape(.rect(cornerRadius: 18, style: .continuous))
-            HStack(spacing: 10) {
+            let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+            actions {
                 Button(action: close) {
                     Text("Cancel").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
                 }
@@ -123,10 +147,9 @@ struct ShortcutEditor: View {
             }
         }
         .padding(18)
-        .frame(maxWidth: 340)
+        .frame(maxWidth: typeSize.isAccessibilitySize ? 520 : 340)
         .glassSurface(in: RoundedRectangle(cornerRadius: 30, style: .continuous), fallback: .card)
         .animation(.snappy(duration: 0.28), value: choosing)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("shortcut.edit")
     }
@@ -138,7 +161,7 @@ struct ShortcutEditor: View {
         HStack(spacing: 8) {
             Text("App").foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
             icon(app)
-            Text(verbatim: appName).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+            Text(verbatim: appName).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
             Image(systemName: choosing ? "chevron.up" : "chevron.down")
                 .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
         }
@@ -168,7 +191,7 @@ struct ShortcutEditor: View {
         } label: {
             HStack(spacing: 10) {
                 icon(id)
-                Text(verbatim: name).foregroundStyle(Color(.label)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                Text(verbatim: name).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blue)
                     .opacity(id == app ? 1 : 0).frame(width: 20)
             }

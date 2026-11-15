@@ -79,6 +79,8 @@ struct TalkBar: View {
     var retry: () -> Void
     var dismiss: () -> Void
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private var controlSize = CompactControlMetrics(base: 44, maximum: 52)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -86,7 +88,7 @@ struct TalkBar: View {
             // What went wrong, in full, under the row: a system's reason can run to several lines.
             if let reason = state.reason {
                 Text(verbatim: reason).font(.footnote).foregroundStyle(Color(.secondaryLabel))
-                    .lineLimit(5).fixedSize(horizontal: false, vertical: true)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6).padding(.bottom, 4)
                     .accessibilityIdentifier("composer.talk.reason")
@@ -94,7 +96,6 @@ struct TalkBar: View {
             }
         }
         .frame(minHeight: 48)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .animation(TalkMotion.state, value: state)
         // A tap you feel where the talk turns: it starts to listen, it is cut off, it breaks.
         .sensoryFeedback(trigger: state) { old, new -> SensoryFeedback? in
@@ -108,32 +109,42 @@ struct TalkBar: View {
     }
 
     private var row: some View {
-        HStack(spacing: 10) {
-            TalkOrb(state: state)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: state.word).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    .lineLimit(1).minimumScaleFactor(0.8).contentTransition(.interpolate)
-                if let since, !state.isFailed {
-                    Text(since, style: .timer).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
-                        .transition(.opacity)
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
+            HStack(spacing: 10) {
+                TalkOrb(state: state).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: state.word).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                        .fixedSize(horizontal: false, vertical: true).contentTransition(.interpolate)
+                    if let since, !state.isFailed {
+                        Text(since, style: .timer).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                    }
                 }
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: 0)
             }
-            .accessibilityElement(children: .combine)
-            Spacer(minLength: 4)
-            if state.isFailed {
-                round("xmark", label: "Close", identifier: "composer.talk.close", action: dismiss)
-                capsule("Try Again", fill: Tint.blue, ink: .white, identifier: "composer.talk.retry", action: retry)
-            } else {
-                if state == .speaking {
-                    round("hand.raised.fill", label: "Interrupt", identifier: "composer.talk.interrupt", action: interrupt)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                }
-                round(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", label: muted ? "Unmute Poki’s Voice" : "Mute Poki’s Voice",
-                      identifier: "composer.talk.mute", action: toggleMute)
-                // The send button's blue, in light and dark (the owner, 2026-11-13: not white on black).
-                capsule("End", fill: Tint.blue, ink: .white, identifier: "composer.talk.end", action: end)
-                    .accessibilityLabel(Text("End Talk"))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { controls }
+                VStack(alignment: .leading, spacing: 8) { controls }
             }
+            .layoutPriority(1)
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        if state.isFailed {
+            round("xmark", label: "Close", identifier: "composer.talk.close", action: dismiss)
+            capsule("Try Again", fill: Tint.blue, ink: .white, identifier: "composer.talk.retry", action: retry)
+        } else {
+            if state == .speaking {
+                round("hand.raised.fill", label: "Interrupt", identifier: "composer.talk.interrupt", action: interrupt)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+            round(muted ? "speaker.slash.fill" : "speaker.wave.2.fill", label: muted ? "Unmute Poki’s Voice" : "Mute Poki’s Voice",
+                  identifier: "composer.talk.mute", action: toggleMute)
+            // The send button's blue, in light and dark (the owner, 2026-11-13: not white on black).
+            capsule("End", fill: Tint.blue, ink: .white, identifier: "composer.talk.end", action: end)
+                .accessibilityLabel(Text("End Talk"))
         }
     }
 
@@ -142,19 +153,24 @@ struct TalkBar: View {
             Image(systemName: symbol)
                 .font(.body.weight(.medium)).foregroundStyle(Color(.label))
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 44, height: 44)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .frame(width: controlSize.side, height: controlSize.side)
                 .background(Color(.label).opacity(scheme == .dark ? 0.16 : 0.1), in: .circle)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(label))
         .accessibilityIdentifier(identifier)
+        .accessibilityShowsLargeContentViewer {
+            Label(label, systemImage: symbol)
+        }
     }
 
     private func capsule(_ title: LocalizedStringKey, fill: Color, ink: Color, identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.body.weight(.semibold)).foregroundStyle(ink).lineLimit(1)
-                .padding(.horizontal, 20).frame(height: 48)
+            Text(title).font(.body.weight(.semibold)).foregroundStyle(ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 20).padding(.vertical, 10).frame(minHeight: 48)
                 .background(fill, in: .capsule)
                 .contentShape(.capsule)
         }
