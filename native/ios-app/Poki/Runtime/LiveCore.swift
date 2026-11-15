@@ -53,6 +53,7 @@ final class LiveCore: CoreSession {
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
     func finishTask(switching: Bool = true) async -> String? { await core.finishTask(switching: switching) }
+    func finishTask(session: String) async -> String? { await core.finishTask(session: session) }
 
     private static func map(_ event: CoreEvent) -> ShellEvent {
         switch event {
