@@ -153,8 +153,9 @@ final class AppModel {
     /// Turning on now will probably bring up iOS's passcode screen (no automation has started since
     /// this iPhone last restarted, or ever): the owner is told first (`passcodeHeadsUp`).
     var passcodeExpected: Bool { UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current }
-    /// The note before iOS's passcode screen is showing; Continue turns Poki on.
     var passcodeHeadsUp = false
+    private(set) var passcodeConfirmationPending = false
+    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Connection and tap Continue."
     /// The note's text (PokiApp's alert). Its translations are looked up by this exact English key.
     static let passcodeHeadsUpMessage: LocalizedStringResource = "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart."
     private var passcodeHeadsUpReconnect = true
@@ -168,6 +169,8 @@ final class AppModel {
     }
     /// Continue on the note: Poki turns on, and iOS's passcode screen comes next.
     func continueAfterPasscodeHeadsUp() {
+        guard passcodeConfirmationPending else { return }
+        passcodeConfirmationPending = false
         passcodeHeadsUp = false
         passcodeHeadsUpSeen = BootClock.current
         if let why = passcodeHeldOpen {
@@ -176,6 +179,11 @@ final class AppModel {
             return
         }
         startSession(reconnectLocal: passcodeHeadsUpReconnect)
+    }
+    func cancelPasscodeHeadsUp() {
+        passcodeConfirmationPending = false
+        passcodeHeadsUp = false
+        passcodeHeldOpen = nil
     }
     /// The in-process open waiting for Continue on the passcode note: its reason.
     private var passcodeHeldOpen: String?
@@ -489,16 +497,15 @@ final class AppModel {
     /// already open answers "reused" in milliseconds.
     func warmInProcess(_ why: String) {
         guard automationPath == .inProcess, sessionOn, runner.isRunning else { return }
-        if InProcessWDA.automationDeclined { return }
+        if InProcessWDA.automationDeclined || passcodeConfirmationPending { return }
         // The first open since the iPhone restarted is what brings up iOS's passcode screen: with
         // Poki in front, the owner is told just before it (Continue opens; elsewhere the Live
         // Activity asks for the passcode once an open takes 5 s).
         if passcodeExpected, passcodeHeadsUpSeen != BootClock.current, inFront, !Self.onSimulator, !inProcessWarming {
-            if passcodeHeldOpen == nil {
-                log.add("runner", "first automation since this iPhone restarted: telling the owner iOS will ask for the passcode")
-            }
             passcodeHeldOpen = why
+            passcodeConfirmationPending = true
             passcodeHeadsUp = true
+            log.add("runner", "first automation since this iPhone restarted: requested notice that iOS will ask for the passcode")
             return
         }
         if inProcessWarming {
@@ -846,7 +853,7 @@ final class AppModel {
     }
 
     func startSession(reconnectLocal: Bool = true) {
-        guard !sessionOn, !sessionStarting else { return }
+        guard !passcodeConfirmationPending, !sessionOn, !sessionStarting else { return }
         diskImage.refreshAvailability()
         // Turning on is the owner asking for automation again, after a cancelled passcode screen too.
         InProcessWDA.gate.withLock { $0.declined = false }
@@ -861,8 +868,9 @@ final class AppModel {
         // (warmInProcess, as soon as the launcher is ready), which brings up iOS's passcode screen.
         if passcodeExpected, passcodeHeadsUpSeen != BootClock.current, inFront, !Self.onSimulator {
             passcodeHeadsUpReconnect = reconnectLocal
+            passcodeConfirmationPending = true
             passcodeHeadsUp = true
-            log.add("runner", "no automation since this iPhone restarted: telling the owner iOS will ask for the passcode")
+            log.add("runner", "no automation since this iPhone restarted: requested notice that iOS will ask for the passcode")
             return
         }
         if setup.loopback == .none {
@@ -1575,6 +1583,9 @@ final class AppModel {
         if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments) }
         if probeDriven { return await core.callTool(name, arguments: arguments) }
         if !sessionOn { startSession() }
+        if passcodeConfirmationPending {
+            return PokiCore.ToolAnswer(text: "not_sent: \(AppLocalization.text(Self.passcodeConfirmationMessage)) Nothing was sent.", jpeg: nil, isError: true)
+        }
         guard sessionOn else {
             let why = problem ?? "Poki is off."
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)

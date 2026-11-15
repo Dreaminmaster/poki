@@ -437,7 +437,7 @@ private struct AutomationNotices: ViewModifier {
             Text("Poki closes by itself so agents can see the screen again. Open Poki again afterwards, from the notification or the Home Screen. It turns on when it opens.")
         }
         .alert("Enter Your Passcode Next", isPresented: Binding(get: { enabled && model.passcodeHeadsUp }, set: { if enabled && !$0 { model.passcodeHeadsUp = false } })) {
-            Button("Cancel", role: .cancel) { model.passcodeHeadsUp = false }
+            Button("Cancel", role: .cancel) { model.cancelPasscodeHeadsUp() }
             Button("Continue") { model.continueAfterPasscodeHeadsUp() }
         } message: {
             Text(AppModel.passcodeHeadsUpMessage)

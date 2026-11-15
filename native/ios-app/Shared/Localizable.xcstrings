@@ -1,6 +1,29 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "To turn on automation, open Settings › Connection and tap Continue." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To turn on automation, open Settings › Connection and tap Continue."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要开启自动化，请前往设置 › 连接并轻点“继续”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "若要開啟自動化，請前往設定 › 連線並點一下「繼續」。"
+          }
+        }
+      }
+    },
     "Downloaded, not available" : {
       "extractionState" : "manual",
       "localizations" : {
