@@ -53,7 +53,17 @@ pub fn classify(error: &IdeviceError) -> Failure {
         IdeviceError::UnexpectedResponse(text) if text.contains("TSS server responded") => failure.fix(DDI_REFUSED_FIX).code("ddi_refused"),
         // The phone could not install what it was given: the files are bad.
         IdeviceError::Cryptexd(CryptexdError::RoutineFailed { .. } | CryptexdError::BadDdiBundle(_)) => failure.fix(DDI_BAD_FIX).code("ddi_bad"),
-        // Anything else on the way to gs.apple.com is the network.
-        _ => failure.fix(NETWORK_FIX).code("network"),
+        IdeviceError::Http(_) => failure.fix(NETWORK_FIX).code("network"),
+        // The device tunnel failed during the mount exchange. The I/O kind can
+        // distinguish EOF from a reset without logging any request or device data.
+        IdeviceError::Socket(io) => Failure::new(format!(
+            "mounting the developer disk image failed: {error} ({:?})",
+            io.kind()
+        ))
+        .fix("Check the local developer connection in Poki Setup → Loopback. Poki retries automatically.")
+        .code("ddi_socket"),
+        _ => failure
+            .fix("Check the developer disk image status in Poki Setup → Pairing. Poki retries automatically.")
+            .code("ddi_mount"),
     }
 }

@@ -248,6 +248,27 @@ async fn the_port_the_app_found_is_the_one_connected_to() {
     assert!(after.detail.starts_with("remote pairing handshake failed"), "{}", after.detail);
 }
 
+/// Use the dependency boundary called by install_ddi, not a preconstructed Http error.
+#[test]
+fn ddi_signing_boundary_keeps_signing_and_phone_socket_failures_distinct() {
+    use idevice::{IdeviceError, cryptexd::ddi_signing_response};
+    use std::io::{Error, ErrorKind};
+    for kind in [ErrorKind::ConnectionRefused, ErrorKind::ConnectionReset, ErrorKind::UnexpectedEof] {
+        let signing = ddi_signing_response(Err(IdeviceError::Socket(Error::new(kind, "PRIVATE request details")))).unwrap_err();
+        let failure = crate::ddi::classify(&signing);
+        assert_eq!(failure.code, Some("network"), "signing boundary: {kind:?}");
+        assert_eq!(failure.fix.as_deref(), Some(crate::device::NETWORK_FIX));
+        assert!(failure.detail.contains(&format!("{kind:?}")));
+        assert!(!failure.detail.contains("PRIVATE"));
+        let phone = crate::ddi::classify(&IdeviceError::Socket(Error::from(kind)));
+        assert_eq!(phone.code, Some("ddi_socket"));
+    }
+    let value = plist::Value::String("synthetic ticket".into());
+    assert_eq!(ddi_signing_response(Ok(value.clone())).unwrap(), value);
+    let refused = ddi_signing_response(Err(IdeviceError::UnexpectedResponse("TSS server responded with non-success status".into()))).unwrap_err();
+    assert_eq!(crate::ddi::classify(&refused).code, Some("ddi_refused"));
+}
+
 /// GitHub issue 69: the loopback takes the connection, then the phone's remote pairing service never
 /// answers. Developer Mode is on (it cannot go off without a restart), so that is not the fix, and
 /// the pairing was never checked, so the app must not read it as refused.
@@ -359,6 +380,18 @@ fn disk_image_failures_name_their_own_fix() {
     let network = classify(&IdeviceError::Http("connection refused".into()));
     assert_eq!(network.code, Some("network"));
     assert_eq!(network.fix.as_deref(), Some(crate::device::NETWORK_FIX));
+}
+
+#[test]
+fn disk_image_socket_failure_reports_transport_and_io_kind() {
+    let error = idevice::IdeviceError::Socket(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+    let failure = crate::ddi::classify(&error);
+    assert_eq!(failure.code, Some("ddi_socket"));
+    assert!(failure.detail.contains("UnexpectedEof"));
+    assert_ne!(failure.fix.as_deref(), Some(crate::device::NETWORK_FIX));
+
+    let missing = crate::ddi::classify(&idevice::IdeviceError::ImageNotMounted);
+    assert_eq!(missing.code, Some("ddi_mount"));
 }
 
 /// GitHub issue 69 and ESP-225: a failure on the way to the phone is not Developer Mode. Only the

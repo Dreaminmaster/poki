@@ -1,0 +1,33 @@
+diff --git a/idevice/src/services/cryptexd.rs b/idevice/src/services/cryptexd.rs
+--- a/idevice/src/services/cryptexd.rs
++++ b/idevice/src/services/cryptexd.rs
+@@ -402,9 +402,7 @@
+
+     let mut request = crate::tss::TSSRequest::new();
+     request.add_cryptex1_tags(&assets.build_identity, &chip_instance, &nonce)?;
+-    let response = request
+-        .send()
+-        .await?
++    let response = ddi_signing_response(request.send().await)?
+         .into_dictionary()
+         .ok_or(CryptexdError::MissingField("(TSS response)"))?;
+     // Cryptex1 responses carry the ticket under its own key on current releases
+@@ -433,6 +431,18 @@
+         .ok_or(IdeviceError::ImageNotMounted)
+ }
+
++/// Classifies the result at the DDI signing-request boundary, before device errors are combined.
++/// Only the I/O kind is retained; request bodies and device identifiers are never included.
++#[doc(hidden)]
++pub fn ddi_signing_response(result: Result<plist::Value, IdeviceError>) -> Result<plist::Value, IdeviceError> {
++    result.map_err(|error| match error {
++        IdeviceError::Socket(io) => IdeviceError::Http(format!(
++            "Apple signing server socket failed ({:?})", io.kind()
++        )),
++        other => other,
++    })
++}
++
+ /// The installed DeveloperDiskImage cryptex, if there is one.
+ #[cfg(feature = "rsd")]
+ pub async fn installed_ddi(
