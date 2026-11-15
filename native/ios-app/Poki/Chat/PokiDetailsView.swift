@@ -359,13 +359,25 @@ struct ConnectionView: View {
                     SettingsRow(title: "Automation", symbol: "hand.tap")
                 }
                 .accessibilityIdentifier("hands.on")
+                if model.passcodeConfirmationPending {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Enter Your Passcode Next").font(.headline)
+                        Text(AppModel.passcodeHeadsUpMessage).font(.subheadline)
+                    }
+                    Button("Continue") { model.continueAfterPasscodeHeadsUp() }
+                    Button("Cancel", role: .cancel) { model.cancelPasscodeHeadsUp() }
+                }
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
-                    Text(model.sessionStarting ? "Poki is turning on."
-                         : on ? "Poki can tap, type, and scroll on this iPhone."
-                         : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
-                         : "Poki is off. Agents can’t reach this iPhone.")
+                    if model.passcodeConfirmationPending {
+                        Text(AppModel.passcodeConfirmationMessage)
+                    } else {
+                        Text(model.sessionStarting ? "Poki is turning on."
+                             : on ? "Poki can tap, type, and scroll on this iPhone."
+                             : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
+                             : "Poki is off. Agents can’t reach this iPhone.")
+                    }
                     // Why turning on failed, under the switch that was turned on (not only on Poki's
                     // page). Poki's own sentences are localized; PokiCore's stay as they came.
                     if let failure = model.developerToolsFailure {
