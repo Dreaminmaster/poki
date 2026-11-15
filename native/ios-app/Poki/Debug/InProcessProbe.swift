@@ -308,35 +308,45 @@ final class InProcessProbe: ObservableObject {
         func generation() async -> UInt64 {
             await withCheckedContinuation { (c: CheckedContinuation<UInt64, Never>) in queue.async { c.resume(returning: PKInProcess.shared().generation()) } }
         }
-        /// Waits until the session is no longer open, at most `seconds`.
-        func closed(within seconds: Double) async -> Double? {
+        /// Waits for a close that iOS answered after close number `after`, at most `seconds`.
+        func closed(after: Int, within seconds: Double) async -> (close: AppModel.InProcessClose, seconds: Double)? {
             let started = ProcessInfo.processInfo.systemUptime
             while ProcessInfo.processInfo.systemUptime - started < seconds {
-                if !model.hasOpenInProcessSession, !model.preparingPhone { return ProcessInfo.processInfo.systemUptime - started }
+                if let close = model.lastInProcessClose, close.number > after { return (close, ProcessInfo.processInfo.systemUptime - started) }
                 try? await Task.sleep(for: .milliseconds(100))
             }
             return nil
         }
-        func look() async -> (text: String, failed: Bool, seconds: Double) {
+        func tool(_ name: String, _ arguments: String) async -> (text: String, failed: Bool, picture: Bool, seconds: Double) {
             let t = ProcessInfo.processInfo.systemUptime
-            let result = await model.runTool("look", arguments: "{}")
-            return (result.text, result.isError, ProcessInfo.processInfo.systemUptime - t)
+            let result = await model.runTool(name, arguments: arguments)
+            return (result.text, result.isError, result.jpeg != nil, ProcessInfo.processInfo.systemUptime - t)
         }
+        func look() async -> (text: String, failed: Bool, picture: Bool, seconds: Double) { await tool("look", "{}") }
         func endTask() async {
             await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in model.finishTask { c.resume() } }
         }
+        /// A task as the chat runs one: look (Poki is in front), open Settings, which answers with the
+        /// screen read in Settings, then the end of the task, which brings Poki back and closes the
+        /// session. The read counts only with a picture and Settings' elements in it.
         func round(_ name: String) async -> UInt64? {
             model.chatTaskBegan()
-            let read = await look()
+            let first = await look()
+            let read = await tool("do", #"{"actions":[{"launch":"com.apple.Preferences"}]}"#)
             let now = await generation()
-            let elements = read.text.split(separator: "\n").count
-            check("\(name) read", !read.failed, "\(read.failed ? "failed: \(read.text.prefix(160))" : "screen read") in \(String(format: "%.2f", read.seconds)) s, session generation \(now), \(elements) lines",
-                  ["seconds": read.seconds, "generation": now, "text": String(read.text.prefix(600))])
+            let elements = read.text.split(separator: "\n").filter { $0.range(of: #"^\D*\d+ \S+ ".*" \[-?\d+,-?\d+,\d+,\d+\]"#, options: .regularExpression) != nil }.count
+            let ok = !read.failed && read.picture && read.text.contains("com.apple.Preferences") && elements > 0
+            check("\(name) read", ok, "\(ok ? "Settings read" : "NOT read: \(read.text.prefix(160))") in \(String(format: "%.2f", read.seconds)) s (first look \(first.failed ? "failed" : "answered") in \(String(format: "%.2f", first.seconds)) s), \(elements) elements, \(read.picture ? "a picture" : "no picture"), session generation \(now)",
+                  ["seconds": read.seconds, "first_look_seconds": first.seconds, "generation": now, "elements": elements, "picture": read.picture, "text": String(read.text.prefix(600))])
+            let before = model.lastInProcessClose?.number ?? 0
+            let ended = ProcessInfo.processInfo.systemUptime
             await endTask()
-            let gone = await closed(within: 8)
-            check("\(name) close", gone != nil, gone.map { String(format: "session closed %.2f s after the task ended; the banner goes with it", $0) } ?? "the session was still open 8 s after the task ended")
-            try? await Task.sleep(for: .seconds(2))
-            return read.failed ? nil : now
+            let done = await closed(after: before, within: 15)
+            let gone = done.map { $0.close.closed && !model.hasOpenInProcessSession } ?? false
+            check("\(name) close", gone, done.map { String(format: "iOS answered the close for %@ %.2f s after the task ended (close took %.2f s): %@; Poki holds %@ session", $0.close.why, ProcessInfo.processInfo.systemUptime - ended, $0.close.seconds, $0.close.closed ? "closed" : "nothing was open", model.hasOpenInProcessSession ? "an open" : "no") } ?? "no close answered within 15 s of the end of the task",
+                  ["closed": done?.close.closed ?? false, "close_seconds": done?.close.seconds ?? -1])
+            try? await Task.sleep(for: .seconds(3))
+            return ok ? now : nil
         }
         var last: UInt64 = 0
         for i in 1...max(1, rounds) {
@@ -346,6 +356,7 @@ final class InProcessProbe: ObservableObject {
             }
         }
         // A session that opens but cannot read.
+        note("simulated: the next session's readiness check is made to fail through the testing flag", ["step": "lifecycle_simulated_failure"])
         PKInProcess.shared().failNextReadinessCheck = true
         model.chatTaskBegan()
         let broken = await look()

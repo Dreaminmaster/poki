@@ -452,6 +452,10 @@ final class AppModel {
     private var inProcessEpoch = 0
     private var inProcessWarmToken = 0
     private var afterInProcessClose: [@MainActor () -> Void] = []
+    /// A close of the in-process session once iOS has answered it: what it was for, and whether a
+    /// session was open. The lifecycle check waits for this, not for the state to say closing.
+    struct InProcessClose { let number: Int; let why: String; let closed: Bool; let seconds: Double }
+    private(set) var lastInProcessClose: InProcessClose?
 
     func closeInProcess(_ why: String, keepingSession: Bool = false, then: (@MainActor () -> Void)? = nil) {
         guard automationPath == .inProcess else { return }
@@ -473,6 +477,9 @@ final class AppModel {
                 self.log.add("runner", keepingSession
                     ? "Automation Mode pause for \(why): \(result["paused"] as? Bool == true ? "paused" : "unavailable")"
                     : "in-process session close for \(why): \(result["closed"] as? Bool == true ? "closed" : "already closed")")
+                self.lastInProcessClose = InProcessClose(number: (self.lastInProcessClose?.number ?? 0) + 1, why: why,
+                                                         closed: !keepingSession && result["closed"] as? Bool == true,
+                                                         seconds: result["seconds"] as? Double ?? 0)
                 let callbacks = self.afterInProcessClose
                 self.afterInProcessClose.removeAll()
                 for callback in callbacks { callback() }
@@ -498,7 +505,7 @@ final class AppModel {
         if InProcessWDA.automationDeclined { return }
         // The first open since the iPhone restarted is what brings up iOS's passcode screen: with
         // Poki in front, the owner is told just before it (Continue opens; elsewhere the Live
-        // Activity asks for the passcode once an open takes 5 s).
+        // Activity asks for it once iOS has held its "allow automation" call for `passcodeEvidence` seconds).
         if passcodeExpected, passcodeHeadsUpSeen != BootClock.current, inFront, !Self.onSimulator, !inProcessWarming {
             if passcodeHeldOpen == nil {
                 log.add("runner", "first automation since this iPhone restarted: telling the owner iOS will ask for the passcode")
