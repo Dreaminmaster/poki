@@ -7,7 +7,7 @@ native/ios-app/CHANGELOG-round.md; this file is what goes into a release and the
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 Build numbers are the GitHub Actions run number of the release workflow.
 
-## [0.4.2] - Unreleased
+## [0.4.2] Beta - 2026-11-15
 
 ### Automation
 - The "Automation Running" watermark now shows only while Poki is operating your phone, and goes away when the task ends. Poki opens its automation session when a task needs the phone and closes it when the work is done. Thanks to @ZhehanZhang (#357).
