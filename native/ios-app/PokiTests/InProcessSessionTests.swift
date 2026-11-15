@@ -7,6 +7,21 @@ import XCTest
 /// owner cancelled the passcode, testmanagerd did not answer within 3 s), an agent's call hears why at
 /// once and asks for another try, instead of every call waiting out "opening the session".
 final class InProcessSessionTests: XCTestCase {
+    func testWorkspaceLauncherIgnoresDuplicateSystemEntriesAndTheMatchingWidgetLabel() {
+        let icon = NSValue(cgRect: CGRect(x: 100, y: 250, width: 86, height: 86))
+        let offPage = NSValue(cgRect: CGRect(x: 490, y: 720, width: 160, height: 162))
+        let title = NSValue(cgPoint: CGPoint(x: 587, y: 323))
+        let widget = NSValue(cgPoint: CGPoint(x: 120, y: 550))
+        let point = PKWorkspaceLauncherPoint(["备忘录": [offPage, icon, icon]], ["备忘录": [widget, title]], false)
+        XCTAssertEqual(point, CGPoint(x: 587, y: 287))
+    }
+
+    func testWorkspaceLauncherRefusesTwoVisibleIconsWithTheSameName() {
+        let icon = NSValue(cgRect: CGRect(x: 100, y: 250, width: 86, height: 86))
+        let labels = [NSValue(cgPoint: CGPoint(x: 587, y: 323)), NSValue(cgPoint: CGPoint(x: 690, y: 323))]
+        XCTAssertTrue(PKWorkspaceLauncherPoint(["备忘录": [icon]], ["备忘录": labels], false).x.isNaN)
+    }
+
     func testAFailedOpenIsAnsweredWithItsReasonAndTheCallTriesAgain() {
         let host = AppCoreHost()
         let tries = Tries()

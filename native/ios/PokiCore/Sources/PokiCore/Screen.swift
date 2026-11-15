@@ -151,7 +151,7 @@ func flattenXML(_ data: Data) -> (elements: [Element], root: (label: String?, na
     return (walker.out, walker.root)
 }
 
-func listable(_ elements: [Element], _ size: ScreenSize) -> [Element] {
+func listable(_ elements: [Element], _ size: ScreenSize, includeUnlabeledImages: Bool = false) -> [Element] {
     // The same element twice (an app that mirrors a control into a second accessibility element at
     // the same place with the same text, seen in WeChat) is listed once.
     var seen = Set<String>()
@@ -162,7 +162,8 @@ func listable(_ elements: [Element], _ size: ScreenSize) -> [Element] {
         // WebKit's parts reach the tree late, or not at all under a reduced depth (seen in the gym:
         // three looks at a WKWebView listed the nav bar and nothing of the page). Listed as
         // [collapsed], its text is read from the picture.
-        guard !e.text.isEmpty || (e.type == "WebView" && e.frame.height >= 40) else { return false }
+        let image = includeUnlabeledImages && e.type == "Image" && e.frame.width >= 44 && e.frame.height >= 44
+        guard !e.text.isEmpty || image || (e.type == "WebView" && e.frame.height >= 40) else { return false }
         let f = e.frame
         guard f.x + f.width > 0 && f.y + f.height > 0 && f.x < size.width && f.y < size.height else { return false }
         // The Dynamic Island (and Poki's Live Activity in it) is never listed: a tap there opens Poki.
@@ -182,11 +183,12 @@ extension Runner {
     /// its main thread all the same), so a look never waits on a session open and a session ended
     /// after a slow action does not cost the next read anything. The settings (deadline, detection
     /// point, depth) live in WDA's process, set by the first session of the runner's life.
-    func tree(timeout: Double, format: String = "json") async throws -> (elements: [Element], foreground: Foreground) {
+    func tree(timeout: Double, format: String = "json", workspace: Bool = false) async throws -> (elements: [Element], foreground: Foreground) {
         let xml = format.lowercased() == "xml"
         await ensureSettings(timeout: min(timeout, 3))
         async let source = raw("GET", "/source?format=\(xml ? "xml" : "json")&excluded_attributes=visible,accessible,enabled,index", timeout: timeout)
-        async let app = try? raw("GET", "/wda/activeAppInfo", timeout: min(timeout, 2))
+        // /activeAppInfo queues behind /source, which confirms the selected pane before reading it.
+        async let app = try? raw("GET", "/wda/activeAppInfo", timeout: workspace ? timeout : min(timeout, 2))
         let appValue = await app
         let bundleID = appValue?["bundleId"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         let appName = appValue?["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }
@@ -230,7 +232,7 @@ extension Runner {
     /// `extra`: time past `timeout` that a shallow re-read may take when the full-depth read timed
     /// out (seen in the gym: a 1,500-cell screen timed out twice at 4 s and answered nothing, while
     /// the depth-12 read after came in 0.2 s; a shallow tree now beats 4 s of nothing).
-    func read(timeout: Double, extra: Double = 0, wantPicture: Bool = true, format: String = "json", callEnds: Double? = nil) async -> Reading {
+    func read(timeout: Double, extra: Double = 0, wantPicture: Bool = true, format: String = "json", callEnds: Double? = nil, allowHostPicture: Bool = true, workspace: Bool = false) async -> Reading {
         let started = now()
         let pictureAt = LockedBox<Double?>(nil)
         // After a read that timed out, the next asks for half the tree's depth (a huge tree is what
@@ -239,7 +241,7 @@ extension Runner {
         if wanted != limits.value { await useLimits(wanted) }
         let readLimits = limits.value
         async let treePart: Result<(elements: [Element], foreground: Foreground), Error> = {
-            do { return .success(try await self.tree(timeout: timeout, format: format)) } catch { return .failure(error) }
+            do { return .success(try await self.tree(timeout: timeout, format: format, workspace: workspace)) } catch { return .failure(error) }
         }()
         async let picturePart: Result<Data, Error>? = wantPicture ? {
             defer { pictureAt.value = now() }
@@ -251,7 +253,7 @@ extension Runner {
         // Up to 6 s: a look under a wedged runner waited 18 s for it in the gym, and an answer at
         // 6 s with the picture and the runner's state keeps the model moving.
         let hostTimeNow = callEnds.map { Swift.max(1.5, Swift.min(6, $0 - now() - 0.5)) } ?? 6
-        let hostEarly: Task<Data?, Never>? = wantPicture && busyWith != nil && screenshotFallback != nil
+        let hostEarly: Task<Data?, Never>? = wantPicture && allowHostPicture && busyWith != nil && screenshotFallback != nil
             ? Task { [fallback = screenshotFallback!] in (try? await withDeadline(hostTimeNow, "the host's screenshot") { await fallback() }) ?? nil }
             : nil
         var reading = Reading()
@@ -267,7 +269,7 @@ extension Runner {
             let left = started + timeout - now()
             if (e as? RunnerError)?.delivery == .notSent, left > 1.2 {
                 await sleep(seconds: 0.3)
-                if let again = try? await self.tree(timeout: left - 0.4, format: format) {
+                if let again = try? await self.tree(timeout: left - 0.4, format: format, workspace: workspace) {
                     reading.elements = again.elements; reading.foreground = again.foreground; treeCame = true
                     reading.notes.append("the element tree came on the second try (the first was refused: \(e))")
                 } else {
@@ -282,7 +284,7 @@ extension Runner {
                 reading.notes.append("no element tree (\(readLimits.isFull ? "full" : readLimits.described)): \(e)")
                 if await waitUntilFree(timeout: min(3, retryUntil - now() - 1.5)) {
                     await useLimits(smaller)
-                    if limits.value == smaller, let again = try? await self.tree(timeout: max(0.5, min(2, retryUntil - now() - 0.2)), format: format) {
+                    if limits.value == smaller, let again = try? await self.tree(timeout: max(0.5, min(2, retryUntil - now() - 0.2)), format: format, workspace: workspace) {
                         reading.elements = again.elements; reading.foreground = again.foreground; treeCame = true
                         reading.notes.removeLast()
                         reading.notes.append("the full tree timed out (\(e)), so it was read again with \(smaller.described) within this call; \(smaller.caveat)")
@@ -316,7 +318,7 @@ extension Runner {
             } else if let early = hostEarly, let png = await early.value {
                 reading.png = png
                 reading.notes.append("screenshot: taken apart from the runner, started beside its own (the runner gave none: \(e))")
-            } else if let fallback = screenshotFallback {
+            } else if allowHostPicture, let fallback = screenshotFallback {
                 // The answer says what became of the host's path, so a missing picture can be traced.
                 // The host's path gets the call's remaining time (up to 15 s; simctl took 6.4 s on a
                 // loaded CI runner and 14 s under a restart), 6 s when the call's end is not known.

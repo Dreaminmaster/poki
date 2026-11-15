@@ -5,6 +5,30 @@ import XCTest
 
 @MainActor
 final class LiveActivityTests: XCTestCase {
+    func testSplitViewChatKeepsStopAvailableWhileWaitingForTheModel() async throws {
+        let activity = ActivityController()
+        activity.finishAfter = .milliseconds(20)
+        activity.setChatOwnsCompletion(true)
+        activity.update { $0.phase = .working; $0.headline = "Read Notes" }
+        activity.record(step: "Read Notes", ok: true)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(activity.state.phase, .working)
+        guard case .progress(_, true) = activity.state.face.bottom else {
+            return XCTFail("An active Split View task must offer Stop")
+        }
+        activity.setChatOwnsCompletion(false)
+        activity.finishNow(alert: false)
+        XCTAssertEqual(activity.state.phase, .done)
+    }
+
+    func testStoppingARunReturnsItsActivityStateToIdle() {
+        let activity = ActivityController()
+        activity.update { $0.phase = .working; $0.headline = "Read Notes" }
+        XCTAssertEqual(activity.state.phase, .working)
+        activity.endStoppedRun()
+        XCTAssertEqual(activity.state.phase, .idle)
+    }
+
     private var language = AppLocalization.system
 
     override func setUp() async throws {

@@ -48,11 +48,22 @@ final class LiveCore: CoreSession {
     func setHostTools(_ tools: [HostTool]) { core.setHostTools(tools) }
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
-    func callTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer { await core.callTool(name, arguments: arguments) }
+    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil) async -> PokiCore.ToolAnswer {
+        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps)
+    }
     func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
+    func prepareWorkspace(session: String) async -> Bool { await core.prepareWorkspace(session: session) }
+    func clearWorkspacePaneForSetup(session: String) async -> Bool {
+        await core.clearWorkspacePaneForSetup(session: session)
+    }
+    func workspaceLauncherStep(session: String, request: JSON) async throws -> JSON {
+        try await core.workspaceLauncherStep(session: session, request: request)
+    }
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
-    func finishTask(switching: Bool = true) async -> String? { await core.finishTask(switching: switching) }
+    func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false) async -> String? {
+        await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace)
+    }
 
     private static func map(_ event: CoreEvent) -> ShellEvent {
         switch event {

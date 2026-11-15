@@ -28,6 +28,26 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
 @property (nonatomic, readonly) uint64_t generation;
 @end
 
+/// The current display in upright points, with the pane beside Poki when one can be identified.
+typedef struct {
+    CGRect bounds;
+    CGRect peer;
+    CGSize nativeSize;
+    CGAffineTransform toFixed;
+    NSInteger orientation;
+    BOOL panePlacementKnown;
+    BOOL routesDisplay;
+    /// Changes even when the device returns to its original orientation before the next read.
+    uint64_t orientationRevision;
+} PKDisplayGeometry;
+
+/// Finds the pane on the opposite edge of a side-by-side window; CGRectNull for other layouts.
+FOUNDATION_EXPORT CGRect PKPeerPane(CGRect screen, CGRect window);
+
+/// Returns a launcher touch point only when the visible labels and accessibility frames agree on one target.
+FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> *candidates,
+                                                    NSDictionary<NSString *, NSArray<NSValue *> *> *visibleLabels, BOOL menu);
+
 /// UI automation from Poki's own process: the XCTest daemon session (testmanagerd), Automation Mode,
 /// and synthesized touch and text events. No runner app and no port. Every method blocks, so call it
 /// from a serial worker queue, never the main thread: the first enable waits for the owner to
@@ -36,6 +56,7 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
 + (instancetype)shared;
 /// Loads the developer frameworks only. Does not open a session or ask for the passcode.
 - (BOOL)developerFrameworksAvailable;
++ (BOOL)canUseDuoSplitView;
 /// Loads the Developer libraries, opens the daemon session and enables Automation Mode, or reuses an
 /// enable of the same session and generation. Keys: ok, code, detail, generation, reused, seconds.
 - (NSDictionary<NSString *, id> *)prepare;
@@ -67,11 +88,21 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
 - (nullable NSDictionary<NSString *, id> *)unanswered;
 /// The app in front: bundleId, name, pid. Empty when accessibility gives none.
 - (NSDictionary<NSString *, id> *)frontApp;
-/// The front app's frame when it does not fill the screen (its half of the iPhone Duo's inner
-/// display, its window on an iPad, with Poki beside it), else CGRectNull. Set by the last tree read, front
-/// read or screenshot. The tree's frames and the screenshot are relative to it, and touches are
-/// offset by it, so the agent sees and drives the one app as if it had the screen.
+/// Confirms a named app icon or its Split View menu item from the system tree and a fresh local screenshot.
+- (nullable PKOutcome *)openWorkspaceLauncherItem:(NSArray<NSString *> *)labels menu:(BOOL)menu;
+/// Select a side of a two-app inner display, or clear the selection with "auto".
+/// Refuses when both visible apps and their window bounds cannot be confirmed.
+- (nullable NSDictionary<NSString *, id> *)selectPane:(NSString *)side code:(NSString *_Nullable *_Nullable)code;
+@property (nonatomic, readonly) BOOL hasSelectedPane;
+/// The opposite pane of the selected workspace, in display coordinates (CGRectNull without one).
+@property (nonatomic, readonly) CGRect otherWorkspacePane;
+/// The pane used for the latest read, or CGRectNull for a full-screen app. Both the screenshot
+/// and the tree use points relative to the pane. Gestures add its origin back before dispatch.
 @property (nonatomic, readonly) CGRect viewport;
+/// Reads the geometry of Poki's visible scene. Falls back to the main screen when it is hidden.
+- (PKDisplayGeometry)displayGeometry;
+/// Sends upright display coordinates using the same display geometry that bounded the gesture.
+- (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry;
 /// The front app's elements in WebDriverAgent's XML source format, and the element with the
 /// keyboard focus (keys value, x, y, width, height) when there is one.
 - (nullable NSString *)sourceXML:(NSDictionary *_Nullable *_Nullable)focused code:(NSString *_Nullable *_Nullable)code;

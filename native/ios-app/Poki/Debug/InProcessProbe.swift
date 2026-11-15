@@ -52,8 +52,16 @@ final class InProcessProbe: ObservableObject {
             case "source": await sourceBothPaths(model: model)
             case "apps": await appsCycle(defaults.string(forKey: "pokiProbeApp") ?? "local.pokimcp.fixture")
             case "tools": await toolsCycle(model: model, app: defaults.string(forKey: "pokiProbeApp") ?? "local.pokimcp.fixture")
+            case "workspace", "workspace-input": await workspaceRead(model: model, testInput: mode == "workspace-input")
+            case "workspace-fullscreen": await workspaceRead(model: model, testInput: true, fullScreen: true)
+            case "workspace-layout": await workspaceLayout(model: model)
+            case "workspace-drag": await workspaceDrag(model: model)
+            case "workspace-owner": await workspaceOwner(model: model)
+            case "workspace-cancel": await workspaceCancel(model: model)
+            case "workspace-adjacent": await workspaceAdjacent(model: model)
             case "gym": await gymScorecard(model: model)
-            case "chat": await chatCycle(model: model)
+            case "chat", "workspace-chat", "workspace-model", "fullscreen-model":
+                await chatCycle(model: model, inSplitView: mode.hasPrefix("workspace-"), configuredModel: mode.hasSuffix("-model"))
             case "web": await WebDemo.run()
             case "bench": await benchmark(model: model, rounds: defaults.integer(forKey: "pokiBenchRounds") > 0 ? defaults.integer(forKey: "pokiBenchRounds") : 5)
             default: await prepareOnly()
@@ -195,6 +203,197 @@ final class InProcessProbe: ObservableObject {
         note("after Home the front app is \(front["bundleId"] as? String ?? "?")", ["step": "home_seen", "bundle": front["bundleId"] as? String ?? "", "look_mentions_home": home.lowercased().contains("springboard") || home.contains("Home")])
     }
 
+    /// On a Duo, put an empty test note and Settings › General side by side after preparing.
+    private func workspaceRead(model: AppModel, testInput: Bool, fullScreen: Bool = false) async {
+        guard begin("Duo workspace") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}") // Open PokiCore's session before backgrounding.
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo workspace probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        func call(_ name: String, _ arguments: String, _ label: String) async -> PokiCore.ToolAnswer {
+            let start = ProcessInfo.processInfo.systemUptime
+            let output = await model.phoneToolWithPicture(name, arguments: arguments)
+            let header = output.text.split(separator: "\n").first.map(String.init) ?? ""
+            let status = output.text.split(separator: "\n").first { $0.hasPrefix("error:") || $0.hasPrefix("did:") } ?? ""
+            note("workspace \(label): \(header) \(status)", ["step": name, "label": label, "error": output.isError,
+                 "picture": output.jpeg != nil, "text": header, "seconds": ProcessInfo.processInfo.systemUptime - start])
+            return output
+        }
+        let first = await call("look", fullScreen ? "{}" : "{\"pane\":\"left\"}", "first read")
+        guard !first.isError else { return }
+        let second: PokiCore.ToolAnswer
+        if fullScreen {
+            second = await call("do", "{\"actions\":[{\"launch\":\"com.apple.Preferences\"}],\"full\":true}", "open Settings")
+        } else {
+            second = await call("look", "{\"pane\":\"right\"}", "second read")
+        }
+        guard !second.isError else { return }
+        let settingsOnLeft = !fullScreen && first.text.hasPrefix("app: 设置")
+        let settings = settingsOnLeft && testInput ? await call("look", "{\"pane\":\"left\"}", "select Settings") : second
+        if testInput, settings.text.hasPrefix("app: 设置"),
+           let row = settings.text.split(separator: "\n").first(where: { $0.contains("\"隔空投送\"") }),
+           let ref = Int(row.drop(while: { !$0.isNumber }).prefix(while: \.isNumber)) {
+            _ = await call("do", "{\"actions\":[{\"tap\":\(ref)}]}", "open AirDrop page")
+        }
+        let editor: PokiCore.ToolAnswer
+        if fullScreen {
+            editor = await call("do", "{\"actions\":[{\"launch\":\"com.apple.mobilenotes\"}]}", "open Notes")
+        } else {
+            let editorSide = settingsOnLeft ? "right" : "left"
+            editor = await call("look", "{\"pane\":\"\(editorSide)\"}", "Notes read")
+        }
+        guard testInput, !editor.isError, editor.text.hasPrefix("app: 备忘录") else { return }
+        let tap = await call("do", "{\"actions\":[{\"tap\":[180,150]}]}", "Notes editor focus")
+        guard !tap.isError else { return }
+        _ = await call("do", "{\"actions\":[{\"type\":\"Duo test\"}]}", "Notes typing")
+    }
+
+    private func workspaceLayout(model: AppModel) async {
+        guard begin("Duo layout change") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo layout probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let pane = await model.phoneTool("look", arguments: "{\"pane\":\"left\"}")
+        note("workspace layout read left: \(!pane.isError)", ["step": "read", "ok": !pane.isError])
+        guard !pane.isError, pane.text.hasPrefix("app: 备忘录") else { return }
+        let keys = await model.phoneTool("do", arguments: "{\"actions\":[{\"type\":\"Duo focus test\"}]}")
+        let sentKeys = keys.text.contains("(sent,")
+        note("workspace key input before focus: \(sentKeys ? "sent" : "refused")", ["step": "focus", "refused": !sentKeys])
+        note("workspace layout ready to collapse", ["step": "wait"])
+        try? await Task.sleep(for: .seconds(18))
+        let result = await model.phoneTool("do", arguments: "{\"actions\":[{\"tap\":[180,150]}]}")
+        let refused = result.text.contains("split_view_changed") || result.text.contains("nothing was sent") || result.text.contains("(not_sent,")
+        note("workspace stale tap: \(refused ? "refused" : "unexpected result")", ["step": "stale_tap", "refused": refused])
+    }
+
+    private func workspaceOwner(model: AppModel) async {
+        guard begin("workspace task isolation") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo owner probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        note("workspace owner ready", ["step": "workspace_ready"])
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let owner = UUID().uuidString
+        let read = await model.runTool("look", arguments: "{\"pane\":\"left\"}", localSession: owner)
+        guard !read.isError, read.jpeg != nil else { note("workspace owner could not read", ["step": "owner_read", "ok": false]); return }
+        let outside = await model.phoneToolWithPicture("look", arguments: "{\"pane\":\"right\"}")
+        let refused = outside.isError && outside.jpeg == nil && outside.text.contains("another task is using Split View")
+        note("workspace owner excludes other callers: \(refused)", ["step": "owner_exclusive", "ok": refused])
+        await model.finishSplitViewTask(localSession: owner)
+        let released = await model.phoneToolWithPicture("look", arguments: "{\"pane\":\"right\"}")
+        note("workspace owner released: \(!released.isError && released.jpeg != nil)", ["step": "owner_release", "ok": !released.isError && released.jpeg != nil])
+        model.finishTask()
+    }
+
+    /// Uses the public-photo fixture and cancels a drop into Safari while it waits for approval.
+    private func workspaceCancel(model: AppModel) async {
+        guard begin("workspace approval cancellation") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo cancel probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        note("workspace cancel ready", ["step": "workspace_ready"])
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let owner = UUID().uuidString
+        let right = await model.runTool("look", arguments: "{\"pane\":\"right\",\"full\":true}", localSession: owner)
+        let left = await model.runTool("look", arguments: "{\"pane\":\"left\",\"full\":true}", localSession: owner)
+        guard !right.isError, right.text.contains("The Blue Marble"), !left.isError,
+              left.text.contains("Duo Attachment Replay"), left.text.contains("Split View: left is com.apple.mobilenotes") else {
+            note("workspace cancel fixture not visible", ["step": "fixture_missing"])
+            await model.finishSplitViewTask(localSession: owner)
+            return
+        }
+        var requested: PendingApproval?
+        model.onProbeApproval = { requested = $0 }
+        defer { model.onProbeApproval = nil }
+        let action = "{\"actions\":[{\"drag\":{\"from\":[180,250],\"to\":[180,300],\"to_pane\":\"right\"}}]}"
+        let call = Task { await model.runTool("do", arguments: action, localSession: owner) }
+        for _ in 0..<60 where requested == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        call.cancel()
+        let result = await call.value
+        await model.finishSplitViewTask(localSession: owner)
+        let status = await model.runTool("status", arguments: "{}")
+        let pending = status.text.contains("approval waiting on the phone:")
+        note("workspace cancel asked: \(requested != nil), cancelled: \(result.isError), pending: \(pending)",
+             ["step": "workspace_cancel", "asked": requested != nil, "cancelled": result.isError, "pending": pending])
+    }
+
+    private func workspaceDrag(model: AppModel) async {
+        guard begin("workspace image drop") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo drag probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        note("workspace drag ready", ["step": "workspace_ready"])
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        func run(_ name: String, _ arguments: String, _ label: String) async -> PokiCore.ToolAnswer {
+            let result = await model.phoneToolWithPicture(name, arguments: arguments)
+            let outcome = result.text.split(separator: "\n").prefix(3)
+                .filter { $0.hasPrefix("app:") || $0.hasPrefix("did:") || $0.hasPrefix("error:") }
+                .map(String.init).joined(separator: "\n")
+            note("workspace drag \(label) \(!result.isError)", ["step": label, "ok": !result.isError, "outcome": outcome])
+            return result
+        }
+        let target = await run("look", "{\"pane\":\"left\"}", "destination")
+        guard !target.isError, target.text.hasPrefix("app: 备忘录") else { return }
+        let source = await run("look", "{\"pane\":\"right\",\"full\":true}", "source")
+        guard !source.isError, source.text.hasPrefix("app: Safari") || source.text.hasPrefix("app: Chrome") else { return }
+        let defaults = UserDefaults.standard
+        let from: JSON
+        if let imageTitle = defaults.string(forKey: "pokiProbeImage"), !imageTitle.isEmpty {
+            let matches = source.text.split(separator: "\n").compactMap { line -> Int? in
+                guard line.contains(" Image "), line.localizedCaseInsensitiveContains(imageTitle) else { return nil }
+                return Int(line.drop(while: { !$0.isNumber }).prefix(while: \.isNumber))
+            }
+            guard matches.count == 1, let image = matches.first else {
+                note("workspace image target not unique", ["step": "source_image", "matches": matches.count])
+                return
+            }
+            note("workspace image located by accessibility label", ["step": "source_image", "matches": 1])
+            from = .number(Double(image))
+        } else {
+            from = [.number(Double(x) ?? 200), .number(Double(y) ?? 250)]
+        }
+        let hold = defaults.double(forKey: "pokiProbeDragHold")
+        let arguments: JSON = ["actions": [["drag": ["from": from, "to": [170, 120], "to_pane": "left",
+                                                     "hold_ms": .number(hold > 0 ? hold : 360), "ms": 1050]]]]
+        let drop = await run("do", arguments.serialized(), "drop")
+        guard !drop.isError else { return }
+        let after = await run("look", "{\"pane\":\"left\",\"full\":true}", "verify")
+        let evidence = after.text.split(separator: "\n").first { $0.hasPrefix("Split View drop:") }
+        note("workspace drag destination read after drop", ["step": "attachment_read", "evidence": evidence.map(String.init) ?? ""])
+        model.finishTask()
+    }
+
+    private func workspaceAdjacent(model: AppModel) async {
+        guard begin("Poki beside Settings") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let read = await model.phoneToolWithPicture("look", arguments: "{}")
+        let ok = !read.isError && read.jpeg != nil && read.text.hasPrefix("app: 设置")
+        note("workspace adjacent Settings read: \(ok)", ["step": "adjacent_read", "ok": ok])
+        guard ok else { return }
+        let tap = await model.phoneTool("do", arguments: "{\"actions\":[{\"tap\":[180,582]}]}")
+        let sent = tap.text.contains("(sent,")
+        note("workspace adjacent Settings tap: \(sent)", ["step": "adjacent_tap", "ok": sent])
+    }
+
     private func frontField() async -> CGPoint? {
         await withCheckedContinuation { (c: CheckedContinuation<CGPoint?, Never>) in
             queue.async {
@@ -289,27 +488,40 @@ final class InProcessProbe: ObservableObject {
     /// this path. The chat is pointed at an OpenAI-compatible endpoint (on CI, a scripted model on the
     /// Mac), the owner sends a task, pi runs it with look and do on the phone, the session is saved; then an
     /// outside agent's `ask_poki` runs a second task as a hand-off. Into Documents/inprocess-probe.json.
-    func chatCycle(model: AppModel) async {
+    func chatCycle(model: AppModel, inSplitView: Bool = false, configuredModel: Bool = false) async {
         guard begin("chat with Poki's agent") else { return }
         defer { end() }
+        let defaults = UserDefaults.standard
+        let probeTask = defaults.string(forKey: "pokiProbeTask")
+        guard !configuredModel || (ModelKeys.hasUsableKey && probeTask?.isEmpty == false) else {
+            note("configured model unavailable, or no test task specified", ["step": "configured_model_unavailable", "hasUsableKey": ModelKeys.hasUsableKey])
+            return
+        }
         guard await prepare() else { return }
         model.inProcessReadyForProbe()
         let background = UIApplication.shared.beginBackgroundTask(withName: "Chat probe")
         defer { UIApplication.shared.endBackgroundTask(background) }
-        let defaults = UserDefaults.standard
-        ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
-        ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
-        ModelKeys.selectedProvider = .custom
-        // ask_poki is off by default (Diagnostics, Testing); this check hands a task over with it, so it
-        // turns it on as the owner would.
-        model.askPokiTool = true
+        if !configuredModel {
+            ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
+            ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
+            ModelKeys.selectedProvider = .custom
+            model.askPokiTool = true
+        }
         AskPoki.refresh()
         guard let chat = AskPoki.chat else { note("no chat", ["step": "chat_missing"]); return }
         chat.newConversation()
-        let task = defaults.string(forKey: "pokiProbeTask") ?? "Open the Poki fixture app and tell me what it shows."
+        let task = probeTask ?? "Open the Poki fixture app and tell me what it shows."
+        if inSplitView || configuredModel {
+            _ = await model.phoneTool("look", arguments: "{}")
+            note("workspace-chat: ready to restore the two test apps", ["step": "workspace_ready"])
+            try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        }
         let t0 = ProcessInfo.processInfo.systemUptime
-        chat.send(task)
-        for _ in 0..<1200 where chat.running { try? await Task.sleep(for: .milliseconds(250)) }
+        chat.send(task, inSplitView: inSplitView)
+        for _ in 0..<1200 {
+            if !chat.running { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
         let seconds = ProcessInfo.processInfo.systemUptime - t0
         let replies: [String] = chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }
         let problems: [String] = chat.entries.compactMap { if case .note(.problem(let why)) = $0.kind { why } else { nil } }
@@ -320,6 +532,7 @@ final class InProcessProbe: ObservableObject {
         try? await Task.sleep(for: .seconds(1))
         let saved = SessionStore.shared.session(chat.sessionID)
         note("chat session saved: \(saved != nil)", ["step": "chat_saved", "saved": saved != nil, "entries": saved?.entries.count ?? 0, "calls": saved?.calls.count ?? 0])
+        guard !inSplitView, !configuredModel else { return }
         // An outside agent hands a task over.
         let t1 = ProcessInfo.processInfo.systemUptime
         let handoff = await model.phoneToolWithPicture("ask_poki", arguments: "{\"task\":\"Open the Poki fixture app and tell me what it shows.\"}")

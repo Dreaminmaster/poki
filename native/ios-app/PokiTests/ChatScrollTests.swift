@@ -37,6 +37,37 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, reading, accuracy: 1, "A reply must not pull you away from what you are reading")
     }
 
+    func testResizingTheRootKeepsAnUnsentDraftInTheSameConversation() throws {
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let session = chat.sessionID
+        let container = UIViewController()
+        let root = UIHostingController(rootView: RootView().environment(app).environment(chat))
+        container.addChild(root)
+        root.view.frame = CGRect(x: 0, y: 0, width: 476, height: 669)
+        container.view.addSubview(root.view)
+        root.didMove(toParent: container)
+        let window = try show(Color.clear)
+        window.rootViewController = container
+        settle { Self.find(CapsuleTextView.self, in: window) != nil }
+        let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        let draft = "Keep this draft through rotation"
+        field.becomeFirstResponder()
+        field.insertText(draft)
+        settle { field.text == draft }
+        XCTAssertEqual(field.text, draft)
+        field.resignFirstResponder()
+
+        for size in [CGSize(width: 669, height: 951), CGSize(width: 951, height: 669), CGSize(width: 476, height: 669)] {
+            root.view.frame.size = size
+            root.view.setNeedsLayout()
+            root.view.layoutIfNeeded()
+            pump(0.45)
+            XCTAssertEqual(Self.find(CapsuleTextView.self, in: window)?.text, draft)
+            XCTAssertEqual(chat.sessionID, session)
+        }
+    }
+
     /// The owner's case, on the chat page itself with its demo conversation: a new conversation, the
     /// keyboard up, a message sent, then Poki's reply, the task card growing step by step and the
     /// approval card over the message field. The page stayed at its top, and the reply and the task

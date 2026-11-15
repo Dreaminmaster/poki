@@ -3,7 +3,7 @@
 One app for everything a user does on the phone: setup (Developer Mode, on-device pairing, UI
 Automation, the loopback, the first-session passcode), starting and stopping a session, the Live
 Activity with Approve/Deny for sensitive actions, the MCP address for each client (text, QR, copy),
-and a Debug tab (the former Poki Probe). Native SwiftUI on the iOS 26 SDK with Liquid Glass.
+and a Debug tab (the former Poki Probe). Native SwiftUI with Liquid Glass.
 
 Poki automates the phone in its own process: it opens the XCTest automation session itself
 (`Poki/Native/InProcess.m`, answered to PokiCore by `Poki/Runtime/InProcessWDA.swift`), so Poki is
@@ -20,6 +20,16 @@ only from iOS 27 (#1 on iOS 18.6.2 and #18 on iOS 26.6 could not tap). The norma
 and approval logic is unchanged. Its state, screenshot and input lanes remain connected independently
 while active; the Diagnostics path comparison records tap, type, swipe and parallel tree/screenshot timings against
 the in-process path. Changing paths takes effect on the next app launch.
+
+## iPhone Duo Split View
+
+On an unfolded Duo in landscape, ask Poki in chat to work across two apps, such as dragging an
+image from Safari into Notes. Poki checks whether the request benefits from Split View, opens the
+two apps, and works with both visible while it runs in the background.
+
+For a pair of apps that's already open, you can also use the **Send Task to Poki** action in
+Shortcuts with **Use Split View** turned on. Both ways use Poki's usual approvals and leave the two
+apps open when the task finishes.
 
 ## Layout
 
@@ -52,6 +62,10 @@ native/ios-app/scripts/make-assets.sh
 xcodegen generate --spec native/ios-app/project.yml
 open native/ios-app/Poki.xcodeproj
 ```
+
+Use Xcode 27.1 or later to build and test on iPhone Duo. The iOS 27.1 SDK lets the app extend to the
+edges of the unfolded display. In Split View, Poki sizes its chat and conversations drawer to the
+space assigned by the system. The iOS deployment target remains unchanged.
 
 `native/ios-app/scripts/app-tests.sh SIMULATOR_UDID` builds `PokiTests` and runs it inside Poki on a booted simulator (the in-process transport's clipboard and session answers).
 
@@ -232,6 +246,21 @@ is smaller than the screen (its half of the Duo, its window on the iPad) that fr
 (`PKInProcess.viewport`): the element tree's frames and the screenshot are relative to it,
 `/wda/screen` reports its size, and touches are moved back onto the screen. An app that fills the
 screen has no viewport. Not yet checked in the gym on an iPad simulator with two windows.
+
+### Two apps beside each other with Poki in the background
+
+On a Duo running the in-process automation path, open two different apps using iOS Split View, or
+restore an existing app pair. Start Poki's automation before moving it to the background. An agent
+can read one of the visible apps with `look {"pane":"left"}` or `look {"pane":"right"}`. Actions use
+the most recent pane read, including its screenshot, element numbers and keyboard focus. Read the
+other pane before targeting it. `look {"pane":"auto"}` returns to normal control, and finishing a
+task leaves both windows in place. A layout change needs a fresh pane read.
+
+Some Duo windows report local frames on both sides. In that case Poki checks visible labels against
+the full display on the device before using either crop. If the keyboard obscures the text, Poki
+can use the still-visible parts of the previously verified windows to recheck their positions.
+It refuses input when it cannot establish which app is on each side. Two windows from the same
+app are currently unsupported.
 
 ## Pairing by iOS version, and the pairing file's life
 

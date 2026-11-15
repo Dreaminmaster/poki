@@ -21,7 +21,7 @@ extension InProcessProbe {
         guard begin("compare paths, \(rounds) rounds") else { return }
         defer { end() }
         guard await prepare(), let field else { return }
-        var paths: [(String, Runner)] = [("in-process", Runner(url: URL(string: "http://127.0.0.1:8100")!, transport: InProcessWDA(screen: UIScreen.main.bounds.size)))]
+        var paths: [(String, Runner)] = [("in-process", Runner(url: URL(string: "http://127.0.0.1:8100")!, transport: InProcessWDA()))]
         if model.automationPath == .runner {
             if !model.runner.isRunning { model.wakeRunner() }
             let by = Date().addingTimeInterval(60)
@@ -81,7 +81,7 @@ extension InProcessProbe {
         try? await Task.sleep(for: .seconds(seconds))
         let url = URL(string: "http://127.0.0.1:8100")!
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let own = Runner(url: url, transport: InProcessWDA(screen: UIScreen.main.bounds.size))
+        let own = Runner(url: url, transport: InProcessWDA())
         for (name, runner) in [("inprocess", own), ("runner", Runner(url: url)), ("inprocess-after", own)] {
             let front = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in queue.async { c.resume(returning: PKInProcess.shared().frontApp()) } }
             note("before \(name): front \(front["bundleId"] as? String ?? "?"), Poki \(UIApplication.shared.applicationState == .active ? "in front" : "in the background")",

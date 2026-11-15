@@ -6,7 +6,7 @@ import XCTest
 /// nothing when the clipboard cannot be read. In-process the clipboard is Poki's own to read, and an
 /// unreadable one answered as empty would be "put back" as empty: the owner's clipboard is gone.
 final class InProcessClipboardTests: XCTestCase {
-    private let wda = InProcessWDA(screen: CGSize(width: 402, height: 874))
+    private let wda = InProcessWDA()
 
     private func readClipboard() async throws -> (status: Int, text: String?) {
         let answer = try await wda.send(method: "POST", url: URL(string: "http://in-process/wda/getPasteboard")!,

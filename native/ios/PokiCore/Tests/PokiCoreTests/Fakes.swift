@@ -11,7 +11,12 @@ final class FakeWDA: HTTPTransport, @unchecked Sendable {
     private var routes: [String: Route] = [:]
     private(set) var log: [(method: String, path: String, body: JSON?)] = []
 
-    init() {
+    let usesDynamicScreenSize: Bool
+    let supportsPaneSelection: Bool
+
+    init(dynamicSize: Bool = false, paneSelection: Bool = false) {
+        usesDynamicScreenSize = dynamicSize
+        supportsPaneSelection = paneSelection
         set("POST /session") { _ in (200, ["value": ["sessionId": "s1"]]) }
         set("GET /status") { _ in (200, ["value": ["ready": true]]) }
         set("DELETE /session") { _ in (200, ["value": .null]) }

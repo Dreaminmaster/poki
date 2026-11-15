@@ -5,6 +5,8 @@ public struct ToolResult: Sendable {
     public var text: String
     public var jpeg: Data?
     public var isError = false
+    var splitView: PokiCore.SplitViewRead?
+    var splitViewNeedsRead = false
 }
 
 /// A sent action failed: whether it may have reached the phone.
@@ -40,6 +42,52 @@ final class Computer: @unchecked Sendable {
     /// again, so a target cannot pass between two reads (the gym's row 250, scrolled past unread).
     var swipeUnread = false
     var lastForeground: Foreground?
+    private var selectedPane: (side: String, identity: String, app: String, other: String, session: String?)?
+    private let workspaceOwner = LockedBox<String?>(nil)
+    var hasLocalWorkspace: Bool { workspaceOwner.value != nil }
+    func heldByLocalTask(otherThan session: String?) -> Bool {
+        workspaceOwner.value.map { $0 != session } ?? false
+    }
+    func reserveWorkspace(session: String) -> Bool {
+        guard !heldByLocalTask(otherThan: session), selectedPane == nil, !handoffWaiting, approvals.pending == nil,
+              beginsTask() || origin?.session == session else { return false }
+        workspaceOwner.value = session
+        return true
+    }
+
+    func clearWorkspacePaneForSetup(session: String) async -> Bool {
+        guard workspaceOwner.value == session, !handoffWaiting, approvals.pending == nil else { return false }
+        guard let selectedPane else { return true }
+        guard selectedPane.session == session else { return false }
+        return await selectPane("auto", session: session, until: now() + 6, keepWorkspace: true) == nil
+    }
+    private var confirmedPaneRead = false
+    private struct WorkspaceRead {
+        let layout, app: String
+        let size: ScreenSize
+        let x, y, at: Double
+        let images: Int
+        let picture: PictureSketch?
+    }
+    private var workspaceReads: [String: WorkspaceRead] = [:]
+    private var workspaceDrop: (before: WorkspaceRead, delivery: Delivery)?
+    private var interruptedDropApp: String?
+    private struct WorkspaceDrag {
+        let fromApp, toApp, layout: String
+        let image: String?
+        let x, y: Double
+
+        func matches(_ other: Self) -> Bool {
+            guard fromApp == other.fromApp, toApp == other.toApp else { return false }
+            if let image, image == other.image { return true }
+            if image != nil && other.image != nil { return false }
+            return layout == other.layout && hypot(x - other.x, y - other.y) <= 8
+        }
+    }
+    // Keep the sent item after the destination read consumes its one-time drop evidence.
+    private var workspaceDrags: [WorkspaceDrag] = []
+    private static let repeatedDrop = "this item was already dragged to the same app in this task. Inspect the destination before continuing."
+    private var paneOffset: (x: Double, y: Double)?
     var size: ScreenSize?
     var lastPNG: Data?
     /// The latest failed step's error, worded for the app log: what the field held is named by case
@@ -95,11 +143,23 @@ final class Computer: @unchecked Sendable {
 
     // MARK: Reading and answering
 
-    func screenSize(until: Double) async throws -> ScreenSize {
-        if let size { return size }
+    func screenSize(until: Double, refreshing: Bool = false) async throws -> ScreenSize {
+        if !refreshing, let size { return size }
         let s = try await runner.screenSize(timeout: max(0.5, min(3, until - now())))
         size = s
         return s
+    }
+
+    /// Refresh after the read chooses a pane, before encoding the picture or mapping OCR to points.
+    private func updateReadSize(until: Double) async {
+        guard size == nil || runner.transport.usesDynamicScreenSize else { return }
+        let previous = size
+        size = try? await screenSize(until: until, refreshing: true)
+        if previous != size {
+            // A failed read of the new pane must not leave a picture or hit targets from the old one.
+            lastPNG = nil; lastPNGAt = nil; lastPicture = nil; lastTree = nil
+            refs = [:]; listed = []; lastAll = []; lastTreeAt = nil
+        }
     }
 
     /// The screenshot's width: one pixel per screen point, so a point read off the picture is a point
@@ -112,9 +172,23 @@ final class Computer: @unchecked Sendable {
     /// Reads the screen and answers with the facts, whatever part of the read failed. `changes` lists
     /// only what changed since the read before (a `do`); `full` lists every element, as the tree has it.
     func readAndReply(until: Double, full: Bool, changes: Bool = false, did: [String] = [], error: String? = nil, extra: [String] = []) async -> ToolResult {
-        let budget = max(0.8, min(config.readTimeout, until - now() - 0.2))
-        let reading = await runner.read(timeout: budget, extra: max(0, min(4, until - now() - budget - 3)), format: config.treeFormat, callEnds: until)
-        if size == nil { _ = try? await screenSize(until: now() + 1.5) }
+        let inWorkspace = selectedPane != nil
+        let readTimeout = inWorkspace ? max(config.readTimeout, 6) : config.readTimeout
+        let budget = max(0.8, min(readTimeout, until - now() - 0.2))
+        let reading = await runner.read(timeout: budget, extra: max(0, min(4, until - now() - budget - 3)), format: config.treeFormat,
+                                        callEnds: until, allowHostPicture: !inWorkspace, workspace: inWorkspace)
+        if let pane = selectedPane {
+            confirmedPaneRead = reading.foreground?.bundleID == pane.app && !reading.elements.isEmpty && reading.png != nil
+            if !confirmedPaneRead {
+                invalidateWorkspaceRead()
+                return ToolResult(text: (["Split View: the \(pane.side) pane could not be confirmed; call look with that pane again"] +
+                    did.map { "did: \($0)" } + (error.map { ["error: \($0)"] } ?? [])).joined(separator: "\n"),
+                    jpeg: nil, isError: true, splitViewNeedsRead: true)
+            }
+        }
+        if reading.png != nil || !reading.elements.isEmpty {
+            await updateReadSize(until: now() + 1.5)
+        }
         let screen = size ?? ScreenSize(width: 10_000, height: 10_000)
         var notes = reading.notes
         if let modal = modalOnly(reading.elements) { notes.append(modal) }
@@ -148,7 +222,7 @@ final class Computer: @unchecked Sendable {
         lastPNG = reading.png ?? lastPNG
 
         // Whether the screen changed since the read before (the one the model saw last).
-        let visible = listable(reading.elements, screen)
+        let visible = listable(reading.elements, screen, includeUnlabeledImages: selectedPane != nil)
         let tree = visible.map { "\($0.key)@\($0.frame.described)" }.joined(separator: "\n")
         let picture = reading.png.map { PictureSketch(png: $0) }
         var changedLine: String?
@@ -250,7 +324,7 @@ final class Computer: @unchecked Sendable {
             assigned = [Int?](repeating: nil, count: shown.count)
             moved = []
             used = []
-            nextRef = 1
+            if selectedPane == nil { nextRef = 1 }
         }
         for i in assigned.indices where assigned[i] == nil {
             assigned[i] = nextRef
@@ -358,13 +432,13 @@ final class Computer: @unchecked Sendable {
     func withPicture(_ text: String, timeout: Double, remember: Bool = true, isErrorWithoutPicture: Bool = true) async -> ToolResult {
         guard timeout > 0.3, let png = try? await runner.screenshot(timeout: min(3, timeout)) else {
             // The runner gives none: the host's own path to the screen, when it has one.
-            if timeout > 0.3, let fallback = runner.screenshotFallback, let png = (try? await withDeadline(6, "the host's screenshot") { await fallback() }) ?? nil, let jpeg = try? host.jpeg(fromPNG: png, width: Self.pictureWidth(size), quality: 0.6) {
+            if selectedPane == nil, timeout > 0.3, let fallback = runner.screenshotFallback, let png = (try? await withDeadline(6, "the host's screenshot") { await fallback() }) ?? nil, let jpeg = try? host.jpeg(fromPNG: png, width: Self.pictureWidth(size), quality: 0.6) {
                 return ToolResult(text: text + "\nscreenshot: the screen now, taken apart from the runner (nothing was sent)", jpeg: jpeg, isError: false)
             }
             return ToolResult(text: text + "\nscreenshot: none (the runner did not give one either)", jpeg: nil, isError: isErrorWithoutPicture)
         }
+        await updateReadSize(until: now() + 1)
         if remember { lastPNG = png }
-        let size = try? await screenSize(until: now() + 1)
         let jpeg = try? host.jpeg(fromPNG: png, width: Self.pictureWidth(size), quality: 0.6)
         return ToolResult(text: text + (jpeg == nil ? "" : "\nscreenshot: the screen now (nothing was sent)"), jpeg: jpeg, isError: jpeg == nil && isErrorWithoutPicture)
     }
@@ -410,25 +484,243 @@ final class Computer: @unchecked Sendable {
         if ended { emit(.handoffEnded(id: id, how: "done")) }
     }
 
-    func look(full: Bool, session: String? = nil) async -> ToolResult {
-        let started = now()
-        defer { lastCallTook = now() - started }
-        return await lookNow(full: full, session: session)
+    private func endWorkspaceHandoff() {
+        guard hasLocalWorkspace else { return }
+        let ended = handoff.update { current in
+            defer { current = nil }
+            return current?.done == nil ? current?.id : nil
+        }
+        if let ended { emit(.handoffEnded(id: ended, how: "taskEnded")) }
     }
 
-    func lookNow(full: Bool, session: String? = nil) async -> ToolResult {
+    func look(full: Bool, pane: String? = nil, session: String? = nil, local: Bool = false, expectedApps: Set<String>? = nil) async -> ToolResult {
+        let started = now()
+        defer { lastCallTook = now() - started }
+        return await lookNow(full: full, pane: pane, session: session, local: local, expectedApps: expectedApps)
+    }
+
+    func lookNow(full: Bool, pane: String? = nil, session: String? = nil, local: Bool = false, expectedApps: Set<String>? = nil) async -> ToolResult {
         let until = now() + config.toolDeadline
         if let blocked = await waitForRunner(until: until) { return blocked }
-        let begins = beginsTask()
+        if let selectedPane, selectedPane.session != session, (hasLocalWorkspace || !beginsTask() || pane == nil) { return workspaceInUse() }
+        if let pane {
+            if let failure = await selectPane(pane, session: session, until: until) { return failure }
+            workspaceOwner.value = local && pane != "auto" ? session : nil
+        }
+        if let expectedApps, let selectedPane, Set([selectedPane.app, selectedPane.other]) != expectedApps {
+            invalidateWorkspaceRead()
+            return ToolResult(text: "not_sent: the two visible apps do not match the planned Split View pair.",
+                              jpeg: nil, isError: true, splitViewNeedsRead: true)
+        }
+        let begins = beginsTask() || (pane != nil && origin?.session != session)
         if begins { beginRecording(); typedText = nil }
         async let locked = isLocked()
         var result = restartNote(await readAndReply(until: until, full: full))
-        if begins, let app = lastForeground { origin = (app, session, now()) } else { origin?.lastCall = now() }
+        if let selectedPane {
+            if !result.isError, let size, let paneOffset {
+                result.splitView = .init(side: selectedPane.side, app: selectedPane.app, otherApp: selectedPane.other,
+                                         layout: workspaceLayout(selectedPane.identity))
+                let layout = workspaceLayout(selectedPane.identity)
+                let images = visibleWorkspaceImages(in: size)
+                workspaceReads[selectedPane.side] = WorkspaceRead(layout: layout, app: selectedPane.app, size: size,
+                                                                 x: paneOffset.x, y: paneOffset.y, at: now(), images: images, picture: lastPicture)
+                if let drop = workspaceDrop, drop.before.app == selectedPane.app {
+                    if interruptedDropApp == drop.before.app || drop.before.layout != layout {
+                        interruptedDropApp = drop.before.app
+                    } else {
+                        var evidence = "Split View drop: gesture \(drop.delivery == .sent ? "sent" : "delivery unknown"); visible image elements in the destination before: \(drop.before.images), now: \(images)."
+                        if let before = drop.before.picture, let after = lastPicture, let change = after.change(from: before) {
+                            if change.share > 0.01 {
+                                let bounds = Rect(x: change.x * size.width, y: change.y * size.height,
+                                                  width: change.width * size.width, height: change.height * size.height)
+                                evidence += " The destination screenshot changed within \(bounds.described)."
+                            } else {
+                                evidence += " The destination screenshot is visually unchanged."
+                            }
+                        }
+                        result.text += "\n" + evidence + " Check the destination screenshot for the intended item. A photo may be visible without an accessibility image element."
+                    }
+                    workspaceDrop = nil
+                }
+                if interruptedDropApp == selectedPane.app {
+                    result.text += "\nSplit View drop: the previous drag may already have landed. Inspect the destination for the intended item now. Do not repeat the drag; if you cannot tell whether it landed, report the uncertain outcome."
+                }
+            } else {
+                workspaceReads.removeValue(forKey: selectedPane.side)
+            }
+            result.text += "\nSplit View: \(selectedPane.side) is \(selectedPane.app); the other pane is \(selectedPane.other). Use look with pane left or right before acting on the other app."
+        }
+        if begins, let app = lastForeground { origin = (app, session, now()) } else if origin?.session == session { origin?.lastCall = now() }
         if begins, let line = routinesLine() { result.text += "\n" + line }
         guard await locked else { return result }
         var lines = result.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         lines.insert("screen: locked (the owner has to unlock the phone before anything can be done)", at: min(1, lines.count))
-        return ToolResult(text: lines.joined(separator: "\n"), jpeg: result.jpeg, isError: result.isError)
+        result.text = lines.joined(separator: "\n")
+        result.splitView = nil
+        return result
+    }
+
+    private func workspaceInUse() -> ToolResult {
+        ToolResult(text: "another task is using Split View; wait for it to finish", jpeg: nil, isError: true)
+    }
+
+    private func selectPane(_ side: String, session: String?, until: Double, keepWorkspace: Bool = false) async -> ToolResult? {
+        guard ["left", "right", "auto"].contains(side) else {
+            return ToolResult(text: "pane must be left, right, or auto", jpeg: nil, isError: true)
+        }
+        guard runner.transport.supportsPaneSelection else {
+            return side == "auto" ? nil : ToolResult(text: "Split View targeting is unavailable on this automation path", jpeg: nil, isError: true)
+        }
+        guard !handoffWaiting || side == "auto" else {
+            return ToolResult(text: "the owner has control; wait for them to finish before selecting a pane", jpeg: nil, isError: true)
+        }
+        do {
+            let reply = try await runner.call("POST", "/poki/pane", ["side": .string(side)], timeout: min(6, max(0.5, until - now())))
+            let oldIdentity = selectedPane?.identity
+            let ownerChanged = selectedPane.map { $0.session != session } ?? false
+            let oldWorkspace = workspaceOwner.value
+            if side == "auto" {
+                selectedPane = nil
+                if !keepWorkspace { workspaceOwner.value = nil }
+                paneOffset = nil
+                workspaceReads.removeAll()
+                workspaceDrop = nil
+                interruptedDropApp = nil
+                workspaceDrags.removeAll()
+            } else {
+                guard let identity = reply["identity"]?.string, !identity.isEmpty,
+                      let app = reply["bundleId"]?.string, !app.isEmpty,
+                      let other = reply["otherBundleId"]?.string, !other.isEmpty else {
+                    invalidateWorkspaceRead()
+                    return ToolResult(text: "could not confirm the two Split View apps", jpeg: nil, isError: true,
+                                      splitViewNeedsRead: true)
+                }
+                if ownerChanged || oldIdentity.map({ workspaceLayout($0) != workspaceLayout(identity) }) == true { workspaceReads.removeAll() }
+                if ownerChanged {
+                    workspaceDrop = nil
+                    interruptedDropApp = nil
+                    workspaceDrags.removeAll()
+                }
+                selectedPane = (side, identity, app, other, session)
+                paneOffset = reply["x"]?.double.flatMap { x in reply["y"]?.double.map { (x, $0) } }
+            }
+            if oldIdentity != selectedPane?.identity || ownerChanged {
+                approvals.discardWorkspaceDecisions(session: oldWorkspace)
+                if let pending = approvals.pending { approvals.withdraw(id: pending.id) }
+                clearPaneRead()
+            }
+            return nil
+        } catch {
+            invalidateWorkspaceRead()
+            return ToolResult(text: "could not select the \(side) pane: \(error)", jpeg: nil, isError: true,
+                              splitViewNeedsRead: side != "auto")
+        }
+    }
+
+    private func workspaceLayout(_ identity: String) -> String {
+        String(identity.split(separator: "/", maxSplits: 1).last ?? "")
+    }
+
+    /// Image elements may be unlabeled. Count distinct visible bounds so nested duplicate views do
+    /// not turn one attachment into multiple images, and tiny icons are excluded.
+    private func visibleWorkspaceImages(in size: ScreenSize) -> Int {
+        let pane = Rect(x: 0, y: 0, width: size.width, height: size.height)
+        var frames = Set<String>()
+        for image in lastAll where image.type == "Image" && !image.fromPicture {
+            let frame = image.frame.intersection(pane)
+            if frame.width >= 44, frame.height >= 44 { frames.insert(frame.described) }
+        }
+        return frames.count
+    }
+
+    private func workspaceDrag(from: (x: Double, y: Double)) -> WorkspaceDrag? {
+        guard let pane = selectedPane else { return nil }
+        let images = lastAll.filter { element in
+            element.type == "Image" && !element.fromPicture && !element.text.isEmpty &&
+                element.frame.x <= from.x && from.x <= element.frame.x + element.frame.width &&
+                element.frame.y <= from.y && from.y <= element.frame.y + element.frame.height
+        }
+        // Identical labels on multiple visible images are not a unique item.
+        let image = images.count == 1
+            && lastAll.filter({ $0.type == "Image" && !$0.fromPicture && $0.text == images[0].text }).count == 1
+            ? images[0].text : nil
+        return WorkspaceDrag(fromApp: pane.app, toApp: pane.other, layout: workspaceLayout(pane.identity),
+                             image: image, x: from.x, y: from.y)
+    }
+
+    func crossPaneDrag(_ spec: JSON, from: (x: Double, y: Double), until: Double) async throws {
+        let side = spec["to_pane"]?.string ?? ""
+        if let other = selectedPane?.other, interruptedDropApp == other || workspaceDrop?.before.app == other {
+            throw ActionFailure(message: "a previous drag may already have landed in this app. Read the destination before issuing another drag; interrupted drags are not replayed in this task", delivery: .notSent)
+        }
+        guard let pane = selectedPane, confirmedPaneRead, side != pane.side,
+              let source = workspaceReads[pane.side], let target = workspaceReads[side],
+              source.layout == workspaceLayout(pane.identity), target.layout == source.layout,
+              target.app == pane.other, now() - source.at < 60, now() - target.at < 60,
+              let to = spec["to"]?.array?.compactMap(\.double), to.count == 2,
+              (0..<target.size.width).contains(to[0]), (0..<target.size.height).contains(to[1]) else {
+            throw ActionFailure(message: "read both panes in this task, then select the source again and use current [x, y] points for the drop", delivery: .notSent)
+        }
+        let drag = workspaceDrag(from: from)
+        if let drag, workspaceDrags.contains(where: { $0.matches(drag) }) {
+            throw ActionFailure(message: Self.repeatedDrop, delivery: .notSent)
+        }
+        let end = (to[0] + target.x - source.x, to[1] + target.y - source.y)
+        let travel = min(2, max(0.25, (spec["ms"]?.double ?? 850) / 1000))
+        let hold = min(2, max(0.15, (spec["hold_ms"]?.double ?? 360) / 1000))
+        let rest = 0.35
+        let finger = humanize.drag(from: from, to: end, seconds: travel, hold: hold, rest: rest)
+        workspaceReads.removeValue(forKey: side)
+        do {
+            _ = try await runner.call("POST", "/poki/workspace-drag", Humanize.actions([finger]),
+                                      timeout: min(until - now(), travel + hold + rest + 4), countsAsMiss: false)
+            workspaceDrop = (target, .sent)
+            if let drag { workspaceDrags.append(drag) }
+        } catch let error as RunnerError where error.delivery == .unknown {
+            workspaceDrop = (target, .unknown)
+            interruptedDropApp = target.app
+            swipeUnread = true
+            throw error
+        } catch is CancellationError {
+            // The call can be cancelled while the driver still holds the finger down.
+            workspaceDrop = (target, .unknown)
+            interruptedDropApp = target.app
+            swipeUnread = true
+            throw CancellationError()
+        }
+        swipeUnread = true
+    }
+
+    private func clearPaneRead() {
+        confirmedPaneRead = false
+        lastPNG = nil; lastPNGAt = nil; lastPicture = nil; lastTree = nil; size = nil
+        refs = [:]; listed = []; lastAll = []; lastTreeAt = nil; lastForeground = nil
+        typedInto = nil; typedText = nil; swipeUnread = false
+    }
+
+    private func invalidateWorkspaceRead() {
+        if let drop = workspaceDrop { interruptedDropApp = drop.before.app }
+        workspaceReads.removeAll()
+        approvals.discardWorkspaceDecisions(session: workspaceOwner.value)
+        clearPaneRead()
+    }
+
+    private func approvalFingerprint(_ actions: [JSON]) -> String {
+        let steps = JSON.array(actions).serialized()
+        return selectedPane.map { "\($0.identity)\n\(steps)" } ?? steps
+    }
+
+    /// Drop references on an owner stop without a runner request or a visible app switch.
+    func forgetTask() {
+        approvals.discardWorkspaceDecisions(session: workspaceOwner.value)
+        endWorkspaceHandoff()
+        if selectedPane == nil { workspaceOwner.value = nil }
+        origin = nil
+        workspaceReads.removeAll()
+        workspaceDrop = nil
+        interruptedDropApp = nil
+        workspaceDrags.removeAll()
+        if selectedPane != nil { clearPaneRead() }
     }
 
     /// The answer with the reason for a restart this side made, reported once: the model learns why
@@ -514,6 +806,7 @@ final class Computer: @unchecked Sendable {
         var approvalWaited = 0.0
         var until = started + config.toolDeadline
         if let blocked = await waitForRunner(until: until) { return blocked }
+        if let selectedPane, selectedPane.session != session { return workspaceInUse() }
         // The app the owner is in before anything is sent: the read before may be another task's.
         if beginsTask() {
             beginRecording()
@@ -535,6 +828,16 @@ final class Computer: @unchecked Sendable {
         // While a step is handed to the owner, nothing is sent (they may be typing a password):
         // the model sees the screen, waits, or takes the step back.
         let harmless = actions.allSatisfy { $0["wait"] != nil || $0["wait_until"] != nil || $0["handoff"] != nil }
+        if selectedPane != nil, !harmless, !confirmedPaneRead {
+            return ToolResult(text: "Split View: look at the selected pane before sending input; nothing was sent",
+                              jpeg: nil, isError: true, splitViewNeedsRead: true)
+        }
+        if let action = actions.first, let drag = action["drag"], drag["to_pane"] != nil,
+           let from = try? point(drag["from"]), let attempted = workspaceDrag(from: from),
+           workspaceDrags.contains(where: { $0.matches(attempted) }) {
+            return ToolResult(text: "not_sent: \(Self.repeatedDrop)",
+                              jpeg: nil, isError: true)
+        }
         if !harmless, handoffWaiting, let h = handoff.value {
             return await withPicture("not_sent: a step is handed to the owner (\(h.kind): \"\(h.text.prefix(80))\"), so no input is sent until they tap Done on the phone or you send {handoff: false}. Keep polling with look, or {wait_until: {handoff_done: true, ms: 10000}}.", timeout: until - now() - 0.5, isErrorWithoutPicture: false)
         }
@@ -590,14 +893,15 @@ final class Computer: @unchecked Sendable {
         var approvedNote: String?
         let steps = sensitiveSteps(actions)
         let sensitive = firstSensitive(actions)
+        let workspaceSession = workspaceOwner.value
         // Any other actions withdraw a pending request: nothing the automation does can approve it.
-        if let pending = approvals.pending, pending.fingerprint != sensitive.map({ JSON.array(Array(actions[$0.at...])).serialized() }) {
+        if let pending = approvals.pending, pending.fingerprint != sensitive.map({ approvalFingerprint(Array(actions[$0.at...])) }) {
             approvals.withdraw(id: pending.id)
         }
         if let (at, reason) = sensitive {
             let tail = Array(actions[at...])
-            let fingerprint = JSON.array(tail).serialized()
-            if approvals.consumeGrant(fingerprint: fingerprint) != nil {
+            let fingerprint = approvalFingerprint(tail)
+            if approvals.consumeGrant(fingerprint: fingerprint, workspaceSession: workspaceSession) != nil {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
@@ -606,8 +910,8 @@ final class Computer: @unchecked Sendable {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
                 }
-                let approval = approvals.pending.flatMap { $0.fingerprint == fingerprint ? $0 : nil }
-                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, fingerprint: fingerprint)
+                let approval = approvals.pending.flatMap { $0.fingerprint == fingerprint && $0.workspaceSession == workspaceSession ? $0 : nil }
+                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, fingerprint: fingerprint, workspaceSession: workspaceSession)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))
@@ -618,6 +922,7 @@ final class Computer: @unchecked Sendable {
                 // The caller gave up while the owner was being waited for (the relay sent `cancel`): the
                 // model will send these actions again, so nothing is sent for this call, whatever the owner does.
                 if Task.isCancelled {
+                    approvals.discardWorkspaceDecisions(session: workspaceSession)
                     return ToolResult(text: "cancelled: the caller stopped waiting before the owner answered; nothing was sent from action \(at + 1).", jpeg: nil, isError: true)
                 }
                 // The owner's approval can open Poki: the app comes back before anything is sent into Poki.
@@ -632,7 +937,7 @@ final class Computer: @unchecked Sendable {
                     // the model would send them again. The approval stays; the same actions sent again run at once.
                     return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner approved on the phone, but too late for this call to send the actions and read the screen before the relay gives up on it.\(sentFirst) The approval is kept: \(again) and they run at once (within \(Int(approvals.lifetime / 60)) minutes).")
                 case .approved?:
-                    guard approvals.consumeGrant(fingerprint: fingerprint) != nil else {
+                    guard approvals.consumeGrant(fingerprint: fingerprint, workspaceSession: workspaceSession) != nil else {
                         return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The approval went to another call with the same actions, so nothing was sent from this one.\(sentFirst) To run them, \(again) and ask again.")
                     }
                     approvedNote = "approval: approved on the phone after \(Int(waited.rounded())) s (\(reason))"
@@ -719,6 +1024,10 @@ final class Computer: @unchecked Sendable {
             result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["\(app) answered no element tree (no accessibility server in its process: kAXErrorServerNotFound); \(how), so its earlier page is gone"])
         }
         if let line = sendCheck(toRun, error: error, textsBefore: textsBefore) { result.text += "\n" + line }
+        if selectedPane != nil, error?.contains("split_view_changed") == true {
+            invalidateWorkspaceRead()
+            result.splitViewNeedsRead = true
+        }
         // A call that took far longer than its parts says where the time went (gym: a wait_until
         // whose parts said 5 s answered after 29.8 s).
         let total = now() - callStarted
@@ -793,9 +1102,36 @@ final class Computer: @unchecked Sendable {
     /// A call with no task open, or after `taskGap` without one, begins a task.
     func beginsTask() -> Bool { origin.map { now() - $0.lastCall > config.taskGap } ?? true }
 
+    func ownsTask(session: String) -> Bool {
+        if let owner = workspaceOwner.value { return owner == session }
+        if let selectedPane { return selectedPane.session == session }
+        return origin?.session == session
+    }
+
     /// Ends the task: the app it began in comes to the front again (the home screen by the Home
     /// button), and nothing is sent when it is in front already. nil when no task was open.
     func returnToOrigin() async -> String? {
+        if let selectedPane {
+            endWorkspaceHandoff()
+            let exit = await selectPane("auto", session: selectedPane.session, until: now() + 3)
+            origin = nil
+            if exit != nil {
+                approvals.discardWorkspaceDecisions(session: workspaceOwner.value)
+                self.selectedPane = nil
+                workspaceOwner.value = nil
+                paneOffset = nil
+                workspaceReads.removeAll()
+                workspaceDrop = nil
+                interruptedDropApp = nil
+                workspaceDrags.removeAll()
+                clearPaneRead()
+            }
+            return exit.map { "finish: Split View stays open; \($0.text)" } ?? "finish: both apps stay open in Split View"
+        }
+        if hasLocalWorkspace {
+            forgetTask()
+            return "finish: the phone stays in its current layout"
+        }
         guard let task = origin else { return nil }
         origin = nil
         guard let bundle = task.app.bundleID else { return nil }
@@ -848,7 +1184,7 @@ final class Computer: @unchecked Sendable {
     /// When Poki itself is in front although the model was working in another app, that app is
     /// activated again, and the line says so. nil when nothing had to be done.
     func bringBack(from before: Foreground?, why: String, check: Bool) async -> String? {
-        guard let app = before?.bundleID, !config.isPoki(before) else { return nil }
+        guard selectedPane == nil, let app = before?.bundleID, !config.isPoki(before) else { return nil }
         if check {
             guard let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), config.isPoki(Foreground(bundleID: front["bundleId"]?.string, name: nil)) else { return nil }
         }
@@ -921,7 +1257,8 @@ final class Computer: @unchecked Sendable {
                 // the field holds decides (see recoverType). Every other action that may have been
                 // delivered is never sent again by us.
                 var recoveryNote = "", recoveryLog = ""
-                if let text = action["type"]?.text, action["via"]?.string != "paste", !(failure is ActionFailure), failure is RunnerError || failure is DeadlineExceeded {
+                if let text = action["type"]?.text, action["via"]?.string != "paste", !why.contains("split_view_changed"),
+                   !(failure is ActionFailure), failure is RunnerError || failure is DeadlineExceeded {
                     let recovered = await recoverType(action, text: text, why: why, until: until - config.readTimeout - 0.5)
                     if let done = recovered.done {
                         lastKind = "type"
@@ -1180,6 +1517,7 @@ final class Computer: @unchecked Sendable {
         // The field is tapped before the text goes.
         case .type: return [at(action["ref"])].compactMap { $0 }
         case .drag:
+            if spec?["to_pane"] != nil { return [at(spec?["from"])].compactMap { $0 } }
             if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
             return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
         case .back:
@@ -1204,6 +1542,8 @@ final class Computer: @unchecked Sendable {
         let unread = !scan.read || (scan.moved && messaging)
         let app = scan.front?.describe ?? "unknown"
         let spec = action[kind.rawValue] ?? .null
+        if kind == .drag, spec["to_pane"] != nil, let destination = selectedPane?.other,
+           destination != "com.apple.mobilenotes" { return "dropping content into \(destination)" }
         if kind == .tap { scan.typingTarget = unread ? nil : target(spec, in: scan.elements) }
         for press in presses(kind, action, scan, unread: unread) {
             if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen) { return r }

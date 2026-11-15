@@ -11,6 +11,7 @@ import SwiftUI
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
+    var sharedDraft: Binding<String>? = nil
     /// Opens Poki's card: under Poki's picture over the greeting on the home page (the bottom of the
     /// picture, in global points), under the top bar in the chat (nil).
     var openDetails: (_ under: CGFloat?) -> Void
@@ -40,10 +41,10 @@ struct ChatView: View {
         pokes += 1
         openDetails(isGreeting ? homeBottom : nil)
     }
-    /// `-pokiDraft <text>` starts with a message already written, for recordings.
-    @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
     /// The message field has the keyboard.
     @State private var writing = false
+    @State private var standaloneDraft = ""
+    private var draft: Binding<String> { sharedDraft ?? $standaloneDraft }
     /// Taps on New Conversation on the home page, for the message field (`ComposerInputView.restarts`).
     @State private var restarts = 0
     /// The page's height, for how far your first words rise.
@@ -120,7 +121,7 @@ struct ChatView: View {
             }
             // The home page stays in the tree while the conversation is in front, neither seen nor
             // touched, so a new conversation brings it back on the same animation.
-            HomePage(home: home, writing: writing, rise: flightRise, pick: { draft = $0; writing = true }) {
+            HomePage(home: home, writing: writing, rise: flightRise, pick: { draft.wrappedValue = $0; writing = true }) {
                 if home, let update { UpdatePill(version: update, open: openUpdates) }
                 if home, let hint = homeHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel,
@@ -142,7 +143,11 @@ struct ChatView: View {
         .bottomBar {
             if !bare { VStack(spacing: 8) {
                 asks
-                ComposerInputView(input: $draft, focused: $writing, running: busy, progress: progress, restarts: restarts,
+                if chat.waitingForSplitView {
+                    Label(ActivityWords.local("Waiting for Split View"), systemImage: "rectangle.split.2x1")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                ComposerInputView(input: draft, focused: $writing, running: busy, progress: progress, restarts: restarts,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey)
             }
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
@@ -1158,7 +1163,7 @@ struct ModeLabels: View {
 // iMessageClone/MessageList/View/Composer/ComposerInputView.swift, by Stefan Blos; no licence file in
 // the repository), with the plus button in front from exyte/Chat (commit f382a14,
 // Sources/ExyteChat/Views/InputView/InputView.swift, Copyright (c) 2019 exyte, MIT License). Now one
-// row on one sheet of glass (the owner's home of 2026-11-12, boards 定稿 04 and 06): the plus menu, the
+// row on one sheet of glass: the plus menu, the
 // message, the microphone when Settings › Voice shows it, and one button that talks, sends or stops;
 // the photos and PDFs picked for the message stand over it.
 struct ComposerInputView: View {
@@ -1354,8 +1359,8 @@ struct ComposerInputView: View {
         #endif
     }
 
-    /// A swipe up on the message field brings the keyboard, a swipe down puts it away (the owner,
-    /// 2026-11-13), on the home page and in the chat. Only a mostly upright drag of some length counts,
+    /// A swipe up on the message field brings the keyboard, a swipe down puts it away on the home
+    /// page and in the chat. Only a mostly upright drag of some length counts,
     /// so a tap on plus or Send stays a tap and a sideways drag does nothing. It lives on the field
     /// alone, so the conversation above scrolls as before; a swipe down on a long message scrolled
     /// away from its first line scrolls it back instead.
@@ -1458,7 +1463,7 @@ struct ComposerInputView: View {
     /// as a ring around it.
     private var mainButton: some View {
         Button {
-            // On an empty field: Talk with Poki, at once (the owner, 2026-11-13). Dictation has its own
+            // On an empty field: Talk with Poki at once. Dictation has its own
             // button beside this one. Without a voice key `openVoice` has the field say so.
             if running { stop() } else if canSend { submit() } else { dictation.stop(model); openVoice() }
         } label: {
@@ -1516,7 +1521,7 @@ struct ComposerInputView: View {
 final class FieldDictation {
     /// The setting (Settings › Voice) that shows the microphone beside Send.
     nonisolated static let buttonKey = "pokiDictationButton"
-    /// Shown unless turned off (the owner, 2026-11-13): the field's main button starts a talk with Poki,
+    /// Shown unless turned off: the field's main button starts a talk with Poki,
     /// so the microphone is the one way to dictate.
     nonisolated static let buttonShown = true
     /// Set once the first launch of the version with this setting has decided it (see `keepButtonForUpgrade`).

@@ -27,7 +27,15 @@ public struct RunnerError: Error, CustomStringConvertible, Sendable {
 
 /// One HTTP exchange. URLSession on the phone; a fake in tests.
 public protocol HTTPTransport: Sendable {
+    /// In-process reads may change their coordinate space as the owner moves or resizes a window.
+    var usesDynamicScreenSize: Bool { get }
+    var supportsPaneSelection: Bool { get }
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data)
+}
+
+public extension HTTPTransport {
+    var usesDynamicScreenSize: Bool { false }
+    var supportsPaneSelection: Bool { false }
 }
 
 public enum TransportError: Error, Sendable {

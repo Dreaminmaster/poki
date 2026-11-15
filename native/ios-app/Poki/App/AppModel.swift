@@ -210,7 +210,8 @@ final class AppModel {
     private let launcher: RunnerLauncher
     private let pairer: DevicePairing
     private let pairingKeepAlive = KeepAlive()
-    private let activity = ActivityController()
+    private let activity: ActivityController
+    private var activitySplitViewSession: String?
 
     /// Presentation-only refresh: no session, runner, approval or conversation is restarted.
     func languageChanged() {
@@ -300,6 +301,10 @@ final class AppModel {
     /// The gym probe answers approvals itself: with no session on, `handle` keeps them off the screen.
     var onProbeApproval: ((PendingApproval) -> Void)?
 
+    var canPlanSplitView: Bool {
+        (sessionOn || probeDriven) && automationPath == .inProcess && (probeDriven || PKInProcess.canUseDuoSplitView())
+    }
+
     /// The outside agent driving the phone now: its MCP session's client, or the agent that handed
     /// a task to Poki. nil while Poki's own chat drives it.
     var currentCaller: String? {
@@ -308,14 +313,16 @@ final class AppModel {
         return ChatModel.delegatedBusy
     }
 
-    init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(), automation: InProcessAutomation = PKInProcess.shared()) {
+    init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
+         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil) {
         ActivityController.endAll()
+        self.activity = ActivityController()
         self.automation = automation
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
         if SetupVault.restorePairingIfMissing() { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
         else { SetupVault.mirrorPairingFromContainer() }
-        let core = LiveCore(host: host, transport: automationPath == .inProcess ? InProcessWDA(screen: UIScreen.main.bounds.size) : URLSessionTransport())
+        let core = LiveCore(host: host, transport: transport ?? (automationPath == .inProcess ? InProcessWDA() : URLSessionTransport()))
         self.core = core
         // Voice taps get the same rules and approval card as an agent's `do`.
         voice = VoiceModel(clearTap: { text, bundle, name in await core.clearTap(on: text, inApp: bundle, named: name, waiting: VoiceModel.approvalWait) },
@@ -1045,6 +1052,7 @@ final class AppModel {
     func stopSession() {
         sessionStartTask?.cancel()
         wantsOn = false
+        if AskPoki.app === self, let chat = AskPoki.chat, chat.isRunningInSplitView { chat.stop() }
         guard sessionOn else {
             if setup.loopback == .builtIn { tunnel.disconnect() }
             return
@@ -1106,14 +1114,18 @@ final class AppModel {
     /// Stops the runner, and with it iOS's automation banner, while the relay stays connected; the
     /// next agent request starts it again. From the Stop runner button, the Live Activity, or idle.
     func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
-        guard sessionOn, !runnerPaused, approvals.isEmpty else { return }
+        let splitChat = byOwner && AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true ? AskPoki.chat : nil
+        splitChat?.stop()
+        guard sessionOn, !runnerPaused else { return }
         // Allow on the Live Activity is followed by its layout changing under the finger: a Stop
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
-        // Allow, then "Stopped from the Live Activity" 0.7 s after the approval ended).
-        if reason == "Stopped from the Live Activity", let answered = lastApprovalAnswered, Date().timeIntervalSince(answered) < 4 {
+        // Allow, then "Stopped from the Live Activity" 0.7 s after the approval ended). A running
+        // Split View task still needs an immediate Stop, including during and just after approval.
+        if splitChat == nil, reason == "Stopped from the Live Activity", let answered = lastApprovalAnswered, Date().timeIntervalSince(answered) < 4 {
             log.add("runner", "a Stop from the Live Activity right after an approval was ignored")
             return
         }
+        guard approvals.isEmpty || splitChat != nil else { return }
         ownerPaused = byOwner
         if automationPath == .inProcess {
             // The in-process session is closed, and with it Automation Mode and iOS's banner; the
@@ -1222,22 +1234,21 @@ final class AppModel {
             beginPasscodeWait()
         }
         passcodeHint = inProcessPasscode || runner.state == "launching" && launchingSince.map { now.timeIntervalSince($0) > 10 } == true
-        // On both paths the automation (the runner, or the in-process session) ends after the idle
-        // time, so iOS's banner shows only while an agent works; the next request starts it again.
-        // Not while Poki is in front: there the owner wants it open for the next task (ESP-464).
-        guard sessionOn, !runnerPaused, !inFront, idleStopSeconds > 0, approvals.isEmpty, activityText == "Idle" else { return }
-        if now.timeIntervalSince(lastAgentActivity) >= Double(idleStopSeconds) {
-            let reason = "Stopped after \(idleStopSeconds / 60 > 0 ? "\(idleStopSeconds / 60) min" : "\(idleStopSeconds) s") without agent activity"
-            // The task is over: the phone goes back to the app it began in while the runner can still
-            // switch apps, then the runner stops unless an agent (or Poki in front) came back meanwhile.
-            Task { [weak self, core] in
-                let line = await core.finishTask()
-                guard let self else { return }
-                if let line { self.log.add("runner", line) }
-                guard self.activityText == "Idle", !self.inFront, Date().timeIntervalSince(self.lastAgentActivity) >= Double(self.idleStopSeconds) else { return }
-                self.pauseRunner(reason: reason, byOwner: false)
-            }
+        guard canStandByWhenIdle, now.timeIntervalSince(lastAgentActivity) >= Double(idleStopSeconds) else { return }
+        let activityAtIdle = lastAgentActivity
+        let reason = "Stopped after \(idleStopSeconds / 60 > 0 ? "\(idleStopSeconds / 60) min" : "\(idleStopSeconds) s") without agent activity"
+        Task { [weak self, core] in
+            guard let self, self.canStandByWhenIdle, self.lastAgentActivity == activityAtIdle else { return }
+            let line = await core.finishTask(ifNoLocalWorkspace: true)
+            if let line { self.log.add("runner", line) }
+            guard self.canStandByWhenIdle, self.lastAgentActivity == activityAtIdle else { return }
+            self.pauseRunner(reason: reason, byOwner: false)
         }
+    }
+
+    private var canStandByWhenIdle: Bool {
+        sessionOn && !runnerPaused && !inFront && idleStopSeconds > 0 && approvals.isEmpty && activityText == "Idle"
+            && !(AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true)
     }
 
     /// iOS had moved the remote pairing service off the port Poki used, and Poki found it. The page
@@ -1410,6 +1421,7 @@ final class AppModel {
             relayStatus = status
         case .toolStarted(_, let summary, _):
             lastAgentActivity = Date(); lastStepAt = Date()
+            if summary == "Look at the screen", AskPoki.chat?.waitingForSplitView == true { return }
             stepUnderWay = (summary, Date())
             activityText = summary
             log.add("agent", "started: \(summary)")
@@ -1425,6 +1437,7 @@ final class AppModel {
             }
         case .toolFinished(let summary, let delivery, let app, let thumbnail, let error, _):
             lastAgentActivity = Date(); lastStepAt = Date()
+            if summary == "Look at the screen", AskPoki.chat?.waitingForSplitView == true { return }
             stepUnderWay = nil
             lastAction = "\(summary), \(delivery)"
             activityText = "Idle"
@@ -1503,8 +1516,14 @@ final class AppModel {
             activity.update { state in
                 if state.handoff?.id == id {
                     state.handoff = nil
-                    state.phase = .working
-                    state.headline = how == "done" ? "Carrying on" : "The agent carried on by itself"
+                    if !state.runnerPaused {
+                        state.phase = .working
+                        state.headline = switch how {
+                        case "done": "Carrying on"
+                        case "taskEnded": "Finishing"
+                        default: "The agent carried on by itself"
+                        }
+                    }
                 }
             }
         }
@@ -1520,11 +1539,37 @@ final class AppModel {
         Task { [core, log] in if let line = await core.finishTask() { log.add("runner", line) } }
     }
 
+    func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, cancelled: () -> Bool = { false }) async {
+        _ = await core.settle(timeout: 30)
+        if let line = await core.finishTask(switching: pairConfirmed, localSession: localSession) { log.add("runner", line) }
+        guard activitySplitViewSession == localSession else { return }
+        activitySplitViewSession = nil
+        lastAgentActivity = Date()
+        activity.setChatOwnsCompletion(false)
+        if cancelled() { activity.endStoppedRun() }
+    }
+
+    func reserveSplitViewWorkspace(session: String) async -> Bool {
+        await core.prepareWorkspace(session: session)
+    }
+
+    func clearSplitViewPaneForSetup(session: String) async -> Bool {
+        await core.clearWorkspacePaneForSetup(session: session)
+    }
+
+    func openSplitViewLauncherItem(labels: [String], menu: Bool, session: String) async throws -> Bool {
+        lastAgentActivity = Date()
+        let request: JSON = ["labels": .array(labels.map(JSON.string)), "menu": .bool(menu)]
+        return try await core.workspaceLauncherStep(session: session, request: request).bool == true
+    }
+
     // MARK: The chat's task
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
-    func chatTaskBegan() {
+    func chatTaskBegan(splitViewSession: String? = nil) {
         lastShot = nil
+        activitySplitViewSession = splitViewSession
+        activity.setChatOwnsCompletion(splitViewSession != nil)
         // The owner sees at once that Poki took the task: the Live Activity (started here, while
         // Poki is in front) and iOS's background line say so before the model's first answer.
         if sessionOn {
@@ -1551,11 +1596,20 @@ final class AppModel {
         }
     }
 
+    func chatWaitingForSplitView(_ waiting: Bool) {
+        if waiting { lastShot = nil }
+        activity.update { state in
+            guard state.phase == .working, state.approval == nil, state.handoff == nil else { return }
+            if waiting { state.headline = "Waiting for Split View" }
+            else if state.headline == "Waiting for Split View" { state.headline = "Continuing" }
+        }
+    }
+
     /// End the task, return to Poki and finish its Live Activity.
-    func chatTaskEnded(reply: String?, session: String, acted: Bool) {
+    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false) {
         lastShot = nil
         guard acted else {
-            finishTask()
+            if !inSplitView { finishTask() }
             // A turn that never touched the phone: nothing ran, so nothing is left showing as working.
             activity.update { state in
                 state.plan = nil
@@ -1566,7 +1620,7 @@ final class AppModel {
             if !inFront, let reply, session == AskPoki.chat?.sessionID { postReply(reply) }
             return
         }
-        finishTask()
+        if !inSplitView { finishTask() }
         activity.finishNow(alert: true)
     }
 
@@ -1581,9 +1635,9 @@ final class AppModel {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "poki-reply", content: content, trigger: nil))
     }
 
-    func runTool(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
-        if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments) }
-        if probeDriven { return await core.callTool(name, arguments: arguments) }
+    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil) async -> PokiCore.ToolAnswer {
+        if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments, localSession: localSession) }
+        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps) }
         if !sessionOn { startSession() }
         if passcodeConfirmationPending {
             return PokiCore.ToolAnswer(text: "not_sent: \(AppLocalization.text(Self.passcodeConfirmationMessage)) Nothing was sent.", jpeg: nil, isError: true)
@@ -1593,7 +1647,7 @@ final class AppModel {
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)
         }
         lastAgentActivity = Date(); lastStepAt = Date()
-        return await core.callTool(name, arguments: arguments)
+        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps)
     }
 
     /// After Stop: waits until the phone has finished the action a stopped call had already sent.

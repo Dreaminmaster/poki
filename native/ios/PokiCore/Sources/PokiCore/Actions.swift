@@ -378,6 +378,10 @@ extension Computer {
             try await longPress(p, seconds: ms / 1000, within: frame(of: spec))
             return ("long_press", "long_press \(spec.serialized()) \(Int(ms)) ms")
         case .drag:
+            if spec["to_pane"] != nil {
+                try await crossPaneDrag(spec, from: point(spec["from"]), until: until)
+                return ("drag", "drag to the \(spec["to_pane"]?.string ?? "other") pane; look there to confirm what was dropped")
+            }
             let from: (x: Double, y: Double), to: (x: Double, y: Double)
             if let a = spec.array, a.count == 4, let v = Optional(a.compactMap(\.double)), v.count == 4 {
                 from = (v[0], v[1]); to = (v[2], v[3])
@@ -515,8 +519,22 @@ extension Computer {
     func sendKeys(deletes: Int, text: String, until: Double) async throws {
         let backspaces = Array(repeating: "\u{8}", count: deletes)
         let plan = humanize.enabled ? Humanize.merged(humanize.typing(text), into: Self.maxBursts) : []
+        func dispatchKeys(_ body: JSON, timeout: Double) async throws {
+            do {
+                _ = try await runner.call("POST", "/wda/keys", body, timeout: timeout)
+            } catch let error as RunnerError where hasLocalWorkspace && error.delivery == .notSent && error.message.contains("nothing lands late") {
+                // LocalRunner can still be draining a focus read after the keyboard appeared.
+                // Only its explicit not-sent response permits another dispatch.
+                try Task.checkCancellation()
+                let remaining = min(1.5, until - now() - timeout)
+                guard remaining > 0.2 else { throw error }
+                await sleep(seconds: remaining)
+                try Task.checkCancellation()
+                _ = try await runner.call("POST", "/wda/keys", body, timeout: timeout)
+            }
+        }
         func oneCall(_ keys: [String]) async throws {
-            _ = try await runner.call("POST", "/wda/keys", ["value": .array(keys.map(JSON.string))], timeout: 3 + 0.06 * Double(keys.count))
+            try await dispatchKeys(["value": .array(keys.map(JSON.string))], timeout: 3 + 0.06 * Double(keys.count))
         }
         // Bursts only with room for the plan, a guessed cost per call and the read after.
         let budget = until - now() - 0.8
@@ -525,7 +543,7 @@ extension Computer {
             return
         }
         if deletes > 0 {
-            _ = try await runner.call("POST", "/wda/keys", ["value": .array(backspaces.map(JSON.string))], timeout: 3 + 0.06 * Double(deletes))
+            try await oneCall(backspaces)
         }
         var overhead = Self.burstCallCost
         for (i, burst) in plan.enumerated() {
@@ -540,7 +558,7 @@ extension Computer {
             let keys: [JSON] = burst.text.map { .string(String($0)) }
             let body: JSON = ["value": .array(keys), "frequency": .number(Double(burst.frequency))]
             let sent = now()
-            _ = try await runner.call("POST", "/wda/keys", body, timeout: 3 + Double(burst.text.count) / Double(burst.frequency))
+            try await dispatchKeys(body, timeout: 3 + Double(burst.text.count) / Double(burst.frequency))
             let took = now() - sent - Double(burst.text.count) / Double(max(1, burst.frequency))
             overhead = i == 0 ? max(0, took) : max(overhead, took)
         }

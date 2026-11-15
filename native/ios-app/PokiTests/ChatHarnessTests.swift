@@ -1,3 +1,4 @@
+import ActivityKit
 import Foundation
 import Network
 import PokiCore
@@ -28,34 +29,221 @@ final class ChatHarnessTests: XCTestCase {
 
     /// A conversation handed over by an outside agent, on the fake endpoint. The phone's tools answer
     /// without a session (the Debug probe's call), so routines reaches the app's own memory.
-    private func chat(on server: FakeCompletions) -> ChatModel {
+    private func chat(on server: FakeCompletions, transport: HTTPTransport? = nil,
+                      automation: InProcessAutomation = PKInProcess.shared(), kind: SavedSession.Kind = .handoff) -> ChatModel {
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
         ModelKeys.customModel = "fake-model"
         ModelKeys.selectedProvider = .custom
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
         app.inProcessReadyForProbe()
         self.app = app
-        return ChatModel(app: app, kind: .handoff, requester: "Test agent")
+        return ChatModel(app: app, kind: kind, requester: kind == .handoff ? "Test agent" : nil)
     }
 
     private static func json(_ object: [String: Any]) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 
+    func testSplitViewTaskWaitsForOriginalPairAndResumesFromFreshReads() async throws {
+        let transport = RotatingWorkspace()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("look", ["pane": "left", "full": true]),
+            FakeCompletions.tool("look", ["pane": "right", "full": true]),
+            FakeCompletions.tool("do", ["actions": [["tap": [180, 200]]]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Focused the draft field."]),
+            FakeCompletions.text("Focused the field."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        defer { if chat.running { chat.stop() } }
+        chat.send("Find the draft and focus its field in the right pane", inSplitView: true)
+
+        for _ in 0..<100 where !chat.waitingForSplitView { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(chat.waitingForSplitView, chat.savedCalls.map(\.answer).joined(separator: "\n"))
+        XCTAssertEqual(server.requests.count, 2)
+        XCTAssertEqual(transport.taps, 0)
+
+        transport.change(to: .otherPair)
+        for _ in 0..<80 where !transport.rejectedPairWasSeen { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(transport.rejectedPairWasSeen)
+        XCTAssertTrue(chat.waitingForSplitView)
+        XCTAssertEqual(transport.taps, 0)
+
+        transport.change(to: .rightPaneOnly)
+        let partialDeadline = ContinuousClock.now + .seconds(5)
+        while !transport.unreadablePaneWasSeen, ContinuousClock.now < partialDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(transport.unreadablePaneWasSeen)
+        XCTAssertTrue(chat.waitingForSplitView)
+        XCTAssertEqual(server.requests.count, 2, "One readable pane is insufficient to resume")
+        XCTAssertEqual(transport.taps, 0)
+
+        transport.change(to: .restored)
+        for _ in 0..<160 where chat.running { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running)
+        XCTAssertFalse(chat.waitingForSplitView)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Focused the field.") = $0.kind { true } else { false } })
+        XCTAssertEqual(transport.taps, 1)
+        XCTAssertEqual(transport.restoredSides, ["left", "right"])
+        XCTAssertTrue(server.requests.contains { Self.json($0).contains("Split View was restored") })
+    }
+
+    func testSplitViewResumesWhenRotationReturnsThePairBetweenToolCalls() async throws {
+        let transport = RotatingWorkspace(rotateAt: .quickPaneRead)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("look", ["pane": "left"]),
+            FakeCompletions.tool("look", ["pane": "right"]),
+            FakeCompletions.text("Read both sides."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        defer { if chat.running { chat.stop() } }
+        chat.send("Read the title in Safari and compare it with Notes", inSplitView: true)
+        let deadline = ContinuousClock.now + .seconds(12)
+        while chat.running, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running)
+        XCTAssertEqual(transport.restoredSides, ["right", "left", "right"])
+        XCTAssertEqual(transport.taps, 0)
+        XCTAssertTrue(server.requests.contains { Self.json($0).contains("Split View was restored") })
+    }
+
+    func testSplitViewStopWhileWaitingDoesNotResumeWhenThePairReturns() async throws {
+        let transport = RotatingWorkspace()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("look", ["pane": "left"]),
+            FakeCompletions.tool("look", ["pane": "right"]),
+            FakeCompletions.tool("do", ["actions": [["tap": [180, 200]]]]),
+        ])
+        let existingActivities = Set(Activity<PokiActivityAttributes>.activities.map(\.id))
+        let savedSetup = SetupState.load()
+        let defaults = UserDefaults.standard
+        let savedWantsOn = defaults.object(forKey: "wantsOn")
+        let savedRelayEnabled = defaults.object(forKey: "relayEnabled")
+        let chat = chat(on: server, transport: transport, automation: FakeAutomation())
+        let app = try XCTUnwrap(self.app)
+        defer {
+            if chat.running { chat.stop() }
+            app.stopSession()
+            savedSetup.save()
+            defaults.set(savedWantsOn, forKey: "wantsOn")
+            defaults.set(savedRelayEnabled, forKey: "relayEnabled")
+        }
+        app.loopback.simulate(.working(ms: 9))
+        app.setup.loopback = .proxy
+        app.setRelayEnabled(false)
+        app.startSession()
+        XCTAssertTrue(app.sessionOn)
+        // The in-process probe supplies the test transport, so no external runner needs to wake.
+        app.inProcessReadyForProbe()
+        app.host.setPaused(false)
+        let activity = try XCTUnwrap(Activity<PokiActivityAttributes>.activities.first {
+            !existingActivities.contains($0.id) && $0.activityState == .active
+        }, "Starting a Poki session must create an active Live Activity")
+        XCTAssertEqual(activity.content.state.phase, .idle)
+        chat.send("Focus the test field in Notes after reading Safari", inSplitView: true)
+
+        let pausedBy = ContinuousClock.now + .seconds(8)
+        while !chat.waitingForSplitView, ContinuousClock.now < pausedBy { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(chat.waitingForSplitView)
+        XCTAssertEqual(server.requests.count, 2)
+
+        let workingBy = ContinuousClock.now + .seconds(5)
+        while activity.content.state.phase != .working, ContinuousClock.now < workingBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(activity.content.state.phase, .working)
+        XCTAssertEqual(activity.activityState, .active)
+        chat.stop()
+        transport.change(to: .restored)
+        let stoppedBy = ContinuousClock.now + .seconds(8)
+        while !chat.entries.contains(where: { if case .poki("Stopped.") = $0.kind { true } else { false } }),
+              ContinuousClock.now < stoppedBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(chat.entries.contains { if case .poki("Stopped.") = $0.kind { true } else { false } })
+        XCTAssertFalse(chat.running)
+        XCTAssertFalse(chat.waitingForSplitView)
+        XCTAssertEqual(server.requests.count, 2, "A cancelled read must never return to the model")
+        XCTAssertTrue(transport.restoredSides.isEmpty, "Stop must cancel the recovery polls")
+        XCTAssertEqual(transport.taps, 0)
+        while Activity<PokiActivityAttributes>.activities.contains(where: { $0.id == activity.id }),
+              ContinuousClock.now < stoppedBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertFalse(Activity<PokiActivityAttributes>.activities.contains { $0.id == activity.id },
+                       "Stop must end the Live Activity started by this session")
+    }
+
+    func testSplitViewStartupReplacesADifferentExistingPair() async throws {
+        let transport = RotatingWorkspace(rotateAt: .drop, startingLayout: .otherPair)
+        let server = try FakeCompletions(replies: [FakeCompletions.text("SPLIT 1 2"), FakeCompletions.text("Both apps are open.")])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.restore(SavedSession(id: UUID().uuidString, kind: .poki, title: "Duo test", started: Date(),
+                                  updated: Date(), live: false,
+                                  entries: [ChatEntry(.you("Prior message", delivered: true))], calls: []))
+
+        chat.send("Compare Safari and Notes in Split View.", attachments: [])
+        let deadline = ContinuousClock.now + .seconds(20)
+        while chat.running, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running)
+        XCTAssertTrue(transport.rejectedPairWasSeen)
+        XCTAssertEqual(transport.launchEvents, ["activate Notes", "clear pane", "activate Home", "open anchor menu", "choose Split View", "activate Safari", "clear pane"])
+        XCTAssertTrue(server.requests.contains { FakeCompletions.system($0).contains("two visible iPhone Split View apps") })
+        XCTAssertTrue(chat.entries.contains { if case .poki("Both apps are open.") = $0.kind { true } else { false } })
+    }
+
+    func testSplitViewChatInspectsTheDestinationAfterRotationDuringAnImageDrop() async throws {
+        let transport = RotatingWorkspace(rotateAt: .drop)
+        let drop = ["actions": [["drag": ["from": [150, 120], "to": [180, 220], "to_pane": "right"]]]]
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("look", ["pane": "right"]),
+            FakeCompletions.tool("look", ["pane": "left"]),
+            FakeCompletions.tool("do", drop),
+            FakeCompletions.tool("look", ["pane": "right"]),
+            FakeCompletions.tool("look", ["pane": "left"]),
+            FakeCompletions.tool("do", drop),
+            FakeCompletions.text("Verified one attachment."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        defer { if chat.running { chat.stop() } }
+        chat.send("Drag the test photo from Safari into Notes and check the attachment count", inSplitView: true)
+
+        let pausedBy = ContinuousClock.now + .seconds(8)
+        while !chat.waitingForSplitView, ContinuousClock.now < pausedBy { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(chat.waitingForSplitView, chat.savedCalls.map(\.answer).joined(separator: "\n"))
+        XCTAssertEqual(transport.drags, 1)
+        XCTAssertEqual(server.requests.count, 3, "The model must wait while the panes are hidden")
+
+        transport.change(to: .restored)
+        // Four pane reads, each with a screenshot, can take longer on a busy simulator.
+        let resumedBy = ContinuousClock.now + .seconds(30)
+        while chat.running, ContinuousClock.now < resumedBy { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running)
+        XCTAssertFalse(chat.waitingForSplitView)
+        XCTAssertEqual(transport.restoredSides, ["right", "left", "right", "left"])
+        XCTAssertEqual(transport.drags, 1)
+        let requests = server.requests.map(Self.json)
+        guard requests.count == 7 else { return XCTFail("Expected seven model requests, got \(requests.count)") }
+        XCTAssertTrue(requests[3].contains("Split View was restored"))
+        XCTAssertTrue(requests[3].contains("Check what actually happened"))
+        XCTAssertTrue(requests[4].contains("Attachment count: 1"))
+        XCTAssertTrue(requests[4].contains("Do not repeat the drag"))
+        XCTAssertTrue(requests[6].contains("interrupted drags are not replayed"))
+    }
+
     /// A note the agent saved during one task reaches the model with the next task of the same
     /// conversation.
     func testEachTaskTellsTheModelWhatMemoryHolds() async throws {
-        let note = "The owner's gym is Fitness First on Queen Street \(UUID().uuidString.prefix(6))"
+        let note = "The sample document identifier is \(UUID().uuidString.prefix(6))"
         notes.append(note)
         let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("routines", ["action": "remember", "text": note]), done, FakeCompletions.text("Noted."),
-            done, FakeCompletions.text("Booked."),
+            done, FakeCompletions.text("Read the identifier."),
         ])
         let chat = chat(on: server)
 
-        _ = await chat.runDelegated("Remember that my gym is Fitness First on Queen Street")
-        _ = await chat.runDelegated("Book a class at my gym")
+        _ = await chat.runDelegated("Remember the sample document's identifier")
+        _ = await chat.runDelegated("What is the sample document identifier?")
 
         let requests = server.requests
         XCTAssertEqual(requests.count, 5)
@@ -101,7 +289,7 @@ final class ChatHarnessTests: XCTestCase {
         ])
         let chat = chat(on: server)
 
-        _ = await chat.runDelegated("Book a class at my gym for tomorrow morning, the early one")
+        _ = await chat.runDelegated("What is the sample document identifier? for tomorrow morning, the early one")
         _ = await chat.runDelegated("What is the battery level?")
 
         let plans = chat.entries.filter { if case .plan = $0.kind { true } else { false } }
@@ -165,7 +353,8 @@ final class ChatHarnessTests: XCTestCase {
     func testStopEndsTheStepUnderWayAtItsNextAction() async throws {
         let waits = Array(repeating: ["wait": 1000], count: 15)
         let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["actions": waits]), FakeCompletions.text("Done.")])
-        let chat = chat(on: server)
+        // The waits run in PokiCore. Keep the surrounding screen reads independent of XCTest's screenshot authorization.
+        let chat = chat(on: server, transport: RotatingWorkspace())
         func said() -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
 
         chat.send("Wait on the phone")
@@ -181,8 +370,29 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(said().contains("Stopping…"))
     }
 
-    /// The system prompt names no tool the model does not have (the app has no unlock_device or
-    /// handle_alert).
+    func testSplitViewRefusesInputBeforeAnExplicitPaneRead() async throws {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]]),
+            FakeCompletions.tool("look", [:]),
+            FakeCompletions.text("Please restore the workspace."),
+        ])
+        let chat = chat(on: server)
+
+        chat.send("Read the left app and write in the right app", inSplitView: true)
+        let deadline = ContinuousClock.now + .seconds(12)
+        while chat.running, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+
+        XCTAssertFalse(chat.running)
+        XCTAssertEqual(chat.savedCalls.map(\.name), ["do", "look"])
+        XCTAssertTrue(chat.savedCalls.allSatisfy { !$0.ok && $0.answer.hasPrefix("not_sent:") })
+        let request = try XCTUnwrap(server.requests.first)
+        let prompt = FakeCompletions.system(request)
+        XCTAssertTrue(prompt.contains("two visible iPhone Split View apps"))
+        XCTAssertFalse(prompt.contains("web_open"))
+        let offered = (request["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
+        XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
+    }
+
     func testThePromptNamesOnlyToolsTheModelHas() throws {
         let tools = Set(Harness.tools.map(\.name))
         let regex = try NSRegularExpression(pattern: "\\b[a-z]+(?:_[a-z]+)+\\b")
@@ -274,5 +484,114 @@ final class FakeCompletions: @unchecked Sendable {
         return messages.filter { ["system", "developer"].contains($0["role"] as? String ?? "") }.map { message in
             (message["content"] as? String) ?? ((message["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined(separator: "\n") ?? "")
         }.joined(separator: "\n")
+    }
+}
+
+/// Reports the same pane metadata and call sequence as the device transport, with controlled layout changes.
+private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
+    enum Layout { case original, portrait, otherPair, rightPaneOnly, restored }
+    enum RotateAt { case paneRead, quickPaneRead, drop }
+    let usesDynamicScreenSize = true
+    let supportsPaneSelection = true
+    private let lock = NSLock()
+    private let screenshot: String
+    private let rotateAt: RotateAt
+    private var layout: Layout
+    private var side = "left"
+    private var reads: [String] = []
+    private var sawOther = false
+    private var sawUnreadable = false
+    private var inputs = 0
+    private var drops = 0
+    private var launchLog: [String] = []
+
+    @MainActor init(rotateAt: RotateAt = .paneRead, startingLayout: Layout = .original) {
+        self.rotateAt = rotateAt
+        self.layout = startingLayout
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 390, height: 600))
+        screenshot = renderer.pngData { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 390, height: 600))
+        }.base64EncodedString()
+    }
+
+    func change(to layout: Layout) { lock.withLock { self.layout = layout } }
+    var restoredSides: [String] { lock.withLock { reads } }
+    var rejectedPairWasSeen: Bool { lock.withLock { sawOther } }
+    var unreadablePaneWasSeen: Bool { lock.withLock { sawUnreadable } }
+    var taps: Int { lock.withLock { inputs } }
+    var drags: Int { lock.withLock { drops } }
+    var launchEvents: [String] { lock.withLock { launchLog } }
+
+    private var app: String { side == "left" ? "com.apple.mobilesafari" : "com.apple.mobilenotes" }
+    private var other: String { side == "left" ? "com.apple.mobilenotes" : "com.apple.mobilesafari" }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let raw = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let path = raw.isEmpty ? "/session" : raw
+        return try lock.withLock {
+            func reply(_ value: JSON = .null, status: Int = 200) -> (Int, Data) {
+                (status, (["value": value] as JSON).data())
+            }
+            switch (method, path) {
+            case ("POST", "/session"): return reply(["sessionId": "rotation-test"])
+            case ("GET", "/status"): return reply(["ready": true])
+            case ("GET", "/wda/locked"): return reply(false)
+            case ("GET", "/wda/activeAppInfo"): return reply(["bundleId": .string(app)])
+            case ("GET", "/wda/screen"): return reply(["screenSize": ["width": 390, "height": 600]])
+            case ("GET", "/screenshot"):
+                if layout == .rightPaneOnly && side == "left" {
+                    sawUnreadable = true
+                    return reply(["error": "unable to capture screen"], status: 500)
+                }
+                return reply(.string(screenshot))
+            case ("GET", "/source"):
+                let contents = side == "right"
+                    ? #"<XCUIElementTypeStaticText type="XCUIElementTypeStaticText" label="Attachment count: \#(drops)" x="80" y="80" width="210" height="44"/>"#
+                    : #"<XCUIElementTypeImage type="XCUIElementTypeImage" label="Test photo" x="90" y="60" width="120" height="140"/>"#
+                return reply(.string("""
+                    <XCUIElementTypeApplication type="XCUIElementTypeApplication" x="0" y="0" width="390" height="600">
+                    \(contents)
+                    <XCUIElementTypeTextField type="XCUIElementTypeTextField" label="Draft field" x="100" y="180" width="160" height="44"/>
+                    </XCUIElementTypeApplication>
+                    """))
+            case ("POST", "/poki/pane"):
+                let requested = body.flatMap { try? JSON.parse($0)["side"]?.string } ?? "left"
+                if requested == "auto" { launchLog.append("clear pane"); return reply() }
+                if layout == .original && requested == "right" && rotateAt != .drop {
+                    layout = rotateAt == .quickPaneRead ? .restored : .portrait
+                }
+                if layout == .portrait {
+                    return reply(["error": "invalid argument", "message": "two visible apps could not be confirmed"], status: 400)
+                }
+                side = requested
+                if layout == .otherPair { sawOther = true }
+                if layout == .restored { reads.append(requested) }
+                return reply(["identity": .string("\(side)/\(layout)"), "bundleId": .string(app),
+                              "otherBundleId": .string(layout == .otherPair ? "local.weather" : other),
+                              "x": side == "left" ? 0 : 390, "y": 0])
+            case ("POST", "/wda/tap"), ("POST", "/actions"):
+                inputs += 1
+                return reply()
+            case ("POST", "/poki/workspace-drag"):
+                drops += 1
+                layout = .portrait
+                throw TransportError.other("sent, no confirmation: split_view_changed_after_dispatch")
+            case ("POST", "/wda/apps/activate"):
+                switch body.flatMap({ try? JSON.parse($0)["bundleId"]?.string }) {
+                case "com.apple.mobilenotes": launchLog.append("activate Notes")
+                case "com.apple.springboard": launchLog.append("activate Home")
+                case "com.apple.mobilesafari": launchLog.append("activate Safari"); layout = .restored
+                default: return reply(["error": "unexpected app"], status: 400)
+                }
+                return reply()
+            case ("POST", "/poki/workspace-launcher"):
+                let menu = body.flatMap { try? JSON.parse($0)["menu"]?.bool } ?? false
+                launchLog.append(menu ? "choose Split View" : "open anchor menu")
+                return reply(true)
+            case ("POST", "/appium/settings"), ("DELETE", "/session"): return reply()
+            default: return reply(["error": "unknown command", "message": .string(path)], status: 404)
+            }
+        }
     }
 }

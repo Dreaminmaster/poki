@@ -212,6 +212,7 @@ extension PokiState {
     /// Poki's own ("Thinking"). Never the action under it ("Tap “Send”"): on its own that says nothing
     /// about the task. nil when none of these is known.
     var doing: String? {
+        if headline == "Waiting for Split View" { return String(activity: "Waiting for Split View") }
         if let words = taskWords { return words }
         if let to = plan?.to?.nonBlank { return String(activity: "Poki’s messaging \(to)") }
         return ActivityWords.statusLines.contains(headline) ? ActivityWords.local(headline) : nil
@@ -407,7 +408,7 @@ extension PokiState {
                     ? String(activity: "The runner wakes when an agent asks.")
                     : String(activity: "Runner on. Waiting for the agent."))
             }
-        // Standing by looks ready: it takes the next request by itself (the owner, 2026-11-13).
+        // Standing by looks ready: it takes the next request by itself.
         return ActivityFace(
             symbol: "checkmark",
             bear: .ready, size: .low,

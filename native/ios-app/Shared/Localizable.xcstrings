@@ -7299,6 +7299,22 @@
         }
       }
     },
+    "Open %@ and %@ together on the unfolded iPhone, then return to Poki and retry. Pair them with the divider to open them together next time." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在展开的 iPhone 上分屏打开 %1$@ 和 %2$@，然后返回 Poki 重试。点按中间的分隔条可绑定两个 App，下次可以一起打开。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在展開的 iPhone 上分割顯示 %1$@ 和 %2$@，然後返回 Poki 重試。點一下中間的分隔線即可配對兩個 App，下次可以一起開啟。"
+          }
+        }
+      }
+    },
     "Open %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8249,6 +8265,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "待處理：%@"
+          }
+        }
+      }
+    },
+    "Poki couldn't determine whether to use Split View. Try sending the task again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法判断是否需要分屏。请重新发送任务。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法判斷是否需要分割顯示。請重新傳送任務。"
           }
         }
       }

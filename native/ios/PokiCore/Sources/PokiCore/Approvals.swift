@@ -100,6 +100,7 @@ public struct Approval: Sendable, Equatable {
     public var expires: Date
     /// The actions it covers, as a fingerprint: the same actions sent again run once it is granted.
     var fingerprint: String
+    var workspaceSession: String?
 }
 
 /// Pending and granted approvals. At most one is pending; it is granted or declined only from the app
@@ -146,19 +147,21 @@ final class Approvals: @unchecked Sendable {
     }
 
     /// A granted approval for exactly these actions, used up by this call.
-    func consumeGrant(fingerprint: String) -> Approval? {
+    func consumeGrant(fingerprint: String, workspaceSession: String? = nil) -> Approval? {
         lock.lock()
         let expired = sweep()
-        let found = entries.first { $0.value.approval.fingerprint == fingerprint && $0.value.decision == .approved }
+        let found = entries.first {
+            $0.value.approval.fingerprint == fingerprint && $0.value.approval.workspaceSession == workspaceSession && $0.value.decision == .approved
+        }
         if let found { entries[found.key] = nil }
         lock.unlock()
         expired.forEach { emit(.approvalEnded(id: $0.id, approved: nil)) }
         return found?.value.approval
     }
 
-    func request(app: String, summary: String, reason: String, fingerprint: String) -> Approval {
+    func request(app: String, summary: String, reason: String, fingerprint: String, workspaceSession: String? = nil) -> Approval {
         let date = Date()
-        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint)
+        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint, workspaceSession: workspaceSession)
         lock.lock()
         // One pending at a time: a new request replaces an older one, which ends unanswered.
         let replaced = entries.values.filter { $0.decision == nil }
@@ -187,6 +190,19 @@ final class Approvals: @unchecked Sendable {
         lock.unlock()
         entry.waiters.values.forEach { $0.resume(returning: .expired) }
         emit(.approvalEnded(id: id, approved: nil))
+    }
+
+    /// A local Split View task cannot carry a pending or granted decision across panes or tasks.
+    func discardWorkspaceDecisions(session: String?) {
+        guard let session else { return }
+        lock.lock()
+        let discarded = entries.values.filter { $0.approval.workspaceSession == session }
+        for entry in discarded { entries[entry.approval.id] = nil }
+        lock.unlock()
+        for entry in discarded where entry.decision == nil {
+            entry.waiters.values.forEach { $0.resume(returning: .expired) }
+            emit(.approvalEnded(id: entry.approval.id, approved: nil))
+        }
     }
 
     func resolve(id: String, approved: Bool) {

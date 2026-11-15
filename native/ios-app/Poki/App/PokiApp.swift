@@ -57,18 +57,22 @@ struct PokiApp: App {
 }
 
 /// The chat is the app (ESP-326): it opens on Poki's conversation. The conversations slide in from the
-/// leading edge on iPhone and stand beside the chat on iPad; an outside agent's session, the voice
-/// page and a setup step push over the chat; every setting lives in Poki's profile, which opens from
-/// the bear.
+/// leading edge in narrow windows and stand beside the chat when both columns fit. An outside agent's
+/// session, the voice page and a setup step push over the chat. Poki's profile opens from the bear.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.horizontalSizeClass) private var width
+    @State private var showsSidebar = false
+    // Both navigation layouts share the composer while the window changes size.
+    @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
 
-    /// What is pushed over the chat on iPhone.
+    private static let sidebarWidth: CGFloat = 375
+    private static let minimumChatWidth: CGFloat = 375
+
+    /// What is pushed over the chat in a narrow window.
     @State private var home = NavigationPath()
-    /// The right-hand column on iPad.
+    /// The right-hand column when both columns fit.
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
@@ -127,6 +131,7 @@ struct RootView: View {
 
     private func chatPage(split: Bool) -> some View {
         ChatView(
+            sharedDraft: $draft,
             openDetails: { under in
                 cardUnder = under
                 statusOpen = true
@@ -142,7 +147,7 @@ struct RootView: View {
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat. Poki's card opens beside the picture and leaves it in sight.
-        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && width != .regular))
+        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && !showsSidebar))
     }
 
     @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
@@ -170,12 +175,12 @@ struct RootView: View {
     }
 
     @ViewBuilder private var mainNavigation: some View {
-        if width == .regular {
+        if showsSidebar {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
                 NavigationStack { sessions }
-                    .frame(width: 375)
+                    .frame(width: Self.sidebarWidth)
                 Divider().ignoresSafeArea()
                 NavigationStack {
                     destination(wide, split: true).id(wide)
@@ -201,13 +206,13 @@ struct RootView: View {
             .softTopEdge()
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
-            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
+            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: showsSidebar ? Self.sidebarWidth + 1 : 0, openModel: { openDetails([DetailsRoute.model]) })
             // Settings covers the whole screen on iPhone (ESP-469: nothing of the chat shows around it), with
             // its Close button; beside the list on iPad it stays a sheet at a page's width (ESP-376).
-            .fullScreenCover(isPresented: Binding(get: { detailsOpen && width != .regular }, set: { detailsOpen = $0 })) {
+            .fullScreenCover(isPresented: Binding(get: { detailsOpen && !showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage
             }
-            .sheet(isPresented: Binding(get: { detailsOpen && width == .regular }, set: { detailsOpen = $0 })) {
+            .sheet(isPresented: Binding(get: { detailsOpen && showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
             .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
@@ -241,6 +246,11 @@ struct RootView: View {
                 navigation
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Tint.page.ignoresSafeArea())
+        .onGeometryChange(for: Bool.self) { geometry in
+            geometry.size.width >= Self.sidebarWidth + 1 + Self.minimumChatWidth
+        } action: { showsSidebar = $0 }
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
@@ -296,7 +306,7 @@ struct RootView: View {
         if let step = model.open(link: url) {
             detailsOpen = false
             threadsOpen = false
-            if width == .regular { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
+            if showsSidebar { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
             openDetails([DetailsRoute.connection])
         } else if url.host() == "log" {
