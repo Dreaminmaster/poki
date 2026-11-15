@@ -566,6 +566,15 @@ final class InProcessPasscodeTests: XCTestCase {
         session.onPrepare = { opened.fulfill() }
 
         try await activateEntry(entry, window: window, chat: chat)
+        if entry == .send {
+            // The chat has already ended without touching the phone: like any task, it stood by
+            // again at its end, and it never opened automation.
+            await fulfillment(of: [opened], timeout: 0.2)
+            XCTAssertTrue(model.runnerPaused, "a chat that never touched the phone stands by again when it ends")
+            XCTAssertFalse(session.isOpen)
+            XCTAssertFalse(model.hasOpenInProcessSession)
+            return
+        }
         await waitFor("the UI entry resumes prerequisites") { !self.model.runnerPaused }
         guard !model.runnerPaused else {
             await fulfillment(of: [opened], timeout: 0.2)
