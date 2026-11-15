@@ -49,8 +49,12 @@ pub(crate) fn without_cryptexd(developer_mode: Option<bool>) -> Failure {
 pub fn classify(error: &IdeviceError) -> Failure {
     let failure = Failure::new(format!("mounting the developer disk image failed: {error}"));
     match error {
-        // Apple's signing server answered, but said no: this image is not for this iOS.
-        IdeviceError::UnexpectedResponse(text) if text.contains("TSS server responded") => failure.fix(DDI_REFUSED_FIX).code("ddi_refused"),
+        // Apple's signing server answered with STATUS=94: this image is not eligible for this iOS.
+        IdeviceError::UnexpectedResponse(text)
+            if idevice::tss::tss_error_status(text) == Some(idevice::tss::TSS_STATUS_NOT_ELIGIBLE) =>
+        {
+            failure.fix(DDI_REFUSED_FIX).code("ddi_refused")
+        }
         // The phone could not install what it was given: the files are bad.
         IdeviceError::Cryptexd(CryptexdError::RoutineFailed { .. } | CryptexdError::BadDdiBundle(_)) => failure.fix(DDI_BAD_FIX).code("ddi_bad"),
         IdeviceError::Http(_) => failure.fix(NETWORK_FIX).code("network"),

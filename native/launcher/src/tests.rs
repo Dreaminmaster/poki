@@ -265,7 +265,10 @@ fn ddi_signing_boundary_keeps_signing_and_phone_socket_failures_distinct() {
     }
     let value = plist::Value::String("synthetic ticket".into());
     assert_eq!(ddi_signing_response(Ok(value.clone())).unwrap(), value);
-    let refused = ddi_signing_response(Err(IdeviceError::UnexpectedResponse("TSS server responded with non-success status".into()))).unwrap_err();
+    let refused = ddi_signing_response(Err(IdeviceError::UnexpectedResponse(
+        "TSS server responded with non-success status (STATUS=94&MESSAGE=This device isn't eligible for the requested build.)".into(),
+    )))
+    .unwrap_err();
     assert_eq!(crate::ddi::classify(&refused).code, Some("ddi_refused"));
 }
 
