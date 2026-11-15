@@ -26,6 +26,10 @@
 + (void)sessionWithConnection:(id)connection completion:(void (^)(id, NSError *))completion;
 - (id)connection;
 - (void)invalidate;
++ (id)localDevice;
++ (void)setLocalDevice:(id)device;
+- (id)initLocalDeviceWithPlatform:(long long)platform;
+- (long long)platform;
 @end
 
 /// The session of Poki's own opened after a close. XCTest's accessibility client
@@ -53,6 +57,47 @@ static void SRUseAsSharedSession(Class cls, id session) {
         method_setImplementation(method, replacement);
         NSLog(@"SRNativeSession: +sharedSession now answers the owned session");
     });
+}
+
+static BOOL SRABI(id target, SEL selector, const char *result, NSArray<NSString *> *arguments);
+
+/// XCUIDevice's one local device takes +[XCTRunnerDaemonSession sharedSession] once, when it is made,
+/// and hands that same object to everything that reads the screen: the accessibility client (its
+/// remoteAccessibilityInterface), the screenshot source, the application monitor and the device
+/// events (Xcode_iOS_DDI 27B52, -[XCUIDevice initLocalDeviceWithPlatform:]). After a close those keep
+/// messaging the invalidated connection, where a request is dropped and its reply never comes, so
+/// every read of a reopened session ran into its deadline while taps and typing, sent on the new
+/// session's own proxy, went through (issue 347). Pointing +sharedSession at the new session is not
+/// enough by itself: the device was made before. So a new local device is made on the new session
+/// and installed, as XCTest's own +setLocalDevice: allows. The old one is kept: nothing asks it
+/// anything again, and its teardown is XCTest's to run only at exit.
+static NSString *SRRebindLocalDevice(void) {
+    static NSMutableArray *retired;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ retired = [NSMutableArray array]; });
+    Class cls = NSClassFromString(@"XCUIDevice");
+    SEL make = @selector(initLocalDeviceWithPlatform:), install = @selector(setLocalDevice:);
+    if (!cls || ![cls instancesRespondToSelector:make] || ![cls respondsToSelector:install] ||
+        ![cls respondsToSelector:@selector(localDevice)]) return @"unavailable";
+    NSMethodSignature *signature = [cls instanceMethodSignatureForSelector:make];
+    const char *platformType = signature.numberOfArguments == 3 ? [signature getArgumentTypeAtIndex:2] : "";
+    if (strcmp(signature.methodReturnType, "@") || !strchr("qQiI", platformType[0]) || strlen(platformType) != 1) return @"abi_mismatch";
+    @try {
+        // 2 is what +localDevice passes on iOS; a device that says otherwise is believed.
+        long long platform = 2;
+        id old = [cls localDevice];
+        if (old && SRABI(old, @selector(platform), platformType, @[])) {
+            platform = platformType[0] == 'q' || platformType[0] == 'Q' ? [old platform]
+                : ((int (*)(id, SEL))objc_msgSend)(old, @selector(platform));
+        }
+        id fresh = [[cls alloc] initLocalDeviceWithPlatform:platform];
+        if (!fresh) return @"no_device";
+        [cls setLocalDevice:fresh];
+        if (old && old != fresh) @synchronized (retired) { [retired addObject:old]; }
+        return @"rebuilt";
+    } @catch (NSException *exception) {
+        return [NSString stringWithFormat:@"exception %@: %@", exception.name, exception.reason ?: @""];
+    }
 }
 
 static BOOL SRFail(NSError **error, NSString *code) {
@@ -130,7 +175,11 @@ static BOOL SRABI(id target, SEL selector, const char *result, NSArray<NSString 
     id _observed, _token, _enabled;
     uint64_t _generation, _enabledGeneration;
     BOOL _invalidated, _reused, _handlerFired;
-    NSString *_closeDetail;
+    /// When the enable of Automation Mode under way began (uptime), 0 while none is.
+    NSTimeInterval _enablingSince;
+    NSString *_closeDetail, *_rebindDetail;
+    /// Signalled by the current session's invalidation handler: close waits on it, not on a clock.
+    dispatch_semaphore_t _gone;
     NSMutableSet<NSString *> *_loaded;
     NSLock *_frameworkLock;
     /// An open of this process's own session still under way: a prepare that gave up waiting for
@@ -149,6 +198,12 @@ static BOOL SRABI(id target, SEL selector, const char *result, NSArray<NSString 
 }
 - (uint64_t)generation {
     [_lifecycleLock lock]; uint64_t value = _generation; [_lifecycleLock unlock]; return value;
+}
+- (double)enablingSeconds {
+    [_lifecycleLock lock];
+    double value = _enablingSince > 0 ? NSProcessInfo.processInfo.systemUptime - _enablingSince : 0;
+    [_lifecycleLock unlock];
+    return value;
 }
 - (BOOL)enableWasReused {
     [_lifecycleLock lock]; BOOL value = _reused; [_lifecycleLock unlock]; return value;
@@ -170,14 +225,14 @@ static BOOL SRABI(id target, SEL selector, const char *result, NSArray<NSString 
     if (!open) return NO;
     id link = [session respondsToSelector:@selector(connection)] ? [session connection] : nil;
     BOOL invalidated = [link respondsToSelector:@selector(invalidate)];
+    [_lifecycleLock lock]; dispatch_semaphore_t gone = _gone; [_lifecycleLock unlock];
     if (invalidated) [link invalidate];
-    // testmanagerd's side of the connection going away is what ends Automation Mode: the session's
-    // invalidation handler fires when it does. Waited for briefly, and reported (closeDetail).
-    BOOL fired = NO;
-    for (int i = 0; i < 100 && !fired; i++) {
-        [_lifecycleLock lock]; fired = _handlerFired; [_lifecycleLock unlock];
-        if (!fired) usleep(10000);
-    }
+    // testmanagerd ends Automation Mode (and the banner) for this client in its own invalidation
+    // handler, as soon as the connection goes (-[XCTestSession invalidate] calls
+    // disableAutomationModeForClient:). This side's handler says the connection is gone: close
+    // returns the moment it fires. The second is a ceiling for a handler that never comes.
+    BOOL fired = invalidated && gone && dispatch_semaphore_wait(gone, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0;
+    if (!fired) { [_lifecycleLock lock]; fired = _handlerFired; [_lifecycleLock unlock]; }
     [_lifecycleLock lock];
     _closeDetail = [NSString stringWithFormat:@"link=%@ invalidate=%@ handler_fired=%@",
                     link ? NSStringFromClass([link class]) : @"none", invalidated ? @"yes" : @"no", fired ? @"yes" : @"no"];
@@ -240,6 +295,12 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
 
 - (NSString *)closeDetail {
     [_lifecycleLock lock]; NSString *value = _closeDetail; [_lifecycleLock unlock]; return value;
+}
+- (NSString *)rebindDetail {
+    [_lifecycleLock lock]; NSString *value = _rebindDetail; [_lifecycleLock unlock]; return value;
+}
+- (BOOL)deviceRebuilt {
+    return [[self rebindDetail] isEqualToString:@"rebuilt"];
 }
 - (id)prepare:(NSError **)error {
     [_prepareLock lock];
@@ -350,6 +411,11 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
         if (!opened) { if (error) *error = failure ?: [NSError errorWithDomain:@"RecoveredNative" code:1 userInfo:@{NSLocalizedDescriptionKey: @"session_reopen_failed"}]; return nil; }
         session = opened;
         SRUseAsSharedSession(cls, opened);
+        // Before anyone is handed the session: a read or a picture asked right after must already
+        // go to the new device.
+        NSString *rebind = SRRebindLocalDevice();
+        [_lifecycleLock lock]; _rebindDetail = rebind; [_lifecycleLock unlock];
+        NSLog(@"SRNativeSession: local device for the new session: %@", rebind);
     }
     if (![session respondsToSelector:@selector(supportsAutomationMode)] ||
         ![session supportsAutomationMode] ||
@@ -363,19 +429,23 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
         _observed = session; _token = nil; _enabled = nil;
         _enabledGeneration = 0; _invalidated = NO; _generation++;
         uint64_t generation = _generation;
+        dispatch_semaphore_t gone = dispatch_semaphore_create(0);
+        _gone = gone;
         [_lifecycleLock unlock];
         if (oldToken && [oldSession respondsToSelector:@selector(unregisterInvalidationHandlerWithToken:)])
             [oldSession unregisterInvalidationHandlerWithToken:oldToken];
         __weak SRNativeSession *weakSelf = self;
         id token = [session registerInvalidationHandler:^{
             SRNativeSession *owner = weakSelf;
-            if (!owner) return;
-            [owner->_lifecycleLock lock];
-            if (owner->_generation == generation) {
-                owner->_invalidated = YES; owner->_enabled = nil; owner->_enabledGeneration = 0;
-                owner->_handlerFired = YES;
+            if (owner) {
+                [owner->_lifecycleLock lock];
+                if (owner->_generation == generation) {
+                    owner->_invalidated = YES; owner->_enabled = nil; owner->_enabledGeneration = 0;
+                    owner->_handlerFired = YES;
+                }
+                [owner->_lifecycleLock unlock];
             }
-            [owner->_lifecycleLock unlock];
+            dispatch_semaphore_signal(gone);
         }];
         [_lifecycleLock lock]; _token = token;
     }
@@ -386,7 +456,12 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
     [_lifecycleLock unlock];
     if (!current) { SRFail(error, @"native_session_invalidated"); return nil; }
     if (reused) return session;
-    if (![session enableAutomationModeWithError:error]) return nil;
+    // The one call that waits on the owner: iOS shows its passcode screen from inside it. How long it
+    // has been waiting is the evidence for asking the owner; a slow session open is not.
+    [_lifecycleLock lock]; _enablingSince = NSProcessInfo.processInfo.systemUptime; [_lifecycleLock unlock];
+    BOOL enabledNow = [session enableAutomationModeWithError:error];
+    [_lifecycleLock lock]; _enablingSince = 0; [_lifecycleLock unlock];
+    if (!enabledNow) return nil;
     [_lifecycleLock lock];
     current = _observed == session && _generation == generation && !_invalidated && _token != nil;
     if (current) { _enabled = session; _enabledGeneration = generation; }

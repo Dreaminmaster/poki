@@ -7,24 +7,73 @@ import UniformTypeIdentifiers
 /// A photo or a PDF added to a message from the message field's plus menu. The model reads `images`;
 /// the strip over the message field and the sent message show `thumbnail`.
 struct ChatAttachment: Identifiable, Equatable {
-    enum Kind: Equatable { case photo, pdf(name: String) }
+    enum Kind: Equatable { case photo, pdf(name: String), text(name: String) }
     let id = UUID()
     var kind: Kind
     /// JPEG, a small square-ish picture for the field and the bubble.
     var thumbnail: Data
     /// JPEG for the model: the photo, or the PDF's first pages, one picture each.
     var images: [Data]
+    var textContent: String? = nil
+
+    var isPDF: Bool {
+        if case .pdf = kind { return true }
+        return false
+    }
+}
+
+struct ChatTextDocument: Codable, Equatable {
+    let name: String
+    let content: String
+
+    var sizeLabel: String {
+        ByteCountFormatter.string(fromByteCount: Int64(content.utf8.count), countStyle: .file)
+    }
+
+    var modelText: String {
+        let filename = name.components(separatedBy: .newlines).joined(separator: " ")
+        let longestRun = content.split(whereSeparator: { $0 != "~" }).map(\.count).max() ?? 0
+        let fence = String(repeating: "~", count: max(3, longestRun + 1))
+        return "Attached file: \(filename)\n\(fence)\n\(content)\n\(fence)"
+    }
+}
+
+struct ChatTextDocumentChip: View {
+    let document: ChatTextDocument
+
+    var body: some View {
+        DisclosureGroup {
+            Text(verbatim: document.content)
+                .font(.system(.footnote, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label {
+                VStack(alignment: .leading) {
+                    Text(verbatim: document.name).lineLimit(1)
+                    Text(verbatim: document.sizeLabel).font(.caption).foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "doc.text")
+            }
+        }
+        .padding(10)
+        .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+    }
 }
 
 /// Turns what the owner picked into an attachment. Pictures go to the model as JPEG at most 1568
 /// pixels on the longer side (larger ones are scaled down by the providers anyway); a PDF goes as
 /// pictures of its first four pages, so every model that reads screenshots reads it.
 enum AttachmentReader {
-    enum Failure: Error { case unsupported, unreadable }
+    enum Failure: Error { case unsupported, unreadable, tooLarge, invalidUTF8 }
 
     static let modelSide = 1568
     static let thumbnailSide = 240
     static let pdfPages = 4
+    static let maxTextBytes = 100_000
+    static let fileTypes: [UTType] = [.image, .pdf, .json, .plainText]
+        + ["md", "markdown"].compactMap { UTType(filenameExtension: $0) }
 
     static func photo(_ data: Data) throws -> ChatAttachment {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
@@ -38,10 +87,23 @@ enum AttachmentReader {
         return try photo(data)
     }
 
-    /// A file from Files: a picture or a PDF; anything else is not supported yet.
+    /// Reads a picture, PDF, or a bounded UTF-8 document from Files.
     static func file(_ url: URL) throws -> ChatAttachment {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if ["json", "md", "markdown", "txt"].contains(url.pathExtension.lowercased()) {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            var bytes = Data()
+            while bytes.count <= maxTextBytes,
+                  let chunk = try handle.read(upToCount: maxTextBytes + 1 - bytes.count),
+                  !chunk.isEmpty {
+                bytes.append(chunk)
+            }
+            guard bytes.count <= maxTextBytes else { throw Failure.tooLarge }
+            guard let text = String(data: bytes, encoding: .utf8) else { throw Failure.invalidUTF8 }
+            return ChatAttachment(kind: .text(name: url.lastPathComponent), thumbnail: Data(), images: [], textContent: text)
+        }
         let type = UTType(filenameExtension: url.pathExtension) ?? .data
         if type.conforms(to: .pdf) { return try pdf(url) }
         guard type.conforms(to: .image) else { throw Failure.unsupported }
@@ -103,21 +165,42 @@ enum TestAttachment {
 struct AttachmentStrip: View {
     var attachments: [ChatAttachment]
     var remove: (ChatAttachment) -> Void
+    @ScaledMetric(relativeTo: .body) private var thumbnailSide = 72.0
+    @ScaledMetric(relativeTo: .caption2) private var removeMarkSide = 18.0
+
+    private var markSide: CGFloat { min(30, removeMarkSide) }
+    private var cornerOffset: CGFloat { (44 - markSide) / 2 }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(attachments) { item in
-                    AttachmentThumb(data: item.thumbnail, side: 72, pdf: item.kind != .photo)
+                    Group {
+                        if case .text = item.kind {
+                            VStack(spacing: 4) {
+                                Image(systemName: "doc.text")
+                                Text(verbatim: item.label).font(.caption2).lineLimit(1)
+                                if let content = item.textContent {
+                                    Text(verbatim: ChatTextDocument(name: item.label, content: content).sizeLabel)
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(4)
+                            .frame(width: min(104, thumbnailSide), height: min(104, thumbnailSide))
+                            .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 16))
+                        } else {
+                            AttachmentThumb(data: item.thumbnail, side: min(104, thumbnailSide), pdf: item.isPDF)
+                        }
+                    }
                         .overlay(alignment: .topTrailing) { removeButton(item) }
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel(Text(item.label))
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, 4).padding(.top, 6).padding(.bottom, 2)
+            .padding(.horizontal, 4).padding(.top, cornerOffset).padding(.bottom, 2)
             // Room for the corner buttons, which stand out of the pictures.
-            .padding(.trailing, 8)
+            .padding(.trailing, cornerOffset)
         }
         .scrollClipDisabled()
         .accessibilityIdentifier("composer.attachments")
@@ -126,17 +209,20 @@ struct AttachmentStrip: View {
     private func removeButton(_ item: ChatAttachment) -> some View {
         Button { remove(item) } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .font(.system(size: markSide / 2, weight: .bold)).foregroundStyle(.white)
+                .frame(width: markSide, height: markSide)
                 .background(Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.85), in: .circle)
                 .overlay(Circle().strokeBorder(.white, lineWidth: 2).padding(-2))
                 // The touch is larger than the mark.
-                .frame(width: 36, height: 36).contentShape(.rect)
+                .frame(width: 44, height: 44).contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .offset(x: 11, y: -11)
+        .offset(x: cornerOffset, y: -cornerOffset)
         .accessibilityLabel(Text("Remove"))
         .accessibilityIdentifier("composer.attachment.remove")
+        .accessibilityShowsLargeContentViewer {
+            Label("Remove", systemImage: "xmark")
+        }
     }
 }
 
@@ -145,6 +231,7 @@ struct AttachmentThumb: View {
     var data: Data
     var side: CGFloat
     var pdf = false
+    @ScaledMetric(relativeTo: .caption2) private var pdfLabelSize = 9.0
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: side * 16 / 72, style: .continuous)
@@ -161,7 +248,7 @@ struct AttachmentThumb: View {
         .shadow(color: Color(red: 24 / 255, green: 56 / 255, blue: 120 / 255).opacity(0.12), radius: 6, y: 4)
         .overlay(alignment: .bottomLeading) {
             if pdf {
-                Text(verbatim: "PDF").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                Text(verbatim: "PDF").font(.system(size: min(18, pdfLabelSize), weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(Color(.systemRed), in: .capsule)
                     .padding(6)
@@ -175,7 +262,7 @@ extension ChatAttachment {
     var label: String {
         switch kind {
         case .photo: AppLocalization.text(LocalizedStringResource("Photo"))
-        case .pdf(let name): name
+        case .pdf(let name), .text(let name): name
         }
     }
 }

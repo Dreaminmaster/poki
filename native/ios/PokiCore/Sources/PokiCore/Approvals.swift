@@ -2,17 +2,17 @@ import Foundation
 
 /// What needs the owner's approval on the phone before it is sent. Words match whole words or
 /// phrases, case-insensitively, in the label, value or identifier of the element an action touches: at
-/// the start of the text, or anywhere in a short one (a button: "Confirm and pay"). A name inside a
+/// the start of the text, anywhere in a short one, or anywhere on an action button. A name inside a
 /// longer text is not an action (seen on the phone: "Contact photo for Best Buy" was taken for a payment).
 public struct SensitivityRules: Sendable, Equatable {
     public var secureFields = true
-    public var payments: [String] = ["pay", "buy", "purchase", "subscribe", "checkout", "place order", "transfer", "send money", "confirm payment", "apple pay", "支付", "付款", "购买", "订阅", "转账", "确认支付", "下单"]
-    public var deletions: [String] = ["delete", "remove", "erase", "reset", "delete all", "删除", "移除", "抹掉", "清空", "还原"]
-    public var sending: [String] = ["send", "post", "reply", "发送", "回复", "发布"]
+    public var payments: [String] = ["pay", "payment", "buy", "purchase", "subscribe", "checkout", "place order", "transfer", "send money", "confirm payment", "apple pay", "支付", "付款", "购买", "订阅", "转账", "确认支付", "下单", "購買", "訂閱", "轉賬", "轉帳", "確認支付", "下單"]
+    public var deletions: [String] = ["delete", "remove", "erase", "reset", "delete all", "删除", "移除", "抹掉", "清空", "还原", "刪除", "還原"]
+    public var sending: [String] = ["send", "post", "reply", "发送", "回复", "发布", "發送", "回覆", "發布"]
     /// Apps where every input needs approval (banking, wallets).
     public var guardedApps: [String] = ["com.apple.Passbook"]
     /// Words that place a call wherever they are tapped.
-    public var calling: [String] = ["call", "拨打", "呼叫"]
+    public var calling: [String] = ["call", "拨打", "呼叫", "撥打"]
     /// Apps where tapping anything can place a call (a contact in Favorites or Recents rings it). FaceTime is
     /// here rather than a word: Settings lists a "FaceTime" row that places no call.
     public var callingApps: [String] = ["com.apple.mobilephone", "com.apple.facetime"]
@@ -34,19 +34,28 @@ public struct SensitivityRules: Sendable, Equatable {
         return rules
     }
 
-    static func matches(_ text: String, _ words: [String]) -> String? {
+    static func matches(_ text: String, _ words: [String], elementType: String = "Other") -> String? {
         let lowered = text.lowercased()
+        // Preserve the base matcher’s whitespace-based short-label protection for every type.
+        // Long Buttons and later whole-word matches add protection to that baseline.
+        let short = lowered.split(whereSeparator: \.isWhitespace).count <= 4
+        // Explicit exception agreed for this rule: digits also bound Latin words, so buy1/1pay
+        // remain unmatched even though the original matcher treated digits as boundaries.
+        let boundary: (Character?) -> Bool = { c in c.map { !$0.isLetter && !$0.isNumber } ?? true }
         for word in words {
             let w = word.lowercased()
-            guard let range = lowered.range(of: w) else { continue }
-            // CJK words match anywhere; Latin words only on word boundaries ("Display" is not "pay").
-            if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { return word }
-            let before = range.lowerBound == lowered.startIndex ? nil : lowered[lowered.index(before: range.lowerBound)]
-            let after = range.upperBound == lowered.endIndex ? nil : lowered[range.upperBound]
-            let boundary: (Character?) -> Bool = { c in c.map { !$0.isLetter } ?? true }
-            let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
-            let short = lowered.split(whereSeparator: { $0.isWhitespace }).count <= 4
-            if boundary(before) && boundary(after) && (opens || short) { return word }
+            guard !w.isEmpty else { continue }
+            var search = lowered.startIndex..<lowered.endIndex
+            while let range = lowered.range(of: w, range: search) {
+                // CJK words match anywhere; Latin words need whole-word boundaries.
+                if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { return word }
+                let before = range.lowerBound == lowered.startIndex ? nil : lowered[lowered.index(before: range.lowerBound)]
+                let after = range.upperBound == lowered.endIndex ? nil : lowered[range.upperBound]
+                let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
+                if boundary(before) && boundary(after) && (elementType == "Button" || opens || short) { return word }
+                // An earlier substring ("buying") must not hide a later whole word ("buy").
+                search = range.upperBound..<lowered.endIndex
+            }
         }
         return nil
     }
@@ -63,7 +72,9 @@ public struct SensitivityRules: Sendable, Equatable {
             return nil
         }
         let texts = [element.text, element.identifier ?? ""]
-        func match(_ words: [String]) -> String? { texts.lazy.compactMap { Self.matches($0, words) }.first }
+        func match(_ words: [String]) -> String? {
+            texts.lazy.compactMap { Self.matches($0, words, elementType: element.type) }.first
+        }
         if let word = match(payments) { return "a payment (\"\(word)\")" }
         if let word = match(deletions) { return "deleting (\"\(word)\")" }
         if let bundle = app?.bundleID, callingApps.contains(bundle) { return "a call (in \(app?.describe ?? bundle))" }
@@ -100,6 +111,7 @@ public struct Approval: Sendable, Equatable {
     public var expires: Date
     /// The actions it covers, as a fingerprint: the same actions sent again run once it is granted.
     var fingerprint: String
+    var workspaceSession: String?
 }
 
 /// Pending and granted approvals. At most one is pending; it is granted or declined only from the app
@@ -146,19 +158,21 @@ final class Approvals: @unchecked Sendable {
     }
 
     /// A granted approval for exactly these actions, used up by this call.
-    func consumeGrant(fingerprint: String) -> Approval? {
+    func consumeGrant(fingerprint: String, workspaceSession: String? = nil) -> Approval? {
         lock.lock()
         let expired = sweep()
-        let found = entries.first { $0.value.approval.fingerprint == fingerprint && $0.value.decision == .approved }
+        let found = entries.first {
+            $0.value.approval.fingerprint == fingerprint && $0.value.approval.workspaceSession == workspaceSession && $0.value.decision == .approved
+        }
         if let found { entries[found.key] = nil }
         lock.unlock()
         expired.forEach { emit(.approvalEnded(id: $0.id, approved: nil)) }
         return found?.value.approval
     }
 
-    func request(app: String, summary: String, reason: String, fingerprint: String) -> Approval {
+    func request(app: String, summary: String, reason: String, fingerprint: String, workspaceSession: String? = nil) -> Approval {
         let date = Date()
-        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint)
+        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint, workspaceSession: workspaceSession)
         lock.lock()
         // One pending at a time: a new request replaces an older one, which ends unanswered.
         let replaced = entries.values.filter { $0.decision == nil }
@@ -187,6 +201,19 @@ final class Approvals: @unchecked Sendable {
         lock.unlock()
         entry.waiters.values.forEach { $0.resume(returning: .expired) }
         emit(.approvalEnded(id: id, approved: nil))
+    }
+
+    /// A local Split View task cannot carry a pending or granted decision across panes or tasks.
+    func discardWorkspaceDecisions(session: String?) {
+        guard let session else { return }
+        lock.lock()
+        let discarded = entries.values.filter { $0.approval.workspaceSession == session }
+        for entry in discarded { entries[entry.approval.id] = nil }
+        lock.unlock()
+        for entry in discarded where entry.decision == nil {
+            entry.waiters.values.forEach { $0.resume(returning: .expired) }
+            emit(.approvalEnded(id: entry.approval.id, approved: nil))
+        }
     }
 
     func resolve(id: String, approved: Bool) {

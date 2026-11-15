@@ -487,6 +487,23 @@
         }
       }
     },
+    "Waiting for Split View" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待恢复分屏"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待恢復分割顯示"
+          }
+        }
+      }
+    },
     "Continuing" : {
       "extractionState" : "manual",
       "localizations" : {

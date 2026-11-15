@@ -81,6 +81,38 @@
         }
       }
     },
+    "Poki is busy. Wait for the current task to finish and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在忙，请等当前任务结束后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在忙，請等目前的任務結束後再試。"
+          }
+        }
+      }
+    },
+    "Choose a model in Poki’s settings, then return to Split View and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先在 Poki 的设置里选择模型，再回到分屏重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先在 Poki 的設定裡選擇模型，再回到分割顯示重試。"
+          }
+        }
+      }
+    },
     "Poki started the task. Turn Poki on so it can act on the phone." : {
       "localizations" : {
         "zh-Hans" : {
@@ -173,6 +205,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "發任務"
+          }
+        }
+      }
+    },
+    "Turn on Poki with on-device automation, then open the two apps in Split View and run the shortcut again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先打开 Poki 并启用本机自动化，再将两个 App 摆成分屏，然后重新运行快捷指令。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先開啟 Poki 並啟用裝置上的自動化，再以分割顯示開啟兩個 App，然後重新執行捷徑。"
+          }
+        }
+      }
+    },
+    "Use Split View" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用分屏"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用分割顯示"
           }
         }
       }

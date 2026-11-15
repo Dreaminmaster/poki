@@ -57,18 +57,22 @@ struct PokiApp: App {
 }
 
 /// The chat is the app (ESP-326): it opens on Poki's conversation. The conversations slide in from the
-/// leading edge on iPhone and stand beside the chat on iPad; an outside agent's session, the voice
-/// page and a setup step push over the chat; every setting lives in Poki's profile, which opens from
-/// the bear.
+/// leading edge in narrow windows and stand beside the chat when both columns fit. An outside agent's
+/// session, the voice page and a setup step push over the chat. Poki's profile opens from the bear.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.horizontalSizeClass) private var width
+    @State private var showsSidebar = false
+    // Both navigation layouts share the composer while the window changes size.
+    @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
 
-    /// What is pushed over the chat on iPhone.
+    private static let sidebarWidth: CGFloat = 375
+    private static let minimumChatWidth: CGFloat = 375
+
+    /// What is pushed over the chat in a narrow window.
     @State private var home = NavigationPath()
-    /// The right-hand column on iPad.
+    /// The right-hand column when both columns fit.
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
@@ -81,6 +85,8 @@ struct RootView: View {
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
     @State private var welcomeLink: SetupStep?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @AppStorage(AppInterfaceSize.defaultsKey) private var interfaceSize = AppInterfaceSize.system
     @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
     @Namespace private var profile
 
@@ -127,6 +133,7 @@ struct RootView: View {
 
     private func chatPage(split: Bool) -> some View {
         ChatView(
+            sharedDraft: $draft,
             openDetails: { under in
                 cardUnder = under
                 statusOpen = true
@@ -142,7 +149,7 @@ struct RootView: View {
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat. Poki's card opens beside the picture and leaves it in sight.
-        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && width != .regular))
+        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && !showsSidebar))
     }
 
     @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
@@ -170,12 +177,12 @@ struct RootView: View {
     }
 
     @ViewBuilder private var mainNavigation: some View {
-        if width == .regular {
+        if showsSidebar {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
                 NavigationStack { sessions }
-                    .frame(width: 375)
+                    .frame(width: Self.sidebarWidth)
                 Divider().ignoresSafeArea()
                 NavigationStack {
                     destination(wide, split: true).id(wide)
@@ -201,13 +208,13 @@ struct RootView: View {
             .softTopEdge()
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
-            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: width == .regular ? 376 : 0, openModel: { openDetails([DetailsRoute.model]) })
+            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: showsSidebar ? Self.sidebarWidth + 1 : 0, openModel: { openDetails([DetailsRoute.model]) })
             // Settings covers the whole screen on iPhone (ESP-469: nothing of the chat shows around it), with
             // its Close button; beside the list on iPad it stays a sheet at a page's width (ESP-376).
-            .fullScreenCover(isPresented: Binding(get: { detailsOpen && width != .regular }, set: { detailsOpen = $0 })) {
+            .fullScreenCover(isPresented: Binding(get: { detailsOpen && !showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage
             }
-            .sheet(isPresented: Binding(get: { detailsOpen && width == .regular }, set: { detailsOpen = $0 })) {
+            .sheet(isPresented: Binding(get: { detailsOpen && showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
             .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
@@ -241,6 +248,11 @@ struct RootView: View {
                 navigation
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Tint.page.ignoresSafeArea())
+        .onGeometryChange(for: Bool.self) { geometry in
+            geometry.size.width >= Self.sidebarWidth + 1 + Self.minimumChatWidth
+        } action: { showsSidebar = $0 }
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
@@ -249,7 +261,7 @@ struct RootView: View {
             Button("Don’t Allow", role: .cancel) { model.answerConnection(false) }
             Button("Allow") { model.answerConnection(true) }
         } message: { ask in
-            Text("\(ask.client) is signing in through \(ask.connector) and returns to \(ask.callback), which isn’t on Poki’s list of known agents. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone.")
+            Text("\(ask.client) is signing in through \(ask.connector) with callback destination \(ask.callback). Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone.")
         }
         .alert("Poki Will Close to Finish the Update", isPresented: Binding(get: { model.signer.finishNotice }, set: { if !$0 { model.signer.finishNoticeAnswered() } })) {
             Button("OK") { model.signer.finishNoticeAnswered() }
@@ -267,7 +279,25 @@ struct RootView: View {
         .onChange(of: appearance, initial: true) { _, value in
             let style = (Appearance(rawValue: value) ?? .automatic).style
             for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
-                for window in scene.windows { window.overrideUserInterfaceStyle = style }
+                for window in scene.windows where window.overrideUserInterfaceStyle != style {
+                    window.overrideUserInterfaceStyle = style
+                }
+            }
+        }
+        .task(id: interfaceSize) {
+            // Apply outside the current layout pass. Coalesce events within roughly one frame,
+            // while the preview and the rest of the window inherit the same native category.
+            try? await Task.sleep(for: .milliseconds(16))
+            guard !Task.isCancelled else { return }
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { AppInterfaceSize.apply(interfaceSize, to: window) }
+            }
+        }
+        .task(id: typeSize) {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                for window in scene.windows { AppInterfaceSize.updateNavigationFonts(in: window) }
             }
         }
         .onAppear(perform: openLaunchScreen)
@@ -296,7 +326,7 @@ struct RootView: View {
         if let step = model.open(link: url) {
             detailsOpen = false
             threadsOpen = false
-            if width == .regular { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
+            if showsSidebar { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
             openDetails([DetailsRoute.connection])
         } else if url.host() == "log" {
@@ -322,6 +352,7 @@ struct RootView: View {
         guard model.voice.canTalkLive else { model.voice.keyAsked = true; return }
         if !model.voice.isOn {
             ApprovalNotice.requestPermission()
+            model.prepareForTask()
             Task { await model.voice.start() }
         }
     }
@@ -407,6 +438,8 @@ struct RootView: View {
             openDetails([DetailsRoute.model])
         case "memory":
             openDetails([SettingsRoute.memory])
+        case "interfaceSize":
+            openDetails([DetailsRoute.interfaceSize])
         case "appearance":
             openDetails([DetailsRoute.appearance])
         case "language":

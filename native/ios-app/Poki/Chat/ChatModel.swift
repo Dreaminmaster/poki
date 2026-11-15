@@ -1,4 +1,5 @@
 import Foundation
+import PiSwiftAI
 import PokiCore
 import SwiftUI
 
@@ -35,7 +36,15 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var total: Int?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
+    var textDocuments: [ChatTextDocument]?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
+
+    /// The same delimited owner request for the model, consent evidence and task routing.
+    var requestText: String {
+        let caption: String
+        switch kind { case .you(let text, _), .request(let text, _): caption = text; default: return "" }
+        return ([caption] + (textDocuments ?? []).map(\.modelText)).filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
 
     /// Browser visits belong to the request around this card, including after restoring a conversation.
     static func taskUsedBrowser(in entries: [ChatEntry], at index: Int) -> Bool {
@@ -129,6 +138,7 @@ final class ChatModel {
     /// For the log's line at the end of each task: when it began, the tool calls, finish_task's verdict.
     private var taskStart = Date()
     private var toolCalls = 0
+    private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
     private var client: ModelClient?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
@@ -142,6 +152,14 @@ final class ChatModel {
     private var taskRequest = ""
     private enum ToolRoute { case app, web }
     private var toolRoute: ToolRoute?
+    private var usesSplitView = false
+    private var splitViewSession: String?
+    var isRunningInSplitView: Bool { running && usesSplitView }
+    private var hasSplitViewRead = false
+    private var lastSplitViewSide: String?
+    private var lastSplitViewLayout: String?
+    private(set) var waitingForSplitView = false
+    private var expectedSplitViewApps: Set<String>?
     /// The whole plan the model published, for the task card's steps still to come.
     var planSteps: [String]? { modelPlan }
     private var task: Task<Void, Never>?
@@ -254,20 +272,23 @@ final class ChatModel {
 
     // MARK: Sending
 
-    func send(_ text: String) { send(text, again: false) }
+    func send(_ text: String, inSplitView: Bool = false) { send(text, again: false, inSplitView: inSplitView) }
 
     /// A message with photos or PDFs from the plus menu: the model reads their pictures with the words.
     /// The words may be left out.
     func send(_ text: String, attachments: [ChatAttachment]) {
         lastImages = attachments.flatMap(\.images)
-        send(text, again: false, thumbnails: attachments.map(\.thumbnail))
+        let documents = attachments.compactMap { attachment in
+            attachment.textContent.map { ChatTextDocument(name: attachment.label, content: $0) }
+        }
+        send(text, again: false, thumbnails: attachments.filter { !$0.thumbnail.isEmpty }.map(\.thumbnail), documents: documents, chooseWorkspace: true)
     }
 
     /// The last message again, after a problem (the Retry button under it).
     func retry() {
         guard !running, let last = entries.last(where: { if case .you = $0.kind { return true }; return false }), case .you(let text, _) = last.kind else { return }
         while let tail = entries.last, case .note(.problem) = tail.kind { entries.removeLast() }
-        send(text, again: true)
+        send(text, again: true, documents: last.textDocuments ?? [], inSplitView: usesSplitView && expectedSplitViewApps == nil, chooseWorkspace: true)
     }
 
     /// The conversation ended on a problem the owner can try again.
@@ -276,36 +297,40 @@ final class ChatModel {
         return entries.contains { if case .you = $0.kind { return true }; return false }
     }
 
-    private var lastOwnerText: String?
     /// What the model reads when the owner sent pictures without words.
     private static let picturesOnly = "(The owner sent the attached pictures without a message.)"
     /// The pictures of the owner's last message, sent again with it by Try Again.
     private var lastImages: [Data] = []
 
-    /// What was said in this chat, oldest first, for the auto-classifier.
-    var ownerContext: [String] {
+    /// Keep captions and file contents separate until the approval context is packed.
+    var ownerContext: [ApprovalClassifier.ContextTurn] {
         entries.suffix(30).compactMap { entry in
             switch entry.kind {
-            case .you(let text, _): "Owner: \(text)"
-            case .request(let text, let from): "Request from \(from): \(text)"
-            case .poki(let text): "Assistant: \(String(text.prefix(400)))"
+            case .you(let text, _):
+                .init(text: "Owner: \(text)", documents: entry.textDocuments ?? [])
+            case .request(let text, let from):
+                .init(text: "Request from \(from): \(text)", documents: entry.textDocuments ?? [])
+            case .poki(let text):
+                .init(text: "Assistant: \(String(text.prefix(400)))")
             default: nil
             }
         }
     }
 
-    private func send(_ text: String, again: Bool, thumbnails: [Data] = []) {
+    private func send(_ text: String, again: Bool, thumbnails: [Data] = [], documents: [ChatTextDocument] = [], inSplitView: Bool = false, chooseWorkspace: Bool = false) {
         if let message = app.signer.installMessage {
             add(.note(.problem(message)))
             return
         }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Pictures may go without words, and Try Again sends them again.
-        guard !text.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
+        guard !text.isEmpty || !documents.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
         if isDemo { playDemo(text); return }
         // Another conversation (an outside agent's hand-off) is working the phone: one task at a time.
         if kind == .poki, let busy = ChatModel.delegatedBusy {
-            entries.append(ChatEntry(.you(text, delivered: false)))
+            var entry = ChatEntry(.you(text, delivered: false))
+            if !documents.isEmpty { entry.textDocuments = documents }
+            entries.append(entry)
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("Poki is working on a task for \(busy). Try again when it’s done.")))))
             return
         }
@@ -317,10 +342,18 @@ final class ChatModel {
         } else {
             var entry = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
             if !thumbnails.isEmpty { entry.attachments = thumbnails } else { lastImages = [] }
+            if !documents.isEmpty { entry.textDocuments = documents }
             you = entry
             entries.append(you)
         }
-        lastOwnerText = text
+        let message = you.requestText
+        usesSplitView = inSplitView
+        splitViewSession = inSplitView ? UUID().uuidString : nil
+        expectedSplitViewApps = nil
+        hasSplitViewRead = false
+        lastSplitViewSide = nil
+        lastSplitViewLayout = nil
+        waitingForSplitView = false
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
@@ -328,12 +361,13 @@ final class ChatModel {
                                        : AppLocalization.text(LocalizedStringResource("Add a model key first. Open Settings, then Models."))))
             return
         }
+        let runSession = sessionID
         let model = ModelKeys.selectedModel
         // The first message names the chat: a few words from the chat's own model, in the background.
         if kind == .poki, !again, entries.filter({ if case .you = $0.kind { return true }; return false }).count == 1,
            let piModel = provider.piModel(model) {
             let id = sessionID
-            Task { if let name = await SessionNamer.name(for: text, provider: provider, model: piModel) { SessionStore.shared.setAutoName(id, name) } }
+            Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel) { SessionStore.shared.setAutoName(id, name) } }
         }
         running = true
         awaitingModel = true
@@ -341,9 +375,11 @@ final class ChatModel {
         planID = nil; noteID = nil; modelPlan = nil
         taskApp = nil
         taskApps = TaskApps(); taskRequest = text; toolRoute = nil
-        let instructions = Harness.instructions(for: text)
         let images = lastImages
-        if Self.direct, provider == .anthropic || provider == .openai {
+        let namedApps = chooseWorkspace && kind == .poki && app.canPlanSplitView
+            ? AppIconStore.bundleIDs(namedIn: text) : []
+        if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
+            let instructions = Harness.instructions(for: text)
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
                 client = provider == .openai ? OpenAIClient(key: key, model: model) : AnthropicClient(key: key, model: model)
@@ -356,12 +392,12 @@ final class ChatModel {
                 // A stopped task may still be ending its last step: this one starts after it.
                 await previous?.value
                 guard let self, self.runToken == token else { return }
-                client.say(text)
+                client.say(message)
                 self.began("direct", provider, model)
                 await self.run(client, instructions: instructions, delivered: you.id, token: token)
                 let current = self.runToken == token
                 if !current { self.app.finishTask() }
-                self.logEnd("direct", outcome: nil, stopped: !current)
+                self.logEnd("direct", outcome: nil, session: runSession, text: text, stopped: !current)
                 if current { self.running = false; self.awaitingModel = false }
             }
             return
@@ -371,15 +407,6 @@ final class ChatModel {
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("pi has no model \(model) for \(provider.name).")))))
             return
         }
-        // Another model starts a new loop that carries the conversation over.
-        if loop?.provider != provider || loop?.model.id != piModel.id {
-            loop = PiLoop(provider: provider, model: piModel, tools: Harness.tools,
-                          carrying: loop?.messages ?? []) { [weak self] call in
-                guard let self else { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
-                return await self.perform(call)
-            }
-        }
-        guard let loop else { running = false; awaitingModel = false; return }
         runToken += 1
         let token = runToken
         let previous = task
@@ -387,16 +414,71 @@ final class ChatModel {
             // A stopped task may still be ending its last step: this one starts after it.
             await previous?.value
             guard let self, self.runToken == token else { return }
-            self.began("pi", provider, model)
-            let outcome = await loop.run(text.isEmpty ? Self.picturesOnly : text, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
+            var pair: [String] = []
+            if !inSplitView, namedApps.count >= 2 {
+                let plannedAt = ContinuousClock.now
+                let choice = await self.chooseSplitView(text: text, apps: namedApps, provider: provider, model: piModel)
+                guard self.runToken == token else { return }
+                AppLog.shared.add("chat", "workspace planning took \(plannedAt.duration(to: .now))")
+                switch choice {
+                case .split(let apps):
+                    pair = apps
+                    self.usesSplitView = true
+                    self.splitViewSession = UUID().uuidString
+                    self.expectedSplitViewApps = Set(apps)
+                    AppLog.shared.add("chat", "workspace planning selected Split View")
+                case .normal:
+                    AppLog.shared.add("chat", "workspace planning selected normal chat")
+                    break
+                case .failed(let words):
+                    AppLog.shared.add("chat", "workspace planning failed before any phone action")
+                    self.add(.note(.problem(words)))
+                    self.running = false
+                    self.awaitingModel = false
+                    self.lastOutcome = .failed(words)
+                    return
+                }
+            }
+            let splitSession = self.splitViewSession
+            self.began("pi", provider, model, splitViewSession: splitSession)
+            if let splitSession, pair.count == 2 {
+                self.phoneStepUnderWay = true
+                let confirmed = await self.openSplitViewPair(pair, session: splitSession, token: token)
+                self.phoneStepUnderWay = false
+                guard self.runToken == token, confirmed else {
+                    await self.app.finishSplitViewTask(localSession: splitSession, pairConfirmed: false) {
+                        self.runToken != token || Task.isCancelled
+                    }
+                    if self.runToken == token {
+                        AppLog.shared.add("chat", "workspace planning could not confirm the requested Split View apps")
+                        let words = Self.splitViewSetupMessage(pair[0], pair[1])
+                        let outcome = PiLoop.Outcome.failed(words)
+                        self.ended(outcome, delivered: you.id)
+                        self.logEnd("pi", outcome: outcome, session: runSession, text: text, stopped: false)
+                        self.running = false
+                        self.awaitingModel = false
+                        self.lastOutcome = outcome
+                    }
+                    return
+                }
+                AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
+            }
+            let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil)
+            let instructions = Harness.instructions(for: message, inSplitView: splitSession != nil)
+            let outcome = await loop.run(message.isEmpty ? Self.picturesOnly : message, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
                 self.awaitingModel = false
                 self.add(.poki(text))
             }
+            if let splitSession {
+                await self.app.finishSplitViewTask(localSession: splitSession) {
+                    self.runToken != token || Task.isCancelled || outcome == .stopped
+                }
+            }
             let current = self.runToken == token
-            if current { self.ended(outcome, delivered: you.id) } else { self.app.finishTask() }
-            self.logEnd("pi", outcome: outcome, stopped: !current)
+            if current { self.ended(outcome, delivered: you.id) } else if splitSession == nil { self.app.finishTask() }
+            self.logEnd("pi", outcome: outcome, session: runSession, text: text, stopped: !current)
             guard current else { return }
             self.running = false
             self.awaitingModel = false
@@ -404,26 +486,148 @@ final class ChatModel {
         }
     }
 
+    private enum WorkspaceChoice { case split([String]), normal, failed(String) }
+
+    private enum PairCheck { case confirmed, unavailable, differentPair, stopped }
+
+    private func openSplitViewPair(_ pair: [String], session: String, token: Int) async -> Bool {
+        guard await app.reserveSplitViewWorkspace(session: session), !Task.isCancelled else { return false }
+        let currentTask = task
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Open Poki Split View") { currentTask?.cancel() }
+        defer { if background != .invalid { UIApplication.shared.endBackgroundTask(background) } }
+        let expected = Set(pair)
+        // Opening one member can restore an existing pair. Anchor a new workspace with the
+        // destination, then open the source beside it, preserving the destination's last window.
+        let anchor = pair[1]
+        let source = pair[0]
+        await activateForSplitView(anchor, session: session)
+        switch await confirmSplitViewPair(expected, session: session, token: token, seconds: 12) {
+        case .confirmed: return true
+        case .stopped: return false
+        case .unavailable, .differentPair: break
+        }
+        guard runToken == token, !Task.isCancelled, let target = KnownApps.find(anchor) else { return false }
+        guard await app.clearSplitViewPaneForSetup(session: session), runToken == token, !Task.isCancelled else { return false }
+        AppLog.shared.add("chat", "opening the requested apps through the system Split View menu")
+        await activateForSplitView("com.apple.springboard", session: session)
+        do {
+            guard try await selectLauncherItem([target.english, target.simplified, target.traditional], menu: false, session: session) else { return false }
+            guard try await selectLauncherItem(["Open in Split View", "以分屏浏览打开", "以分割顯示方式打開", "以分割顯示打開"], menu: true, session: session) else { return false }
+            try await Task.sleep(for: .seconds(1))
+        } catch { return false }
+        guard runToken == token, !Task.isCancelled else { return false }
+        await activateForSplitView(source, session: session)
+        return await confirmSplitViewPair(expected, session: session, token: token, seconds: 35) == .confirmed
+    }
+
+    private func activateForSplitView(_ bundle: String, session: String) async {
+        let request: JSON = ["actions": [["launch": .string(bundle)]]]
+        _ = await app.runTool("do", arguments: request.serialized(), localSession: session)
+    }
+
+    private func selectLauncherItem(_ labels: [String], menu: Bool, session: String) async throws -> Bool {
+        let deadline = ContinuousClock.now + .seconds(8)
+        repeat {
+            try Task.checkCancellation()
+            do {
+                if try await app.openSplitViewLauncherItem(labels: labels, menu: menu, session: session) { return true }
+            } catch let error as RunnerError where error.delivery == .notSent && error.message.contains("nothing lands late") {
+                // The earlier system activation is still draining. This step sent no input.
+            }
+            try await Task.sleep(for: .milliseconds(550))
+        } while ContinuousClock.now < deadline
+        return false
+    }
+
+    private func confirmSplitViewPair(_ pair: Set<String>, session: String, token: Int, seconds: Int) async -> PairCheck {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        var pane = "left"
+        while runToken == token, !Task.isCancelled, ContinuousClock.now < deadline {
+            let read = await app.runTool("look", arguments: "{\"pane\":\"\(pane)\"}", localSession: session, expectedApps: pair)
+            if read.text.contains("screen: locked") { return .stopped }
+            if read.text.contains("do not match the planned Split View pair") { return .differentPair }
+            // Keep the initial layout so a rotation before the model's first read also triggers recovery.
+            if !read.isError, read.jpeg != nil, let observed = read.splitView {
+                lastSplitViewSide = observed.side
+                lastSplitViewLayout = observed.layout
+                return .confirmed
+            }
+            // Either pane verifies both app identities. Try the other if the first cannot be read.
+            pane = pane == "left" ? "right" : "left"
+            try? await Task.sleep(for: .seconds(1))
+        }
+        return Task.isCancelled || runToken != token ? .stopped : .unavailable
+    }
+
+    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model) async -> WorkspaceChoice {
+        let names = apps.enumerated().map { "\($0.offset + 1). \(AppIconStore.name($0.element) ?? $0.element)" }.joined(separator: "\n")
+        let instructions = "Choose whether two candidate iPhone apps should work side by side for the owner's request. A word may describe an item and just happen to match an app name (for example 写一封邮件 can describe a message, or 照片 can mean an image in Safari). Select only the two apps actually requested. For a side-by-side task such as dragging, comparing, or transferring between two apps, output SPLIT followed by their two numbers separated by spaces, source first if there is a source. Otherwise output NORMAL. Output only that line."
+        let planner = PiLoop(provider: provider, model: model, tools: []) { _ in
+            PokiCore.ToolAnswer(text: "Planning only.", jpeg: nil, isError: true)
+        }
+        var answer = ""
+        let outcome = await withTaskCancellationHandler {
+            await planner.run("Apps: \(names)\nRequest: \(text)", instructions: instructions, maxTurns: 1) { answer += $0 }
+        } onCancel: {
+            Task { @MainActor in planner.stop() }
+        }
+        if case .failed(let words) = outcome { return .failed(words) }
+        let words = answer.split(whereSeparator: \.isWhitespace)
+        if outcome == .done {
+            if words == ["NORMAL"] { return .normal }
+            if words.count == 3, words[0] == "SPLIT", let first = Int(words[1]), let second = Int(words[2]),
+               first != second, (1...apps.count).contains(first), (1...apps.count).contains(second) {
+                return .split([apps[first - 1], apps[second - 1]])
+            }
+        }
+        return .failed(Self.splitViewPlanningMessage)
+    }
+
+    static func splitViewSetupMessage(_ source: String, _ destination: String) -> String {
+        let sourceName = AppName.display(source) ?? source
+        let destinationName = AppName.display(destination) ?? destination
+        return AppLocalization.text(LocalizedStringResource("Open \(sourceName) and \(destinationName) together on the unfolded iPhone, then return to Poki and retry. Pair them with the divider to open them together next time."))
+    }
+
+    static var splitViewPlanningMessage: String {
+        AppLocalization.text(LocalizedStringResource("Poki couldn't determine whether to use Split View. Try sending the task again."))
+    }
+
+    private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool) -> PiLoop {
+        let changedWorkspace = loop.map { $0.inSplitView != inSplitView } ?? false
+        if let loop, loop.provider == provider, loop.model.id == model.id, !changedWorkspace { return loop }
+        // A different workspace starts without old screen evidence.
+        let next = PiLoop(provider: provider, model: model, tools: inSplitView ? Harness.splitViewTools : Harness.tools,
+                          inSplitView: inSplitView, carrying: changedWorkspace ? [] : loop?.messages ?? []) { [weak self] call in
+            guard let self else { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
+            return await self.perform(call)
+        }
+        loop = next
+        return next
+    }
+
     /// Every provider runs on pi. `-chatEngine direct` sends Anthropic and OpenAI through their own APIs
     /// instead; that code goes once the phone acceptance with the owner's OpenAI key has passed on pi.
     private static var direct: Bool { UserDefaults.standard.string(forKey: "chatEngine") == "direct" }
 
-    private func began(_ engine: String, _ provider: ModelProvider, _ model: String) {
+    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, splitViewSession: String? = nil) {
         taskStart = Date(); toolCalls = 0; taskResult = nil
-        app.chatTaskBegan()
+        taskCalls.removeAll()
+        app.prepareForTask()
+        app.chatTaskBegan(splitViewSession: splitViewSession)
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
-    private func logEnd(_ engine: String, outcome: PiLoop.Outcome?, stopped: Bool = false) {
+    private func logEnd(_ engine: String, outcome: PiLoop.Outcome?, session: String, text: String, stopped: Bool) {
         let stopAsked = stopped || self.stopAsked
         let seconds = String(format: "%.1f", Date().timeIntervalSince(taskStart))
         let verdict = taskResult.map { $0.success ? "success" : "failure" } ?? "not called"
         let ending = outcome.map { if case .failed = $0 { "failed" } else { "\($0)" } } ?? (stopAsked ? "stopped" : "ended")
         AppLog.shared.add("chat", "task ended: \(engine), \(ending) after \(seconds) s, \(toolCalls) tool calls, finish_task \(verdict)")
-        let record = TaskRecord(session: sessionID, task: lastOwnerText ?? "", calls: Array(calls.suffix(toolCalls)), result: taskResult,
+        let record = TaskRecord(session: session, task: text, calls: taskCalls, result: taskResult,
                                 seconds: Date().timeIntervalSince(taskStart))
         Self.afterTask?(record)
-        SessionStore.shared.taskEnded(sessionID, success: taskResult?.success, stopped: stopAsked)
+        SessionStore.shared.taskEnded(session, success: taskResult?.success, stopped: stopAsked)
         if kind == .poki, taskResult?.success == true { Haptics.done() }
     }
 
@@ -433,11 +637,26 @@ final class ChatModel {
     /// task ended, and finish_task's summary and answer.
     func runDelegated(_ task: String) async -> (text: String, success: Bool?) {
         if let message = app.signer.installMessage { return (message, false) }
+        guard !Task.isCancelled else { return ("Poki's task was cancelled.", false) }
+        guard !running, ChatModel.delegatedBusy == nil else { return ("Poki is already running a task.", false) }
         ChatModel.delegatedBusy = requester ?? AppLocalization.text(LocalizedStringResource("an agent"))
         defer { ChatModel.delegatedBusy = nil }
         lastOutcome = nil
         send(task)
-        while running { try? await Task.sleep(for: .milliseconds(100)) }
+        if running, let started = self.task {
+            let token = runToken
+            await withTaskCancellationHandler {
+                await started.value
+            } onCancel: {
+                Task { @MainActor in
+                    guard self.runToken == token, self.running else { return }
+                    self.stop()
+                }
+            }
+            if Task.isCancelled {
+                return ("Stopped. Poki's task was cancelled.", false)
+            }
+        }
         let replies = entries.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }
         var lines: [String] = []
         if let taskResult {
@@ -472,7 +691,11 @@ final class ChatModel {
             reply = words
             add(.note(.problem(words)))
         }
-        if case .stopped = outcome { app.finishTask() } else { app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0) }
+        if case .stopped = outcome {
+            if !usesSplitView { app.finishTask() }
+        } else {
+            app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView)
+        }
     }
 
     /// Ends the task now, as far as the chat goes: it takes the next message at once, and nothing more
@@ -483,6 +706,7 @@ final class ChatModel {
         if isDemo { stopDemo(); return }
         guard running else { return }
         stopAsked = true
+        waitingForSplitView = false
         loop?.stop()
         task?.cancel()
         // A browser step waiting for a page or for the owner ends too.
@@ -496,12 +720,18 @@ final class ChatModel {
         guard phoneStepUnderWay else { add(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))); return }
         let stopping = ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopping…"))))
         entries.append(stopping)
+        let session = sessionID
         let stopped = task
         Task { [weak self] in
             await stopped?.value
             _ = await self?.app.phoneSettles(within: 30)
-            guard let self, let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
-            self.entries[i].kind = .poki(AppLocalization.text(LocalizedStringResource("Stopped.")))
+            let text = AppLocalization.text(LocalizedStringResource("Stopped."))
+            guard let self, self.sessionID == session else {
+                SessionStore.shared.finishStopping(stopping.id, in: session, text: text)
+                return
+            }
+            guard let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
+            self.entries[i].kind = .poki(text)
             self.persist()
         }
     }
@@ -557,16 +787,24 @@ final class ChatModel {
 
     /// The phone's tools go to PokiCore; the harness's two are answered here, as task-runner.mjs answers them.
     private func perform(_ call: ToolCall) async -> PokiCore.ToolAnswer {
+        let session = sessionID
+        let token = runToken
         awaitingModel = false
         let started = Date()
         let answer = await performCall(call)
+        let record = CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError)
+        taskCalls.append(record)
+        guard sessionID == session else {
+            SessionStore.shared.appendCall(record, to: session)
+            return answer
+        }
         // A launch that went through says which app the task is for; a refused one says nothing.
-        if call.name == "do", !answer.isError {
+        if runToken == token, call.name == "do", !answer.isError {
             for app in TaskApps.launches(inArguments: call.arguments) { taskApps.launch(app) }
             taskApp = taskApps.target(request: taskRequest)
         }
-        calls.append(CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError))
-        if !stopAsked, running { awaitingModel = true }
+        calls.append(record)
+        if runToken == token, !stopAsked, running { awaitingModel = true }
         persist()
         return answer
     }
@@ -574,6 +812,30 @@ final class ChatModel {
     private func performCall(_ call: ToolCall) async -> PokiCore.ToolAnswer {
         toolCalls += 1
         let args = (call.arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
+        if usesSplitView {
+            switch call.name {
+            case "look":
+                if let pane = args["pane"] as? String {
+                    hasSplitViewRead = false
+                    guard pane == "left" || pane == "right" else {
+                        return splitViewRefusal("Choose left or right with look. This task keeps both apps in Split View.")
+                    }
+                } else if !hasSplitViewRead {
+                    return splitViewRefusal("Use look with pane left or right to confirm the two visible apps first.")
+                }
+            case "do":
+                guard hasSplitViewRead else {
+                    return splitViewRefusal("Use look with pane left or right to confirm the two visible apps first.")
+                }
+                let actions = args["actions"] as? [[String: Any]] ?? []
+                if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["button"] != nil }) {
+                    return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run routines. Finish with finish_task.")
+                }
+            case "report_plan", "finish_task", "status": break
+            default:
+                return splitViewRefusal("Use the two visible apps with look and do for this task.")
+            }
+        }
         switch call.name {
         case "report_plan":
             guard let steps = args["steps"] as? [String], (1...8).contains(steps.count), let current = args["currentStep"] as? Int, (1...steps.count).contains(current) else {
@@ -600,10 +862,87 @@ final class ChatModel {
             if let refusal = selectRoute(.app) { return refusal }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
-            return await app.runTool(call.name, arguments: call.arguments)
+            let taskToken = runToken
+            let response = await app.runTool(call.name, arguments: call.arguments, localSession: splitViewSession, expectedApps: expectedSplitViewApps)
+            guard taskToken == runToken, usesSplitView else { return response }
+            let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&
+                response.splitView.map { $0.layout != lastSplitViewLayout } == true
+            if let previous = lastSplitViewSide, response.splitViewNeedsRead || changedLayout {
+                hasSplitViewRead = false
+                let side = (args["pane"] as? String) ?? previous
+                return await recoverSplitView(side: side, token: taskToken,
+                                              layoutSeen: changedLayout,
+                                              action: call.name == "do" ? response : nil)
+            }
+            if call.name == "look", let read = response.splitView, response.jpeg != nil {
+                recordSplitViewRead(read)
+            }
+            return response
         default:
             return await app.runTool(call.name, arguments: call.arguments)
         }
+    }
+
+    private func recordSplitViewRead(_ read: PokiCore.SplitViewRead) {
+        hasSplitViewRead = true
+        lastSplitViewSide = read.side
+        lastSplitViewLayout = read.layout
+        if expectedSplitViewApps == nil { expectedSplitViewApps = Set([read.app, read.otherApp]) }
+    }
+
+    /// Keep the model call suspended while the owner restores the workspace. Every retry only reads.
+    private func recoverSplitView(side: String, token: Int, layoutSeen: Bool,
+                                  action: PokiCore.ToolAnswer?) async -> PokiCore.ToolAnswer {
+        waitingForSplitView = true
+        app.chatWaitingForSplitView(true)
+        AppLog.shared.add("chat", "Split View changed; waiting to read the workspace again")
+        defer {
+            if runToken == token {
+                waitingForSplitView = false
+                app.chatWaitingForSplitView(false)
+            }
+        }
+        let session = splitViewSession
+        let expected = expectedSplitViewApps
+        let otherSide = side == "left" ? "right" : "left"
+        var otherRead: PokiCore.SplitViewRead?
+        var wait = layoutSeen ? Duration.milliseconds(350) : .seconds(2)
+        while runToken == token, !Task.isCancelled {
+            do { try await Task.sleep(for: wait) } catch { break }
+            guard runToken == token, !Task.isCancelled else { break }
+            // End on the pane expected by the original call, so the model's next action uses
+            // the same side as the fresh screenshot it receives here.
+            let pane = otherRead == nil ? otherSide : side
+            let read = await app.runTool("look", arguments: #"{"pane":"\#(pane)","full":true}"#,
+                                         localSession: session, expectedApps: expected)
+            guard runToken == token, !Task.isCancelled else { break }
+            guard !read.isError, read.jpeg != nil, let observed = read.splitView, observed.side == pane else {
+                otherRead = nil
+                wait = .seconds(2)
+                app.chatWaitingForSplitView(true)
+                continue
+            }
+            if pane == otherSide {
+                otherRead = observed
+                wait = .milliseconds(350)
+                continue
+            }
+            guard let otherRead, otherRead.layout == observed.layout,
+                  otherRead.app == observed.otherApp, otherRead.otherApp == observed.app else {
+                otherRead = nil
+                continue
+            }
+            recordSplitViewRead(observed)
+            AppLog.shared.add("chat", "Split View restored; the model received a fresh pane read")
+            let previous = action.map { "\nPrevious action result. Check what actually happened before attempting any remaining step.\n\($0.text)\n" } ?? ""
+            return PokiCore.ToolAnswer(text: "Split View was restored. Replan the remaining steps from the fresh layout. Old coordinates, element numbers, and pending gestures are invalid.\n\(previous)\n\(read.text)",
+                                       jpeg: read.jpeg, isError: action != nil, splitView: observed)
+        }
+        return splitViewRefusal("Task stopped while waiting for Split View.")
+    }
+
+    private func splitViewRefusal(_ message: String) -> PokiCore.ToolAnswer {
+        PokiCore.ToolAnswer(text: "not_sent: " + message, jpeg: nil, isError: true)
     }
 
     private func selectRoute(_ next: ToolRoute) -> PokiCore.ToolAnswer? {

@@ -5,6 +5,464 @@ import XCTest
 /// slow drags, no-op actions that looked like success, the picture's scale, collapsed cells, fixed
 /// waits and repeated text.
 final class LookDoTests: XCTestCase {
+    func testSplitViewSetupKeepsTheLauncherPrivateAndReleasesTheQueueOnStop() async throws {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        wda.set("POST /poki/workspace-launcher") { _ in (200, ["value": true]) }
+        let reserved = await core.prepareWorkspace(session: "setup")
+        XCTAssertTrue(reserved)
+        let outside = await core.callTool("look", arguments: "{}", localSession: "other")
+        XCTAssertTrue(outside.isError)
+        XCTAssertNil(outside.jpeg)
+        let unlisted = await core.callTool("workspace-launcher", arguments: "{}", localSession: "setup")
+        XCTAssertTrue(unlisted.isError)
+        do {
+            _ = try await core.workspaceLauncherStep(session: "other", request: [:])
+            XCTFail("Another session must not send launcher input")
+        } catch is CancellationError {}
+        XCTAssertTrue(wda.bodies("POST /poki/workspace-launcher").isEmpty)
+        let result = try await core.workspaceLauncherStep(session: "setup", request: ["labels": ["Notes"], "menu": false])
+        XCTAssertEqual(result, true)
+        XCTAssertEqual(wda.bodies("POST /poki/workspace-launcher").count, 1)
+        _ = await core.finishTask(switching: false, localSession: "setup")
+        let released = await core.prepareWorkspace(session: "other")
+        XCTAssertTrue(released)
+        XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty)
+    }
+
+    func testSplitViewTypingRetriesOnlyKeysThatWereNotSent() async throws {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true)) { $0.humanize = false }
+        let owned = await core.prepareWorkspace(session: "local")
+        XCTAssertTrue(owned)
+        let attempts = LockedBox(0)
+        wda.set("POST /wda/keys") { _ in
+            attempts.update { $0 += 1 }
+            if attempts.value == 1 {
+                return (500, ["value": ["error": "unknown error", "message": "not sent: finishing the focus read; nothing lands late"]])
+            }
+            return (200, ["value": .null])
+        }
+        try await core.computer.sendKeys(deletes: 0, text: "Duo", until: now() + 6)
+        XCTAssertEqual(attempts.value, 2)
+        XCTAssertEqual(wda.bodies("POST /wda/keys").first, wda.bodies("POST /wda/keys").last)
+
+        wda.set("POST /wda/keys") { _ in throw TransportError.other("delivery unknown") }
+        do {
+            try await core.computer.sendKeys(deletes: 0, text: "Duo", until: now() + 6)
+            XCTFail("Unknown delivery must be verified before typing again")
+        } catch let error as RunnerError {
+            XCTAssertEqual(error.delivery, .unknown)
+        }
+        XCTAssertEqual(wda.bodies("POST /wda/keys").count, 3)
+    }
+
+    func testPlannedSplitViewChecksBothAppIdentitiesBeforeReading() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        wda.set("POST /poki/pane") { _ in
+            (200, ["value": ["identity": "left/workspace", "bundleId": "com.apple.mobilenotes", "otherBundleId": "local.wrong"]])
+        }
+        let response = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "chat-task",
+                                           expectedApps: ["com.apple.mobilenotes", "com.apple.mobilesafari"])
+        XCTAssertTrue(response.isError)
+        XCTAssertNil(response.jpeg)
+        XCTAssertTrue(response.text.contains("do not match the planned Split View pair"))
+        let tap = await core.callTool("do", arguments: "{\"actions\":[{\"tap\":[100,100]}]}", localSession: "chat-task")
+        XCTAssertTrue(tap.text.contains("look at the selected pane before sending input"), tap.text)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+
+        wda.set("POST /poki/pane") { _ in
+            (200, ["value": ["identity": "left/new-layout", "bundleId": "com.apple.mobilesafari", "otherBundleId": "com.apple.mobilenotes"]])
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobilesafari"]]) }
+        let matched = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "chat-task",
+                                          expectedApps: ["com.apple.mobilenotes", "com.apple.mobilesafari"])
+        XCTAssertFalse(matched.isError, matched.text)
+        XCTAssertTrue(matched.text.contains("Split View: left is com.apple.mobilesafari"))
+    }
+
+    func testSplitViewPaneChangesInvalidateReferencesAndFinishLeavesBothAppsOpen() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        let side = LockedBox("left")
+        wda.set("POST /poki/pane") { args in
+            let next = args?["side"]?.string ?? "auto"
+            side.value = next
+            if next == "auto" { return (200, ["value": .null]) }
+            let left = next == "left"
+            return (200, ["value": ["identity": .string(next), "bundleId": left ? "local.a" : "local.b",
+                                     "otherBundleId": left ? "local.b" : "local.a"]])
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            let left = side.value == "left"
+            return (200, ["value": ["bundleId": left ? "local.a" : "local.b"]])
+        }
+        wda.source([("Button", "Same control")])
+        let left = await core.call("look", ["pane": "left"], session: "workspace-owner")
+        XCTAssertTrue(left.text.contains("Split View: left is local.a"), left.text)
+        let competing = await core.call("look", ["pane": "right"], session: "other")
+        XCTAssertTrue(competing.isError, competing.text)
+        XCTAssertEqual(side.value, "left")
+        let right = await core.call("look", ["pane": "right"], session: "workspace-owner")
+        XCTAssertTrue(right.text.contains("Split View: right is local.b"), right.text)
+        let stale = await core.call("do", ["actions": [["tap": 1]]], session: "workspace-owner")
+        XCTAssertTrue(stale.text.contains("not in the latest read"), stale.text)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+        let finished = await core.call("do", ["actions": [], "finish": true], session: "workspace-owner")
+        XCTAssertTrue(finished.text.contains("both apps stay open"), finished.text)
+        XCTAssertEqual(side.value, "auto")
+        XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty)
+    }
+
+    func testSplitViewReadWaitsForPaneIdentityAfterSlowTree() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true)) {
+            $0.readTimeout = 4
+        }
+        wda.set("POST /poki/pane") { _ in
+            (200, ["value": ["identity": "left/restored", "bundleId": "com.apple.Preferences",
+                            "otherBundleId": "com.apple.mobilesafari", "x": 0, "y": 0]])
+        }
+        // In-process activeAppInfo waits behind source, so a valid pane can take over 2 s.
+        wda.delay("GET /source", 3)
+        wda.delay("GET /wda/activeAppInfo", 3)
+        wda.delay("GET /screenshot", 4.8)
+
+        let read = await core.callTool("look", arguments: #"{"pane":"left"}"#, localSession: "chat-task",
+                                       expectedApps: ["com.apple.Preferences", "com.apple.mobilesafari"])
+        XCTAssertFalse(read.isError, read.text)
+        XCTAssertNotNil(read.jpeg, read.text)
+        XCTAssertEqual(read.splitView?.app, "com.apple.Preferences")
+        XCTAssertTrue(read.text.contains("General"), read.text)
+    }
+
+    func testSplitViewLocalTaskKeepsExclusiveControlAndFinishesOnlyItsOwnSession() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true)) { $0.taskGap = 0 }
+        let side = LockedBox("auto")
+        wda.set("POST /poki/pane") { args in
+            side.value = args?["side"]?.string ?? "auto"
+            return (200, ["value": ["identity": "left/workspace", "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
+        }
+        let read = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "chat-task")
+        XCTAssertFalse(read.isError, read.text)
+        let outside = await core.call("look", ["pane": "right"], session: "outside")
+        XCTAssertTrue(outside.text.contains("another task is using Split View"), outside.text)
+        XCTAssertNil(outside.jpeg)
+        let cancelledElsewhere = await core.finishTask(localSession: "outside")
+        XCTAssertNil(cancelledElsewhere)
+        let idleFinish = await core.finishTask(ifNoLocalWorkspace: true)
+        XCTAssertNil(idleFinish)
+        XCTAssertEqual(side.value, "left")
+        let finished = await core.finishTask(localSession: "chat-task")
+        XCTAssertEqual(finished, "finish: both apps stay open in Split View")
+        XCTAssertEqual(side.value, "auto")
+        XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty)
+    }
+
+    func testSplitViewStopWithdrawsApprovalWithoutSendingTheWaitingAction() async throws {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true)) { $0.approvalWait = 30 }
+        wda.set("POST /poki/pane") { _ in
+            (200, ["value": ["identity": "left/workspace", "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
+        }
+        wda.source([("Button", "Delete test item")])
+        let read = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "workspace")
+        XCTAssertFalse(read.isError, read.text)
+        let call = Task {
+            await core.callTool("do", arguments: "{\"actions\":[{\"tap\":1}]}", localSession: "workspace")
+        }
+        defer { call.cancel() }
+        let requested = await eventually { core.pendingApproval != nil }
+        XCTAssertTrue(requested)
+        let approval = try XCTUnwrap(core.pendingApproval)
+        let outside = await core.callTool("look", arguments: "{\"pane\":\"right\"}", localSession: "outside")
+        XCTAssertTrue(outside.isError, outside.text)
+        XCTAssertNil(outside.jpeg)
+        let voice = await core.clearTap(on: "Delete test item", inApp: "com.apple.Preferences", named: "Settings", waiting: 1)
+        XCTAssertFalse(voice.mayTap)
+        XCTAssertEqual(core.pendingApproval?.id, approval.id)
+        call.cancel()
+        let result = await call.value
+        XCTAssertTrue(result.isError, result.text)
+        let revoked = await eventually { core.pendingApproval == nil }
+        XCTAssertTrue(revoked)
+        XCTAssertNil(core.pendingApproval)
+        core.resolveApproval(id: approval.id, approved: true)
+        let finished = await core.finishTask(localSession: "workspace")
+        XCTAssertEqual(finished, "finish: both apps stay open in Split View")
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+        XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty)
+    }
+
+    func testSplitViewStopReleasesTheOwnerHandoffForTheNextTask() async throws {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        wda.set("POST /poki/pane") { args in
+            let side = args?["side"]?.string ?? "auto"
+            return (200, ["value": ["identity": .string("\(side)/workspace"), "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
+        }
+        let read = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "old")
+        XCTAssertFalse(read.isError, read.text)
+        let handoff = await core.callTool("do", arguments: "{\"actions\":[{\"handoff\":\"Review the test screen\"}]}", localSession: "old")
+        XCTAssertFalse(handoff.isError, handoff.text)
+        let id = try XCTUnwrap(core.handoff?.id)
+        _ = await core.finishTask(switching: false)
+        XCTAssertNil(core.handoff)
+        core.handoffDone(id: id)
+        _ = await core.finishTask(localSession: "old")
+        let again = await core.callTool("look", arguments: "{\"pane\":\"right\"}", localSession: "new")
+        XCTAssertFalse(again.isError, again.text)
+        XCTAssertFalse(again.text.contains("handoff:"), again.text)
+        XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty)
+    }
+
+    func testSplitViewApprovalDoesNotCarryOverWhenTheOwnerReturnsToAPane() async throws {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true)) { $0.approvalWait = 0 }
+        let side = LockedBox("left")
+        wda.set("POST /poki/pane") { args in
+            side.value = args?["side"]?.string ?? "auto"
+            return (200, ["value": ["identity": .string("\(side.value)/workspace"), "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
+        }
+        wda.source([("Button", "Delete test item")])
+        func read(_ side: String) async {
+            let result = await core.callTool("look", arguments: "{\"pane\":\"\(side)\"}", localSession: "workspace")
+            XCTAssertFalse(result.isError, result.text)
+        }
+        await read("left")
+        let action = "{\"actions\":[{\"tap\":[120,120]}]}"
+        let held = await core.callTool("do", arguments: action, localSession: "workspace")
+        XCTAssertTrue(held.text.contains("approval_required"), held.text)
+        let approval = try XCTUnwrap(core.pendingApproval)
+        core.resolveApproval(id: approval.id, approved: true)
+        await read("right")
+        await read("left")
+        let retry = await core.callTool("do", arguments: action, localSession: "workspace")
+        XCTAssertTrue(retry.text.contains("approval_required"), retry.text)
+        XCTAssertNotEqual(core.pendingApproval?.id, approval.id)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+    }
+
+    func testSplitViewDragRequiresBothFreshPaneReadsAndOneContinuousGesture() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        let side = LockedBox("left")
+        wda.set("POST /poki/pane") { args in
+            let next = args?["side"]?.string ?? "auto"
+            side.value = next
+            let left = next == "left"
+            return (200, ["value": ["identity": .string("\(next)/workspace"),
+                                    "bundleId": left ? "com.apple.mobilenotes" : "com.apple.mobilesafari",
+                                    "otherBundleId": left ? "com.apple.mobilesafari" : "com.apple.mobilenotes",
+                                    "x": left ? 0 : 400, "y": 0]])
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": side.value == "left" ? "com.apple.mobilenotes" : "com.apple.mobilesafari"]])
+        }
+        #if canImport(Vision) && canImport(ImageIO) && canImport(CoreText) && os(macOS)
+        let picture = LockedBox(PictureSketchTests.png { _ in })
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(picture.value.base64EncodedString())]) }
+        #endif
+        wda.set("POST /poki/workspace-drag") { _ in (200, ["value": .null]) }
+        let drag: JSON = ["actions": [["drag": ["from": [150, 150], "to": [100, 100], "to_pane": "left"]]]]
+        _ = await core.call("look", ["pane": "right"])
+        let refused = await core.call("do", drag)
+        XCTAssertTrue(refused.text.contains("read both panes"), refused.text)
+        XCTAssertTrue(wda.bodies("POST /poki/workspace-drag").isEmpty)
+        _ = await core.call("look", ["pane": "left"])
+        _ = await core.call("look", ["pane": "right"])
+        let sent = await core.call("do", drag)
+        XCTAssertTrue(sent.text.contains("look there to confirm"), sent.text)
+        let path = wda.bodies("POST /poki/workspace-drag").first?["actions"]?.array?.first?["actions"]?.array ?? []
+        XCTAssertEqual(path.filter { $0["type"]?.string == "pointerDown" }.count, 1)
+        XCTAssertEqual(path.filter { $0["type"]?.string == "pointerUp" }.count, 1)
+        XCTAssertEqual(path.last(where: { $0["type"]?.string == "pointerMove" })?["x"]?.int, -300)
+        let repeatDrop = await core.call("do", drag)
+        XCTAssertTrue(repeatDrop.text.contains("already dragged"), repeatDrop.text)
+        XCTAssertEqual(wda.bodies("POST /poki/workspace-drag").count, 1)
+        let wrongPane = await core.call("look", ["pane": "right"])
+        XCTAssertFalse(wrongPane.text.contains("Split View drop:"), wrongPane.text)
+        #if canImport(Vision) && canImport(ImageIO) && canImport(CoreText) && os(macOS)
+        picture.value = PictureSketchTests.png { $0.fill(CGRect(x: 40, y: 440, width: 150, height: 150)) }
+        #else
+        wda.tree([Node("Image", nil, [40, 70, 150, 150]), Node("Button", "Done", [20, 300, 60, 40])])
+        #endif
+        let evidence = await core.call("look", ["pane": "left"])
+        #if canImport(Vision) && canImport(ImageIO) && canImport(CoreText) && os(macOS)
+        XCTAssertTrue(evidence.text.contains("before: 0, now: 0"), evidence.text)
+        XCTAssertTrue(evidence.text.contains("destination screenshot changed within ["), evidence.text)
+        wda.tree([Node("Image", nil, [40, 70, 150, 150]), Node("Button", "Done", [20, 300, 60, 40])])
+        let labeledByType = await core.call("look", ["pane": "left"])
+        XCTAssertTrue(labeledByType.text.contains("Image \"\" [40,70,150,150]"), labeledByType.text)
+        #else
+        XCTAssertTrue(evidence.text.contains("before: 0, now: 1"), evidence.text)
+        #endif
+        let again = await core.call("look", ["pane": "left"])
+        XCTAssertFalse(again.text.contains("Split View drop:"), again.text)
+
+        _ = await core.call("look", ["pane": "right"])
+        let adjustedDrop: JSON = ["actions": [["drag": ["from": [155, 152], "to": [110, 140], "to_pane": "left"]]]]
+        let alreadySent = await core.call("do", adjustedDrop)
+        XCTAssertTrue(alreadySent.text.contains("already dragged"), alreadySent.text)
+        XCTAssertEqual(wda.bodies("POST /poki/workspace-drag").count, 1)
+        let differentItem: JSON = ["actions": [["drag": ["from": [220, 180], "to": [100, 100], "to_pane": "left"]]]]
+        let anotherDrop = await core.call("do", differentItem)
+        XCTAssertTrue(anotherDrop.text.contains("look there to confirm"), anotherDrop.text)
+        XCTAssertEqual(wda.bodies("POST /poki/workspace-drag").count, 2)
+    }
+
+    func testSplitViewDragCannotBeReplayedAfterLayoutChangesEvenWhenDestinationMoves() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        let layout = LockedBox("landscape")
+        let selected = LockedBox("left")
+        wda.set("POST /poki/pane") { args in
+            let side = args?["side"]?.string ?? "left"
+            if layout.value == "portrait" { return (400, ["value": ["error": "invalid argument", "message": "two visible apps could not be confirmed"]]) }
+            selected.value = side
+            let notes = (side == "left") == (layout.value == "landscape")
+            return (200, ["value": ["identity": .string("\(side)/\(layout.value)"),
+                "bundleId": notes ? "com.apple.mobilenotes" : "com.apple.mobilesafari",
+                "otherBundleId": notes ? "com.apple.mobilesafari" : "com.apple.mobilenotes",
+                "x": side == "left" ? 0 : 400, "y": 0]])
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            let notes = (selected.value == "left") == (layout.value == "landscape")
+            return (200, ["value": ["bundleId": notes ? "com.apple.mobilenotes" : "com.apple.mobilesafari"]])
+        }
+        wda.set("POST /poki/workspace-drag") { _ in
+            layout.value = "portrait"
+            return (200, ["value": .null])
+        }
+        let session = "rotation"
+        _ = await core.call("look", ["pane": "left"], session: session, local: true)
+        _ = await core.call("look", ["pane": "right"], session: session, local: true)
+        let first: JSON = ["actions": [["drag": ["from": [150, 150], "to": [100, 100], "to_pane": "left"]]]]
+        _ = await core.call("do", first, session: session, local: true)
+        let interrupted = await core.call("look", ["pane": "left"], session: session, local: true)
+        XCTAssertTrue(interrupted.isError, interrupted.text)
+        XCTAssertTrue(interrupted.splitViewNeedsRead, interrupted.text)
+        XCTAssertNil(interrupted.jpeg)
+
+        // iOS can bring back the original binding with the exact same pane geometry.
+        layout.value = "landscape"
+        let sameDestination = await core.call("look", ["pane": "left"], session: session, local: true)
+        XCTAssertTrue(sameDestination.text.contains("Do not repeat the drag"), sameDestination.text)
+
+        layout.value = "rotatedBack"
+        let destination = await core.call("look", ["pane": "right"], session: session, local: true)
+        XCTAssertTrue(destination.text.contains("Do not repeat the drag"), destination.text)
+        let source = await core.call("look", ["pane": "left"], session: session, local: true)
+        XCTAssertFalse(source.isError, source.text)
+        let replay: JSON = ["actions": [["drag": ["from": [150, 150], "to": [100, 100], "to_pane": "right"]]]]
+        let refused = await core.call("do", replay, session: session, local: true)
+        XCTAssertTrue(refused.text.contains("interrupted drags are not replayed"), refused.text)
+        XCTAssertEqual(wda.bodies("POST /poki/workspace-drag").count, 1)
+    }
+
+    func testSplitViewDragWithUnknownDeliveryWaitsForFreshReadsAfterQuickRotation() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        let revision = LockedBox(1)
+        let selected = LockedBox("left")
+        let notes = "com.apple.mobilenotes", safari = "com.apple.mobilesafari"
+        wda.set("POST /poki/pane") { args in
+            let side = args?["side"]?.string ?? "left"
+            selected.value = side
+            return (200, ["value": ["identity": .string("\(side)/\(revision.value)"),
+                "bundleId": .string(side == "left" ? notes : safari),
+                "otherBundleId": .string(side == "left" ? safari : notes),
+                "x": side == "left" ? 0 : 400, "y": 0]])
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": .string(selected.value == "left" ? notes : safari)]])
+        }
+        wda.set("POST /poki/workspace-drag") { _ in
+            // The native driver sees a turn during dispatch. By the next read the panes
+            // have returned to their original positions, but the orientation revision advanced.
+            revision.value += 2
+            throw TransportError.other("sent, no confirmation: split_view_changed_after_dispatch")
+        }
+
+        let session = "quick-rotation-during-drag"
+        let original = await core.call("look", ["pane": "left"], session: session, local: true)
+        _ = await core.call("look", ["pane": "right"], session: session, local: true)
+        let drag: JSON = ["actions": [["drag": ["from": [150, 150], "to": [100, 100], "to_pane": "left"]]]]
+        let interrupted = await core.call("do", drag, session: session, local: true)
+        XCTAssertTrue(interrupted.splitViewNeedsRead, interrupted.text)
+        XCTAssertTrue(interrupted.text.contains("split_view_changed_after_dispatch"), interrupted.text)
+
+        let tap: JSON = ["actions": [["tap": [100, 100]]]]
+        let stale = await core.call("do", tap, session: session, local: true)
+        XCTAssertTrue(stale.splitViewNeedsRead, stale.text)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+
+        let destination = await core.call("look", ["pane": "left"], session: session, local: true)
+        XCTAssertEqual(destination.splitView?.app, notes, destination.text)
+        XCTAssertNotEqual(destination.splitView?.layout, original.splitView?.layout)
+        XCTAssertTrue(destination.text.contains("Do not repeat the drag"), destination.text)
+        _ = await core.call("look", ["pane": "right"], session: session, local: true)
+        let replay = await core.call("do", drag, session: session, local: true)
+        XCTAssertTrue(replay.text.contains("interrupted drags are not replayed"), replay.text)
+        XCTAssertEqual(wda.bodies("POST /poki/workspace-drag").count, 1)
+
+        let fresh = await core.call("do", tap, session: session, local: true)
+        XCTAssertFalse(fresh.isError, fresh.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1)
+    }
+
+    func testSplitViewRotationNeverTapsAnOldDraftFieldAndFocusesTheRestoredOne() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        let layout = LockedBox("original")
+        let field = "Draft message"
+        wda.source([("TextField", field)])
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "local.notes"]]) }
+        wda.set("POST /poki/pane") { args in
+            let side = args?["side"]?.string ?? "left"
+            let key = layout.value
+            if key == "portrait" { return (400, ["value": ["error": "invalid argument", "message": "two visible apps could not be confirmed"]]) }
+            return (200, ["value": ["identity": .string("\(side)/\(key)"), "bundleId": "local.notes",
+                "otherBundleId": key == "wrongPair" ? "local.weather" : "local.safari",
+                "x": side == "left" ? 0 : 400, "y": 0]])
+        }
+        let session = "draft-rotation"
+        let expected: Set<String> = ["local.notes", "local.safari"]
+        let original = await core.call("look", ["pane": "left"], session: session, local: true, expectedApps: expected)
+        XCTAssertFalse(original.isError, original.text)
+        XCTAssertTrue(original.text.contains(field), original.text)
+
+        for incompatibleLayout in ["portrait", "wrongPair"] {
+            layout.value = incompatibleLayout
+            let read = await core.call("look", ["pane": "left"], session: session, local: true, expectedApps: expected)
+            XCTAssertTrue(read.splitViewNeedsRead, read.text)
+            XCTAssertNil(read.jpeg)
+            let tap = await core.call("do", ["actions": [["tap": [100, 100]]]], session: session, local: true)
+            XCTAssertTrue(tap.splitViewNeedsRead, tap.text)
+            XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+        }
+
+        layout.value = "restored"
+        let restored = await core.call("look", ["pane": "right"], session: session, local: true, expectedApps: expected)
+        XCTAssertEqual(restored.splitView?.app, "local.notes", restored.text)
+        XCTAssertNotEqual(restored.splitView?.layout, original.splitView?.layout)
+        let tap = await core.call("do", ["actions": [["tap": [100, 100]]]], session: session, local: true)
+        XCTAssertFalse(tap.isError, tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1)
+    }
+
+    func testSplitViewPaneIsReportedUnavailableOnOtherAutomationPaths() async {
+        let (core, wda, _) = makeCore()
+        let result = await core.call("look", ["pane": "right"])
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("unavailable"), result.text)
+        XCTAssertTrue(wda.bodies("POST /poki/pane").isEmpty)
+    }
+
+    func testSplitViewDoesNotUseAFullScreenFallbackWhenTheSelectedAppDisappears() async {
+        let (core, wda, host) = makeCore(FakeWDA(dynamicSize: true, paneSelection: true))
+        wda.set("POST /poki/pane") { _ in
+            (200, ["value": ["identity": "left", "bundleId": "local.a", "otherBundleId": "local.b"]])
+        }
+        host.ownScreenshot.value = Data("full screen".utf8)
+        wda.set("GET /screenshot") { _ in (500, ["value": ["error": "unknown error", "message": "workspace changed"]]) }
+        let read = await core.call("look", ["pane": "left"])
+        XCTAssertTrue(read.isError, read.text)
+        XCTAssertNil(read.jpeg)
+        let action = await core.call("do", ["actions": [["tap": [80, 120]]]])
+        XCTAssertTrue(action.text.contains("nothing was sent"), action.text)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+    }
+
     /// A reply thread: a table of posts with a reply bar drawn over its bottom.
     func thread(_ wda: FakeWDA, quotedY: Double = 742) {
         wda.tree([
@@ -255,6 +713,19 @@ final class LookDoTests: XCTestCase {
         XCTAssertTrue(result.text.contains("screenshot: 390 px wide, 1 px = 1 screen point"), result.text)
     }
 
+    func testSplitResizeUpdatesPictureAndDropsTheOldTargets() async {
+        let (core, wda, host) = makeCore(FakeWDA(dynamicSize: true))
+        _ = await core.call("look", [:])
+        wda.set("GET /wda/screen") { _ in (200, ["value": ["screenSize": ["width": 290, "height": 720]]]) }
+        wda.set("GET /source") { _ in (500, ["value": ["error": "unknown error", "message": "no accessibility tree"]]) }
+        let pane = await core.call("look", [:])
+        XCTAssertEqual(host.widths.value.filter { $0 >= 200 }, [390, 290])
+        XCTAssertTrue(pane.text.contains("screenshot: 290 px wide, 1 px = 1 screen point"), pane.text)
+        let tap = await core.call("do", ["actions": [["tap": 1]]])
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+    }
+
     func testWaitUntilReadsUntilTheTextAppears() async {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
@@ -356,7 +827,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 final class PictureSketchTests: XCTestCase {
-    func png(_ draw: (CGContext) -> Void) -> Data {
+    static func png(_ draw: (CGContext) -> Void) -> Data {
         let width = 402, height = 874
         let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
@@ -373,20 +844,20 @@ final class PictureSketchTests: XCTestCase {
     /// Seen on the simulator: a scroll indicator fading out after a drag made a no-op wait answer
     /// screen_changed: true. A picture change is what a person would see.
     func testAFadingScrollIndicatorIsNotAChangeButASheetIs() throws {
-        let plain = PictureSketch(png: png { _ in })
-        let indicator = PictureSketch(png: png { $0.fill(CGRect(x: 396, y: 300, width: 3, height: 120)) })
-        let cursor = PictureSketch(png: png { $0.fill(CGRect(x: 40, y: 700, width: 2, height: 22)) })
-        let sheet = PictureSketch(png: png { $0.fill(CGRect(x: 0, y: 0, width: 402, height: 300)) })
-        let photo = PictureSketch(png: png { $0.fill(CGRect(x: 100, y: 400, width: 120, height: 120)) })
+        let plain = PictureSketch(png: Self.png { _ in })
+        let indicator = PictureSketch(png: Self.png { $0.fill(CGRect(x: 396, y: 300, width: 3, height: 120)) })
+        let cursor = PictureSketch(png: Self.png { $0.fill(CGRect(x: 40, y: 700, width: 2, height: 22)) })
+        let sheet = PictureSketch(png: Self.png { $0.fill(CGRect(x: 0, y: 0, width: 402, height: 300)) })
+        let photo = PictureSketch(png: Self.png { $0.fill(CGRect(x: 100, y: 400, width: 120, height: 120)) })
         XCTAssertNil(plain.hash, "decoded, not hashed")
         XCTAssertFalse(indicator.differs(from: plain))
         XCTAssertFalse(cursor.differs(from: plain))
         XCTAssertTrue(sheet.differs(from: plain))
         XCTAssertTrue(photo.differs(from: plain))
-        XCTAssertFalse(plain.differs(from: PictureSketch(png: png { _ in })))
+        XCTAssertFalse(plain.differs(from: PictureSketch(png: Self.png { _ in })))
         // A long indicator, as iOS draws it beside a two-page list, is a change (it moves a column of
         // cells), and the change is told by its share and box, so the reader knows it is a strip.
-        let longIndicator = PictureSketch(png: png { $0.fill(CGRect(x: 396, y: 110, width: 3, height: 700)) })
+        let longIndicator = PictureSketch(png: Self.png { $0.fill(CGRect(x: 396, y: 110, width: 3, height: 700)) })
         let change = try XCTUnwrap(longIndicator.change(from: plain))
         XCTAssertTrue(longIndicator.differs(from: plain))
         XCTAssertTrue(change.share > 0.01 && change.share < 0.05, "\(change)")

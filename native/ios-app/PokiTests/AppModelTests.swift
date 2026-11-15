@@ -1,4 +1,6 @@
 import PokiCore
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Poki
 
@@ -16,15 +18,24 @@ final class FakeLauncher: RunnerLauncher, @unchecked Sendable {
 final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     private let lock = NSLock()
     private var open = false
+    var isOpen: Bool { lock.withLock { open } }
     private var gate: DispatchSemaphore?
     private var heldOpenStarted = false
     private var answer: [String: Any]?
+    var onPrepare: (@Sendable () -> Void)?
+    var openingDelay: TimeInterval = 0
+    private var requested: TimeInterval = 0
+    private var ready: TimeInterval = 0
+    var openingTimes: (requested: TimeInterval, ready: TimeInterval) { lock.withLock { (requested, ready) } }
     /// The next open waits until `answer(_:)`.
     func holdNextOpen() { lock.withLock { gate = DispatchSemaphore(value: 0); heldOpenStarted = false } }
     var isHoldingOpen: Bool { lock.withLock { gate != nil && heldOpenStarted } }
     /// Lets a held open go on, with this answer instead of opening (nil opens).
     func answer(_ result: [String: Any]?) { lock.withLock { answer = result; gate?.signal(); gate = nil } }
     func prepare() -> [String: Any] {
+        lock.withLock { requested = ProcessInfo.processInfo.systemUptime }
+        onPrepare?()
+        if openingDelay > 0 { Thread.sleep(forTimeInterval: openingDelay) }
         if let held = lock.withLock({ () -> DispatchSemaphore? in heldOpenStarted = gate != nil; return gate }) {
             held.wait()
             if let given = lock.withLock({ () -> [String: Any]? in defer { answer = nil }; return answer }) { return given }
@@ -32,11 +43,16 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
         return lock.withLock {
             let reused = open
             open = true
+            ready = ProcessInfo.processInfo.systemUptime
             return ["ok": true, "generation": 1, "reused": reused, "seconds": 0.0]
         }
     }
     func close() -> [String: Any] { lock.withLock { defer { open = false }; return ["closed": open, "generation": 1, "seconds": 0.0] } }
     func pauseAutomation() -> [String: Any] { ["paused": true, "how": "fake"] }
+    /// How long iOS has held its "allow automation" call in the open under way.
+    func setAuthorizationWait(_ seconds: Double) { lock.withLock { authorizationWait = seconds } }
+    private var authorizationWait = 0.0
+    func authorizationWaitSeconds() -> Double { lock.withLock { authorizationWait } }
 }
 
 final class FakePairing: DevicePairing {
@@ -74,8 +90,8 @@ final class AppModelTests: XCTestCase {
         let (model, _) = model()
         try XCTSkipUnless(model.automationPath == .inProcess, "Poki Runner path: the launcher's state is the whole story")
         model.loopback.simulate(.working(ms: 9))
-        let opening = model.coreState(of: RunnerStatus(state: "running")).describe
-        XCTAssertTrue(opening.contains("opening the in-process session"), opening)
+        let preparing = model.coreState(of: RunnerStatus(state: "running"))
+        XCTAssertFalse(preparing.isRunning, preparing.describe)
         sessionOpen(model)
         XCTAssertEqual(model.coreState(of: RunnerStatus(state: "running")).describe, "running")
     }
@@ -422,6 +438,9 @@ final class InProcessPasscodeTests: XCTestCase {
 
     override func setUp() async throws {
         try XCTSkipUnless(AutomationPath.current == .inProcess, "Poki Runner path")
+        // The open gate is process-wide: a suite that sent Poki to the background before this one
+        // must not leave each open here refused as "open Poki first".
+        InProcessWDA.gate.withLock { $0 = InProcessWDA.OpenGate() }
         saved = (UserDefaults.standard.string(forKey: "relayAddress"), UserDefaults.standard.object(forKey: "relayEnabled"), SetupState.load())
         session = FakeAutomation()
         launcher = FakeLauncher()
@@ -448,6 +467,276 @@ final class InProcessPasscodeTests: XCTestCase {
         await fulfillment(of: [done], timeout: 5)
     }
 
+    func testForegroundAndPrerequisitesDoNotEnableAutomation() async {
+        let opened = expectation(description: "Automation Mode stays off without a phone task")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+
+        await prepareWithoutPhoneTask()
+        model.becameActive()
+
+        await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+    }
+
+    func testRemoteInitializationAndStatusWaitForPhoneReadToEnableAutomation() async {
+        let opened = expectation(description: "Connecting an agent does not enable Automation Mode")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+        let transport = SessionScreenTransport(session: session)
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
+
+        let reply = await core.handle(RelayRequest(id: "initialize", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Test agent","version":"1"}}}"#))
+
+        XCTAssertEqual(reply.status, 200)
+        XCTAssertNotNil(reply.headers["mcp-session-id"])
+        await finishPreparing()
+        for _ in 0..<2 {
+            let status = await core.handle(RelayRequest(id: "status", method: "POST", headers: [:], body:
+                #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}"#))
+            XCTAssertEqual(status.status, 200)
+            XCTAssertTrue(status.body.contains("runner:"), status.body)
+            XCTAssertFalse(status.body.contains("\"isError\":true"), status.body)
+        }
+        await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(session.isOpen, "readonly status must not enable Automation Mode")
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        session.onPrepare = nil
+        let screen = await core.handle(RelayRequest(id: "phone-step", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"look","arguments":{}}}"#))
+        XCTAssertEqual(screen.status, 200)
+        XCTAssertTrue(screen.body.contains("General"), screen.body)
+        XCTAssertFalse(screen.body.contains("\"isError\":true"), screen.body)
+        XCTAssertEqual(transport.screenReads, 1)
+        XCTAssertTrue(session.isOpen)
+    }
+
+    func testPureChatCompletesWithoutAutomation() async throws {
+        try await exerciseChatEntry(.send)
+    }
+
+    func testInputFocusPreparesWithoutOpeningAutomation() async throws {
+        try await exerciseChatEntry(.focus)
+    }
+
+    func testDictationButtonPreparesWithoutOpeningAutomation() async throws {
+        try await exerciseChatEntry(.dictation)
+    }
+
+    func testHomeShortcutPreparesWithoutOpeningAutomation() async throws {
+        try await exerciseChatEntry(.shortcut)
+    }
+
+    private enum ChatEntryPoint: String { case focus, dictation, shortcut, send }
+
+    private func exerciseChatEntry(_ entry: ChatEntryPoint) async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiDraft", "pokiDictationButton"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        let server = try FakeCompletions(replies: Array(repeating: FakeCompletions.text("The answer is four."), count: 3))
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        UserDefaults.standard.set(entry == .send ? "What is two plus two?" : "", forKey: "pokiDraft")
+        UserDefaults.standard.set(true, forKey: "pokiDictationButton")
+        await prepareWithoutPhoneTask()
+        model.pauseRunner(byOwner: false)
+        await withCheckedContinuation { done in model.closeInProcess("entry fixture") { done.resume() } }
+        XCTAssertTrue(model.runnerPaused)
+        let chat = ChatModel(app: model, kind: .handoff, requester: "Test agent")
+        let accessibility = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        defer { dlclose(accessibility) }
+        let isEnabled = unsafeBitCast(try XCTUnwrap(dlsym(accessibility, "_AXSAutomationEnabled")), to: (@convention(c) () -> Int32).self)
+        let setEnabled = unsafeBitCast(try XCTUnwrap(dlsym(accessibility, "_AXSSetAutomationEnabled")), to: (@convention(c) (Int32) -> Void).self)
+        let previous = isEnabled()
+        setEnabled(1)
+        defer { setEnabled(previous) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
+        window.makeKeyAndVisible()
+        UIAccessibility.post(notification: .screenChanged, argument: window.rootViewController?.view)
+        defer { window.endEditing(true); window.isHidden = true }
+        await drawEntry(window)
+        _ = try XCTUnwrap(Self.entryField(in: window))
+        let opened = expectation(description: "\(entry.rawValue) prepares dependencies without enabling Automation Mode")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+
+        try await activateEntry(entry, window: window, chat: chat)
+        if entry == .send {
+            // The chat has already ended without touching the phone: like any task, it stood by
+            // again at its end, and it never opened automation.
+            await fulfillment(of: [opened], timeout: 0.2)
+            XCTAssertTrue(model.runnerPaused, "a chat that never touched the phone stands by again when it ends")
+            XCTAssertFalse(session.isOpen)
+            XCTAssertFalse(model.hasOpenInProcessSession)
+            return
+        }
+        await waitFor("the UI entry resumes prerequisites") { !self.model.runnerPaused }
+        guard !model.runnerPaused else {
+            await fulfillment(of: [opened], timeout: 0.2)
+            return
+        }
+        await finishPreparing()
+        try await activateEntry(entry, window: window, chat: chat)
+        await fulfillment(of: [opened], timeout: 0.2)
+        XCTAssertFalse(session.isOpen)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        session.onPrepare = nil
+        let transport = SessionScreenTransport(session: session)
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
+        let read = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(read.isError, read.text)
+        XCTAssertTrue(read.text.contains("General"), read.text)
+        XCTAssertEqual(transport.screenReads, 1)
+        let reopened = expectation(description: "repeated UI entry keeps the existing session")
+        reopened.isInverted = true
+        session.onPrepare = { reopened.fulfill() }
+        try await activateEntry(entry, window: window, chat: chat)
+        await fulfillment(of: [reopened], timeout: 0.2)
+        XCTAssertTrue(session.isOpen)
+    }
+
+    private func activateEntry(_ entry: ChatEntryPoint, window: UIWindow, chat: ChatModel) async throws {
+        window.makeKeyAndVisible()
+        await drawEntry(window)
+        let field = try XCTUnwrap(Self.entryField(in: window))
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("OnDemandEvidence")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        try XCTUnwrap(image.pngData()).write(to: folder.appendingPathComponent("entry-\(entry.rawValue).png"))
+        switch entry {
+        case .focus:
+            field.resignFirstResponder()
+            await drawEntry(window)
+            XCTAssertTrue(field.becomeFirstResponder())
+            await drawEntry(window)
+        case .dictation:
+            let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.dictate" }))
+            XCTAssertTrue(button.accessibilityActivate(), "activate the actual dictation button")
+            await drawEntry(window)
+        case .shortcut:
+            field.resignFirstResponder()
+            await drawEntry(window)
+            let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0.hasPrefix("home.idea.") }))
+            XCTAssertTrue(button.accessibilityActivate(), "activate an actual home shortcut")
+            await drawEntry(window)
+            XCTAssertFalse(field.plainText.isEmpty, "the shortcut fills the composer")
+        case .send:
+            if field.plainText.isEmpty {
+                field.insertText("What is two plus two?")
+                field.delegate?.textViewDidChange?(field)
+                await drawEntry(window)
+            }
+            let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.main" }))
+            XCTAssertTrue(button.accessibilityActivate(), "activate the actual send button")
+            let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !chat.running && chat.entries.contains { if case .poki(let text) = $0.kind { text == "The answer is four." } else { false } }
+            }, object: nil)
+            await fulfillment(of: [completed], timeout: 20)
+            XCTAssertTrue(chat.savedCalls.isEmpty)
+        }
+    }
+
+    private func drawEntry(_ window: UIWindow) async {
+        window.layoutIfNeeded()
+        let drawn = expectation(description: "the entry UI rendered")
+        let frames = SessionEvidenceFrames { drawn.fulfill() }
+        let display = CADisplayLink(target: frames, selector: #selector(SessionEvidenceFrames.tick))
+        display.add(to: .main, forMode: .common)
+        await fulfillment(of: [drawn], timeout: 5)
+        display.invalidate()
+    }
+
+    private static func entryField(in view: UIView) -> CapsuleTextView? {
+        if let field = view as? CapsuleTextView { return field }
+        return view.subviews.lazy.compactMap { entryField(in: $0) }.first
+    }
+
+    private static func entryElement(in root: NSObject, matching matches: (String) -> Bool) -> NSObject? {
+        var pending = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if let identifier, matches(identifier) {
+                let frame = item.accessibilityFrame
+                let visible = (root as? UIView).map { $0.convert($0.bounds, to: nil) } ?? .zero
+                let button = item.accessibilityTraits.contains(.button)
+                if button && visible.contains(CGPoint(x: frame.midX, y: frame.midY)) && !frame.isEmpty { return item }
+            }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for index in 0..<count {
+                    if let child = item.accessibilityElement(at: index) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
+    }
+
+    func testBrowserOnlyChatCompletesWithoutAutomation() async throws {
+        let page = try PageServer(pages: ["/": "<html><head><title>Local fixture</title></head><body><p>Test capacity: 81 percent</p></body></html>"])
+        defer { PokiBrowser.shared.close() }
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("web_open", ["url": "http://127.0.0.1:\(page.port)/"]),
+            FakeCompletions.text("The page says 81 percent."),
+        ])
+        let chat = try await chatWithoutAutomation(on: server, request: "Read the capacity on this webpage.")
+
+        XCTAssertTrue(chat.entries.contains { if case .poki(let text) = $0.kind { text == "The page says 81 percent." } else { false } })
+        let call = try XCTUnwrap(chat.savedCalls.first)
+        XCTAssertEqual(call.name, "web_open")
+        XCTAssertTrue(call.ok)
+        XCTAssertTrue(call.answer.contains("81 percent"))
+        let modelInput = try JSONSerialization.data(withJSONObject: server.requests)
+        XCTAssertTrue(String(decoding: modelInput, as: UTF8.self).contains("81 percent"), "the real page observation reached the model")
+    }
+
+    private func chatWithoutAutomation(on server: FakeCompletions, request: String) async throws -> ChatModel {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        let opened = expectation(description: "A task without phone tools leaves Automation Mode off")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+        await prepareWithoutPhoneTask()
+        model.becameActive()
+        let chat = ChatModel(app: model, kind: .handoff, requester: "Test agent")
+
+        chat.send(request)
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !chat.running }, object: nil)
+        await fulfillment(of: [completed], timeout: 20)
+        await fulfillment(of: [opened], timeout: 0.1)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+        return chat
+    }
+
+    private func prepareWithoutPhoneTask() async {
+        let core = PokiCore(config: CoreConfig(), host: model.host)
+        _ = await core.handle(RelayRequest(id: "prepare", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#))
+        await finishPreparing()
+    }
+
+    private func finishPreparing() async {
+        await waitFor("the simulator's prerequisite check finished") { ["failed", "running"].contains(self.model.runner.state) }
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+    }
+
     /// On cellular the launcher reports `local_ddi`: the image is mounted, and nothing reached the
     /// phone's developer services. Holds the session's open that this starts.
     private func handOverToTheMountedImage() async {
@@ -459,6 +748,7 @@ final class InProcessPasscodeTests: XCTestCase {
         model.setup.developerMode = false
         model.setup.uiAutomation = false
         session.holdNextOpen()
+        model.wakeRunner()
         model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
         await waitFor("the local open is under way") { self.session.isHoldingOpen }
     }
@@ -537,58 +827,272 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(launcher.restarts, restarts + 1, "one retry while the loopback stays up")
     }
 
-    func testAPasscodeWaitAsksTheOwnerAndTellsTheAgentWhoMustEnterIt() async {
+    func testAPasscodeWaitAsksTheOwnerAndTellsTheAgentWhoMustEnterIt() async throws {
         session.holdNextOpen()
         model.wakeRunner()
         // On the simulator the launcher is WebDriverAgent on the Mac; its answer comes first.
         await waitFor("the simulator's runner check answered") { ["failed", "running"].contains(self.model.runner.state) }
         model.runnerChanged(RunnerStatus(state: "running"))
+        session.setAuthorizationWait(4)
         model.checkIdle(now: Date().addingTimeInterval(6))
         XCTAssertTrue(model.passcodeHint, "Poki's home asks the owner for the passcode")
         let waiting = model.host.currentRunner.describe
         XCTAssertTrue(waiting.contains("owner to enter the iPhone passcode"), waiting)
+        try await captureSessionState("passcode")
         session.answer(["ok": false, "code": "com.apple.dt.XCTest.XCTFuture 1000", "detail": "Timed out while enabling automation mode.", "seconds": 60.0])
         await waitFor("iOS gave up on the passcode") { !self.model.passcodeHint && !self.model.host.currentRunner.describe.hasPrefix("starting") }
         let failed = model.host.currentRunner.describe
         XCTAssertTrue(failed.contains("owner did not enter the iPhone passcode"), failed)
         XCTAssertTrue(failed.contains("the owner turns Poki off and on"), failed)
+
+        // Poki does not ask again by itself, so the next call hears it at once instead of waiting.
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let started = Date()
+        let look = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(look.isError, look.text)
+        XCTAssertTrue(look.text.contains("owner did not enter the iPhone passcode"), look.text)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
     }
 
-    /// The owner's call (ESP-464): with Poki in front the automation stays open between tasks, so the
-    /// next task does not wait for it to open again. Away from Poki it stands by after the idle time
-    /// as before, counted from when Poki left the front.
-    func testPokiInFrontDoesNotStandByWhenIdle() async {
-        let saved = model.idleStopSeconds
-        model.idleStopSeconds = 1
-        defer {
-            model.idleStopSeconds = saved
-            // The open gate is shared: the next test starts with Poki in front again.
-            InProcessWDA.gate.withLock { $0.inFront = true }
-        }
+    /// Issue 347: an open that is only slow (the session, or its first read) is not iOS asking for
+    /// the passcode. Nobody is asked for it until iOS has held its own "allow automation" call.
+    func testASlowOpenAloneAsksForNoPasscode() async {
+        session.holdNextOpen()
         model.wakeRunner()
-        try? await Task.sleep(nanoseconds: 1_300_000_000)
-        model.checkIdle()
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        XCTAssertFalse(model.runnerPaused, "Poki in front does not stand by")
-        model.wentToBackground()
-        model.checkIdle()
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertFalse(model.runnerPaused, "the idle time counts from leaving the front")
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        model.checkIdle()
-        await waitFor("standing by in the background after the idle time") { self.model.runnerPaused }
+        await waitFor("the simulator's runner check answered") { ["failed", "running"].contains(self.model.runner.state) }
+        model.runnerChanged(RunnerStatus(state: "running"))
+        await waitFor("the open is under way") { self.session.isHoldingOpen }
+        model.checkIdle(now: Date().addingTimeInterval(12))
+        XCTAssertFalse(model.passcodeHint, "a slow open is not a passcode request")
+        XCTAssertFalse(model.host.currentRunner.describe.contains("passcode"), model.host.currentRunner.describe)
+        session.answer(nil)
+        await waitFor("the session opened") { self.model.hasOpenInProcessSession }
+        XCTAssertFalse(model.passcodeHint)
     }
+
+    /// A session that opened but answers no element tree is a failure the agent reads as such, with
+    /// the reason, and not a ready session.
+    func testAnUnreadableSessionIsReportedAndNotTakenAsOpen() async {
+        session.holdNextOpen()
+        model.wakeRunner()
+        await waitFor("the simulator's runner check answered") { ["failed", "running"].contains(self.model.runner.state) }
+        model.runnerChanged(RunnerStatus(state: "running"))
+        await waitFor("the open is under way") { self.session.isHoldingOpen }
+        session.answer(["ok": false, "code": "session_unreadable", "detail": "accessibility did not load for this session", "seconds": 1.0])
+        await waitFor("the failure is reported") { self.model.host.currentRunner.describe.contains("could not read the screen") }
+        XCTAssertFalse(model.hasOpenInProcessSession)
+        XCTAssertTrue(model.host.currentRunner.describe.contains("accessibility did not load"), model.host.currentRunner.describe)
+    }
+
+    /// A look that waits for the session and hears it cannot read ends there: nothing opens another
+    /// session (and brings the banner back) until the agent calls again. That next call opens a new
+    /// session and reads the screen.
+    func testAFailedOpenEndsTheCallThatWaitedAndTheNextCallReads() async {
+        await prepareWithoutPhoneTask()
+        model.runnerChanged(RunnerStatus(state: "running"))
+        session.holdNextOpen()
+        async let first = model.runTool("look", arguments: "{}")
+        await waitFor("the look's open is under way") { self.session.isHoldingOpen }
+        let reopened = expectation(description: "no session opens after the failed look")
+        reopened.isInverted = true
+        session.onPrepare = { reopened.fulfill() }
+        session.answer(["ok": false, "code": "session_unreadable", "detail": "accessibility did not load for this session", "seconds": 1.0])
+
+        let failed = await first
+        XCTAssertTrue(failed.isError, failed.text)
+        XCTAssertTrue(failed.text.contains("could not read the screen"), failed.text)
+        await fulfillment(of: [reopened], timeout: 1.5)
+        XCTAssertFalse(session.isOpen)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        session.onPrepare = nil
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let next = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(next.isError, next.text)
+        XCTAssertTrue(next.text.contains("General"), next.text)
+        XCTAssertTrue(model.hasOpenInProcessSession)
+    }
+
+    func testSessionStaysOpenDuringTaskAndClosesAfterIdle() async {
+        let saved = model.idleStopSeconds
+        model.idleStopSeconds = 60
+        defer { model.idleStopSeconds = saved }
+        await prepareWithoutPhoneTask()
+        model.wakeRunner()
+        await waitFor("automation is open") { self.session.isOpen && self.model.hasOpenInProcessSession }
+        model.chatTaskBegan()
+
+        model.checkIdle(now: Date().addingTimeInterval(120))
+        XCTAssertTrue(session.isOpen, "thinking between phone steps must keep the same session")
+        XCTAssertFalse(model.runnerPaused)
+
+        // No idle time is waited for: the end of the task closes the session.
+        model.chatTaskEnded(reply: nil, session: "test", acted: true)
+        await waitFor("the completed task closes automation at once, even while Poki is in front") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        model.prepareForTask()
+        await finishPreparing()
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let next = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(next.isError, next.text)
+        XCTAssertTrue(next.text.contains("General"), next.text)
+        XCTAssertTrue(model.hasOpenInProcessSession)
+    }
+
+    func testRemotePhoneReadWaitsForSessionWithoutInputPreparation() async throws {
+        session.holdNextOpen()
+        let transport = SessionScreenTransport(session: session)
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: transport)
+        _ = await core.handle(RelayRequest(id: "connect", method: "POST", headers: [:], body:
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#))
+        await finishPreparing()
+        let reading = Task {
+            await core.handle(RelayRequest(id: "phone-step", method: "POST", headers: [:], body:
+                #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"look","arguments":{}}}"#))
+        }
+        await waitFor("the remote phone step requests automation") { self.session.isHoldingOpen }
+        XCTAssertEqual(transport.screenReads, 0, "no screen request may reach native automation before it is ready")
+        let chat = ChatModel(app: model)
+        XCTAssertEqual(PokiStatus.current(model: model, chat: chat).word, "Preparing")
+        try await captureSessionState("waiting", chat: chat)
+        session.answer(nil)
+        let reply = await reading.value
+        XCTAssertEqual(reply.status, 200)
+        XCTAssertTrue(reply.body.contains("General"), reply.body)
+        XCTAssertFalse(reply.body.contains("\"isError\":true"), reply.body)
+        XCTAssertEqual(transport.screenReads, 1, "the first phone read succeeds without a model retry")
+        XCTAssertNotEqual(PokiStatus.current(model: model, chat: chat).word, "Preparing")
+        try await captureSessionState("ready", chat: chat)
+    }
+
+    func testSimulatedFirstScreenTimings() async throws {
+        try XCTSkipUnless(UserDefaults.standard.bool(forKey: "sessionTiming"), "explicit simulator timing run only")
+        let entry = try XCTUnwrap(ChatEntryPoint(rawValue: UserDefaults.standard.string(forKey: "sessionTimingEntry") ?? "focus"))
+        let baseline = UserDefaults.standard.bool(forKey: "sessionTimingBaseline")
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiDraft", "pokiDictationButton"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        let server = try FakeCompletions(replies: [FakeCompletions.tool("look", [:]), FakeCompletions.text("The screen was read.")])
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        UserDefaults.standard.set("", forKey: "pokiDraft")
+        UserDefaults.standard.set(true, forKey: "pokiDictationButton")
+        model.stopSession()
+        let native = DelayedSimulatorAutomation()
+        model = AppModel(launcher: launcher, pairer: FakePairing(), automation: native)
+        model.loopback.simulate(.working(ms: 9))
+        model.setup.loopback = .proxy
+        XCTAssertTrue(model.setRelay("https://relay.invalid"))
+        model.startSession()
+        await prepareWithoutPhoneTask()
+        if baseline {
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.model.hasOpenInProcessSession }, object: nil)
+            await fulfillment(of: [ready], timeout: 60)
+            XCTAssertTrue(model.hasOpenInProcessSession, "the old foreground path opens before input")
+        }
+        let chat = ChatModel(app: model, kind: .handoff, requester: "Test agent")
+        let accessibility = try XCTUnwrap(dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW))
+        defer { dlclose(accessibility) }
+        let isEnabled = unsafeBitCast(try XCTUnwrap(dlsym(accessibility, "_AXSAutomationEnabled")), to: (@convention(c) () -> Int32).self)
+        let setEnabled = unsafeBitCast(try XCTUnwrap(dlsym(accessibility, "_AXSSetAutomationEnabled")), to: (@convention(c) (Int32) -> Void).self)
+        let previous = isEnabled()
+        setEnabled(1)
+        defer { setEnabled(previous) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
+        window.makeKeyAndVisible()
+        defer { window.endEditing(true); window.isHidden = true }
+        await drawEntry(window)
+        try await activateEntry(entry, window: window, chat: chat)
+        if entry != .shortcut {
+            let field = try XCTUnwrap(Self.entryField(in: window))
+            field.insertText("Read the screen")
+            field.delegate?.textViewDidChange?(field)
+            await drawEntry(window)
+        }
+        let submitted = ProcessInfo.processInfo.systemUptime
+        let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.main" }))
+        XCTAssertTrue(button.accessibilityActivate())
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !chat.running && chat.entries.contains { if case .poki(let text) = $0.kind { text == "The screen was read." } else { false } }
+        }, object: nil)
+        await fulfillment(of: [completed], timeout: 60)
+        let read = try XCTUnwrap(chat.savedCalls.first { $0.name == "look" })
+        XCTAssertTrue(read.ok, "the actual simulator screen must reach the chat model")
+        XCTAssertEqual(chat.savedCalls.filter { $0.name == "look" }.count, 1)
+        let events = AppLog.shared.lines.filter { $0.contains("[session-timing]") }
+        let firstRead = try XCTUnwrap(events.compactMap { line -> Double? in
+            guard let range = line.range(of: "screen_read_succeeded uptime="), let value = Double(line[range.upperBound...]), value >= submitted else { return nil }
+            return value
+        }.first)
+        XCTAssertGreaterThan(firstRead, submitted)
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("OnDemandEvidence")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let times = native.times
+        let output: [String: Any] = ["entry": entry.rawValue, "baseline": baseline, "simulator_native": true,
+                                  "artificial_open_delay_seconds": 1.92, "submitted": submitted,
+                                  "session_requested": times.requested, "session_ready": times.ready,
+                                  "first_screen_read": firstRead, "elapsed_seconds": firstRead - submitted,
+                                  "speech_text_is_fixture": entry == .dictation,
+                                  "events": events, "ok": read.ok, "look_calls": chat.savedCalls.filter { $0.name == "look" }.count]
+        await drawEntry(window)
+        let screenshot = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        try XCTUnwrap(screenshot.pngData()).write(to: folder.appendingPathComponent("entry-\(entry.rawValue)-complete.png"))
+        try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]).write(to: folder.appendingPathComponent("timings.json"))
+    }
+
+    private func captureSessionState(_ name: String, chat: ChatModel? = nil) async throws {
+        guard UserDefaults.standard.bool(forKey: "sessionEvidence") else { return }
+        let language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "zh-Hans"
+        defer { AppLocalization.shared.preference = language }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        let chat = chat ?? ChatModel(app: model)
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(model).environment(chat).environment(\.locale, AppLocalization.locale))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let drawn = expectation(description: "ChatView rendered its geometry and state")
+        let frames = SessionEvidenceFrames { drawn.fulfill() }
+        let display = CADisplayLink(target: frames, selector: #selector(SessionEvidenceFrames.tick))
+        display.add(to: .main, forMode: .common)
+        await fulfillment(of: [drawn], timeout: 5)
+        display.invalidate()
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("OnDemandEvidence")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try XCTUnwrap(image.pngData()).write(to: folder.appendingPathComponent("\(name).png"))
+    }
+
 }
 
 @MainActor
 final class FrontendSubtractionTests: XCTestCase {
     private var savedSetup: SetupState!
+    private var savedLanguage = AppLocalization.system
 
     override func setUp() {
         savedSetup = SetupState.load()
+        savedLanguage = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
     }
 
     override func tearDown() {
+        AppLocalization.shared.preference = savedLanguage
         savedSetup.save()
     }
 
@@ -793,4 +1297,32 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertNotNil(runnerIssue, "#78: PokiDetailsView Issue.current(model) includes the runner failure")
         XCTAssertEqual(runnerIssue?.fix, .setup)
     }
+}
+
+@MainActor
+private final class SessionEvidenceFrames: NSObject {
+    private var remaining = 3
+    private let drawn: () -> Void
+    init(drawn: @escaping () -> Void) { self.drawn = drawn }
+    @objc func tick() {
+        guard remaining > 0 else { return }
+        remaining -= 1
+        if remaining == 0 { drawn() }
+    }
+}
+
+private final class DelayedSimulatorAutomation: InProcessAutomation, @unchecked Sendable {
+    private let lock = NSLock()
+    private var requested: TimeInterval = 0
+    private var ready: TimeInterval = 0
+    var times: (requested: TimeInterval, ready: TimeInterval) { lock.withLock { (requested, ready) } }
+    func prepare() -> [String: Any] {
+        lock.withLock { requested = ProcessInfo.processInfo.systemUptime }
+        Thread.sleep(forTimeInterval: 1.92)
+        let result = PKInProcess.shared().prepare()
+        lock.withLock { ready = ProcessInfo.processInfo.systemUptime }
+        return result
+    }
+    func close() -> [String: Any] { PKInProcess.shared().close() }
+    func pauseAutomation() -> [String: Any] { PKInProcess.shared().pauseAutomation() }
 }

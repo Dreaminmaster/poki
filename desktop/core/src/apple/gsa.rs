@@ -122,6 +122,7 @@ fn apple_error(st: &Status) -> Error {
         -20101 | -22406 | -20970 => "Apple ID or password is wrong.".to_string(),
         -20209 | -20751 => "This Apple ID is locked. Unlock it at iforgot.apple.com and try again.".to_string(),
         -22421 => "Apple refused the sign-in from this computer's identity (anisette). Try again in a minute, or choose another anisette server in Settings.".to_string(),
+        -23782 => "Apple refused the Mac identity Poki signs in with (it asks for macOS 10.13 or later). Update Poki and Poki Setup to the latest version, then try again.".to_string(),
         -20283 => "Apple asked for a passcode or trusted device that this computer cannot provide. Enable two-factor authentication on this Apple ID and try again.".to_string(),
         _ if st.em.is_empty() => format!("Apple's sign-in failed with code {}.", st.ec),
         _ => st.em.clone(),

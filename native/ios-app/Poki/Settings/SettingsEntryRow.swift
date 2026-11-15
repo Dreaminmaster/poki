@@ -16,6 +16,8 @@ struct SettingsEntryButton: View {
     @Environment(\.openPokiSettings) private var open
     @Environment(\.drawerSliding) private var sliding
 
+    private var controlSize = CompactControlMetrics()
+
     private var needsYou: Bool {
         !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update" || model.relayStatus.isOffline
     }
@@ -25,8 +27,11 @@ struct SettingsEntryButton: View {
             Button { if !sliding { open() } } label: {
                 // The dot inside the label, so the glass draws it rather than covering it.
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: "gearshape").font(.system(size: 20, weight: .medium)).foregroundStyle(Tint.sidebarInk)
-                        .frame(width: 48, height: 48)
+                    Image(systemName: "gearshape")
+                        .font(.body.weight(.semibold))
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                        .foregroundStyle(Tint.sidebarInk)
+                        .frame(width: controlSize.side, height: controlSize.side)
                     if needsYou {
                         Circle().fill(Tint.amber).frame(width: 9, height: 9).offset(x: -8, y: 8)
                             .accessibilityHidden(true)
@@ -39,6 +44,9 @@ struct SettingsEntryButton: View {
             .accessibilityLabel(Text("Settings"))
             .accessibilityValue(needsYou ? Text("Needs your attention") : Text(verbatim: ""))
             .accessibilityIdentifier("threads.settings")
+            .accessibilityShowsLargeContentViewer {
+                Label("Settings", systemImage: "gearshape")
+            }
         }
     }
 }

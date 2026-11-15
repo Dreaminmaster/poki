@@ -84,6 +84,25 @@ final class ComposerReturnTests: XCTestCase {
         XCTAssertEqual(draft.sent, [])
     }
 
+    func testChangingFocusAndSizeKeepsTheSameEditorAndDraft() throws {
+        let (field, draft) = try composer()
+        type("Keep my draft", into: field)
+        settle { draft.text == "Keep my draft" }
+        draft.focused = false
+        settle { !field.isFirstResponder }
+        window?.frame.size.width = 240
+        window?.layoutIfNeeded()
+        settle { field.bounds.width > 180 }
+        draft.typeSize = .accessibility5
+        settle { (field.font?.pointSize ?? 0) > 40 }
+        draft.focused = true
+        settle { field.isFirstResponder }
+        XCTAssertTrue(Self.textView(in: try XCTUnwrap(window)) === field)
+        XCTAssertEqual(field.plainText, "Keep my draft")
+        XCTAssertEqual(draft.text, "Keep my draft")
+        XCTAssertEqual(draft.sent, [])
+    }
+
     private func pressReturn(_ field: CapsuleTextView) throws -> Bool {
         try XCTUnwrap(field.delegate?.textView?(field, shouldChangeTextIn: field.selectedRange, replacementText: "\n"))
     }
@@ -125,6 +144,7 @@ final class ComposerReturnTests: XCTestCase {
     private final class Draft: ObservableObject {
         @Published var text = ""
         @Published var focused = true
+        @Published var typeSize: DynamicTypeSize = .large
         var sent: [String] = []
     }
 
@@ -133,6 +153,7 @@ final class ComposerReturnTests: XCTestCase {
         var body: some View {
             ComposerInputView(input: $draft.text, focused: $draft.focused, running: false,
                               send: { text, _ in draft.sent.append(text) }, stop: {}, openVoice: {})
+                .dynamicTypeSize(draft.typeSize)
         }
     }
 }

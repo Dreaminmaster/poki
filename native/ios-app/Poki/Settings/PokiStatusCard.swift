@@ -56,6 +56,11 @@ extension PowerTile {
 struct PokiStatusCard: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
+    var maximumHeight: CGFloat = 600
+    @State private var contentHeight: CGFloat = 160
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var rowInset = 10.0
+    @ScaledMetric(relativeTo: .body) private var rowHeight = 52.0
     @Environment(\.colorScheme) private var scheme
     /// Settings › Models, for Add Model.
     var openModel: () -> Void
@@ -69,20 +74,25 @@ struct PokiStatusCard: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
-        VStack(alignment: .leading, spacing: 0) {
-            // Where Poki stands, which the top bar no longer says in words: its face shows it there.
-            Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
-                .font(.footnote).foregroundStyle(soft)
-                .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
-                .accessibilityIdentifier("status.word")
-            modelRow
-            if open == .model { modelChoices }
-            rule
-            approvalRow
-            if open == .approvals { approvalChoices }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Where Poki stands, which the top bar no longer says in words: its face shows it there.
+                Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
+                    .font(.footnote).foregroundStyle(soft)
+                    .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
+                    .accessibilityIdentifier("status.word")
+                modelRow
+                if open == .model { modelChoices }
+                rule
+                approvalRow
+                if open == .approvals { approvalChoices }
+            }
+            .padding(.vertical, 6)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
-        .padding(.vertical, 6)
-        .frame(maxWidth: 330, alignment: .leading)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: min(contentHeight, maximumHeight))
+        .frame(maxWidth: typeSize.isAccessibilitySize ? 520 : 330, alignment: .leading)
         .background(.regularMaterial, in: shape)
         .background(Color(dark ? .secondarySystemBackground : .systemBackground).opacity(0.6), in: shape)
         .overlay(shape.strokeBorder(Color.white.opacity(dark ? 0.12 : 0.95), lineWidth: 1))
@@ -120,7 +130,7 @@ struct PokiStatusCard: View {
                     Text("Add Model").foregroundStyle(Tint.blue).frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
                 }
-                .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
+                .padding(.horizontal, 20).frame(minHeight: min(64, max(44, rowHeight))).contentShape(.rect)
             }
             .buttonStyle(CardRowStyle())
             .accessibilityIdentifier("status.addModel")
@@ -192,14 +202,29 @@ struct PokiStatusCard: View {
     private func toggle(_ row: Row) { open = open == row ? nil : row }
 
     /// A row of the card: its name, what is chosen, and the arrow that opens the choices under it.
-    private func choiceRow(_ title: LocalizedStringKey, value: String, open: Bool) -> some View {
-        HStack(spacing: 8) {
-            Text(title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
-            Text(verbatim: value).foregroundStyle(soft).lineLimit(1)
-            Image(systemName: open ? "chevron.up" : "chevron.down")
-                .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+    @ViewBuilder private func choiceRow(_ title: LocalizedStringKey, value: String, open: Bool) -> some View {
+        let chevron = Image(systemName: open ? "chevron.up" : "chevron.down")
+            .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+        Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(title).foregroundStyle(Color(.label))
+                        Spacer(minLength: 0)
+                        chevron
+                    }
+                    Text(verbatim: value).foregroundStyle(soft)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 8) {
+                    Text(title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(verbatim: value).foregroundStyle(soft).lineLimit(1)
+                    chevron
+                }
+            }
         }
-        .padding(.horizontal, 20).frame(minHeight: 52).contentShape(.rect)
+        .padding(.horizontal, 20).padding(.vertical, min(16, rowInset)).frame(minHeight: min(64, max(44, rowHeight))).contentShape(.rect)
     }
 
     private func tickRow(_ title: String, ticked: Bool, inset: CGFloat, height: CGFloat = 44) -> some View {
@@ -241,30 +266,31 @@ private struct PokiStatusCardOverlay: ViewModifier {
 
     func body(content: Content) -> some View {
         content.overlay(alignment: .top) {
-            ZStack(alignment: .top) {
-                if isPresented {
-                    // The page stays as it is behind the card (the board); a tap anywhere else closes it.
-                    Color.black.opacity(0.001)
-                        .ignoresSafeArea()
-                        .contentShape(.rect)
-                        .onTapGesture { isPresented = false }
-                        .accessibilityLabel(Text("Close"))
-                        .accessibilityAddTraits(.isButton)
-                    PokiStatusCard(openModel: {
-                        isPresented = false
-                        openModel()
-                    })
-                    .padding(.horizontal, 16)
-                    // Under Poki's picture: over the greeting on the home page, clear of it; in the chat,
-                    // under the picture and its name.
-                    .padding(.top, under.map { max(0, $0 - origin + 12) } ?? 84)
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.9, anchor: .top).combined(with: .opacity))
-                    .accessibilityAddTraits(.isModal)
-                    .accessibilityAction(.escape) { isPresented = false }
+            GeometryReader { geometry in
+                ZStack(alignment: .top) {
+                    if isPresented {
+                        let top = under.map { max(0, $0 - origin + 12) } ?? 84
+                        // The page stays behind the card; a tap outside closes it.
+                        Color.black.opacity(0.001)
+                            .ignoresSafeArea()
+                            .contentShape(.rect)
+                            .onTapGesture { isPresented = false }
+                            .accessibilityLabel(Text("Close"))
+                            .accessibilityAddTraits(.isButton)
+                        PokiStatusCard(maximumHeight: max(120, geometry.size.height - top - 16), openModel: {
+                            isPresented = false
+                            openModel()
+                        })
+                        .padding(.horizontal, 16)
+                        .padding(.top, top)
+                        .transition(reduceMotion ? .opacity : .scale(scale: 0.9, anchor: .top).combined(with: .opacity))
+                        .accessibilityAddTraits(.isModal)
+                        .accessibilityAction(.escape) { isPresented = false }
+                    }
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.leading, leading)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.leading, leading)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { origin = $0 }
             .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.18), value: isPresented)
         }

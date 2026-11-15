@@ -52,6 +52,8 @@ struct TaskCard: View {
     /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
     /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
     @State private var open: Bool?
+    @ScaledMetric(relativeTo: .footnote) private var endingSide = 20.0
+    @ScaledMetric(relativeTo: .subheadline) private var cardInset = 12.0
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var total: Int { steps.count + upcoming.count }
@@ -84,7 +86,7 @@ struct TaskCard: View {
                             .transition(.opacity)
                     }
                 }
-                .padding(.vertical, 12).padding(.horizontal, 14)
+                .padding(.vertical, min(18, cardInset)).padding(.horizontal, min(20, cardInset + 2))
             } else if blue {
                 VStack(alignment: .leading, spacing: 14) {
                     header
@@ -101,7 +103,9 @@ struct TaskCard: View {
                     header
                 }
                 .tint(Color(.tertiaryLabel))
-                .padding(.vertical, isOpen ? 16 : 12).padding(.leading, isOpen ? 16 : 12).padding(.trailing, isOpen ? 16 : 14)
+                .padding(.vertical, min(20, cardInset + (isOpen ? 4 : 0)))
+                .padding(.leading, min(20, cardInset + (isOpen ? 4 : 0)))
+                .padding(.trailing, min(20, cardInset + (isOpen ? 4 : 2)))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -117,8 +121,8 @@ struct TaskCard: View {
         HStack(spacing: over ? 12 : 10) {
             mark
             VStack(alignment: .leading, spacing: over ? 2 : 1) {
-                Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? 3 : 1)
-                subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? 2 : 1)
+                Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? nil : 1)
+                subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? nil : 1)
                 // At the accessibility text sizes the title wraps and the label goes under it.
                 if big, !over || asker != nil { pill }
             }
@@ -139,8 +143,8 @@ struct TaskCard: View {
     }
 
     private func endMark(_ name: String, _ color: Color, size: CGFloat = 9) -> some View {
-        Image(systemName: name).font(.system(size: size, weight: .heavy)).foregroundStyle(.white)
-            .frame(width: 20, height: 20).background(color, in: .circle)
+        Image(systemName: name).font(.system(size: size * min(32, endingSide) / 20, weight: .heavy)).foregroundStyle(.white)
+            .frame(width: min(32, endingSide), height: min(32, endingSide)).background(color, in: .circle)
     }
 
     /// Poki's face while the task is alive; a tick, a cross or a stop sign once it is over.
@@ -253,10 +257,9 @@ private struct TaskPill: View {
     var ink: Color
     var ground: Color
     var body: some View {
-        text.font(.caption.weight(.medium)).foregroundStyle(ink).lineLimit(1)
+        text.font(.caption.weight(.medium)).foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10).frame(minHeight: 24)
             .background(ground, in: .capsule)
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 }
 

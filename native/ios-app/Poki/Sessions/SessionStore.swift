@@ -178,6 +178,12 @@ final class SessionStore {
 
     func session(_ id: String) -> SavedSession? { sessions.first { $0.id == id } }
 
+    /// The outside agent behind an MCP session, by the session id the core's events carry. Read from
+    /// the names kept per MCP session, not from a saved conversation: one conversation can show the
+    /// steps of several MCP sessions, and its id is then not the session's. nil for the chat's own
+    /// session, which is no outside agent's.
+    func outsideClient(ofMCPSession id: String) -> String? { clients[id] }
+
     /// The latest in-app chat, to come back to at launch.
     func latestPoki() -> SavedSession? { sessions.first { $0.kind == .poki && $0.archived == nil } }
 
@@ -230,6 +236,18 @@ final class SessionStore {
         session.live = live
         if !live, session.outcome == nil { session.outcome = .done }
         session.updated = Date()
+        put(session)
+    }
+
+    func appendCall(_ call: CallRecord, to id: String) {
+        guard var session = session(id) else { return }
+        session.calls.append(call)
+        put(session)
+    }
+
+    func finishStopping(_ entry: UUID, in id: String, text: String) {
+        guard var session = session(id), let index = session.entries.firstIndex(where: { $0.id == entry }) else { return }
+        session.entries[index].kind = .poki(text)
         put(session)
     }
 

@@ -69,6 +69,7 @@ struct ApprovalsSections: View {
                         } maximumValueLabel: {
                             Image(systemName: "lock.shield").foregroundStyle(.secondary).accessibilityLabel(Text("Asks most"))
                         }
+                        .sensoryFeedback(.selection, trigger: model.classifierLevel)
                         .accessibilityValue(Text(model.classifierLevel.title))
                         .accessibilityIdentifier("approvals.sensitivity")
                     }

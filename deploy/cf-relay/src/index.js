@@ -8,7 +8,7 @@
 //
 // OAuth (claude.ai needs it): a minimal authorization server per connector URL. Possession of
 // the connector URL (label + secret) is the credential: /authorize checks that the connected
-// phone knows the secret and grants at once. Client ids, codes and tokens are stateless HMAC
+// phone knows the secret and the owner approves the client. Client ids, codes and tokens are stateless HMAC
 // tokens (TOKEN_SECRET) bound to sha256(secret); revoking the secret on the phone ends them all.
 //
 // Nothing about traffic is stored or logged. The only storage is the Budget object's daily
@@ -36,8 +36,8 @@ const DEFAULTS = {
   LEASE: 25, // requests a device object takes from the daily budget at a time
   ACCESS_TTL: 3_600,
   REFRESH_TTL: 30 * 86_400,
-  REDIRECT_HOSTS: '', // empty: any https callback (an unlisted one needs the owner's OK); a comma-separated list narrows registration to those hosts
-  CONSENT_MS: 90_000, // how long a sign-in from an unlisted client waits for the owner's OK on the phone
+  REDIRECT_HOSTS: '', // empty: any https callback; a comma-separated list narrows registration, never grants consent
+  CONSENT_MS: 90_000, // how long each new authorization waits for the owner's OK on the phone
 };
 const limit = (env, name) => (env[name] !== undefined && env[name] !== '' ? (typeof DEFAULTS[name] === 'number' ? Number(env[name]) : env[name]) : DEFAULTS[name]);
 
@@ -138,23 +138,6 @@ const APP_SCHEMES = new Set([
   'cursor', 'vscode', 'vscode-insiders', 'vscodium', 'windsurf', 'trae', 'trae-cn', 'kiro', 'positron',
   'zed', 'raycast', 'claude', 'chatgpt', 'goose', 'lmstudio', 'cherrystudio', 'msty', 'boltai', 'warp', 'jan', 'poke',
 ]);
-// Callback hosts of known web clients (and their subdomains). Registration takes any https callback;
-// a sign-in whose callback is elsewhere waits for the owner's OK on the phone (see authorize).
-const KNOWN_HOSTS = [
-  'claude.ai', 'claude.com', 'anthropic.com', 'chatgpt.com', 'openai.com', 'poke.com', 'meta.ai', 'meta.com',
-  'perplexity.ai', 'mistral.ai', 'gemini.google.com', 'google.com', 'microsoft.com', 'copilot.microsoft.com',
-  'github.com', 'vscode.dev', 'cursor.com', 'cursor.sh', 'windsurf.com', 'codeium.com', 'x.ai', 'grok.com',
-  'manus.im', 'manus.ai', 'deepseek.com', 'openrouter.ai', 'kimi.com', 'moonshot.cn', 'qwen.ai', 'aliyun.com',
-  'huggingface.co', 'n8n.cloud', 'n8n.io', 'zapier.com', 'make.com', 'raycast.com', 'zed.dev', 'block.xyz',
-  'lmstudio.ai', 'cherry-ai.com', 'msty.app', 'boltai.com', 'warp.dev', 'jan.ai', 'cline.bot', 'roocode.com',
-];
-function knownCallback(uri) {
-  let url;
-  try { url = new URL(uri); } catch { return false; }
-  if (url.protocol === 'http:') return true; // loopback only (redirectAllowed): a client on the owner's own computer
-  if (APP_SCHEMES.has(url.protocol.slice(0, -1))) return true;
-  return KNOWN_HOSTS.some(h => url.hostname === h || url.hostname.endsWith(`.${h}`));
-}
 function redirectAllowed(env, uri) {
   let url;
   try { url = new URL(uri); } catch { return false; }
@@ -209,12 +192,10 @@ async function authorize(env, url, label, secretHash, b, device) {
   const known = await device.fetch(new Request('https://do/knows', { method: 'POST', body: JSON.stringify({ secretHash }) }));
   if (known.status === 503) return new Response('The phone is offline: open Poki on the phone, then try again.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   if (known.status !== 200) return back({ error: 'access_denied' });
-  // A client outside the known list (and no REDIRECT_HOSTS narrowing it): the owner says yes on the phone.
-  if (!String(limit(env, 'REDIRECT_HOSTS')).trim() && !knownCallback(redirect)) {
-    const asked = await device.fetch(new Request('https://do/consent', { method: 'POST', body: JSON.stringify({ secretHash, client: client.n ?? 'MCP client', callback: new URL(redirect).host || redirect }) }));
-    if (asked.status === 503) return new Response('The phone is offline: open Poki on the phone, then try again.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
-    if (asked.status !== 200) return back({ error: 'access_denied', error_description: 'the owner did not allow this client on the phone' });
-  }
+  // Callback routing (including REDIRECT_HOSTS) is not evidence of the owner's consent.
+  const asked = await device.fetch(new Request('https://do/consent', { method: 'POST', body: JSON.stringify({ secretHash, client: client.n ?? 'MCP client', callback: new URL(redirect).host || redirect }) }));
+  if (asked.status === 503) return new Response('The phone is offline: open Poki on the phone, then try again.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  if (asked.status !== 200) return back({ error: 'access_denied', error_description: 'the owner did not allow this client on the phone' });
   const cid = hex(await sha256(p.get('client_id')));
   const code = await seal(env, { k: 'code', l: label, s: secretHash, c: cid, r: redirect, cc: challenge, exp: Math.floor(Date.now() / 1000) + 60 });
   return back({ code });
@@ -425,7 +406,7 @@ export class DeviceRelay extends DurableObject {
     return true;
   }
 
-  // Asks the phone's owner whether an unlisted client may connect: 200 when they allow it, 403 when
+  // Asks the phone's owner whether a client may connect: 200 when they allow it, 403 when
   // they do not or do not answer in CONSENT_MS, 503 with the phone offline.
   async consent(request) {
     const { secretHash, client, callback } = await request.json();

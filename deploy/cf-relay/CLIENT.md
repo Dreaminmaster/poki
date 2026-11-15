@@ -52,18 +52,16 @@ Answer each one exactly once:
 
 1. In Poki, the user taps **Add connector** and copies the URL.
 2. In claude.ai: Settings → Connectors → Add custom connector, paste the URL, Connect. ChatGPT works the same way in developer mode.
-3. The client runs OAuth on its own: it discovers the metadata, registers itself and opens the authorize page. The relay asks the connected phone whether it knows this secret and grants at once. There is no password and no page to click through, because the URL itself is the credential. The phone must be online, otherwise the page says so.
-   Clients differ in what they register, so the relay accepts a callback on any https host (and on http only for localhost, 127.0.0.1 and [::1]). The user never sees an approval page or a consent step: pasting the URL is the whole authorization, and the phone checks it silently. If registration answers 400 `invalid_redirect_uri` with a description starting `callback address not allowed`, the client sent a callback the relay refuses ([DEPLOY.md](DEPLOY.md#oauth-design) lists the rules, including the optional `REDIRECT_HOSTS` list).
+3. The client discovers the metadata, registers and starts OAuth. The relay checks that the connected phone knows the connector secret, then waits for the user to approve on the phone. The relay sends a v1 `consent` frame with the connector hash, client name and callback display value. The phone replies with `consent_res` and a matching ID. Explicit approval grants a code, refusal or no answer returns `access_denied`, and an offline phone returns HTTP 503.
+   If registration returns `invalid_redirect_uri`, check the callback address against the [supported callback rules](DEPLOY.md#oauth-design).
    The relay supports Streamable HTTP only. A client that probes for SSE with `GET` on the MCP URL gets 405 from the phone, and a client that follows the spec then falls back to `POST`. Do not answer that `GET` with a stream.
 4. The client now calls tools, and each call arrives at the phone as a `req`. To disconnect a client, the user revokes its secret in Poki.
-
-Approving each new client on the phone, with a prompt that names the client, would need a v2 frame pair. [APPROVAL-v2.md](APPROVAL-v2.md) has the proposal.
 
 ## Trying it without a phone
 
 ```sh
 node test/phone-sim.mjs https://poki-relay.you.workers.dev           # acts as a phone; prints the connector URL
-node test/phone-sim.mjs https://poki-relay.you.workers.dev --check   # also runs OAuth + initialize + tools/call; exit 0 = OK
+node test/phone-sim.mjs https://poki-relay.you.workers.dev --check   # checks refusal and approval, then initialize + tools/call
 ```
 
 The simulator keeps its key and secret in `./phone-sim.json`, or the file named by `PHONE_SIM_STATE`, so its URL stays the same between runs. It needs Node 22 or later. Locally, run it against `wrangler dev` with `TOKEN_SECRET` set in `.dev.vars`: `node test/phone-sim.mjs http://127.0.0.1:8787 --check`.

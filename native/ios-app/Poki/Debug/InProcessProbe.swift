@@ -16,6 +16,12 @@ import UIKit
 /// launches it again and terminates it, noting the front app and its pid after each;
 /// `-pokiInProcess tools -pokiProbeApp BUNDLE` runs PokiCore's look and do as an agent would: open
 /// the app, tap its first field and type, open Settings and swipe, press Home, looking after each;
+/// `-pokiInProcess reopen -pokiProbeRounds 5` closes the session and opens it again that many times in
+/// this one process, reading the screen after each open (issue 347), with every step's seconds;
+/// `-pokiInProcess lifecycle -pokiProbeRounds 5` runs whole tasks through PokiCore (task, read, end,
+/// session closed) that many times, then one whose new session cannot read;
+/// `-pokiInProcess delivery` reopens the session, then taps and types in Poki and in Settings and
+/// brings Poki back, saying which of those arrived;
 /// `-pokiInProcess gym` runs the whole Poki Gym scorecard (native/ios-gym/check) through PokiCore on
 /// this path, answering approvals as the owner would, into Documents/gym-scorecard.txt and
 /// Documents/gym-pictures (the gym workflow's scorecard-inprocess job).
@@ -48,12 +54,23 @@ final class InProcessProbe: ObservableObject {
             case "later": await later()
             case "read": await readOnly()
             case "separate": await separateTrial()
+            case "delivery": await deliveryCheck()
+            case "lifecycle": await lifecycleCheck(model: model, rounds: defaults.integer(forKey: "pokiProbeRounds") > 0 ? defaults.integer(forKey: "pokiProbeRounds") : 5)
+            case "reopen": await reopenCycle(rounds: defaults.integer(forKey: "pokiProbeRounds") > 0 ? defaults.integer(forKey: "pokiProbeRounds") : 5)
             case "port": await portCheck()
             case "source": await sourceBothPaths(model: model)
             case "apps": await appsCycle(defaults.string(forKey: "pokiProbeApp") ?? "local.pokimcp.fixture")
             case "tools": await toolsCycle(model: model, app: defaults.string(forKey: "pokiProbeApp") ?? "local.pokimcp.fixture")
+            case "workspace", "workspace-input": await workspaceRead(model: model, testInput: mode == "workspace-input")
+            case "workspace-fullscreen": await workspaceRead(model: model, testInput: true, fullScreen: true)
+            case "workspace-layout": await workspaceLayout(model: model)
+            case "workspace-drag": await workspaceDrag(model: model)
+            case "workspace-owner": await workspaceOwner(model: model)
+            case "workspace-cancel": await workspaceCancel(model: model)
+            case "workspace-adjacent": await workspaceAdjacent(model: model)
             case "gym": await gymScorecard(model: model)
-            case "chat": await chatCycle(model: model)
+            case "chat", "workspace-chat", "workspace-model", "fullscreen-model":
+                await chatCycle(model: model, inSplitView: mode.hasPrefix("workspace-"), configuredModel: mode.hasSuffix("-model"))
             case "web": await WebDemo.run()
             case "bench": await benchmark(model: model, rounds: defaults.integer(forKey: "pokiBenchRounds") > 0 ? defaults.integer(forKey: "pokiBenchRounds") : 5)
             default: await prepareOnly()
@@ -195,6 +212,197 @@ final class InProcessProbe: ObservableObject {
         note("after Home the front app is \(front["bundleId"] as? String ?? "?")", ["step": "home_seen", "bundle": front["bundleId"] as? String ?? "", "look_mentions_home": home.lowercased().contains("springboard") || home.contains("Home")])
     }
 
+    /// On a Duo, put an empty test note and Settings › General side by side after preparing.
+    private func workspaceRead(model: AppModel, testInput: Bool, fullScreen: Bool = false) async {
+        guard begin("Duo workspace") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}") // Open PokiCore's session before backgrounding.
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo workspace probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        func call(_ name: String, _ arguments: String, _ label: String) async -> PokiCore.ToolAnswer {
+            let start = ProcessInfo.processInfo.systemUptime
+            let output = await model.phoneToolWithPicture(name, arguments: arguments)
+            let header = output.text.split(separator: "\n").first.map(String.init) ?? ""
+            let status = output.text.split(separator: "\n").first { $0.hasPrefix("error:") || $0.hasPrefix("did:") } ?? ""
+            note("workspace \(label): \(header) \(status)", ["step": name, "label": label, "error": output.isError,
+                 "picture": output.jpeg != nil, "text": header, "seconds": ProcessInfo.processInfo.systemUptime - start])
+            return output
+        }
+        let first = await call("look", fullScreen ? "{}" : "{\"pane\":\"left\"}", "first read")
+        guard !first.isError else { return }
+        let second: PokiCore.ToolAnswer
+        if fullScreen {
+            second = await call("do", "{\"actions\":[{\"launch\":\"com.apple.Preferences\"}],\"full\":true}", "open Settings")
+        } else {
+            second = await call("look", "{\"pane\":\"right\"}", "second read")
+        }
+        guard !second.isError else { return }
+        let settingsOnLeft = !fullScreen && first.text.hasPrefix("app: 设置")
+        let settings = settingsOnLeft && testInput ? await call("look", "{\"pane\":\"left\"}", "select Settings") : second
+        if testInput, settings.text.hasPrefix("app: 设置"),
+           let row = settings.text.split(separator: "\n").first(where: { $0.contains("\"隔空投送\"") }),
+           let ref = Int(row.drop(while: { !$0.isNumber }).prefix(while: \.isNumber)) {
+            _ = await call("do", "{\"actions\":[{\"tap\":\(ref)}]}", "open AirDrop page")
+        }
+        let editor: PokiCore.ToolAnswer
+        if fullScreen {
+            editor = await call("do", "{\"actions\":[{\"launch\":\"com.apple.mobilenotes\"}]}", "open Notes")
+        } else {
+            let editorSide = settingsOnLeft ? "right" : "left"
+            editor = await call("look", "{\"pane\":\"\(editorSide)\"}", "Notes read")
+        }
+        guard testInput, !editor.isError, editor.text.hasPrefix("app: 备忘录") else { return }
+        let tap = await call("do", "{\"actions\":[{\"tap\":[180,150]}]}", "Notes editor focus")
+        guard !tap.isError else { return }
+        _ = await call("do", "{\"actions\":[{\"type\":\"Duo test\"}]}", "Notes typing")
+    }
+
+    private func workspaceLayout(model: AppModel) async {
+        guard begin("Duo layout change") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo layout probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let pane = await model.phoneTool("look", arguments: "{\"pane\":\"left\"}")
+        note("workspace layout read left: \(!pane.isError)", ["step": "read", "ok": !pane.isError])
+        guard !pane.isError, pane.text.hasPrefix("app: 备忘录") else { return }
+        let keys = await model.phoneTool("do", arguments: "{\"actions\":[{\"type\":\"Duo focus test\"}]}")
+        let sentKeys = keys.text.contains("(sent,")
+        note("workspace key input before focus: \(sentKeys ? "sent" : "refused")", ["step": "focus", "refused": !sentKeys])
+        note("workspace layout ready to collapse", ["step": "wait"])
+        try? await Task.sleep(for: .seconds(18))
+        let result = await model.phoneTool("do", arguments: "{\"actions\":[{\"tap\":[180,150]}]}")
+        let refused = result.text.contains("split_view_changed") || result.text.contains("nothing was sent") || result.text.contains("(not_sent,")
+        note("workspace stale tap: \(refused ? "refused" : "unexpected result")", ["step": "stale_tap", "refused": refused])
+    }
+
+    private func workspaceOwner(model: AppModel) async {
+        guard begin("workspace task isolation") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo owner probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        note("workspace owner ready", ["step": "workspace_ready"])
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let owner = UUID().uuidString
+        let read = await model.runTool("look", arguments: "{\"pane\":\"left\"}", localSession: owner)
+        guard !read.isError, read.jpeg != nil else { note("workspace owner could not read", ["step": "owner_read", "ok": false]); return }
+        let outside = await model.phoneToolWithPicture("look", arguments: "{\"pane\":\"right\"}")
+        let refused = outside.isError && outside.jpeg == nil && outside.text.contains("another task is using Split View")
+        note("workspace owner excludes other callers: \(refused)", ["step": "owner_exclusive", "ok": refused])
+        await model.finishSplitViewTask(localSession: owner)
+        let released = await model.phoneToolWithPicture("look", arguments: "{\"pane\":\"right\"}")
+        note("workspace owner released: \(!released.isError && released.jpeg != nil)", ["step": "owner_release", "ok": !released.isError && released.jpeg != nil])
+        model.finishTask()
+    }
+
+    /// Uses the public-photo fixture and cancels a drop into Safari while it waits for approval.
+    private func workspaceCancel(model: AppModel) async {
+        guard begin("workspace approval cancellation") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo cancel probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        note("workspace cancel ready", ["step": "workspace_ready"])
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let owner = UUID().uuidString
+        let right = await model.runTool("look", arguments: "{\"pane\":\"right\",\"full\":true}", localSession: owner)
+        let left = await model.runTool("look", arguments: "{\"pane\":\"left\",\"full\":true}", localSession: owner)
+        guard !right.isError, right.text.contains("The Blue Marble"), !left.isError,
+              left.text.contains("Duo Attachment Replay"), left.text.contains("Split View: left is com.apple.mobilenotes") else {
+            note("workspace cancel fixture not visible", ["step": "fixture_missing"])
+            await model.finishSplitViewTask(localSession: owner)
+            return
+        }
+        var requested: PendingApproval?
+        model.onProbeApproval = { requested = $0 }
+        defer { model.onProbeApproval = nil }
+        let action = "{\"actions\":[{\"drag\":{\"from\":[180,250],\"to\":[180,300],\"to_pane\":\"right\"}}]}"
+        let call = Task { await model.runTool("do", arguments: action, localSession: owner) }
+        for _ in 0..<60 where requested == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        call.cancel()
+        let result = await call.value
+        await model.finishSplitViewTask(localSession: owner)
+        let status = await model.runTool("status", arguments: "{}")
+        let pending = status.text.contains("approval waiting on the phone:")
+        note("workspace cancel asked: \(requested != nil), cancelled: \(result.isError), pending: \(pending)",
+             ["step": "workspace_cancel", "asked": requested != nil, "cancelled": result.isError, "pending": pending])
+    }
+
+    private func workspaceDrag(model: AppModel) async {
+        guard begin("workspace image drop") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        _ = await model.phoneTool("look", arguments: "{}")
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Duo drag probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        note("workspace drag ready", ["step": "workspace_ready"])
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        func run(_ name: String, _ arguments: String, _ label: String) async -> PokiCore.ToolAnswer {
+            let result = await model.phoneToolWithPicture(name, arguments: arguments)
+            let outcome = result.text.split(separator: "\n").prefix(3)
+                .filter { $0.hasPrefix("app:") || $0.hasPrefix("did:") || $0.hasPrefix("error:") }
+                .map(String.init).joined(separator: "\n")
+            note("workspace drag \(label) \(!result.isError)", ["step": label, "ok": !result.isError, "outcome": outcome])
+            return result
+        }
+        let target = await run("look", "{\"pane\":\"left\"}", "destination")
+        guard !target.isError, target.text.hasPrefix("app: 备忘录") else { return }
+        let source = await run("look", "{\"pane\":\"right\",\"full\":true}", "source")
+        guard !source.isError, source.text.hasPrefix("app: Safari") || source.text.hasPrefix("app: Chrome") else { return }
+        let defaults = UserDefaults.standard
+        let from: JSON
+        if let imageTitle = defaults.string(forKey: "pokiProbeImage"), !imageTitle.isEmpty {
+            let matches = source.text.split(separator: "\n").compactMap { line -> Int? in
+                guard line.contains(" Image "), line.localizedCaseInsensitiveContains(imageTitle) else { return nil }
+                return Int(line.drop(while: { !$0.isNumber }).prefix(while: \.isNumber))
+            }
+            guard matches.count == 1, let image = matches.first else {
+                note("workspace image target not unique", ["step": "source_image", "matches": matches.count])
+                return
+            }
+            note("workspace image located by accessibility label", ["step": "source_image", "matches": 1])
+            from = .number(Double(image))
+        } else {
+            from = [.number(Double(x) ?? 200), .number(Double(y) ?? 250)]
+        }
+        let hold = defaults.double(forKey: "pokiProbeDragHold")
+        let arguments: JSON = ["actions": [["drag": ["from": from, "to": [170, 120], "to_pane": "left",
+                                                     "hold_ms": .number(hold > 0 ? hold : 360), "ms": 1050]]]]
+        let drop = await run("do", arguments.serialized(), "drop")
+        guard !drop.isError else { return }
+        let after = await run("look", "{\"pane\":\"left\",\"full\":true}", "verify")
+        let evidence = after.text.split(separator: "\n").first { $0.hasPrefix("Split View drop:") }
+        note("workspace drag destination read after drop", ["step": "attachment_read", "evidence": evidence.map(String.init) ?? ""])
+        model.finishTask()
+    }
+
+    private func workspaceAdjacent(model: AppModel) async {
+        guard begin("Poki beside Settings") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        model.inProcessReadyForProbe()
+        try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        let read = await model.phoneToolWithPicture("look", arguments: "{}")
+        let ok = !read.isError && read.jpeg != nil && read.text.hasPrefix("app: 设置")
+        note("workspace adjacent Settings read: \(ok)", ["step": "adjacent_read", "ok": ok])
+        guard ok else { return }
+        let tap = await model.phoneTool("do", arguments: "{\"actions\":[{\"tap\":[180,582]}]}")
+        let sent = tap.text.contains("(sent,")
+        note("workspace adjacent Settings tap: \(sent)", ["step": "adjacent_tap", "ok": sent])
+    }
+
     private func frontField() async -> CGPoint? {
         await withCheckedContinuation { (c: CheckedContinuation<CGPoint?, Never>) in
             queue.async {
@@ -233,8 +441,237 @@ final class InProcessProbe: ObservableObject {
         note("separate session: \(line); watch whether the banner goes now", (["step": "separate_result"] as [String: Any]).merging(result) { a, _ in a })
     }
 
+    /// Issue 347's check: the session is closed (the banner goes) and opened again in this same
+    /// process, `rounds` times, and after each open the front app, its tree and a picture must all
+    /// read. Each step's seconds are kept, so the same run measures how fast stop and start are. The
+    /// 2 s after a close are for the person watching to see the banner go, not for the session.
+    func reopenCycle(rounds: Int = 5) async {
+        guard begin("close and reopen, \(rounds) rounds") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        await read()
+        var passed = 0
+        for round in 1...max(1, rounds) {
+            let closed = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+                queue.async { c.resume(returning: PKInProcess.shared().close()) }
+            }
+            note(String(format: "round %d close: %@ in %.3f s (%@)", round, (closed["closed"] as? Bool) == true ? "closed" : "nothing open",
+                        (closed["seconds"] as? Double) ?? 0, closed["detail"] as? String ?? ""),
+                 (["step": "reopen_close", "round": round] as [String: Any]).merging(closed) { a, _ in a })
+            try? await Task.sleep(for: .seconds(2))
+            let started = ProcessInfo.processInfo.systemUptime
+            let opened = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+                queue.async { c.resume(returning: PKInProcess.shared().prepare()) }
+            }
+            guard (opened["ok"] as? Bool) == true else {
+                note("round \(round) open: failed: \(opened["code"] ?? "?") \(opened["detail"] ?? "")", (["step": "reopen_open", "round": round] as [String: Any]).merging(opened) { a, _ in a })
+                continue
+            }
+            let readStarted = ProcessInfo.processInfo.systemUptime
+            let screen = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+                queue.async { c.resume(returning: PKInProcess.shared().readProbe()) }
+            }
+            let done = ProcessInfo.processInfo.systemUptime
+            let reads = (screen["front_ok"] as? Bool) == true && (screen["tree_ok"] as? Bool) == true && (screen["picture_ok"] as? Bool) == true
+            if reads { passed += 1 }
+            var fields: [String: Any] = ["step": "reopen_open", "round": round, "reads": reads, "open_seconds": readStarted - started, "read_seconds": done - readStarted]
+            fields.merge(opened) { a, _ in a }
+            fields.merge(screen) { a, _ in a }
+            note(String(format: "round %d open: generation %@, device %@, open %.3f s (session %.3f, first look %.3f), read %.3f s: %@", round,
+                        "\(opened["generation"] ?? "?")", opened["device"] as? String ?? "?", readStarted - started,
+                        (opened["seconds"] as? Double) ?? 0, (opened["warm_seconds"] as? Double) ?? 0, done - readStarted,
+                        reads ? "front app, \(screen["tree_elements"] ?? 0) elements and a picture" : "NOT READ (\(screen["tree_error"] ?? screen["front_error"] ?? screen["picture_error"] ?? screen["error"] ?? "no front app"))"),
+                 fields)
+        }
+        note("reopen: \(passed) of \(rounds) rounds read the screen after reopening", ["step": "reopen_result", "passed": passed, "rounds": rounds])
+    }
+
+    /// Whole tasks, as the chat runs them, in this one process: each round begins a task, reads the
+    /// screen through PokiCore (which opens the session), ends the task (which closes the session and
+    /// takes iOS's banner away), and waits. Then one round in which the new session is made to fail
+    /// its readiness check: the read has to fail with that reason, the session must not be taken as
+    /// open then or a few seconds later, and the round after it has to read on a new session.
+    func lifecycleCheck(model: AppModel, rounds: Int) async {
+        guard begin("task, close, next task (\(rounds) rounds, then a session that cannot read)") else { return }
+        defer { end() }
+        let background = UIApplication.shared.beginBackgroundTask(withName: "In-process probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        let device = UIDevice.current
+        note("build \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] ?? "?")), \(device.model), iOS \(device.systemVersion)", ["step": "lifecycle_build"])
+        var passed = 0, checks = 0
+        func check(_ name: String, _ ok: Bool, _ detail: String, _ fields: [String: Any] = [:]) {
+            checks += 1
+            if ok { passed += 1 }
+            note("\(ok ? "PASS" : "FAIL") \(name): \(detail)", fields.merging(["step": "lifecycle_check", "check": name, "ok": ok]) { a, _ in a })
+        }
+        func generation() async -> UInt64 {
+            await withCheckedContinuation { (c: CheckedContinuation<UInt64, Never>) in queue.async { c.resume(returning: PKInProcess.shared().generation()) } }
+        }
+        /// Waits for a close that iOS answered after close number `after`, at most `seconds`.
+        func closed(after: Int, within seconds: Double) async -> (close: AppModel.InProcessClose, seconds: Double)? {
+            let started = ProcessInfo.processInfo.systemUptime
+            while ProcessInfo.processInfo.systemUptime - started < seconds {
+                if let close = model.lastInProcessClose, close.number > after { return (close, ProcessInfo.processInfo.systemUptime - started) }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            return nil
+        }
+        func tool(_ name: String, _ arguments: String) async -> (text: String, failed: Bool, picture: Bool, seconds: Double) {
+            let t = ProcessInfo.processInfo.systemUptime
+            let result = await model.runTool(name, arguments: arguments)
+            return (result.text, result.isError, result.jpeg != nil, ProcessInfo.processInfo.systemUptime - t)
+        }
+        func look() async -> (text: String, failed: Bool, picture: Bool, seconds: Double) { await tool("look", "{}") }
+        func endTask() async {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in model.finishTask { c.resume() } }
+        }
+        /// A task as the chat runs one: look (Poki is in front), open Settings, which answers with the
+        /// screen read in Settings, then the end of the task, which brings Poki back and closes the
+        /// session. The read counts only with a picture and Settings' elements in it.
+        func round(_ name: String) async -> UInt64? {
+            model.chatTaskBegan()
+            let first = await look()
+            let read = await tool("do", #"{"actions":[{"launch":"com.apple.Preferences"}]}"#)
+            let now = await generation()
+            let elements = read.text.split(separator: "\n").filter { $0.range(of: #"^\D*\d+ \S+ ".*" \[-?\d+,-?\d+,\d+,\d+\]"#, options: .regularExpression) != nil }.count
+            let ok = !read.failed && read.picture && read.text.contains("com.apple.Preferences") && elements > 0
+            check("\(name) read", ok, "\(ok ? "Settings read" : "NOT read: \(read.text.prefix(160))") in \(String(format: "%.2f", read.seconds)) s (first look \(first.failed ? "failed" : "answered") in \(String(format: "%.2f", first.seconds)) s), \(elements) elements, \(read.picture ? "a picture" : "no picture"), session generation \(now)",
+                  ["seconds": read.seconds, "first_look_seconds": first.seconds, "generation": now, "elements": elements, "picture": read.picture, "text": String(read.text.prefix(600))])
+            let before = model.lastInProcessClose?.number ?? 0
+            let ended = ProcessInfo.processInfo.systemUptime
+            await endTask()
+            let done = await closed(after: before, within: 15)
+            let gone = done.map { $0.close.closed && !model.hasOpenInProcessSession } ?? false
+            check("\(name) close", gone, done.map { String(format: "iOS answered the close for %@ %.2f s after the task ended (close took %.2f s): %@; Poki holds %@ session", $0.close.why, ProcessInfo.processInfo.systemUptime - ended, $0.close.seconds, $0.close.closed ? "closed" : "nothing was open", model.hasOpenInProcessSession ? "an open" : "no") } ?? "no close answered within 15 s of the end of the task",
+                  ["closed": done?.close.closed ?? false, "close_seconds": done?.close.seconds ?? -1])
+            try? await Task.sleep(for: .seconds(3))
+            return ok ? now : nil
+        }
+        var last: UInt64 = 0
+        for i in 1...max(1, rounds) {
+            if let now = await round("round \(i)") {
+                if i > 1 { check("round \(i) new session", now != last, "generation \(last) before, \(now) now") }
+                last = now
+            }
+        }
+        // A session that opens but cannot read.
+        note("simulated: the next session's readiness check is made to fail through the testing flag", ["step": "lifecycle_simulated_failure"])
+        PKInProcess.shared().failNextReadinessCheck = true
+        model.chatTaskBegan()
+        let broken = await look()
+        let named = broken.text.contains("could not read the screen") || broken.text.contains("session_unreadable")
+        check("unreadable session reported", broken.failed && named, "the read \(broken.failed ? "failed" : "did not fail") in \(String(format: "%.2f", broken.seconds)) s: \(broken.text.prefix(240))",
+              ["seconds": broken.seconds, "text": String(broken.text.prefix(600))])
+        check("unreadable session not open", !model.hasOpenInProcessSession, "Poki \(model.hasOpenInProcessSession ? "took" : "did not take") the session as open")
+        // Nothing may open again by itself: no new session for 30 s, with the task still under way.
+        let brokenGeneration = await generation()
+        try? await Task.sleep(for: .seconds(30))
+        let quiet = await generation()
+        check("no reopen after the failure", !model.hasOpenInProcessSession && quiet == brokenGeneration,
+              "30 s later the session is \(model.hasOpenInProcessSession ? "open" : "still not open"), generation \(brokenGeneration) then \(quiet)",
+              ["generation_before": brokenGeneration, "generation_after": quiet])
+        await endTask()
+        try? await Task.sleep(for: .seconds(2))
+        if let after = await round("round after the failure") {
+            check("broken session not reused", after != brokenGeneration, "generation \(brokenGeneration) could not read, the next task read on \(after)")
+        }
+        PKInProcess.shared().failNextReadinessCheck = false
+        note("lifecycle: \(passed) of \(checks) checks passed", ["step": "lifecycle_done", "passed": passed, "checks": checks])
+    }
+
     /// Nothing in Poki may listen on WebDriverAgent's port on the in-process path: a connection to
     /// 127.0.0.1:8100 from inside the app has to be refused.
+    /// Whether actions arrive on a session reopened in this process: closes and reopens, then taps and
+    /// types in Poki's own field, opens Settings, taps and types in its search field, and brings Poki
+    /// back, with the app read in front after each and every step's seconds.
+    func deliveryCheck() async {
+        guard begin("delivery after a reopen") else { return }
+        defer { end() }
+        guard await prepare() else { return }
+        let background = UIApplication.shared.beginBackgroundTask(withName: "In-process probe")
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        let own = Bundle.main.bundleIdentifier ?? ""
+        var passed = 0, checks = 0
+        func check(_ name: String, _ ok: Bool, _ detail: String, _ fields: [String: Any] = [:]) {
+            checks += 1
+            if ok { passed += 1 }
+            note("\(ok ? "PASS" : "FAIL") \(name): \(detail)", fields.merging(["step": "delivery_check", "check": name, "ok": ok]) { a, _ in a })
+        }
+        func front() async -> String {
+            await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
+                queue.async { c.resume(returning: PKInProcess.shared().frontApp()["bundleId"] as? String ?? "") }
+            }
+        }
+        func app(_ action: String, _ bundle: String) async -> (code: String?, seconds: Double) {
+            await withCheckedContinuation { (c: CheckedContinuation<(code: String?, seconds: Double), Never>) in
+                queue.async {
+                    let t = ProcessInfo.processInfo.systemUptime
+                    let code = PKInProcess.shared().app(bundle, action: action)
+                    c.resume(returning: (code, ProcessInfo.processInfo.systemUptime - t))
+                }
+            }
+        }
+        _ = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+            queue.async { c.resume(returning: PKInProcess.shared().close()) }
+        }
+        try? await Task.sleep(for: .seconds(2))
+        let opened = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+            queue.async { c.resume(returning: PKInProcess.shared().prepare()) }
+        }
+        check("reopen", (opened["ok"] as? Bool) == true, "generation \(opened["generation"] ?? "?"), device \(opened["device"] as? String ?? "?")", opened)
+        guard (opened["ok"] as? Bool) == true else { return }
+        let first = await front()
+        check("front app", first == own, "read \(first.isEmpty ? "none" : first), Poki is in front", ["front": first])
+        if let field {
+            field.text = ""
+            field.resignFirstResponder()
+            try? await Task.sleep(for: .seconds(0.4))
+            let frame = field.convert(field.bounds, to: nil)
+            let point = CGPoint(x: frame.midX, y: frame.midY)
+            let tap = await touch([[PKTouchPoint.at(point, offset: 0), PKTouchPoint.at(point, offset: 0.05)]], "tap Poki's field at [\(Int(point.x)), \(Int(point.y))]")
+            try? await Task.sleep(for: .seconds(0.6))
+            check("tap in Poki", field.isFirstResponder, String(format: "field focused %@, answered in %.3f s", field.isFirstResponder ? "yes" : "no", tap.seconds), ["seconds": tap.seconds])
+            if field.isFirstResponder {
+                let typed = await type(Self.sample)
+                try? await Task.sleep(for: .seconds(0.6))
+                let same = field.text == Self.sample
+                check("type in Poki", same, String(format: "read back %@, answered in %.3f s", same ? "same as sent" : "differs", typed.seconds), ["seconds": typed.seconds])
+                field.text = ""
+                field.resignFirstResponder()
+            }
+        }
+        let settings = "com.apple.Preferences"
+        let launch = await app("launch", settings)
+        try? await Task.sleep(for: .seconds(1))
+        let second = await front()
+        check("open Settings", launch.code == nil && second == settings,
+              String(format: "%@ in %.3f s, front %@", launch.code ?? "done", launch.seconds, second.isEmpty ? "none" : second),
+              ["seconds": launch.seconds, "code": launch.code ?? "", "front": second])
+        if second == settings {
+            if let point = await frontField() {
+                let tap = await touch([[PKTouchPoint.at(point, offset: 0), PKTouchPoint.at(point, offset: 0.05)]], "tap Settings' search field at [\(Int(point.x)), \(Int(point.y))]")
+                try? await Task.sleep(for: .seconds(1.0))
+                var typed = tap
+                if tap.delivery == .sent { typed = await type(Self.sample) }
+                try? await Task.sleep(for: .seconds(0.8))
+                let value = await focusedValue()
+                let same = value.map { $0.hasSuffix(Self.sample) } ?? false
+                check("tap and type in Settings", same,
+                      String(format: "%@, tap %.3f s, typing %.3f s", same ? "read back same as sent" : value == nil ? "no focused field after the tap" : "read back differs", tap.seconds, typed.seconds),
+                      ["tap_seconds": tap.seconds, "type_seconds": typed.seconds])
+            } else {
+                check("tap and type in Settings", false, "no search field in Settings' tree")
+            }
+        }
+        let back = await app("activate", own)
+        try? await Task.sleep(for: .seconds(1))
+        let last = await front()
+        check("back to Poki", back.code == nil && last == own,
+              String(format: "%@ in %.3f s, front %@", back.code ?? "done", back.seconds, last.isEmpty ? "none" : last),
+              ["seconds": back.seconds, "code": back.code ?? "", "front": last])
+        note("delivery: \(passed) of \(checks) checks passed", ["step": "delivery_result", "passed": passed, "checks": checks])
+    }
+
     func portCheck() async {
         guard begin("port 8100") else { return }
         defer { end() }
@@ -289,27 +726,40 @@ final class InProcessProbe: ObservableObject {
     /// this path. The chat is pointed at an OpenAI-compatible endpoint (on CI, a scripted model on the
     /// Mac), the owner sends a task, pi runs it with look and do on the phone, the session is saved; then an
     /// outside agent's `ask_poki` runs a second task as a hand-off. Into Documents/inprocess-probe.json.
-    func chatCycle(model: AppModel) async {
+    func chatCycle(model: AppModel, inSplitView: Bool = false, configuredModel: Bool = false) async {
         guard begin("chat with Poki's agent") else { return }
         defer { end() }
+        let defaults = UserDefaults.standard
+        let probeTask = defaults.string(forKey: "pokiProbeTask")
+        guard !configuredModel || (ModelKeys.hasUsableKey && probeTask?.isEmpty == false) else {
+            note("configured model unavailable, or no test task specified", ["step": "configured_model_unavailable", "hasUsableKey": ModelKeys.hasUsableKey])
+            return
+        }
         guard await prepare() else { return }
         model.inProcessReadyForProbe()
         let background = UIApplication.shared.beginBackgroundTask(withName: "Chat probe")
         defer { UIApplication.shared.endBackgroundTask(background) }
-        let defaults = UserDefaults.standard
-        ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
-        ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
-        ModelKeys.selectedProvider = .custom
-        // ask_poki is off by default (Diagnostics, Testing); this check hands a task over with it, so it
-        // turns it on as the owner would.
-        model.askPokiTool = true
+        if !configuredModel {
+            ModelKeys.customURL = defaults.string(forKey: "pokiProbeModelURL") ?? "http://127.0.0.1:8765/v1"
+            ModelKeys.customModel = defaults.string(forKey: "pokiProbeModel") ?? "poki-mock"
+            ModelKeys.selectedProvider = .custom
+            model.askPokiTool = true
+        }
         AskPoki.refresh()
         guard let chat = AskPoki.chat else { note("no chat", ["step": "chat_missing"]); return }
         chat.newConversation()
-        let task = defaults.string(forKey: "pokiProbeTask") ?? "Open the Poki fixture app and tell me what it shows."
+        let task = probeTask ?? "Open the Poki fixture app and tell me what it shows."
+        if inSplitView || configuredModel {
+            _ = await model.phoneTool("look", arguments: "{}")
+            note("workspace-chat: ready to restore the two test apps", ["step": "workspace_ready"])
+            try? await Task.sleep(for: .seconds(Double(delay) ?? 8))
+        }
         let t0 = ProcessInfo.processInfo.systemUptime
-        chat.send(task)
-        for _ in 0..<1200 where chat.running { try? await Task.sleep(for: .milliseconds(250)) }
+        chat.send(task, inSplitView: inSplitView)
+        for _ in 0..<1200 {
+            if !chat.running { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
         let seconds = ProcessInfo.processInfo.systemUptime - t0
         let replies: [String] = chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }
         let problems: [String] = chat.entries.compactMap { if case .note(.problem(let why)) = $0.kind { why } else { nil } }
@@ -320,6 +770,7 @@ final class InProcessProbe: ObservableObject {
         try? await Task.sleep(for: .seconds(1))
         let saved = SessionStore.shared.session(chat.sessionID)
         note("chat session saved: \(saved != nil)", ["step": "chat_saved", "saved": saved != nil, "entries": saved?.entries.count ?? 0, "calls": saved?.calls.count ?? 0])
+        guard !inSplitView, !configuredModel else { return }
         // An outside agent hands a task over.
         let t1 = ProcessInfo.processInfo.systemUptime
         let handoff = await model.phoneToolWithPicture("ask_poki", arguments: "{\"task\":\"Open the Poki fixture app and tell me what it shows.\"}")
@@ -421,6 +872,9 @@ struct InProcessSection: View {
                 Button("Separate session") { Task { await probe.separateTrial() } }
             }.disabled(probe.running)
             Button("Compare both paths (5 rounds)") { Task { await probe.benchmark(model: model, rounds: 5) } }.disabled(probe.running)
+            Button("Close and reopen (5 rounds)") { Task { await probe.reopenCycle(rounds: 5) } }.disabled(probe.running)
+            Button("Reopen, then tap, type and open an app") { Task { await probe.deliveryCheck() } }.disabled(probe.running)
+            Button("Whole tasks, 5 rounds, then a session that cannot read") { Task { await probe.lifecycleCheck(model: model, rounds: 5) } }.disabled(probe.running)
             HStack {
                 Button("Prepare") { Task { await probe.prepareOnly() } }
                 Spacer()

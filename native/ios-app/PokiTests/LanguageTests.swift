@@ -58,6 +58,24 @@ final class LanguageTests: XCTestCase {
         }
     }
 
+    func testSplitViewStartupErrorsFollowTheSelectedLanguage() {
+        AppLocalization.shared.preference = "en"
+        XCTAssertEqual(ChatModel.splitViewPlanningMessage,
+                       "Poki couldn't determine whether to use Split View. Try sending the task again.")
+        let english = ChatModel.splitViewSetupMessage("com.apple.mobilesafari", "com.apple.mobilenotes")
+        XCTAssertTrue(english.hasPrefix("Open Safari and Notes together"), english)
+
+        AppLocalization.shared.preference = "zh-Hans"
+        XCTAssertEqual(ChatModel.splitViewPlanningMessage, "Poki 无法判断是否需要分屏。请重新发送任务。")
+        let simplified = ChatModel.splitViewSetupMessage("com.apple.mobilesafari", "com.apple.mobilenotes")
+        XCTAssertTrue(simplified.contains("分屏打开 Safari浏览器 和 备忘录"), simplified)
+
+        AppLocalization.shared.preference = "zh-Hant"
+        XCTAssertEqual(ChatModel.splitViewPlanningMessage, "Poki 無法判斷是否需要分割顯示。請重新傳送任務。")
+        let traditional = ChatModel.splitViewSetupMessage("com.apple.mobilesafari", "com.apple.mobilenotes")
+        XCTAssertTrue(traditional.contains("分割顯示 Safari瀏覽器 和 備忘錄"), traditional)
+    }
+
     func testKnownAppNamesFollowTheSelectedLanguage() {
         for (language, expected) in [("en", "Notes"), ("zh-Hans", "备忘录"), ("zh-Hant", "備忘錄")] {
             AppLocalization.shared.preference = language

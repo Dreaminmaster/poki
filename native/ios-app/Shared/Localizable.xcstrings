@@ -93,6 +93,265 @@
         }
       }
     },
+  "Finish Setup": {
+    "extractionState": "manual",
+    "localizations": {
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "完成设置"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "完成設定"
+        }
+      }
+    }
+  },
+  "Interface Size Minimum": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "A"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "小"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "小"
+        }
+      }
+    }
+  },
+  "Interface Size Maximum": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "A"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "大"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "大"
+        }
+      }
+    }
+  },
+  "Show me the full plan.": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Show me the full plan."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "给我看看完整计划。"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "給我看看完整計劃。"
+        }
+      }
+    }
+  },
+  "Tomorrow’s plan  \n9:00 — Start with your most important task.  \n12:00 — Take a lunch break.  \n12:45 — Go for a short walk.  \n14:00 — Catch up on messages.  \n16:30 — Review today’s progress.": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Tomorrow’s plan  \n9:00 — Start with your most important task.  \n12:00 — Take a lunch break.  \n12:45 — Go for a short walk.  \n14:00 — Catch up on messages.  \n16:30 — Review today’s progress."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "明天的安排  \n09:00　先完成最重要的事  \n12:00　吃午饭，休息一下  \n12:45　出门散步  \n14:00　集中回复消息  \n16:30　整理今天的进度"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "明天的安排  \n09:00　先完成最重要的事  \n12:00　吃午餐，休息一下  \n12:45　出門散步  \n14:00　集中回覆訊息  \n16:30　整理今天的進度"
+        }
+      }
+    }
+  },
+  "Help me plan tomorrow.": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Help me plan tomorrow."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "帮我安排一下明天的计划。"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "幫我安排一下明天的計劃。"
+        }
+      }
+    }
+  },
+  "Start with your most important task in the morning. Leave time for lunch and a short walk.\n\nI can also help you set a reminder.": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Start with your most important task in the morning. Leave time for lunch and a short walk.\n\nI can also help you set a reminder."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "上午先完成最重要的事情，午间留出吃饭和散步的时间。\n\n我还可以帮你设置提醒。"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "上午先完成最重要的事情，午間留出吃飯和散步的時間。\n\n我還可以幫你設定提醒。"
+        }
+      }
+    }
+  },
+  "Reminder created": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Reminder created"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "已创建提醒"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "已建立提醒"
+        }
+      }
+    }
+  },
+  "Tomorrow at 9:00 AM": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Tomorrow at 9:00 AM"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "明天上午 9:00"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "明天上午 9:00"
+        }
+      }
+    }
+  },
+  "Interface Size": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Interface Size"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "界面大小"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "介面大小"
+        }
+      }
+    }
+  },
+  "Size %lld of %lld": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Size %lld of %lld"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "大小 %1$lld / %2$lld"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "大小 %1$lld / %2$lld"
+        }
+      }
+    }
+  },
+  "Preview": {
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Preview"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "预览"
+        }
+      },
+      "zh-Hant": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "預覽"
+        }
+      }
+    }
+  },
     "%@ is chosen, but nothing answers at 10.7.0.1 right now. Open %@, make sure it is connected with the loopback on, then come back; this page updates by itself." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7299,6 +7558,22 @@
         }
       }
     },
+    "Open %@ and %@ together on the unfolded iPhone, then return to Poki and retry. Pair them with the divider to open them together next time." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在展开的 iPhone 上分屏打开 %1$@ 和 %2$@，然后返回 Poki 重试。点按中间的分隔条可绑定两个 App，下次可以一起打开。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在展開的 iPhone 上分割顯示 %1$@ 和 %2$@，然後返回 Poki 重試。點一下中間的分隔線即可配對兩個 App，下次可以一起開啟。"
+          }
+        }
+      }
+    },
     "Open %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8249,6 +8524,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "待處理：%@"
+          }
+        }
+      }
+    },
+    "Poki couldn't determine whether to use Split View. Try sending the task again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法判断是否需要分屏。请重新发送任务。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法判斷是否需要分割顯示。請重新傳送任務。"
           }
         }
       }
@@ -16320,24 +16611,24 @@
         }
       }
     },
-    "A client Poki doesn’t know (%@) is signing in with %@. Open Poki to allow or deny it." : {
+    "A client (%@) is signing in with %@. Open Poki to allow or deny it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请打开 Poki 允许或拒绝。未知客户端（%@）正通过 %@ 登录。"
+            "value" : "客户端（%1$@）正在使用 %2$@ 登录。打开 Poki 以允许或拒绝。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請開啟 Poki 允許或拒絕。未知用戶端（%@）正透過 %@ 登入。"
+            "value" : "用戶端（%1$@）正在使用 %2$@ 登入。打開 Poki 以允許或拒絕。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Poki to allow or deny sign-in. An unrecognized client (%@) is signing in with %@."
+            "value" : "A client (%@) is signing in with %@. Open Poki to allow or deny it."
           }
         }
       }
@@ -17632,6 +17923,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Apple 的登入需要只有 Apple 硬體才能生成的裝置標頭。Poki 從此 anisette 伺服器獲取這些標頭。伺服器不會看到你的 Apple ID 或密碼。"
+          }
+        }
+      }
+    },
+    "Apple refused the Mac identity Poki signs in with (it asks for macOS 10.13 or later). Update Poki and Poki Setup to the latest version, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple refused the Mac identity Poki signs in with (it asks for macOS 10.13 or later). Update Poki and Poki Setup to the latest version, then try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 拒绝了 Poki 登录时使用的 Mac 身份（要求 macOS 10.13 或更高版本）。请把 Poki 和 Poki Setup 更新到最新版本后再试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 拒絕了 Poki 登入時使用的 Mac 身分（要求 macOS 10.13 或更新版本）。請將 Poki 和 Poki Setup 更新至最新版本後再試。"
           }
         }
       }
@@ -21724,24 +22038,24 @@
         }
       }
     },
-    "%@ is signing in through %@ and returns to %@, which isn’t on Poki’s list of known agents. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone." : {
+    "%@ is signing in through %@ with callback destination %@. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 正通过 %@ 登录并跳转至未知智能体 %@。仅在你本人此刻发起连接时才允许；允许后对方可查看屏幕并操作此 iPhone。"
+            "value" : "%1$@ 正在通过 %2$@ 登录，回调目标为 %3$@。请仅在你正在连接此客户端时允许。获准后，它可查看屏幕并在此 iPhone 上操作。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 正透過 %@ 登入並跳轉至未知智慧體 %@。僅在你本人此刻發起連線時才允許；允許後對方可查看螢幕並操作此 iPhone。"
+            "value" : "%1$@ 正在透過 %2$@ 登入，回呼目的地為 %3$@。請只在你正在連接此用戶端時允許。獲准後，它可查看螢幕並在此 iPhone 上操作。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ is signing in through %@ and redirecting to %@, which isn’t a known agent. Allow only if you initiated this connection right now; it grants screen view and control of this iPhone."
+            "value" : "%@ is signing in through %@ with callback destination %@. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone."
           }
         }
       }
@@ -21854,18 +22168,18 @@
         }
       }
     },
-    "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart." : {
+    "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode. It may ask only when Poki first operates the phone. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这是 iPhone 重新启动后 Poki 首次启动自动化，因此 iOS 会在下一个屏幕要求输入锁屏密码。该屏幕属于 iOS。Poki 无法看到或读取你输入的内容，并且在下次重新启动前只会询问一次。"
+            "value" : "这是 iPhone 重新启动后 Poki 首次启动自动化，因此 iOS 会要求输入锁屏密码，可能要等 Poki 第一次操作手机时才会要求。该屏幕属于 iOS。Poki 无法看到或读取你输入的内容，并且在下次重新启动前只会询问一次。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "這是 iPhone 重新啟動後 Poki 首次啟動自動化，因此 iOS 會在下一個螢幕要求輸入鎖屏密碼。該螢幕屬於 iOS。Poki 無法看到或讀取你輸入的內容，並且在下次重新啟動前只會詢問一次。"
+            "value" : "這是 iPhone 重新啟動後 Poki 首次啟動自動化，因此 iOS 會要求輸入鎖屏密碼，可能要等 Poki 第一次操作手機時才會要求。該螢幕屬於 iOS。Poki 無法看到或讀取你輸入的內容，並且在下次重新啟動前只會詢問一次。"
           }
         }
       }
@@ -21964,44 +22278,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "磁碟映像"
-          }
-        }
-      }
-    },
-    "Hide Banner When Idle" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空闲时隐藏横幅"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空閒時隱藏橫幅"
-          }
-        }
-      }
-    },
-    "Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体停止时结束自动化会话并隐藏 iOS 横幅（实验性）。若此后智能体无法读取屏幕，请关闭此项并重开 Poki。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體停止時結束自動化工作階段並隱藏 iOS 橫幅（實驗性）。若此後智慧體無法讀取螢幕，請關閉此項並重開 Poki。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the automation session and hides the iOS banner when the agent stops (experimental). If agents lose screen view afterward, turn this off and reopen Poki."
           }
         }
       }
@@ -31812,29 +32088,6 @@
         }
       }
     },
-    "Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested: if the agent can’t see the screen after this, turn it off and open Poki again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the automation session and hides the iOS banner when the agent stops (experimental). If agents lose screen view afterward, turn this off and reopen Poki."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体停止时结束自动化会话并隐藏 iOS 横幅（实验性）。若此后智能体无法读取屏幕，请关闭此项并重开 Poki。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體停止時結束自動化工作階段並隱藏 iOS 橫幅（實驗性）。若此後智慧體無法讀取螢幕，請關閉此項並重開 Poki。"
-          }
-        }
-      }
-    },
     "An agent saves a routine after a task that worked; the next time it repeats the task in one step and stops where the screen differs. Swipe a routine to forget it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32894,6 +33147,100 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在安裝更新。重新開啟 Poki 前，功能暫不可用。"
+          }
+        }
+      }
+    },
+    "Text files must be 100 KB or smaller." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文本文件不能超过 100 KB。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字檔案不能超過 100 KB。"
+          }
+        }
+      }
+    },
+    "This text file must use UTF-8 encoding." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文本文件必须使用 UTF-8 编码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個文字檔案必須使用 UTF-8 編碼。"
+          }
+        }
+      }
+    },
+    "Only images, PDFs, JSON, Markdown, and plain text files can be added." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能添加图片、PDF、JSON、Markdown 和纯文本文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能加入圖片、PDF、JSON、Markdown 和純文字檔案。"
+          }
+        }
+      }
+    },
+    "The task has ended. Open Poki to see the result." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The task has ended. Open Poki to see the result."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务已结束。打开 Poki 查看结果。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務已結束。開啟 Poki 檢視結果。"
+          }
+        }
+      }
+    },
+    "%@ used this iPhone through Poki. Open Poki to see what it did." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ used this iPhone through Poki. Open Poki to see what it did."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 通过 Poki 使用了这台 iPhone。打开 Poki 查看它做了什么。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 透過 Poki 使用了這部 iPhone。開啟 Poki 檢視它做了什麼。"
           }
         }
       }

@@ -22,6 +22,12 @@ protocol InProcessAutomation: AnyObject, Sendable {
     func close() -> [String: Any]
     /// Automation Mode off with the session kept. Keys: paused, how, selectors.
     func pauseAutomation() -> [String: Any]
+    /// Seconds iOS has been asked to allow automation in the open under way; 0 while no open is there.
+    func authorizationWaitSeconds() -> Double
+}
+
+extension InProcessAutomation {
+    func authorizationWaitSeconds() -> Double { 0 }
 }
 
 /// Thread-safe: its session state is behind locks, and every call blocks on its own.
@@ -29,6 +35,8 @@ extension PKInProcess: InProcessAutomation, @unchecked Sendable {}
 
 /// Poki's own automation session, once the launcher has mounted the disk image (ESP-152).
 enum InProcessSession: Equatable {
+    case idle
+    case closing(reopen: Bool)
     case opening
     case open
     /// prepare answered no: its code and detail.
@@ -41,6 +49,8 @@ enum InProcessSession: Equatable {
     /// What PokiCore reads while the launcher runs. A failure is answered at once, with its fix.
     var agentState: RunnerState {
         switch self {
+        case .idle: return .starting("ready for a phone task; the automation session is not open")
+        case .closing: return .starting("finishing the previous automation session")
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:
@@ -49,6 +59,10 @@ enum InProcessSession: Equatable {
             return .failed("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
                            fix: "Turn Poki off and on, then enter the iPhone passcode when iOS asks for it to allow automation")
         case .failed(let code, let detail):
+            if code == "session_unreadable" {
+                return .failed("the automation session opened but could not read the screen (\(detail)). Nothing was sent, and that session was closed; the next call opens a new one",
+                               fix: "Try the step again. If it keeps failing, turn Poki off and on")
+            }
             return .failed("the in-process session could not be opened (\(code)\(detail.isEmpty ? "" : ": \(detail)")); Poki tries again on the next call",
                            fix: "Open Poki and, if iOS asks, enter the passcode to allow automation")
         }
@@ -67,7 +81,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     private let native = PKInProcess.shared()
     /// When each request runs: one action or read at a time, screenshots beside them (PokiCore).
     private var lanes: LocalRunner!
-    private let screen: CGSize
+    let usesDynamicScreenSize = true
+    let supportsPaneSelection = true
+    private let readGeometry = OSAllocatedUnfairLock<(display: PKDisplayGeometry, pane: CGRect)?>(initialState: nil)
     private var routes: [String: Route] = [:]
     /// The focused field from the latest `/element/active`, for the value and frame asked right after.
     private var focused: [AnyHashable: Any]?
@@ -112,8 +128,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         return result
     }
 
-    init(screen: CGSize) {
-        self.screen = screen
+    init() {
         routes = [
             "POST /session": { [unowned self] _, _ in
                 // The owner cancelled iOS's passcode screen: no new open (and no new screen) until they
@@ -125,6 +140,39 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 return ["sessionId": .string("inprocess-\(self.native.generation())")]
             },
             "DELETE /session": { _, _ in .null },
+            "POST /poki/pane": { [unowned self] body, _ in
+                guard let side = body?["side"]?.string, ["left", "right", "auto"].contains(side) else {
+                    throw Refusal("invalid argument", "pane must be left, right, or auto")
+                }
+                var reason: NSString?
+                guard let pane = self.native.selectPane(side, code: &reason) else {
+                    throw Refusal("invalid argument", reason.map { $0 as String } ?? "Split View unavailable")
+                }
+                self.readGeometry.withLock { $0 = nil }
+                self.focused = nil
+                if side == "auto" { return .null }
+                return ["bundleId": .string(pane["bundleId"] as? String ?? ""),
+                        "otherBundleId": .string(pane["otherBundleId"] as? String ?? ""),
+                        "identity": .string(pane["identity"] as? String ?? ""),
+                        "x": .number(pane["x"] as? Double ?? 0), "y": .number(pane["y"] as? Double ?? 0)]
+            },
+            "POST /poki/workspace-drag": { [unowned self] body, _ in
+                let fingers = try Self.fingers(body)
+                let other = self.native.otherWorkspacePane
+                guard self.native.hasSelectedPane, !other.isNull, fingers.count == 1 else {
+                    throw Refusal("invalid argument", "a Split View drag needs two confirmed panes and one continuous finger")
+                }
+                return try self.touch(fingers, into: other)
+            },
+            "POST /poki/workspace-launcher": { [unowned self] body, _ in
+                let labels = body?["labels"]?.array?.compactMap(\.string) ?? []
+                guard !self.native.hasSelectedPane, let menu = body?["menu"]?.bool, !labels.isEmpty else {
+                    throw Refusal("invalid argument", "workspace setup requires a system launcher target")
+                }
+                guard let outcome = self.native.openWorkspaceLauncherItem(labels, menu: menu) else { return .bool(false) }
+                _ = try self.answer(outcome)
+                return .bool(true)
+            },
             "POST /appium/settings": { [unowned self] body, _ in
                 let settings = body?["settings"]
                 if let depth = settings?["snapshotMaxDepth"]?.double { self.maxDepth = depth >= 50 ? 0 : max(1, Int(depth)) }
@@ -132,9 +180,11 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 return .null
             },
             // Beside another app, the front app's part of the screen is the screen the agent sees (viewport).
-            "GET /wda/screen": { [unowned self, screen] _, _ in
+            "GET /wda/screen": { [unowned self] _, _ in
+                let geometry = self.native.displayGeometry()
                 let viewport = self.native.viewport
-                let size = viewport.isNull ? screen : viewport.size
+                let size = viewport.isNull ? geometry.bounds.size : viewport.size
+                self.readGeometry.withLock { $0 = (geometry, viewport) }
                 return ["screenSize": ["width": .number(size.width), "height": .number(size.height)]]
             },
             "GET /wda/locked": { [unowned self] _, _ in .bool(self.native.screenLocked()) },
@@ -145,6 +195,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             "GET /source": { [unowned self] _, _ in
                 var code: NSString?
                 guard let xml = self.native.sourceXML(nil, maxDepth: self.maxDepth, maxChildren: self.maxChildren, code: &code) else { throw Refusal("unknown error", "no element tree: \(code ?? "unknown")") }
+                let readAt = ProcessInfo.processInfo.systemUptime
+                Task { @MainActor in AppLog.shared.add("session-timing", String(format: "screen_read_succeeded uptime=%.6f", readAt)) }
                 return .string(xml)
             },
             "GET /element/active": { [unowned self] _, _ in
@@ -203,6 +255,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             "POST /wda/keys": { [unowned self] body, _ in
                 let text = (body?["value"]?.array ?? []).compactMap(\.string).joined()
                 guard !text.isEmpty else { throw Refusal("invalid argument", "no keys given") }
+                try self.refuseInPoki()
                 // `frequency`: characters a second for this burst (PokiCore's Humanize types a word at
                 // a time at an uneven pace); without one, the fixed 120 of before.
                 let speed = UInt(max(1, min(240, body?["frequency"]?.int ?? 120)))
@@ -263,6 +316,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         if let session, session != "inprocess-\(native.generation())", key != "DELETE /session" {
             return refused(404, "invalid session id", "the automation session \(session) has ended (now generation \(native.generation()))")
         }
+        if native.hasSelectedPane, ["POST /wda/homescreen", "POST /wda/apps/launch", "POST /wda/apps/activate", "POST /wda/apps/terminate"].contains(key) {
+            return refused(400, "invalid argument", "this would leave Split View; choose look {pane: \"auto\"} first to return to normal control")
+        }
         do {
             if key == "GET /screenshot" {
                 var code: NSString?
@@ -284,7 +340,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         switch outcome.delivery {
         case .sent: return .null
         case .notSent:
-            if outcome.code == "native_session_invalidated" || outcome.code == "native_action_superseded" {
+            if outcome.code == "native_session_invalidated" || outcome.code == "native_action_superseded" || outcome.code == "session_unreadable" {
                 throw Refusal("invalid session id", "the automation session ended before the action was sent (\(outcome.code ?? ""))")
             }
             throw Refusal("unknown error", "not sent: \(outcome.code ?? "unknown")\(outcome.detail.map { " (\($0))" } ?? "")")
@@ -298,13 +354,45 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         throw Refusal("unknown error", failure)
     }
 
-    private func touch(_ fingers: [[(CGPoint, Double)]]) throws -> JSON {
+    /// Nothing is tapped or typed in Poki itself, whoever asks and whatever they could tell of the
+    /// screen: with Poki the app in front (not merely beside the driven app, where the other one is
+    /// the front app), a touch or text is refused here, the last place before it would be sent.
+    /// Opening an app and the Home button stay: they are how a task leaves Poki.
+    private func refuseInPoki() throws {
+        guard let own = Bundle.main.bundleIdentifier, native.frontApp()["bundleId"] as? String == own else { return }
+        throw Refusal("unknown error", "not sent: Poki itself is in front, and nothing is tapped or typed in Poki. Open the task's app first (launch)")
+    }
+
+    private func touch(_ fingers: [[(CGPoint, Double)]], into other: CGRect? = nil) throws -> JSON {
+        try refuseInPoki()
         // Points are in the viewport the agent saw (the driven app's part of the screen): moved back onto the screen.
+        let geometry = native.displayGeometry()
         let viewport = native.viewport
+        if let previous = readGeometry.withLock({ $0 }), previous.display.routesDisplay.boolValue || geometry.routesDisplay.boolValue {
+            guard previous.display.bounds == geometry.bounds, previous.display.peer == geometry.peer,
+                  previous.display.nativeSize == geometry.nativeSize,
+                  previous.display.toFixed == geometry.toFixed, previous.display.orientation == geometry.orientation,
+                  previous.display.orientationRevision == geometry.orientationRevision, previous.pane == viewport else {
+                throw Refusal("invalid argument", "split_view_changed: look at the new pane before tapping")
+            }
+        }
         let shift = viewport.isNull ? CGPoint.zero : viewport.origin
+        if !geometry.peer.isNull || native.hasSelectedPane {
+            guard !viewport.isNull else { throw Refusal("invalid argument", "look at the target pane before tapping") }
+            let local = CGRect(origin: .zero, size: viewport.size)
+            if let other {
+                guard let finger = fingers.first, let start = finger.first, let end = finger.last,
+                      local.contains(start.0), other.offsetBy(dx: -shift.x, dy: -shift.y).contains(end.0),
+                      fingers.allSatisfy({ $0.allSatisfy { geometry.bounds.offsetBy(dx: -shift.x, dy: -shift.y).contains($0.0) } }) else {
+                    throw Refusal("invalid argument", "the drag must start in the selected pane and finish in the other pane")
+                }
+            } else if !fingers.allSatisfy({ $0.allSatisfy { local.contains($0.0) } }) {
+                throw Refusal("invalid argument", "the gesture would leave the target pane; use points inside its screenshot")
+            }
+        }
         let paths = fingers.map { $0.map { PKTouchPoint.at(CGPoint(x: $0.0.x + shift.x, y: $0.0.y + shift.y), offset: $0.1) } }
         let longest = fingers.compactMap { $0.last?.1 }.max() ?? 0
-        return try answer(native.touch(paths, timeout: longest + 3))
+        return try answer(native.touch(paths, timeout: longest + 3, geometry: geometry))
     }
 
     private static func point(_ body: JSON?, _ x: String, _ y: String) throws -> CGPoint {

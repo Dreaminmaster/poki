@@ -1,6 +1,15 @@
 import SwiftUI
 import UIKit
 
+/// Sizing for custom icon controls that share space with scrolling content.
+struct CompactControlMetrics: DynamicProperty {
+    @ScaledMetric(relativeTo: .body) private var scale = 1.0
+    var base: CGFloat = 48
+    var maximum: CGFloat = 56
+
+    var side: CGFloat { min(maximum, max(44, base * scale)) }
+}
+
 /// The app's own colours (ESP-326 prototype, theme.ts), each one a light and a dark value. Blue belongs
 /// to Poki: the bear, the task card while it has the phone, the links to what it can do. Amber is your
 /// turn, green is done, red is a problem. Surfaces, text and separators are the system's own semantic

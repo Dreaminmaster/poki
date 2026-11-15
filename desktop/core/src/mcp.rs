@@ -97,7 +97,10 @@ pub async fn relay_up(origin: &str) -> Result<bool> {
 /// The whole path a Claude connector takes: metadata, registration, authorize (the phone must
 /// be online and know the secret), token, then `tools/list` through the phone.
 pub async fn check(url: &str) -> Result<Check> {
-    let parts = parse(url)?;
+    check_connector(url, parse(url)?).await
+}
+
+async fn check_connector(url: &str, parts: Parts) -> Result<Check> {
     let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).redirect(reqwest::redirect::Policy::none()).build()?;
     let base = format!("{}/v1/{}/{}", parts.origin, parts.label, parts.secret);
     let at = crate::keeper::now();
@@ -125,8 +128,10 @@ pub async fn check(url: &str) -> Result<Check> {
     rand::thread_rng().fill_bytes(&mut v);
     let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+    // The relay can wait 90 seconds for phone consent. Allow extra transport time only here.
     let auth = http
         .get(format!("{base}/authorize"))
+        .timeout(std::time::Duration::from_secs(105))
         .query(&[("response_type", "code"), ("client_id", client_id.as_str()), ("redirect_uri", "http://127.0.0.1/poki-setup"), ("code_challenge", challenge.as_str()), ("code_challenge_method", "S256"), ("state", "x")])
         .send()
         .await?;
@@ -139,7 +144,7 @@ pub async fn check(url: &str) -> Result<Check> {
                 Some(c) => c,
                 None => {
                     let err = u.as_ref().and_then(|u| u.query_pairs().find(|(k, _)| k == "error").map(|(_, v)| v.to_string())).unwrap_or_default();
-                    return Ok(fail(true, true, if err == "access_denied" { "The phone is online but does not know this link any more. It was revoked in Poki, or the link is from another phone.".into() } else { format!("Authorization failed: {err}") }));
+                    return Ok(fail(true, true, if err == "access_denied" { "Authorization was not granted. Open Poki and approve the connection when prompted. If no prompt appears, check that the connector link is still valid.".into() } else { format!("Authorization failed: {err}") }));
                 }
             }
         }
@@ -202,7 +207,7 @@ pub fn record_check(url: &str, check: &Check) -> Result<()> {
 /// Ready-to-paste client setups for one link.
 pub fn snippets(url: &str) -> Vec<(String, String)> {
     vec![
-        ("Claude.ai".into(), "Settings → Connectors → Add custom connector → paste the link → Connect. The phone approves it silently; it has to be online.".into()),
+        ("Claude.ai".into(), "Settings → Connectors → Add custom connector → paste the link → Connect. Keep Poki online and approve the connection on the phone when prompted.".into()),
         ("Claude Code".into(), format!("claude mcp add --transport http poki \"{url}\"")),
         ("Claude Desktop (claude_desktop_config.json)".into(), serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": { "poki": { "type": "http", "url": url } } })).unwrap_or_default()),
         ("Cursor (.cursor/mcp.json)".into(), serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": { "poki": { "url": url } } })).unwrap_or_default()),
@@ -214,6 +219,69 @@ pub fn snippets(url: &str) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // A loopback relay exercises Setup's real HTTP request timeouts and OAuth response handling.
+    async fn serve_check(approve: bool, consent_wait: std::time::Duration) -> (String, Parts, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let parts = Parts {
+            origin: format!("http://{}", listener.local_addr().unwrap()),
+            label: "a".repeat(52),
+            secret: "s".repeat(43),
+        };
+        let url = format!("{}/v1/{}/{}/mcp", parts.origin, parts.label, parts.secret);
+        let server = tokio::spawn(async move {
+            let routes = [
+                ("/.well-known/", "200 OK", "", "{}"),
+                ("/register ", "201 Created", "", r#"{"client_id":"fixture"}"#),
+                ("/authorize?", "302 Found", if approve {
+                    "Location: http://127.0.0.1/poki-setup?code=synthetic\r\n"
+                } else {
+                    "Location: http://127.0.0.1/poki-setup?error=access_denied\r\n"
+                }, ""),
+                ("/token ", "200 OK", "", r#"{"access_token":"synthetic"}"#),
+                ("/mcp ", "200 OK", "", "{}"),
+                ("/mcp ", "200 OK", "", r#"{"result":{"tools":[{"name":"echo"}]}}"#),
+            ];
+            for (path, status, headers, body) in routes.into_iter().take(if approve { 6 } else { 3 }) {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = BufReader::new(stream);
+                let mut line = String::new();
+                stream.read_line(&mut line).await.unwrap();
+                assert!(line.contains(path), "expected {path}");
+                loop {
+                    line.clear();
+                    let n = stream.read_line(&mut line).await.unwrap();
+                    if n == 0 || line == "\r\n" { break; }
+                }
+                if path == "/authorize?" { tokio::time::sleep(consent_wait).await; }
+                let response = format!("HTTP/1.1 {status}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{headers}\r\n{body}", body.len());
+                stream.get_mut().write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        (url, parts, server)
+    }
+
+    #[tokio::test]
+    async fn setup_check_accepts_approval_after_old_timeout() {
+        let (url, parts, server) = serve_check(true, std::time::Duration::from_secs(61)).await;
+        let result = check_connector(&url, parts).await.unwrap();
+        assert!(result.ok, "{}", result.detail);
+        assert_eq!(result.tools, ["echo"]);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn setup_check_reports_refusal_as_ungranted_authorization() {
+        let (url, parts, server) = serve_check(false, std::time::Duration::ZERO).await;
+        let result = check_connector(&url, parts).await.unwrap();
+        assert!(!result.ok && result.phone_online && result.relay_ok);
+        assert!(result.tools.is_empty());
+        assert!(result.detail.contains("Authorization was not granted"));
+        assert!(!result.detail.contains("revoked"));
+        server.await.unwrap();
+    }
+
     #[test]
     fn parse_and_redact() {
         let label = "a".repeat(52);
