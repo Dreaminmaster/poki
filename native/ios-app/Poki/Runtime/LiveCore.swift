@@ -122,16 +122,21 @@ final class AppCoreHost: CoreHost, @unchecked Sendable {
         guard let ask = lock.withLock({ consent }) else { return false }
         return await ask(client, callback, connector)
     }
-    /// PokiCore asks before every device tool. A paused runner is started here, so the call answers
-    /// "starting" and the next one finds it running. A failed one is answered as it is, and the app
-    /// is asked to try again for the next call.
+    /// PokiCore asks as each device tool begins. A paused runner is started here, so the call answers
+    /// "starting" and the next one finds it running. A failed session is opened again for this call,
+    /// which waits for it: the call that heard the failure has already ended without asking.
     func runnerState() -> RunnerState {
         let (state, then) = lock.withLock { () -> (RunnerState, (@Sendable () -> Void)?) in
             guard paused else {
                 // Failed, or still starting: the app is asked to (re)open its session. Opening is
                 // idempotent and the app ignores the ask while an open is under way, so a call that
-                // waits on "starting" can never wait on an open nobody started.
-                if case .failed = runner { return (runner, retry) }
+                // waits on "starting" can never wait on an open nobody started. After the ask the app
+                // sets the state again, so a failure it does not retry (a missed passcode) still
+                // reaches the call.
+                if case .failed = runner, retry != nil {
+                    runner = .starting("opening a new automation session after the last one failed; it takes a few seconds")
+                    return (runner, retry)
+                }
                 if case .starting = runner { return (runner, retry) }
                 return (runner, nil)
             }

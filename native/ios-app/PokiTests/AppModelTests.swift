@@ -832,6 +832,14 @@ final class InProcessPasscodeTests: XCTestCase {
         let failed = model.host.currentRunner.describe
         XCTAssertTrue(failed.contains("owner did not enter the iPhone passcode"), failed)
         XCTAssertTrue(failed.contains("the owner turns Poki off and on"), failed)
+
+        // Poki does not ask again by itself, so the next call hears it at once instead of waiting.
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let started = Date()
+        let look = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(look.isError, look.text)
+        XCTAssertTrue(look.text.contains("owner did not enter the iPhone passcode"), look.text)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
     }
 
     /// Issue 347: an open that is only slow (the session, or its first read) is not iOS asking for

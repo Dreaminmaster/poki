@@ -350,7 +350,13 @@ final class AppModel {
             }
         }
         if automationPath == .inProcess {
-            host.onRetry { [weak self] in Task { @MainActor in self?.wakeRunner() } }
+            host.onRetry { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.wakeRunner()
+                    if self.sessionOn { self.host.update(runner: self.coreState(of: self.runner)) }
+                }
+            }
         }
         // Allow and Deny on the Live Activity run in this process and come straight here.
         ApprovalIntentBridge.install { [weak self] decision in
