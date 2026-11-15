@@ -39,6 +39,14 @@ final class SensitivityTests: XCTestCase {
         }
     }
 
+    /// A mix of a message and a money move must be reported as the payment. The app is a messaging one, so
+    /// if `reason` consulted sending before payments this label would come back as a sent message instead.
+    func testAPaymentIsReportedInsteadOfASentMessageWhenBothAreInTheLabel() {
+        let why = reason("Please send money to Sam and reply afterwards")
+        XCTAssertNotNil(why)
+        XCTAssertTrue((why ?? "").contains("a payment"), "expected a payment, got \(why ?? "nil")")
+    }
+
     func testLaterWholeWordMatchIsNotHiddenByAnEarlierSubstring() {
         XCTAssertNotNil(reason("Buying help: buy this item now"))
         XCTAssertNotNil(reason("Display details, then pay for this order"))
