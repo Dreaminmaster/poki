@@ -1,0 +1,85 @@
+# One-off iOS verification for Poki contribution PRs, isolated in a fork CI branch.
+# Does not modify or trigger any upstream Pull Request source branch.
+name: Fork iOS PR verification
+on:
+  push:
+    branches:
+      - ci/poki-ios-249-322-20261115
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ios-pr-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator-tests:
+    name: "iOS Simulator XCTest — ${{ matrix.pr }}"
+    runs-on: macos-15
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: "249"
+            sha: a2c60ace60fde6443c43c7b8040737db639c0c98
+          - pr: "322"
+            sha: 887f1ddbfdc9e6ddbfff6c1fb97b130892580697
+
+    steps:
+      - name: Check out exact reviewed PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 0
+
+      - name: Select Xcode
+        shell: bash
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Prepare iOS launcher and XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          native/launcher/fetch-idevice.sh
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add aarch64-apple-ios-sim
+          cargo build --release --locked --target aarch64-apple-ios-sim --manifest-path native/launcher/Cargo.toml
+          native/ios-app/scripts/make-assets.sh
+          brew install xcodegen
+
+      - name: Boot iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          UDID="$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          devices=json.load(sys.stdin)["devices"]
+          phones=[d for runtime,items in sorted(devices.items(),reverse=True)
+                  for d in items if d["name"].startswith("iPhone") and d.get("isAvailable",True)]
+          if not phones: raise SystemExit("No available iPhone simulator")
+          print(next((d["udid"] for d in phones if "Pro" in d["name"]), phones[0]["udid"]))
+          ')"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Run Poki's existing in-app XCTest suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          native/ios-app/scripts/app-tests.sh "$UDID" "$PWD/build/app-tests" 2>&1 | tee out/ios-xctest.log
+
+      - name: Upload test transcript
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: "ios-xctest-${{ matrix.pr }}"
+          path: out/ios-xctest.log
+          if-no-files-found: ignore
