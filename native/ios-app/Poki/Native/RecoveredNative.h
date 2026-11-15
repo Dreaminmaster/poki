@@ -26,8 +26,16 @@ NS_ASSUME_NONNULL_BEGIN
 /// What the last close found: the connection class, whether it could be invalidated, and whether
 /// the session's invalidation handler fired (testmanagerd saw it go).
 - (nullable NSString *)closeDetail;
+/// How the last session of this process's own got XCTest's local device: "rebuilt" (a new XCUIDevice
+/// on the new session, so reads, pictures and buttons go to it), "unavailable" or "abi_mismatch"
+/// (this XCTest offers no way), or the exception. nil while the first session lasts.
+- (nullable NSString *)rebindDetail;
+- (BOOL)deviceRebuilt;
 - (uint64_t)generation;
 - (BOOL)enableWasReused;
+/// How long the enable of Automation Mode under way has been waiting, in seconds; 0 while none is.
+/// iOS shows its passcode screen from inside that call, so a long wait here is the owner being asked.
+- (double)enablingSeconds;
 /// Turns Automation Mode (and iOS's banner) off while the session stays open, when this iOS offers a
 /// way; the next prepare turns it on again. Keys: paused, how, selectors (what the session offers).
 - (NSDictionary<NSString *, id> *)pauseAutomation;

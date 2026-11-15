@@ -3,9 +3,9 @@ import PokiCore
 import XCTest
 @testable import Poki
 
-/// Poki opens its own automation session before an agent needs it (ESP-152). When that fails (the
-/// owner cancelled the passcode, testmanagerd did not answer within 3 s), an agent's call hears why at
-/// once and asks for another try, instead of every call waiting out "opening the session".
+/// Poki opens its own automation session when a call needs it (ESP-152). The call that waited on an
+/// open that failed hears why and ends; the next call asks for a new open and waits for it, instead
+/// of hearing the old failure again while an open nobody waits for starts behind it.
 final class InProcessSessionTests: XCTestCase {
     func testWorkspaceLauncherIgnoresDuplicateSystemEntriesAndTheMatchingWidgetLabel() {
         let icon = NSValue(cgRect: CGRect(x: 100, y: 250, width: 86, height: 86))
@@ -22,7 +22,7 @@ final class InProcessSessionTests: XCTestCase {
         XCTAssertTrue(PKWorkspaceLauncherPoint(["备忘录": [icon]], ["备忘录": labels], false).x.isNaN)
     }
 
-    func testAFailedOpenIsAnsweredWithItsReasonAndTheCallTriesAgain() {
+    func testACallThatBeginsOnAFailedOpenAsksForANewOneAndWaits() {
         let host = AppCoreHost()
         let tries = Tries()
         host.onRetry { tries.add() }
@@ -30,10 +30,13 @@ final class InProcessSessionTests: XCTestCase {
 
         let state = host.runnerState()
 
-        guard case .failed(let detail, let fix) = state else { return XCTFail("the agent reads \(state.describe)") }
+        guard case .starting = state else { return XCTFail("the agent reads \(state.describe)") }
+        XCTAssertEqual(tries.count, 1, "the call asks Poki to open the session again")
+        let noRetry = AppCoreHost()
+        noRetry.update(runner: InProcessSession.failed(code: "session_timeout", detail: "").agentState)
+        guard case .failed(let detail, let fix) = noRetry.runnerState() else { return XCTFail("without a retry the failure is answered as it is") }
         XCTAssertTrue(detail.contains("session_timeout"), detail)
         XCTAssertNotNil(fix)
-        XCTAssertEqual(tries.count, 1, "the call asks Poki to open the session again")
     }
 
     /// Seen on the phone: the banner up and the session open, while every look answered "still

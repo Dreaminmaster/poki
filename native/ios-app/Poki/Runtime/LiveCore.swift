@@ -64,6 +64,7 @@ final class LiveCore: CoreSession {
     func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false) async -> String? {
         await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace)
     }
+    func finishTask(session: String) async -> String? { await core.finishTask(session: session) }
 
     private static func map(_ event: CoreEvent) -> ShellEvent {
         switch event {
@@ -106,16 +107,15 @@ final class AppCoreHost: CoreHost, @unchecked Sendable {
 
     func update(key: Curve25519.Signing.PrivateKey?, hashes: [String]) { lock.withLock { self.key = key; self.hashes = hashes } }
     func update(runner: RunnerState) { lock.withLock { self.runner = runner } }
-    /// The state as last given, without the wake side effect of `runnerState()` (tests).
+    /// Status queries must not wake or retry automation.
     var currentRunner: RunnerState { lock.withLock { runner } }
     func onRestart(_ action: @escaping @Sendable () -> Void) { lock.withLock { restart = action } }
     func onWake(_ action: @escaping @Sendable () -> Void) { lock.withLock { wake = action } }
     func onWarmUp(_ action: @escaping @Sendable () -> Void) { lock.withLock { warm = action } }
     /// A tool call found automation failed or not open yet: the app may try again (the in-process session, ESP-152).
     func onRetry(_ action: @escaping @Sendable () -> Void) { lock.withLock { retry = action } }
-    /// MCP initialize: a paused runner starts now, and the app gets the session ready.
+    /// A connection prepares dependencies without requesting phone automation.
     func warmUp() {
-        _ = runnerState()
         lock.withLock { warm }?()
     }
     /// The runner was stopped while idle (or by the owner): the next tool call starts it again.
@@ -133,16 +133,21 @@ final class AppCoreHost: CoreHost, @unchecked Sendable {
         guard let ask = lock.withLock({ consent }) else { return false }
         return await ask(client, callback, connector)
     }
-    /// PokiCore asks before every device tool. A paused runner is started here, so the call answers
-    /// "starting" and the next one finds it running. A failed one is answered as it is, and the app
-    /// is asked to try again for the next call.
+    /// PokiCore asks as each device tool begins. A paused runner is started here, so the call answers
+    /// "starting" and the next one finds it running. A failed session is opened again for this call,
+    /// which waits for it: the call that heard the failure has already ended without asking.
     func runnerState() -> RunnerState {
         let (state, then) = lock.withLock { () -> (RunnerState, (@Sendable () -> Void)?) in
             guard paused else {
                 // Failed, or still starting: the app is asked to (re)open its session. Opening is
                 // idempotent and the app ignores the ask while an open is under way, so a call that
-                // waits on "starting" can never wait on an open nobody started.
-                if case .failed = runner { return (runner, retry) }
+                // waits on "starting" can never wait on an open nobody started. After the ask the app
+                // sets the state again, so a failure it does not retry (a missed passcode) still
+                // reaches the call.
+                if case .failed = runner, retry != nil {
+                    runner = .starting("opening a new automation session after the last one failed; it takes a few seconds")
+                    return (runner, retry)
+                }
                 if case .starting = runner { return (runner, retry) }
                 return (runner, nil)
             }

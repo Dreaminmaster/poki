@@ -195,7 +195,8 @@ final class Computer: @unchecked Sendable {
         if reading.png == nil && reading.elements.isEmpty {
             lastForeground = reading.foreground
             // Nothing came back: say what was sent and what the runner is doing, and nothing else.
-            let state = host.runnerState()
+            // Reading it asks for nothing: a call that failed does not start another open.
+            let state = host.currentRunner
             let did = did.map { $0.replacingOccurrences(of: "(sent,", with: "(sent, not confirmed: no read after it,") }
             // The numbers of the read before stand: nothing newer was read, and the model can act on
             // them or send the same action again (CI simulator: a type sent again after "nothing was
@@ -736,8 +737,10 @@ final class Computer: @unchecked Sendable {
     }
 
     /// The app stops the runner when no agent is using the phone, and asking for its state wakes it.
-    /// While it is starting, the call waits for it (every 250 ms, at most `runnerWait`, within the
-    /// call's deadline) and then goes on; a failed runner is answered at once, with its fix.
+    /// The call asks once, as it begins. While it is starting, the call waits for it (every 250 ms,
+    /// at most `runnerWait`, within the call's deadline) and then goes on; a failed runner is answered
+    /// at once, with its fix. Waiting only reads the state: a failure heard while waiting ends this
+    /// call without another open behind it, and the next call asks again.
     func waitForRunner(until: Double) async -> ToolResult? {
         var state = host.runnerState()
         // A runner seen starting is a new process: what the last one was finishing, and its settings,
@@ -748,7 +751,7 @@ final class Computer: @unchecked Sendable {
         let waitUntil = min(now() + config.runnerWait, until - config.readTimeout - 1)
         while case .starting = state, now() < waitUntil {
             await sleep(seconds: 0.25)
-            state = host.runnerState()
+            state = host.currentRunner
         }
         if restarted { runner.forgetRunner() }
         guard !state.isRunning else { return nil }

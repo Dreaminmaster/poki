@@ -55,6 +55,9 @@
 - (id)registerInvalidationHandler:(void (^)(void))handler;
 - (id)connection;
 - (void)invalidate;
++ (id)sharedSession;
+- (id)applicationMonitor;
+- (id)initWithApplicationProcessTracker:(id)tracker remoteAccessibilityInterface:(id)remote device:(id)device;
 @end
 
 /// XCUIElementType's names, by value (XCUIElementTypes.h).
@@ -236,6 +239,24 @@ static CGRect PKScreenFrame(id ax, id system) {
 
 static id PKForegroundElementTimed(id ax, PKDisplayGeometry geometry, CGRect *pane, NSString *(^bundleForPID)(int));
 
+static BOOL PKPhoneLocked(void) {
+    static int token = -1;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ if (notify_register_check("com.apple.springboard.lockstate", &token) != NOTIFY_STATUS_OK) token = -1; });
+    if (token == -1) return NO;
+    uint64_t state = 0;
+    notify_get_state(token, &state);
+    return state != 0;
+}
+
+/// Processes iOS lists as active that show only over the Lock Screen.
+static NSSet<NSString *> *PKLockScreenOnlyBundles(void) {
+    static NSSet *bundles;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ bundles = [NSSet setWithObjects:@"com.apple.SleepLockScreen", nil]; });
+    return bundles;
+}
+
 static id PKForegroundElement(id ax, PKDisplayGeometry geometry, CGRect *pane, NSString *(^bundleForPID)(int)) {
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
     id chosen = PKForegroundElementTimed(ax, geometry, pane, bundleForPID);
@@ -299,6 +320,16 @@ static id PKForegroundElementTimed(id ax, PKDisplayGeometry geometry, CGRect *pa
         if (isSpringBoard) springBoard = element;
         else if (geometry.routesDisplay && [bundleForPID(pid) isEqualToString:@"com.apple.SleepLockScreen"]) sleepOverlay = element;
         else [candidates addObject:element];
+    }
+    // iOS keeps its Sleep screen's process among the active apps with the phone unlocked and another
+    // app in front, during a Sleep Focus and after it is turned off (iPhone, iOS 27.3: Poki in front,
+    // two active apps, the Sleep screen taken for the front one, so every read was of it and an app
+    // Poki had just opened was never seen in front). It is in front only on a locked phone.
+    if (candidates.count > 1 && !PKPhoneLocked()) {
+        NSMutableArray *shown = [NSMutableArray array];
+        for (id element in candidates)
+            if (![PKLockScreenOnlyBundles() containsObject:bundleForPID(PKAXPid(element)) ?: @""]) [shown addObject:element];
+        if (shown.count) candidates = shown;
     }
     if (candidates.count == 1) return candidates.firstObject;
     if (!candidates.count) return sleepOverlay ?: springBoard ?: system;
@@ -818,7 +849,8 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
 @implementation PKInProcess {
     SRNativeSession *_sessions;
     uint64_t _accessibilityGeneration;
-    /// The AX client made for a session reopened after a close (nil while the first session lasts).
+    /// Only where XCTest's local device could not be rebuilt for a reopened session: an AX client
+    /// made for that session. nil while the first session lasts, and whenever the device was rebuilt.
     id _freshAX;
     CGRect _viewport;
     PKDisplayGeometry _capturedGeometry;
@@ -839,6 +871,9 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
     // Written and read on the main thread. Geometry still comes from the active screen, not the sensor.
     UIDeviceOrientation _lastPhysicalOrientation;
     uint64_t _orientationRevision;
+    /// The generation that has answered with an element tree, and the one being checked now.
+    uint64_t _readableGeneration, _provingGeneration;
+    NSLock *_proofLock;
 }
 
 + (BOOL)canUseDuoSplitView { return PKIsDuo(); }
@@ -851,7 +886,7 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
 }
 
 - (instancetype)init {
-    if ((self = [super init])) { _sessions = [SRNativeSession new]; _viewport = CGRectNull; }
+    if ((self = [super init])) { _sessions = [SRNativeSession new]; _viewport = CGRectNull; _proofLock = [NSLock new]; }
     return self;
 }
 
@@ -1081,23 +1116,94 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
         NSString *code = [error.domain isEqualToString:@"RecoveredNative"] ? error.localizedDescription : [NSString stringWithFormat:@"%@ %ld", error.domain ?: @"unknown", (long)error.code];
         return @{@"ok": @NO, @"code": code ?: @"unknown", @"detail": detail, @"seconds": @(seconds)};
     }
+    // Ready means readable: a session that is enabled but answers no element tree is not handed out
+    // (issue 347: such a session was reported ready, and every read after it failed).
+    uint64_t generation = _sessions.generation;
     double warm = 0;
-    if (!_sessions.enableWasReused) {
-        // The first use of a new session pays for the accessibility client's first snapshot and
-        // XCUIScreen's first screenshot, seconds each (the gym: the agent's first look after prepare
-        // took 8.1 s and came with no tree and no picture; the next read took 1.6 s). Paid here, with
-        // a shallow snapshot of the front app, so the agent's first read is an ordinary one.
-        NSTimeInterval warmStarted = NSProcessInfo.processInfo.systemUptime;
-        @try {
-            id ax = nil;
-            id app = [self front:NULL ax:&ax];
-            if (app && ax) PKRequestSnapshotWithin(3, ax, app, 3, 30, NULL);
-            NSString *code = nil;
-            [self screenshot:&code];
-        } @catch (__unused NSException *e) {}
-        warm = NSProcessInfo.processInfo.systemUptime - warmStarted;
+    NSString *unreadable = [self unreadableReason:generation warm:&warm];
+    if (unreadable) {
+        return @{@"ok": @NO, @"code": @"session_unreadable", @"detail": unreadable, @"generation": @(generation),
+                 @"seconds": @(seconds), @"warm_seconds": @(warm), @"device": [_sessions rebindDetail] ?: @"first"};
     }
-    return @{@"ok": @YES, @"generation": @(_sessions.generation), @"reused": @(_sessions.enableWasReused), @"seconds": @(seconds), @"warm_seconds": @(warm)};
+    return @{@"ok": @YES, @"generation": @(generation), @"reused": @(_sessions.enableWasReused), @"seconds": @(seconds), @"warm_seconds": @(warm),
+             @"device": [_sessions rebindDetail] ?: @"first"};
+}
+
+- (double)authorizationWaitSeconds { return [_sessions enablingSeconds]; }
+
+/// nil once this generation has answered with an element tree (checked once per generation), else
+/// why it has not. A generation that cannot read is closed, so nothing reuses it and the next
+/// prepare opens a new session.
+- (nullable NSString *)unreadableReason:(uint64_t)generation warm:(double *)warm {
+    // The check's own lookups come back through -current:outcome: and pass.
+    @synchronized (self) { if (_readableGeneration == generation || _provingGeneration == generation) return nil; }
+    [_proofLock lock];
+    @try {
+        @synchronized (self) {
+            if (_readableGeneration == generation) return nil;
+            _provingGeneration = generation;
+        }
+        NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
+        NSString *why = [self proveReadable:generation];
+        if (warm) *warm = NSProcessInfo.processInfo.systemUptime - started;
+        @synchronized (self) {
+            _provingGeneration = 0;
+            if (!why) _readableGeneration = generation;
+        }
+        if (why) {
+            NSLog(@"PokiInProcess: session generation %llu cannot read (%@): closing it", generation, why);
+            if (_sessions.generation == generation) [_sessions close];
+        }
+        return why;
+    } @finally {
+        [_proofLock unlock];
+    }
+}
+
+/// One read of a new session, which also pays for the accessibility client's first snapshot and
+/// XCUIScreen's first screenshot (the gym: the agent's first look after prepare took 8.1 s and came
+/// with no tree and no picture; the next read took 1.6 s). The system application's tree is what
+/// proves the session: it answers whatever is in front, so an app that is slow or hung is not taken
+/// for a broken session. nil when it read.
+- (nullable NSString *)proveReadable:(uint64_t)generation {
+    if (self.failNextReadinessCheck) {
+        self.failNextReadinessCheck = NO;
+        return @"no element tree (failure asked for by the readiness test)";
+    }
+    @try {
+        id ax = [self accessibilityFor:generation];
+        if (!ax) return @"no accessibility client";
+        // Whether testmanagerd turned accessibility on for this session. On the simulator the load
+        // answers no and reads work, so it is not asked for there.
+        BOOL loaded = YES;
+#if !TARGET_OS_SIMULATOR
+        @synchronized (self) { loaded = _accessibilityGeneration == generation || ![ax respondsToSelector:@selector(loadAccessibility:)]; }
+#endif
+        id system = [ax respondsToSelector:@selector(systemApplication)] ? [ax systemApplication] : nil;
+        NSString *code = nil;
+        id root = system ? PKRequestSnapshotWithin(3, ax, system, 1, 1, &code) : nil;
+        id client = nil;
+        NSString *frontCode = nil;
+        id app = [self front:NULL ax:&client code:&frontCode];
+        // The front app's first snapshot is paid for here. With accessibility loaded, its own
+        // timeout is the app's and not the session's.
+        NSString *appCode = nil;
+        id appRoot = (app && client) ? PKRequestSnapshotWithin(3, client, app, 3, 30, &appCode) : nil;
+        if (!root && !appRoot) {
+            return [NSString stringWithFormat:@"no element tree from the system or from the app in front (%@)", code ?: appCode ?: frontCode ?: @"no answer"];
+        }
+        // Accessibility did not load (issue 347's reopened sessions): only a tree from the app in
+        // front itself shows that this session reads all the same.
+        if (!loaded && !appRoot) {
+            return [NSString stringWithFormat:@"accessibility did not load for this session, and the app in front gave no element tree (%@)", appCode ?: frontCode ?: @"no answer"];
+        }
+        NSString *shot = nil;
+        [self screenshot:&shot];
+        if (shot) NSLog(@"PokiInProcess: session generation %llu reads its tree; its first picture failed (%@)", generation, shot);
+        return nil;
+    } @catch (NSException *exception) {
+        return [NSString stringWithFormat:@"%@: %@", exception.name, exception.reason ?: @""];
+    }
 }
 
 - (NSDictionary<NSString *, id> *)close {
@@ -1121,7 +1227,13 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
         return nil;
     }
     *generation = _sessions.generation;
-    if (!session) *outcome = [PKOutcome delivery:PKDeliveryNotSent code:error.localizedDescription ?: @"no_session" detail:nil];
+    if (!session) { *outcome = [PKOutcome delivery:PKDeliveryNotSent code:error.localizedDescription ?: @"no_session" detail:nil]; return nil; }
+    // A session opened here (testmanagerd ended the last one) reads before anything is sent to it.
+    NSString *unreadable = [self unreadableReason:*generation warm:NULL];
+    if (unreadable) {
+        *outcome = [PKOutcome delivery:PKDeliveryNotSent code:@"session_unreadable" detail:unreadable];
+        return nil;
+    }
     return session;
 }
 
@@ -1501,15 +1613,35 @@ static const NSTimeInterval PKWorkspaceFrontSeconds = 4.0;
     @synchronized (self) {
         if (_accessibilityGeneration != 0 && _accessibilityGeneration != generation) {
             // A new session after a close: requests the old one left hanging never return, so the
-            // pids they marked unresponsive (the accessibility server's among them) are asked again,
-            // and the AX client is a new one on the new session rather than XCUIDevice's, which keeps
-            // talking to the session that was closed (0.2.8 build 144: every read after a stand-by
-            // and reopen timed out until Poki was relaunched).
+            // pids they marked unresponsive (the accessibility server's among them) are asked again.
             @synchronized (PKHungLock()) { [PKHungSince() removeAllObjects]; }
-            Class client = NSClassFromString(@"XCAXClient_iOS");
-            id fresh = [client instancesRespondToSelector:@selector(init)] ? [[client alloc] init] : nil;
-            if (fresh) _freshAX = fresh;
-            NSLog(@"PokiInProcess: session generation %llu: hung marks cleared, %@ AX client", generation, fresh ? @"a new" : @"the device's");
+            // The AX client is the one of the local device SRNativeSession rebuilt on the new session
+            // (`ax` above already is). A client made here with plain -init is not one: XCAXClient_iOS
+            // has no -init of its own on iOS 27, so its remoteAccessibilityInterface and queue were
+            // nil, loadAccessibility went to nil and no reply ever came (issue 347: "pid 0 gets no
+            // answer for 4 s" on every reopened session). Where the device cannot be rebuilt, the
+            // client is made with its real initializer on the new session; plain -init is the last
+            // resort for an XCTest that has neither (the CI simulator's read after a reopen with it).
+            _freshAX = nil;
+            if (![_sessions deviceRebuilt]) @try {
+                Class client = NSClassFromString(@"XCAXClient_iOS");
+                SEL designated = NSSelectorFromString(@"initWithApplicationProcessTracker:remoteAccessibilityInterface:device:");
+                id device = [NSClassFromString(@"XCUIDevice") sharedDevice];
+                id session = [NSClassFromString(@"XCTRunnerDaemonSession") sharedSession];
+                id fresh = nil;
+                if (session && [client instancesRespondToSelector:designated] &&
+                    PKMatches([client instanceMethodSignatureForSelector:designated], "@", @[@"@", @"@", @"@"])) {
+                    id tracker = [device respondsToSelector:@selector(applicationMonitor)] ? [device applicationMonitor] : nil;
+                    fresh = [[client alloc] initWithApplicationProcessTracker:tracker remoteAccessibilityInterface:session device:device];
+                } else if ([client instancesRespondToSelector:@selector(init)]) {
+                    fresh = [[client alloc] init];
+                }
+                if (fresh) { _freshAX = fresh; ax = fresh; }
+            } @catch (NSException *e) {
+                NSLog(@"PokiInProcess: no AX client of its own for session generation %llu: %@", generation, e.reason);
+            }
+            NSLog(@"PokiInProcess: session generation %llu: hung marks cleared, AX client of %@", generation,
+                  [_sessions deviceRebuilt] ? @"the rebuilt device" : _freshAX ? @"its own (no device rebuild)" : @"the old device");
         }
         if (_freshAX) ax = _freshAX;
         if (_accessibilityGeneration != generation && [ax respondsToSelector:@selector(loadAccessibility:)]) {

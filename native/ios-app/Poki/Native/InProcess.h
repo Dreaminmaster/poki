@@ -60,6 +60,12 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// Loads the Developer libraries, opens the daemon session and enables Automation Mode, or reuses an
 /// enable of the same session and generation. Keys: ok, code, detail, generation, reused, seconds.
 - (NSDictionary<NSString *, id> *)prepare;
+/// How long iOS has been asked to allow automation in the open under way (seconds); 0 while no
+/// open is at that point. Opening the session and its first read do not count.
+- (double)authorizationWaitSeconds;
+/// Testing only: the next readiness check of a new session fails as if no element tree came back,
+/// so the handling of a session that cannot read can be seen on a phone.
+@property (atomic) BOOL failNextReadinessCheck;
 /// Ends the session, and with it Automation Mode and iOS's "Automation Running" banner, while Poki
 /// stays up. Keys: closed (whether one was open), generation (the one that ended), seconds. The next
 /// prepare opens a new session; iOS asks for no passcode again within the same boot.

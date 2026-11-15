@@ -853,6 +853,11 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
 final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let beforeRequest: (@Sendable () async -> Void)?
+    private let lock = NSLock()
+    private var reads = 0
+    private var firstRead: TimeInterval?
+    var firstReadAt: TimeInterval? { lock.withLock { firstRead } }
+    var screenReads: Int { lock.withLock { reads } }
     init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil) {
         self.session = session
         self.beforeRequest = beforeRequest
@@ -872,6 +877,10 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
             value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
         case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
         case "/source":
+            lock.withLock {
+                reads += 1
+                if firstRead == nil { firstRead = ProcessInfo.processInfo.systemUptime }
+            }
             value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeButton name="General" label="General" x="16" y="100" width="358" height="44" /></XCUIElementTypeApplication></AppiumAUT>"#)
         default: value = .null
         }

@@ -22168,18 +22168,18 @@
         }
       }
     },
-    "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode on the next screen. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart." : {
+    "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode. It may ask only when Poki first operates the phone. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这是 iPhone 重新启动后 Poki 首次启动自动化，因此 iOS 会在下一个屏幕要求输入锁屏密码。该屏幕属于 iOS。Poki 无法看到或读取你输入的内容，并且在下次重新启动前只会询问一次。"
+            "value" : "这是 iPhone 重新启动后 Poki 首次启动自动化，因此 iOS 会要求输入锁屏密码，可能要等 Poki 第一次操作手机时才会要求。该屏幕属于 iOS。Poki 无法看到或读取你输入的内容，并且在下次重新启动前只会询问一次。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "這是 iPhone 重新啟動後 Poki 首次啟動自動化，因此 iOS 會在下一個螢幕要求輸入鎖屏密碼。該螢幕屬於 iOS。Poki 無法看到或讀取你輸入的內容，並且在下次重新啟動前只會詢問一次。"
+            "value" : "這是 iPhone 重新啟動後 Poki 首次啟動自動化，因此 iOS 會要求輸入鎖屏密碼，可能要等 Poki 第一次操作手機時才會要求。該螢幕屬於 iOS。Poki 無法看到或讀取你輸入的內容，並且在下次重新啟動前只會詢問一次。"
           }
         }
       }
@@ -22278,44 +22278,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "磁碟映像"
-          }
-        }
-      }
-    },
-    "Hide Banner When Idle" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空闲时隐藏横幅"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "空閒時隱藏橫幅"
-          }
-        }
-      }
-    },
-    "Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested. If the agent can’t see the screen after this, turn it off and open Poki again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体停止时结束自动化会话并隐藏 iOS 横幅（实验性）。若此后智能体无法读取屏幕，请关闭此项并重开 Poki。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體停止時結束自動化工作階段並隱藏 iOS 橫幅（實驗性）。若此後智慧體無法讀取螢幕，請關閉此項並重開 Poki。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the automation session and hides the iOS banner when the agent stops (experimental). If agents lose screen view afterward, turn this off and reopen Poki."
           }
         }
       }
@@ -32126,29 +32088,6 @@
         }
       }
     },
-    "Ends the automation session, and iOS’s banner with it, when the agent stops. Being tested: if the agent can’t see the screen after this, turn it off and open Poki again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ends the automation session and hides the iOS banner when the agent stops (experimental). If agents lose screen view afterward, turn this off and reopen Poki."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体停止时结束自动化会话并隐藏 iOS 横幅（实验性）。若此后智能体无法读取屏幕，请关闭此项并重开 Poki。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體停止時結束自動化工作階段並隱藏 iOS 橫幅（實驗性）。若此後智慧體無法讀取螢幕，請關閉此項並重開 Poki。"
-          }
-        }
-      }
-    },
     "An agent saves a routine after a task that worked; the next time it repeats the task in one step and stops where the screen differs. Swipe a routine to forget it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33256,6 +33195,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "只能加入圖片、PDF、JSON、Markdown 和純文字檔案。"
+          }
+        }
+      }
+    },
+    "The task has ended. Open Poki to see the result." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The task has ended. Open Poki to see the result."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务已结束。打开 Poki 查看结果。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務已結束。開啟 Poki 檢視結果。"
+          }
+        }
+      }
+    },
+    "%@ used this iPhone through Poki. Open Poki to see what it did." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ used this iPhone through Poki. Open Poki to see what it did."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 通过 Poki 使用了这台 iPhone。打开 Poki 查看它做了什么。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 透過 Poki 使用了這部 iPhone。開啟 Poki 檢視它做了什麼。"
           }
         }
       }
