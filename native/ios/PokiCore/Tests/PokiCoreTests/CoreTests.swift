@@ -990,7 +990,7 @@ final class MCPTests: XCTestCase {
 
 final class RelayTests: XCTestCase {
     func testHandshakeRequestsAndKeepalive() async throws {
-        let (core, _, _) = makeCore()
+        let (core, _, _) = makeCore { $0.relayAppVersion = "0.4.2 (1505)" }
         let sockets = FakeSockets()
         let events = LockedBox<[CoreEvent]>([])
         Task { for await e in core.events { events.update { $0.append(e) } } }
@@ -1006,6 +1006,8 @@ final class RelayTests: XCTestCase {
         do { let ok = await eventually { !socket.sent.isEmpty }; XCTAssertTrue(ok) }
         let hello = try JSON.parse(socket.sent[0])
         XCTAssertEqual(hello["t"], "hello")
+        XCTAssertEqual(hello["app"], "0.4.2 (1505)")
+        XCTAssertEqual(hello["v"], 1)
         XCTAssertEqual(hello["access"], ["abc123"])
         var signed = Data("poki-relay-v1:\(label):".utf8)
         signed.append(nonce)

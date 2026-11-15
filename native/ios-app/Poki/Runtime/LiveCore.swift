@@ -16,6 +16,9 @@ final class LiveCore: CoreSession {
     init(host: AppCoreHost, transport: HTTPTransport) {
         self.host = host
         var config = CoreConfig()
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        config.relayAppVersion = "\(version) (\(build))"
         // Signing tools may rename the app; its own id is Poki too.
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional

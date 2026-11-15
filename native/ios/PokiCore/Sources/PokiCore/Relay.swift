@@ -98,6 +98,7 @@ final class RelayClient: @unchecked Sendable {
     /// had already failed the caller, and the answer would be lost (seen on the phone: a three-action
     /// do answered "what was sent is unknown" when the relay reset mid-call).
     var undelivered: (@Sendable (RelayRequest, RelayResponse) -> Void)?
+    var appVersion = "1.0"
     var pingEvery = 25.0
     var silentLimit = 60.0
     var maxBackoff = 30.0
@@ -196,7 +197,7 @@ final class RelayClient: @unchecked Sendable {
         }
         var signed = Data("poki-relay-v1:\(label):".utf8)
         signed.append(nonce)
-        let hello: JSON = ["t": "hello", "v": 1, "key": .string(key.publicKey.base64EncodedString()), "sig": .string(try key.sign(signed).base64EncodedString()), "access": .array(host.accessHashes().prefix(8).map(JSON.string)), "app": "1.0"]
+        let hello: JSON = ["t": "hello", "v": 1, "key": .string(key.publicKey.base64EncodedString()), "sig": .string(try key.sign(signed).base64EncodedString()), "access": .array(host.accessHashes().prefix(8).map(JSON.string)), "app": .string(appVersion)]
         try await socket.send(hello.serialized())
         let ready = try JSON.parse(try await withDeadline(15, "the relay's ready") { try await socket.receive() })
         guard ready["t"]?.string == "ready" else { throw RelayFailure("the relay refused the phone: \(ready["reason"]?.string ?? ready.serialized())") }
