@@ -69,6 +69,41 @@ space assigned by the system. The iOS deployment target remains unchanged.
 
 `native/ios-app/scripts/app-tests.sh SIMULATOR_UDID` builds `PokiTests` and runs it inside Poki on a booted simulator (the in-process transport's clipboard and session answers).
 
+### Notification permission before UI and Live Activity tests
+
+A new simulator has no notification decision for Poki. Tests that start a session can request
+permission asynchronously, leaving the system alert above later tests, even after the test app
+exits. While that alert is present, Poki is inactive: a foreground-only Live Activity must not
+start, and accessibility reads describe the alert instead of the preview or browser header.
+An absent activity or missing localized text in this state is not a completed product check.
+
+Use this preparation whenever the simulator is new or its notification permission was reset:
+
+1. Record the simulator UUID and use that explicit UUID for every command; do not select a physical
+   iPhone or rely on a default device. Build and install the test host, then run the session-starting
+   tests with the normal runner above.
+2. If a notification alert interrupts the run, preserve its screenshot and the failed log. Stop the
+   test command and terminate its host with `xcrun simctl terminate SIMULATOR_UDID APP_BUNDLE_ID`.
+   Read the actual bundle ID from the built app's `Info.plist`; do not guess it. The notification
+   alert can remain above the simulator's Home Screen after termination.
+3. On that simulator, answer the notification alert with **Don't Allow**. Denial is sufficient for
+   the layout and activity-lifecycle checks; those checks do not require permission to post
+   notifications. With Poki MCP, use `handle_alert` with the simulator's explicit `device` UUID and
+   the observed button label. Do not answer unrelated alerts or change a real phone's permissions.
+4. Confirm the alert is gone, then restart the affected tests in a fresh Poki process on the same
+   simulator. Preserve the new result separately from the interrupted run. For screen-reading
+   tests, check that the captured application is Poki and the expected preview or browser header
+   is visible; for activity tests, Poki must be active before an activity can be created.
+5. Delete only the temporary simulator after collecting logs, screenshots and XML. Repeat this
+   preparation when creating another simulator; a decision on one simulator does not apply to
+   another. `simctl privacy grant all` does not grant notification permission.
+
+This procedure was checked on iOS 27.0: with the alert present the Split View stop test failed
+while Poki was inactive, and the language test captured the permission alert; after denying
+notifications, the unchanged 20 chat tests and the language-preview test passed. The navigation
+font test is separate: English uses Geist scaled by `UIFontMetrics`, while Chinese uses the system
+font. Its expected sizes must follow the chosen font rather than assume both scaling curves match.
+
 `-pokiScreen home|setup|connect|debug|activity|steps|status|connector|details|model|voice|session|hands|rules|health|memory|appearance|voiceSettings|conversations|updates|language` opens that screen at launch (the app opens on the chat; home is the chat with the conversations drawer open, details Settings, hands and setup its Connection page, rules and health the Approvals and Advanced pages, connect the Agents page, memory, appearance, voiceSettings (Dictation & Mute), conversations (Archived Conversations) updates (Signing & Updates) and language (Language) their pages, debug Diagnostics under Advanced, steps the Activity Log, session an outside agent's session); `-pokiChat empty|working|approval|handoff|approved|failed` shows the sample chat scenes (the greeting, a task under way, a step waiting for approval, a hand-over, a finished task, a failed one) and `-pokiVoice ready|listening|working` the voice faces; `-pokiSetupStep N` opens setup at step N, `-pokiSettingsEnd YES` opens Settings scrolled to its end, and `-pokiSample B|C` fills the status, history and Live Activity with sample steps and an approval, and `-pokiSample PIN` shows a sample pairing code, for screenshots only; on a simulator `-pokiLoopback cellular` forces the cellular-only loopback hint, `-pokiLoopback working` a loopback that answers, and `-pokiSigningDays 1` a signing that ends in a day.
 
 Poki ships English, Simplified Chinese and Traditional Chinese. Settings › Language lets the owner follow the effective iOS app language or choose a Poki UI language. See [iOS UI language](../../docs/ios-localization.md) for scope and verification. The app's screens use the String Catalog `Shared/Localizable.xcstrings`, the Live Activity its own table `Shared/LiveActivity.xcstrings` (see `Shared/ActivityWords.swift`), and the permission prompts `Poki/InfoPlist.xcstrings`. Poki's own status words stay in English inside the app (the code compares them and the agent reads them) and are looked up where they reach the screen; the launcher's fix sentences have entries too. Steps an agent reports, logs and diagnostics output stay as they come. Add `-AppleLanguages '(zh-Hans)'` to a launch to see Chinese without changing the simulator's language.

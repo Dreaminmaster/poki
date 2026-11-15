@@ -64,26 +64,39 @@ final class InterfaceSizeTests: XCTestCase {
     }
 
     func testNavigationFontsUseTheEffectiveWindowCategory() throws {
+        let language = AppLocalization.shared.preference
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         let navigation = UINavigationController(rootViewController: UIViewController())
         window.rootViewController = navigation
         window.makeKeyAndVisible()
         defer {
+            AppLocalization.shared.preference = language
             AppInterfaceSize.apply(AppInterfaceSize.system, to: window)
             AppInterfaceSize.updateNavigationFonts(in: window)
             window.isHidden = true
         }
-        var sizes: [CGFloat] = []
-        for category in [UIContentSizeCategory.extraSmall, .small, .large, .extraLarge, .extraExtraExtraLarge, .accessibilityMedium, .accessibilityExtraLarge, .accessibilityExtraExtraExtraLarge] {
-            AppInterfaceSize.apply(category.rawValue, to: window)
-            AppInterfaceSize.updateNavigationFonts(in: window)
-            let font = try XCTUnwrap(navigation.navigationBar.titleTextAttributes?[.font] as? UIFont)
-            let expected = UIFont.preferredFont(forTextStyle: .headline, compatibleWith: window.traitCollection)
-            XCTAssertEqual(font.pointSize, expected.pointSize, accuracy: 0.1)
-            sizes.append(font.pointSize)
+        let geist = try XCTUnwrap(UIFont(name: "Geist-SemiBold", size: 17))
+        for language in ["en", "zh-Hans"] {
+            AppLocalization.shared.preference = language
+            var sizes: [CGFloat] = []
+            for category in [UIContentSizeCategory.extraSmall, .small, .large, .extraLarge, .extraExtraExtraLarge, .accessibilityMedium, .accessibilityExtraLarge, .accessibilityExtraExtraExtraLarge] {
+                AppInterfaceSize.apply(category.rawValue, to: window)
+                AppInterfaceSize.updateNavigationFonts(in: window)
+                let font = try XCTUnwrap(navigation.navigationBar.titleTextAttributes?[.font] as? UIFont)
+                let traits = UITraitCollection(preferredContentSizeCategory: category)
+                // Custom-font metrics need not equal the system font's sizes; Geist's two smallest
+                // headline sizes can also be equal. The expected traits come from the test case.
+                let expected = language == "en"
+                    ? UIFontMetrics(forTextStyle: .headline).scaledFont(for: geist, compatibleWith: traits)
+                    : UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traits)
+                XCTAssertEqual(font.fontName, expected.fontName, "\(language), \(category.rawValue)")
+                XCTAssertEqual(font.pointSize, expected.pointSize, accuracy: 0.1, "\(language), \(category.rawValue)")
+                if let previous = sizes.last { XCTAssertGreaterThanOrEqual(font.pointSize, previous) }
+                sizes.append(font.pointSize)
+            }
+            XCTAssertGreaterThan(try XCTUnwrap(sizes.last), try XCTUnwrap(sizes.first))
         }
-        XCTAssertGreaterThan(sizes[1], sizes[0])
     }
 
     func testPreferenceSurvivesSettingsVaultRestoration() throws {
