@@ -864,6 +864,35 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(model.host.currentRunner.describe.contains("accessibility did not load"), model.host.currentRunner.describe)
     }
 
+    /// A look that waits for the session and hears it cannot read ends there: nothing opens another
+    /// session (and brings the banner back) until the agent calls again. That next call opens a new
+    /// session and reads the screen.
+    func testAFailedOpenEndsTheCallThatWaitedAndTheNextCallReads() async {
+        await prepareWithoutPhoneTask()
+        model.runnerChanged(RunnerStatus(state: "running"))
+        session.holdNextOpen()
+        async let first = model.runTool("look", arguments: "{}")
+        await waitFor("the look's open is under way") { self.session.isHoldingOpen }
+        let reopened = expectation(description: "no session opens after the failed look")
+        reopened.isInverted = true
+        session.onPrepare = { reopened.fulfill() }
+        session.answer(["ok": false, "code": "session_unreadable", "detail": "accessibility did not load for this session", "seconds": 1.0])
+
+        let failed = await first
+        XCTAssertTrue(failed.isError, failed.text)
+        XCTAssertTrue(failed.text.contains("could not read the screen"), failed.text)
+        await fulfillment(of: [reopened], timeout: 1.5)
+        XCTAssertFalse(session.isOpen)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+
+        session.onPrepare = nil
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let next = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(next.isError, next.text)
+        XCTAssertTrue(next.text.contains("General"), next.text)
+        XCTAssertTrue(model.hasOpenInProcessSession)
+    }
+
     func testSessionStaysOpenDuringTaskAndClosesAfterIdle() async {
         let saved = model.idleStopSeconds
         model.idleStopSeconds = 60
