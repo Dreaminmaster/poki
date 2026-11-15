@@ -2,6 +2,11 @@
 
 What changed in each round, and what still needs the phone. Newest first.
 
+## Idle return to Poki (Unreleased, 2026-11-15)
+
+Changed:
+- Returning to Poki after the idle timeout keeps automation open until the return finishes. The foreground callback and another idle timer tick no longer close the session while it is still being used.
+
 ## Developer Mode only when the phone says so (2026-11-09, on standalone)
 
 Changed:
