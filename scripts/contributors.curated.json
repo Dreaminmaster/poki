@@ -535,5 +535,24 @@
       "ko": "#326에서 iPhone의 3D 곰 초기화 중 발생하는 충돌을 수정했습니다.",
       "es": "Corrigió en #326 un fallo al inicializar el oso 3D en el iPhone."
     }
+  },
+  "Ryanwu316": {
+    "status": "counted",
+    "categories": [
+      "code",
+      "testing"
+    ],
+    "basis": [
+      "#354"
+    ],
+    "summary": "Brought two-app workspaces to iPhone Duo in #354, so a task waits through rotation and resumes on the same app pair.",
+    "lines": {
+      "en": "Brought two-app workspaces to iPhone Duo in #354, so a task waits through rotation and resumes on the same app pair.",
+      "zh-CN": "在 #354 中为 iPhone Duo 加入双应用工作区，任务在旋转时会等待，并在同一对应用上继续。",
+      "zh-TW": "在 #354 為 iPhone Duo 加入雙 App 工作區，任務在旋轉時會等待，並在同一組 App 上繼續。",
+      "ja": "#354 で iPhone Duo に 2 つのアプリのワークスペースを追加し、回転中もタスクが待機して同じアプリの組み合わせで再開するようにしました。",
+      "ko": "#354에서 iPhone Duo에 두 앱 작업 공간을 추가해, 화면을 돌리는 동안 작업이 기다렸다가 같은 앱 쌍에서 이어지도록 했습니다.",
+      "es": "Añadió en #354 los espacios de trabajo con dos apps en el iPhone Duo: la tarea espera durante la rotación y continúa en el mismo par de apps."
+    }
   }
 }
