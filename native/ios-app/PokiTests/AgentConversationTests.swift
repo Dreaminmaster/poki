@@ -95,6 +95,36 @@ final class AgentConversationTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(store.listed.first).live)
     }
 
+    /// A disconnected MCP session may not finish its last tool before reopening with
+    /// the same identifier. Its old pending receipt must not capture the new result.
+    func testSessionReopenDoesNotCompleteAnAbandonedStep() throws {
+        let store = launch()
+        let id = "reopened-" + UUID().uuidString
+        func begin() {
+            store.observe(.session(.started(id: id, client: "claude-ai", version: "1.0", connector: "work")), approvals: [])
+        }
+        begin()
+        store.observe(.toolStarted(name: "do", summary: "Unconfirmed old tap", session: id), approvals: [])
+        store.observe(.session(.ended(id: id)), approvals: [])
+        XCTAssertFalse(try XCTUnwrap(store.listed.first).live)
+
+        begin()
+        store.observe(.toolStarted(name: "look", summary: "New screen read", session: id), approvals: [])
+        store.observe(.toolFinished(summary: "New read succeeded", delivery: "sent", app: "Safari",
+                                    thumbnail: nil, error: nil, session: id), approvals: [])
+        let receipts = try XCTUnwrap(store.listed.first).entries.compactMap { entry -> (String, Bool?)? in
+            if case .step(let summary, let ok) = entry.kind { return (summary, ok) }
+            return nil
+        }
+        XCTAssertEqual(receipts.count, 2)
+        XCTAssertEqual(receipts[0].0, "Unconfirmed old tap")
+        XCTAssertNil(receipts[0].1, "a lost tool response is unknown, never retroactively confirmed")
+        XCTAssertEqual(receipts[1].0, "New read succeeded")
+        XCTAssertEqual(receipts[1].1, true)
+        store.observe(.session(.ended(id: id)), approvals: [])
+        XCTAssertFalse(try XCTUnwrap(store.listed.first).live)
+    }
+
     func testEachClientAndEachConnectorKeepsItsOwnConversation() {
         let store = launch()
         for round in 1...3 {

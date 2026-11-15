@@ -345,6 +345,9 @@ final class SessionStore {
             if let connector { connectors[id] = connector }
         case .session(.ended(let id)):
             activeAgentSessions.remove(id)
+            // A cancelled/disconnected call may never send toolFinished. Keep its visible
+            // step unconfirmed, but never attach a later call to its stale pending UUID.
+            pendingAgentSteps.removeValue(forKey: id)
             let conversationID = conversations[id] ?? id
             // Another MCP session might still be working in this same conversation.
             // The first DELETE must not make the other session's active work archivable.
