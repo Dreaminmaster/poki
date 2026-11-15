@@ -2,6 +2,10 @@
 
 What changed in each round, and what still needs the phone. Newest first.
 
+## Optional Live Activities (Unreleased, 2026-11-15)
+
+- Turning off Live Activities no longer marks background setup as incomplete or displays “Poki can’t stay on in the background yet” when location permission is already granted. Live Activity status and approval buttons remain optional; normal notification and in-app approvals are unchanged.
+
 ## Developer Mode only when the phone says so (2026-11-09, on standalone)
 
 Changed:
