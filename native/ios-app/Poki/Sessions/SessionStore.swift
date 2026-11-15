@@ -333,6 +333,10 @@ final class SessionStore {
     func observe(_ event: ShellEvent, approvals: [PendingApproval]) {
         switch event {
         case .session(.started(let id, let client, _, let connector)):
+            // Only a genuine reopen clears orphaned receipts. A duplicate initialize while
+            // still active must not erase an in-flight tool; a late finish after DELETE
+            // can still complete the previous record up to the next session start.
+            if !activeAgentSessions.contains(id) { pendingAgentSteps.removeValue(forKey: id) }
             activeAgentSessions.insert(id)
             if client.isEmpty {
                 // A session that began before Poki last started: named from the connector's agent,
@@ -345,9 +349,6 @@ final class SessionStore {
             if let connector { connectors[id] = connector }
         case .session(.ended(let id)):
             activeAgentSessions.remove(id)
-            // A cancelled/disconnected call may never send toolFinished. Keep its visible
-            // step unconfirmed, but never attach a later call to its stale pending UUID.
-            pendingAgentSteps.removeValue(forKey: id)
             let conversationID = conversations[id] ?? id
             // Another MCP session might still be working in this same conversation.
             // The first DELETE must not make the other session's active work archivable.

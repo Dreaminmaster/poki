@@ -125,6 +125,29 @@ final class AgentConversationTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(store.listed.first).live)
     }
 
+    /// A repeated initialize for an already-live MCP session is not a reconnect.
+    /// Its still-running tool must keep the original receipt ID.
+    func testRepeatedInitializeKeepsTheInFlightStep() throws {
+        let store = launch()
+        let id = "still-active-" + UUID().uuidString
+        func begin() {
+            store.observe(.session(.started(id: id, client: "claude-ai", version: "1.0", connector: "work")), approvals: [])
+        }
+        begin()
+        store.observe(.toolStarted(name: "look", summary: "Reading a page", session: id), approvals: [])
+        begin()
+        store.observe(.toolFinished(summary: "Read succeeded", delivery: "sent", app: "Safari",
+                                    thumbnail: nil, error: nil, session: id), approvals: [])
+        let receipts = try XCTUnwrap(store.listed.first).entries.compactMap { entry -> (String, Bool?)? in
+            if case .step(let summary, let ok) = entry.kind { return (summary, ok) }
+            return nil
+        }
+        XCTAssertEqual(receipts.count, 1, "duplicate initialize must not create a second receipt")
+        XCTAssertEqual(receipts.first?.0, "Read succeeded")
+        XCTAssertEqual(receipts.first?.1, true)
+        store.observe(.session(.ended(id: id)), approvals: [])
+    }
+
     func testEachClientAndEachConnectorKeepsItsOwnConversation() {
         let store = launch()
         for round in 1...3 {
