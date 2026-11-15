@@ -16,7 +16,7 @@ struct SettingsEntryButton: View {
     @Environment(\.openPokiSettings) private var open
     @Environment(\.drawerSliding) private var sliding
 
-    private var controlSize = CompactControlMetrics()
+    var controlSize = CompactControlMetrics()
 
     private var needsYou: Bool {
         !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update" || model.relayStatus.isOffline

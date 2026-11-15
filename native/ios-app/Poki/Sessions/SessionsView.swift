@@ -24,7 +24,7 @@ struct SessionsView: View {
     @Environment(\.drawerSliding) private var sliding
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .title) private var headerIcon = 32.0
-    private var controlSize = CompactControlMetrics()
+    var controlSize = CompactControlMetrics()
 
     private var store: SessionStore { SessionStore.shared }
     private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }

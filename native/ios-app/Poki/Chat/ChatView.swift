@@ -842,7 +842,7 @@ enum ChatFollow: Equatable {
 /// Back to the newest message, over the bottom of a conversation you have scrolled up in.
 private struct NewestButton: View {
     var action: () -> Void
-    private var controlSize = CompactControlMetrics(base: 44, maximum: 52)
+    var controlSize = CompactControlMetrics(base: 44, maximum: 52)
 
     var body: some View {
         Button(action: action) {
@@ -982,7 +982,7 @@ private struct StepLine: View {
 // licence file). Changed: Poki's picture at the board's 56 pt instead of 20, the 12 pt name with its
 // chevron, no video button, and a view of its own instead of a toolbar item.
 struct MessageListHeader: View {
-    private var backSize = CompactControlMetrics(base: 44, maximum: 52)
+    var backSize = CompactControlMetrics(base: 44, maximum: 52)
     var dark: Bool
     /// The model answering, under the name (the chat); nil on the voice page.
     var subtitle: String? = nil

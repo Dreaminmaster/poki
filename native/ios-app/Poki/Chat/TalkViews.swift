@@ -80,7 +80,7 @@ struct TalkBar: View {
     var dismiss: () -> Void
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var typeSize
-    private var controlSize = CompactControlMetrics(base: 44, maximum: 52)
+    var controlSize = CompactControlMetrics(base: 44, maximum: 52)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
