@@ -563,9 +563,13 @@ final class InProcessProbe: ObservableObject {
         check("unreadable session reported", broken.failed && named, "the read \(broken.failed ? "failed" : "did not fail") in \(String(format: "%.2f", broken.seconds)) s: \(broken.text.prefix(240))",
               ["seconds": broken.seconds, "text": String(broken.text.prefix(600))])
         check("unreadable session not open", !model.hasOpenInProcessSession, "Poki \(model.hasOpenInProcessSession ? "took" : "did not take") the session as open")
-        try? await Task.sleep(for: .seconds(4))
-        check("no late ready", !model.hasOpenInProcessSession, "4 s later the session is \(model.hasOpenInProcessSession ? "open" : "still not open")")
+        // Nothing may open again by itself: no new session for 30 s, with the task still under way.
         let brokenGeneration = await generation()
+        try? await Task.sleep(for: .seconds(30))
+        let quiet = await generation()
+        check("no reopen after the failure", !model.hasOpenInProcessSession && quiet == brokenGeneration,
+              "30 s later the session is \(model.hasOpenInProcessSession ? "open" : "still not open"), generation \(brokenGeneration) then \(quiet)",
+              ["generation_before": brokenGeneration, "generation_after": quiet])
         await endTask()
         try? await Task.sleep(for: .seconds(2))
         if let after = await round("round after the failure") {
