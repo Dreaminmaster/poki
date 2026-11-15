@@ -1,7 +1,8 @@
 diff --git a/idevice/src/services/cryptexd.rs b/idevice/src/services/cryptexd.rs
+index 9bc7854..eed11d4 100644
 --- a/idevice/src/services/cryptexd.rs
 +++ b/idevice/src/services/cryptexd.rs
-@@ -402,9 +402,7 @@
+@@ -402,9 +402,7 @@ pub async fn install_ddi(
 
      let mut request = crate::tss::TSSRequest::new();
      request.add_cryptex1_tags(&assets.build_identity, &chip_instance, &nonce)?;
@@ -12,7 +13,7 @@ diff --git a/idevice/src/services/cryptexd.rs b/idevice/src/services/cryptexd.rs
          .into_dictionary()
          .ok_or(CryptexdError::MissingField("(TSS response)"))?;
      // Cryptex1 responses carry the ticket under its own key on current releases
-@@ -433,6 +431,18 @@
+@@ -433,6 +431,18 @@ pub async fn install_ddi(
          .ok_or(IdeviceError::ImageNotMounted)
  }
 
@@ -31,3 +32,42 @@ diff --git a/idevice/src/services/cryptexd.rs b/idevice/src/services/cryptexd.rs
  /// The installed DeveloperDiskImage cryptex, if there is one.
  #[cfg(feature = "rsd")]
  pub async fn installed_ddi(
+diff --git a/idevice/src/tss.rs b/idevice/src/tss.rs
+index 163b2dd..8039c00 100644
+--- a/idevice/src/tss.rs
++++ b/idevice/src/tss.rs
+@@ -19,6 +19,7 @@ const TSS_CONTROLLER_ACTION_URL: &str = "http://gs.apple.com/TSS/controller?acti
+ /// Represents a TSS request to Apple's signing server
+ #[derive(Debug)]
+ pub struct TSSRequest {
++    url: String,
+     /// The underlying plist dictionary containing request parameters
+     inner: plist::Dictionary,
+ }
+@@ -36,7 +37,16 @@ impl TSSRequest {
+             "@VersionInfo": TSS_CLIENT_VERSION_STRING,
+             "@UUID": uuid::Uuid::new_v4().to_string().to_uppercase()
+         });
+-        Self { inner }
++        Self {
++            url: TSS_CONTROLLER_ACTION_URL.to_string(),
++            inner,
++        }
++    }
++
++    #[must_use]
++    pub fn with_url(mut self, url: impl Into<String>) -> Self {
++        self.url = url.into();
++        self
+     }
+
+     /// Inserts a key-value pair into the TSS request
+@@ -74,7 +84,7 @@ impl TSSRequest {
+             crate::pretty_print_dictionary(&self.inner)
+         );
+         // The TSS controller is plain HTTP, so no TLS/crypto provider is needed.
+-        let res = crate::http::HttpRequest::post(TSS_CONTROLLER_ACTION_URL)
++        let res = crate::http::HttpRequest::post(&self.url)
+             .header("Cache-Control", "no-cache")
+             .header("Content-type", "text/xml; charset=\"utf-8\"")
+             .header("User-Agent", "InetURL/1.0")
