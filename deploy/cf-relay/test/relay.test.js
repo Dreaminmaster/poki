@@ -84,7 +84,7 @@ const call = (url, token, body = { jsonrpc: '2.0', id: 7, method: 'tools/list' }
 async function connected(answer = echo) {
   const id = await identity();
   const secret = newSecret();
-  const p = await phone(id, [secret], { answer });
+  const p = await phone(id, [secret], { answer, consent: async () => true });
   const ready = await p.next('ready');
   const { as, client, verifier, prm, authorized } = await signIn(id.label, secret);
   const code = new URL(authorized.headers.get('Location')).searchParams.get('code');
@@ -185,26 +185,74 @@ describe('OAuth and MCP', () => {
     expect(refused.error_description).toMatch(/callback address/i);
   });
 
-  it('a sign-in from an unlisted client waits for the owner on the phone; a known one does not', async () => {
+  it('every new authorization waits for explicit phone consent, regardless of callback', async () => {
     const id = await identity();
     const secret = newSecret();
     const asked = [];
     let allow = true;
     const p = await phone(id, [secret], { answer: echo, consent: async frame => { asked.push(frame); return allow; } });
     await p.next('ready');
-    const known = await signIn(id.label, secret, 'https://poke.com/oauth/callback');
-    expect(new URL(known.authorized.headers.get('Location')).searchParams.get('code')).toBeTruthy();
-    expect(asked.length).toBe(0);
-    const allowed = await signIn(id.label, secret, 'https://agents.example.net/cb');
-    expect(new URL(allowed.authorized.headers.get('Location')).searchParams.get('code')).toBeTruthy();
-    expect(asked.length).toBe(1);
-    expect(asked[0].callback).toBe('agents.example.net');
-    expect(asked[0].client).toBe('Claude');
-    expect(asked[0].s).toBe(hex(await sha256(secret)));
-    allow = false;
-    const denied = await signIn(id.label, secret, 'https://agents.example.net/cb');
-    expect(new URL(denied.authorized.headers.get('Location')).searchParams.get('error')).toBe('access_denied');
-    expect(asked.length).toBe(2);
+    const callbacks = ['https://poke.com/oauth/callback', 'https://github.com/example/callback',
+      'http://localhost:3000/cb', 'http://127.0.0.1:8080/cb', 'http://[::1]:8080/cb',
+      'cursor://anysphere.cursor-mcp/oauth/callback', 'https://agents.example.net/cb'];
+    for (const callback of callbacks) {
+      for (const decision of [true, false]) {
+        allow = decision;
+        const count = asked.length;
+        const result = await signIn(id.label, secret, callback);
+        const reply = new URL(result.authorized.headers.get('Location')).searchParams;
+        expect(asked.length, callback).toBe(count + 1);
+        expect(asked.at(-1)).toMatchObject({ client: 'Claude', callback: new URL(callback).host || callback,
+          s: hex(await sha256(secret)) });
+        if (decision) expect(reply.get('code'), callback).toBeTruthy();
+        else {
+          expect(reply.get('error'), callback).toBe('access_denied');
+          expect(reply.has('code'), callback).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('does not issue a code before the phone answers, or when it never answers', async () => {
+    const id = await identity();
+    const secret = newSecret();
+    let finish;
+    const p = await phone(id, [secret], { consent: () => new Promise(resolve => { finish = resolve; }) });
+    await p.next('ready');
+    let completed = false;
+    const pending = signIn(id.label, secret).then(result => { completed = true; return result; });
+    expect(await p.next('consent')).toBeTruthy();
+    expect(completed).toBe(false);
+    finish(false);
+    expect(new URL((await pending).authorized.headers.get('Location')).searchParams.get('error')).toBe('access_denied');
+
+    const base = `${HOST}/v1/${id.label}/${secret}`;
+    const client = await (await SELF.fetch(`${base}/register`, { method: 'POST', body: JSON.stringify({
+      client_name: 'Silent client', redirect_uris: ['https://poke.com/cb'] }) })).json();
+    const params = new URLSearchParams({ response_type: 'code', client_id: client.client_id,
+      redirect_uri: 'https://poke.com/cb', code_challenge: 'x'.repeat(43), code_challenge_method: 'S256' });
+    const unanswered = await SELF.fetch(`${base}/authorize?${params}`, { redirect: 'manual' });
+    expect(unanswered.status).toBe(302);
+    const reply = new URL(unanswered.headers.get('Location')).searchParams;
+    expect(reply.get('error')).toBe('access_denied');
+    expect(reply.has('code')).toBe(false);
+  });
+
+  it('REDIRECT_HOSTS narrows registration but never replaces owner consent', async () => {
+    const id = await identity();
+    const secret = newSecret();
+    const asked = [];
+    const p = await phone(id, [secret], { consent: async frame => { asked.push(frame); return false; } });
+    await p.next('ready');
+    const base = `${HOST}/v1/${id.label}/${secret}`;
+    const scoped = { ...env, REDIRECT_HOSTS: 'poke.com' };
+    const client = await (await worker.fetch(new Request(`${base}/register`, { method: 'POST', body: JSON.stringify({
+      redirect_uris: ['https://poke.com/cb'] }) }), scoped)).json();
+    const params = new URLSearchParams({ response_type: 'code', client_id: client.client_id,
+      redirect_uri: 'https://poke.com/cb', code_challenge: 'x'.repeat(43), code_challenge_method: 'S256' });
+    const response = await worker.fetch(new Request(`${base}/authorize?${params}`), scoped);
+    expect(asked).toHaveLength(1);
+    expect(new URL(response.headers.get('Location')).searchParams.get('error')).toBe('access_denied');
   });
 
   it('REDIRECT_HOSTS, when set, allows only the listed hosts and their subdomains', async () => {

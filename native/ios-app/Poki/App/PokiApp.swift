@@ -261,7 +261,7 @@ struct RootView: View {
             Button("Don’t Allow", role: .cancel) { model.answerConnection(false) }
             Button("Allow") { model.answerConnection(true) }
         } message: { ask in
-            Text("\(ask.client) is signing in through \(ask.connector) and returns to \(ask.callback), which isn’t on Poki’s list of known agents. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone.")
+            Text("\(ask.client) is signing in through \(ask.connector) with callback destination \(ask.callback). Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone.")
         }
         .alert("Poki Will Close to Finish the Update", isPresented: Binding(get: { model.signer.finishNotice }, set: { if !$0 { model.signer.finishNoticeAnswered() } })) {
             Button("OK") { model.signer.finishNoticeAnswered() }

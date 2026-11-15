@@ -16611,24 +16611,24 @@
         }
       }
     },
-    "A client Poki doesn’t know (%@) is signing in with %@. Open Poki to allow or deny it." : {
+    "A client (%@) is signing in with %@. Open Poki to allow or deny it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请打开 Poki 允许或拒绝。未知客户端（%@）正通过 %@ 登录。"
+            "value" : "客户端（%1$@）正在使用 %2$@ 登录。打开 Poki 以允许或拒绝。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請開啟 Poki 允許或拒絕。未知用戶端（%@）正透過 %@ 登入。"
+            "value" : "用戶端（%1$@）正在使用 %2$@ 登入。打開 Poki 以允許或拒絕。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open Poki to allow or deny sign-in. An unrecognized client (%@) is signing in with %@."
+            "value" : "A client (%@) is signing in with %@. Open Poki to allow or deny it."
           }
         }
       }
@@ -22015,24 +22015,24 @@
         }
       }
     },
-    "%@ is signing in through %@ and returns to %@, which isn’t on Poki’s list of known agents. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone." : {
+    "%@ is signing in through %@ with callback destination %@. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 正通过 %@ 登录并跳转至未知智能体 %@。仅在你本人此刻发起连接时才允许；允许后对方可查看屏幕并操作此 iPhone。"
+            "value" : "%1$@ 正在通过 %2$@ 登录，回调目标为 %3$@。请仅在你正在连接此客户端时允许。获准后，它可查看屏幕并在此 iPhone 上操作。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 正透過 %@ 登入並跳轉至未知智慧體 %@。僅在你本人此刻發起連線時才允許；允許後對方可查看螢幕並操作此 iPhone。"
+            "value" : "%1$@ 正在透過 %2$@ 登入，回呼目的地為 %3$@。請只在你正在連接此用戶端時允許。獲准後，它可查看螢幕並在此 iPhone 上操作。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ is signing in through %@ and redirecting to %@, which isn’t a known agent. Allow only if you initiated this connection right now; it grants screen view and control of this iPhone."
+            "value" : "%@ is signing in through %@ with callback destination %@. Allow it only if you are connecting it yourself right now. It could then see your screen and act on this iPhone."
           }
         }
       }

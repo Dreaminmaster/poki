@@ -65,6 +65,8 @@ function mcp(request) {
   }
 }
 
+// Only check mode answers, for this simulator's test connector and one expected request.
+let pendingConsent;
 function connect() {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/v1/${label}/connect`);
@@ -84,6 +86,11 @@ function connect() {
       } else if (frame.t === 'ready') {
         clearTimeout(handshake);
         resolve(ws);
+      } else if (frame.t === 'consent' && check && pendingConsent &&
+                 frame.s === access[0] && frame.client === pendingConsent.client && frame.callback === '127.0.0.1:9') {
+        const { allow } = pendingConsent;
+        pendingConsent = undefined;
+        ws.send(JSON.stringify({ t: 'consent_res', id: frame.id, ok: allow }));
       } else if (frame.t === 'req') {
         let answer;
         try { answer = mcp(frame); } catch (error) { answer = { status: 400, headers: {}, body: String(error.message) }; }
@@ -116,13 +123,27 @@ async function asClient() {
   const as = await (await fetch(`${origin}/.well-known/oauth-authorization-server${issuer.pathname}`)).json();
   expect(as.issuer === prm.authorization_servers[0], 'authorization server metadata');
   const redirect = 'http://127.0.0.1:9/callback';
-  const client = await (await fetch(here(as.registration_endpoint), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client_name: 'phone-sim check', redirect_uris: [redirect] }) })).json();
+  const clientName = `phone-sim check ${randomBytes(8).toString('hex')}`;
+  const client = await (await fetch(here(as.registration_endpoint), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client_name: clientName, redirect_uris: [redirect] }) })).json();
   expect(Boolean(client.client_id), 'dynamic client registration');
   const verifier = b64u(randomBytes(32));
   const params = new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: redirect, code_challenge: b64u(createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256', state: 's', resource: prm.resource, scope: 'poki' });
-  const authorized = await fetch(`${here(as.authorization_endpoint)}?${params}`, { redirect: 'manual' });
-  const code = new URL(authorized.headers.get('location') ?? 'http://x/').searchParams.get('code');
-  expect(authorized.status === 302 && code, 'authorize grants a code (the phone knows the secret)');
+  const authorize = async allow => {
+    pendingConsent = { client: clientName, allow };
+    try {
+      const response = await fetch(`${here(as.authorization_endpoint)}?${params}`, { redirect: 'manual' });
+      expect(pendingConsent === undefined, 'authorize asked the simulated phone for consent');
+      expect(response.status === 302 && response.headers.has('location'), 'authorize returned an OAuth redirect');
+      return new URL(response.headers.get('location')).searchParams;
+    } finally {
+      pendingConsent = undefined;
+    }
+  };
+  const refused = await authorize(false);
+  expect(refused.get('error') === 'access_denied' && !refused.has('code'), 'refusal issues no code');
+  const approved = await authorize(true);
+  const code = approved.get('code');
+  expect(code && !approved.has('error'), 'explicit approval issues a code');
   const tokens = await (await fetch(here(as.token_endpoint), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier, client_id: client.client_id }) })).json();
   expect(Boolean(tokens.access_token), 'token exchange with PKCE');
   const call = async body => {
@@ -138,7 +159,7 @@ async function asClient() {
 
 const ws = await connect().catch(error => { console.error(`phone-sim: ${error.message}`); process.exit(1); });
 console.log(`phone-sim: connected as ${label}`);
-console.log(`connector URL: ${connectorUrl}`);
+if (!check) console.log(`connector URL: ${connectorUrl}`);
 if (check) {
   try {
     await asClient();

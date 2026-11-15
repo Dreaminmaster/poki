@@ -78,7 +78,7 @@ enum ConnectionNotice {
     @MainActor static func post(_ ask: AppModel.ConnectionAsk) {
         let content = UNMutableNotificationContent()
         content.title = AppLocalization.text(LocalizedStringResource("Allow \(ask.client) to connect?"))
-        content.body = AppLocalization.text(LocalizedStringResource("A client Poki doesn’t know (\(ask.callback)) is signing in with \(ask.connector). Open Poki to allow or deny it."))
+        content.body = AppLocalization.text(LocalizedStringResource("A client (\(ask.callback)) is signing in with \(ask.connector). Open Poki to allow or deny it."))
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = "connections"
