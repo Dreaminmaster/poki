@@ -368,9 +368,13 @@ struct ConnectionView: View {
                          : "Poki is off. Agents can’t reach this iPhone.")
                     // Why turning on failed, under the switch that was turned on (not only on Poki's
                     // page). Poki's own sentences are localized; PokiCore's stay as they came.
-                    if !on, !model.sessionStarting, let problem = model.problem {
+                    if let failure = model.developerToolsFailure {
+                        Text(failure).foregroundStyle(.red)
+                    } else if !on, !model.sessionStarting, let problem = model.problem {
                         Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
                             .foregroundStyle(.red)
+                    } else if !on, !model.sessionStarting, case .downloaded = model.diskImage.state {
+                        Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
                     }
                 }
             }
@@ -396,7 +400,7 @@ struct ConnectionView: View {
         }
         .navigationTitle(AppLocalization.text("Connection"))
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { model.loopback.resume() }
+        .onAppear { model.loopback.resume(); model.diskImage.notice() }
         .sheet(isPresented: $guiding) {
             SetupGuide(start: SetupStep.shown.first { !model.isDone($0) })
         }

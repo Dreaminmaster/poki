@@ -382,7 +382,7 @@ final class AppModel {
             if let text { problem = text; tunnelAttention = text }
             else if problem == tunnelAttention { problem = nil; tunnelAttention = nil }
         }
-        if !diskImage.isReady { Task { await diskImage.download() } }
+        if !diskImage.hasFiles { Task { await diskImage.download() } }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
         if UserDefaults.standard.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
@@ -413,6 +413,12 @@ final class AppModel {
 
     /// The in-process session as prepare last answered it in this process (ESP-152).
     private var inProcessSession = InProcessSession.opening
+    var developerToolsFailure: LocalizedStringResource? {
+        if case .failed("developer_framework_unavailable", _) = inProcessSession {
+            return DiskImageStore.loadFailureMessage
+        }
+        return nil
+    }
     /// Automation works through Poki's own session, whether or not the loopback answers (ESP-448).
     var hasOpenInProcessSession: Bool {
         automationPath == .inProcess && sessionOn && inProcessSession == .open
@@ -631,7 +637,7 @@ final class AppModel {
     private func turnOnIfWanted() {
         Task {
             await tunnel.refresh()
-            if wantsOn, !sessionOn, pairingPath != nil, diskImage.isReady { startSession(reconnectLocal: false) }
+            if wantsOn, !sessionOn, pairingPath != nil, diskImage.hasFiles { startSession(reconnectLocal: false) }
         }
     }
 
@@ -841,6 +847,7 @@ final class AppModel {
 
     func startSession(reconnectLocal: Bool = true) {
         guard !sessionOn, !sessionStarting else { return }
+        diskImage.refreshAvailability()
         // Turning on is the owner asking for automation again, after a cancelled passcode screen too.
         InProcessWDA.gate.withLock { $0.declined = false }
         if automationPath == .inProcess, inProcessUsedUp, !Self.onSimulator {
@@ -911,7 +918,7 @@ final class AppModel {
         let relay = activeRelay
         guard relay != nil || ModelKeys.hasUsableKey else { problem = Self.noRelay; return }
         if !inFront { loopback.resume(every: 6) }
-        guard Self.onSimulator || diskImage.isReady && diskImage.recheck() else {
+        guard Self.onSimulator || diskImage.hasFiles && diskImage.recheck() else {
             problem = "The developer disk image is not downloaded yet (Setup > Pair). It is needed once."
             Task { await diskImage.download() }
             return
@@ -1351,7 +1358,10 @@ final class AppModel {
         // On the in-process path the session is opened as soon as the launcher is ready, so the
         // owner's one-time Automation Mode passcode comes when they turn Poki on, not mid-task, and
         // the first look finds it open.
-        if status.state == "running" { warmInProcess("the launcher is ready") }
+        if status.state == "running" {
+            diskImage.refreshAvailability()
+            warmInProcess("the launcher is ready")
+        }
         if status.state == "failed" {
             let title = Self.problemText(code: status.code, fix: status.fix ?? status.detail ?? "The runner stopped")
             activity.update { $0.phase = .problem; $0.label = "Runner Stopped"; $0.headline = title }

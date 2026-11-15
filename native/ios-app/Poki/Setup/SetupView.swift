@@ -621,6 +621,9 @@ private struct PairingPage: View {
         switch model.diskImage.state {
         case .ready:
             LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Ready")))
+        case .downloaded:
+            LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Downloaded, not available")))
+            Text(DiskImageStore.unavailableMessage).font(.footnote).foregroundStyle(.orange)
         case .downloading(let step):
             LabeledContent("Downloading") { HStack { Text(verbatim: "\(step)"); ProgressView() } }
         case .missing:
@@ -735,7 +738,7 @@ struct SetupStepRow: View {
             return model.setup.loopback == .none ? AppLocalization.text(LocalizedStringResource("Needed")) : AppLocalization.text(LocalizedStringResource("Off"))
         case .pairing:
             if model.pairingTrouble != nil { return AppLocalization.text(LocalizedStringResource("Pair Again")) }
-            if model.pairingPath != nil, !model.diskImage.isReady { return AppLocalization.text(LocalizedStringResource("Downloading")) }
+            if model.pairingPath != nil, !model.diskImage.hasFiles { return AppLocalization.text(LocalizedStringResource("Downloading")) }
             return AppLocalization.text(LocalizedStringResource("Needed"))
         default: return AppLocalization.text(LocalizedStringResource("Needed"))
         }
