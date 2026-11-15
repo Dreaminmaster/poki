@@ -63,6 +63,40 @@ final class InterfaceSizeTests: XCTestCase {
         }
     }
 
+    func testNonTrackingSliderChangesPersistCommonSizes() async throws {
+        let defaults = UserDefaults.standard
+        let original = defaults.object(forKey: AppInterfaceSize.defaultsKey)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app, kind: .handoff, requester: "Interface size test")
+        defaults.set(UIContentSizeCategory.large.rawValue, forKey: AppInterfaceSize.defaultsKey)
+        let host = UIHostingController(rootView: InterfaceSizeSettingsView().environment(app).environment(chat))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            defaults.set(original, forKey: AppInterfaceSize.defaultsKey)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        window.layoutIfNeeded()
+        func slider(in view: UIView) -> UISlider? {
+            if let slider = view as? UISlider { return slider }
+            return view.subviews.lazy.compactMap { slider(in: $0) }.first
+        }
+        let control = try XCTUnwrap(slider(in: host.view))
+        // Programmatic/accessibility changes have no active touch tracking and must save
+        // immediately. Actual drag tracking is checked with a finger and device recording.
+        XCTAssertFalse(control.isTracking)
+        for index in [0, 3, 5, 8, 11, 2] {
+            control.value = control.minimumValue + (control.maximumValue - control.minimumValue) * Float(index) / 11
+            control.sendActions(for: .valueChanged)
+            try await Task.sleep(for: .milliseconds(500))
+            window.layoutIfNeeded()
+            XCTAssertEqual(defaults.string(forKey: AppInterfaceSize.defaultsKey), AppInterfaceSize.categories[index].rawValue)
+        }
+    }
+
     func testNavigationFontsUseTheEffectiveWindowCategory() throws {
         let language = AppLocalization.shared.preference
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
