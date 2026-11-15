@@ -2,17 +2,17 @@ import Foundation
 
 /// What needs the owner's approval on the phone before it is sent. Words match whole words or
 /// phrases, case-insensitively, in the label, value or identifier of the element an action touches: at
-/// the start of the text, or anywhere in a short one (a button: "Confirm and pay"). A name inside a
+/// the start of the text, anywhere in a short one, or anywhere on an action button. A name inside a
 /// longer text is not an action (seen on the phone: "Contact photo for Best Buy" was taken for a payment).
 public struct SensitivityRules: Sendable, Equatable {
     public var secureFields = true
-    public var payments: [String] = ["pay", "buy", "purchase", "subscribe", "checkout", "place order", "transfer", "send money", "confirm payment", "apple pay", "支付", "付款", "购买", "订阅", "转账", "确认支付", "下单"]
-    public var deletions: [String] = ["delete", "remove", "erase", "reset", "delete all", "删除", "移除", "抹掉", "清空", "还原"]
-    public var sending: [String] = ["send", "post", "reply", "发送", "回复", "发布"]
+    public var payments: [String] = ["pay", "payment", "buy", "purchase", "subscribe", "checkout", "place order", "transfer", "send money", "confirm payment", "apple pay", "支付", "付款", "购买", "订阅", "转账", "确认支付", "下单", "購買", "訂閱", "轉賬", "轉帳", "確認支付", "下單"]
+    public var deletions: [String] = ["delete", "remove", "erase", "reset", "delete all", "删除", "移除", "抹掉", "清空", "还原", "刪除", "還原"]
+    public var sending: [String] = ["send", "post", "reply", "发送", "回复", "发布", "發送", "回覆", "發布"]
     /// Apps where every input needs approval (banking, wallets).
     public var guardedApps: [String] = ["com.apple.Passbook"]
     /// Words that place a call wherever they are tapped.
-    public var calling: [String] = ["call", "拨打", "呼叫"]
+    public var calling: [String] = ["call", "拨打", "呼叫", "撥打"]
     /// Apps where tapping anything can place a call (a contact in Favorites or Recents rings it). FaceTime is
     /// here rather than a word: Settings lists a "FaceTime" row that places no call.
     public var callingApps: [String] = ["com.apple.mobilephone", "com.apple.facetime"]
@@ -34,19 +34,28 @@ public struct SensitivityRules: Sendable, Equatable {
         return rules
     }
 
-    static func matches(_ text: String, _ words: [String]) -> String? {
+    static func matches(_ text: String, _ words: [String], elementType: String = "Other") -> String? {
         let lowered = text.lowercased()
+        // Preserve the base matcher’s whitespace-based short-label protection for every type.
+        // Long Buttons and later whole-word matches add protection to that baseline.
+        let short = lowered.split(whereSeparator: \.isWhitespace).count <= 4
+        // Explicit exception agreed for this rule: digits also bound Latin words, so buy1/1pay
+        // remain unmatched even though the original matcher treated digits as boundaries.
+        let boundary: (Character?) -> Bool = { c in c.map { !$0.isLetter && !$0.isNumber } ?? true }
         for word in words {
             let w = word.lowercased()
-            guard let range = lowered.range(of: w) else { continue }
-            // CJK words match anywhere; Latin words only on word boundaries ("Display" is not "pay").
-            if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { return word }
-            let before = range.lowerBound == lowered.startIndex ? nil : lowered[lowered.index(before: range.lowerBound)]
-            let after = range.upperBound == lowered.endIndex ? nil : lowered[range.upperBound]
-            let boundary: (Character?) -> Bool = { c in c.map { !$0.isLetter } ?? true }
-            let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
-            let short = lowered.split(whereSeparator: { $0.isWhitespace }).count <= 4
-            if boundary(before) && boundary(after) && (opens || short) { return word }
+            guard !w.isEmpty else { continue }
+            var search = lowered.startIndex..<lowered.endIndex
+            while let range = lowered.range(of: w, range: search) {
+                // CJK words match anywhere; Latin words need whole-word boundaries.
+                if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { return word }
+                let before = range.lowerBound == lowered.startIndex ? nil : lowered[lowered.index(before: range.lowerBound)]
+                let after = range.upperBound == lowered.endIndex ? nil : lowered[range.upperBound]
+                let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
+                if boundary(before) && boundary(after) && (elementType == "Button" || opens || short) { return word }
+                // An earlier substring ("buying") must not hide a later whole word ("buy").
+                search = range.upperBound..<lowered.endIndex
+            }
         }
         return nil
     }
@@ -63,7 +72,9 @@ public struct SensitivityRules: Sendable, Equatable {
             return nil
         }
         let texts = [element.text, element.identifier ?? ""]
-        func match(_ words: [String]) -> String? { texts.lazy.compactMap { Self.matches($0, words) }.first }
+        func match(_ words: [String]) -> String? {
+            texts.lazy.compactMap { Self.matches($0, words, elementType: element.type) }.first
+        }
         if let word = match(payments) { return "a payment (\"\(word)\")" }
         if let word = match(deletions) { return "deleting (\"\(word)\")" }
         if let bundle = app?.bundleID, callingApps.contains(bundle) { return "a call (in \(app?.describe ?? bundle))" }
