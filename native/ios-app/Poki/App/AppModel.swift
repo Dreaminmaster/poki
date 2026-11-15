@@ -330,6 +330,8 @@ final class AppModel {
                            connection: VoiceModel.connection)
         self.launcher = launcher
         self.pairer = pairer
+        // inFront starts true before the first scene callback, including a background launch.
+        self.activity.canStart = { [weak self] in self?.inFront == true && UIApplication.shared.applicationState == .active }
         host.update(key: identity.signingKey, hashes: identity.accessHashes)
         host.onConsent { [weak self] client, callback, connector in
             await self?.askToConnect(client: client, callback: callback, connector: connector) ?? false
@@ -369,7 +371,7 @@ final class AppModel {
         // The same answers from the approval notification's own buttons.
         ApprovalNotice.registerActions()
         listenForApprovals()
-        talkActivity = TalkActivity(voice: voice, activity: activity, deviceName: { UIDevice.current.name },
+        talkActivity = TalkActivity(voice: voice, activity: self.activity, deviceName: { UIDevice.current.name },
                                     keepsActivity: { [weak self] in self?.sessionOn == true })
         // One pump for the app's whole life. Cancelling a task that reads an AsyncStream ends the
         // stream for good, so a pump per session would go silent after the first Turn off (no steps,

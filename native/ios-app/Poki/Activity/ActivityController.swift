@@ -101,6 +101,9 @@ final class ActivityController {
     func start(deviceName: String) {
         wanted = deviceName
         guard activity == nil else { return }
+        // Keep it wanted for the next foreground update, without asking ActivityKit to start from
+        // the background. Direct callers and update-driven restarts share the same restriction.
+        guard canStart() else { return }
         if state.isQuiet, hidesWhenIdle() { lastError = nil; return }
         guard enabled else { lastError = "Live Activities are off for Poki (Settings > Poki > Live Activities)."; return }
         // A Live Activity left from an earlier run of the app is replaced.
