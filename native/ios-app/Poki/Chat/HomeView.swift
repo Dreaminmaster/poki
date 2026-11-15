@@ -49,7 +49,7 @@ enum HomeMotion {
 }
 
 /// The portrait and both of its anchors must use the same scale during the home-to-chat flight.
-private struct HomeSizes: DynamicProperty {
+struct HomeSizes: DynamicProperty {
     @ScaledMetric(relativeTo: .body) private var factor = 1.0
     private var scale: CGFloat { min(1.2, max(0.9, factor)) }
     var avatar: CGFloat { HomeMotion.avatar * scale }
@@ -153,7 +153,7 @@ extension View {
 /// is drawn at one size, so nothing is made again on the way. A tap says hi and opens Poki's
 /// card. In the chat VoiceOver reads the top bar's Poki instead, which is the same button.
 struct PokiFlight: View {
-    private var sizes = HomeSizes()
+    var sizes = HomeSizes()
     var status: PokiStatus
     var home: Bool
     var writing = false
@@ -199,7 +199,7 @@ struct PokiFlight: View {
 /// in the picture's face; the word for it is at the top of Poki's card and in what VoiceOver reads.
 /// On the home page the picture is over the greeting and the bar's middle is empty.
 struct PokiHead: View {
-    private var sizes = HomeSizes()
+    var sizes = HomeSizes()
     var home: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -238,7 +238,7 @@ struct PokiHead: View {
 /// edge effect. The new-conversation button looks the same on the home page: there, the page already
 /// being a new conversation, a tap starts the message instead (`newConversation` decides what).
 struct ChatTopBar: View {
-    private var sizes = HomeSizes()
+    var sizes = HomeSizes()
     var status: PokiStatus
     var home: Bool
     /// A task is under way: no new conversation until it ends or is stopped.
@@ -447,7 +447,7 @@ struct HomeGreetingView: View {
 /// rows of glass pills over the message field. A pill fills the message field; nothing is sent until
 /// you send it.
 struct HomePage<Footer: View>: View {
-    private var sizes = HomeSizes()
+    var sizes = HomeSizes()
     var home: Bool
     /// Suggestions yield their space while the message field has focus.
     var writing = false
