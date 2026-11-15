@@ -62,7 +62,7 @@ Several iPhones plugged in: list them with `node bin/install-iphone.mjs phones` 
 
 The installer runs these in order. Most need nobody. Each step is complete when its `done` event confirms the result described below. A `wait` remains incomplete until its condition is met. Inspect every `skipped` reason; a skipped installation does not prove an update, and a manual step remains unverified until the user confirms it.
 
-1. **`setup_app`** Downloads Poki Setup and checks its SHA-256, Developer ID team (`Q64ZL36CJN`) and notarization. Nobody acts.
+1. **`setup_app`** Downloads Poki Setup and checks its SHA-256, Developer ID team (`ANVS3UQK9W`, or `Q64ZL36CJN` for Poki Setup 0.2.2 and earlier) and notarization. Nobody acts.
 2. **`bridge`** Starts Poki Setup's helper without a window. Nobody acts.
 3. **`channel`** Finds the newest Beta release for this installation. Nobody acts.
 4. **`apple_account`** Signs in with the Apple Account, on the Mac only. Poki Setup keeps the sign-in for renewals. Stops `apple_dialog` and `apple_code_dialog` when this Mac was never signed in.
@@ -168,7 +168,7 @@ The installer exits with code 2. The last `error` event has `code`, `reason` and
 |---|---|---|
 | `setup_download_failed` | Release metadata or an asset could not be read or trusted. | Read the source notice. Network failures can fall back to GitHub. Signature, redirect and address-validation failures stop the operation; report them without switching sources manually. For a GitHub refusal, report the status and retry later. |
 | `setup_checksum_mismatch` | A downloaded file differs from its expected checksum or signed size. | Stop and report. Keep the installed app and its data. Never open the downloaded file. |
-| `setup_signature_invalid` | Poki Setup is not signed by team `Q64ZL36CJN` or not notarized. | Stop. Do not run it. Report it. |
+| `setup_signature_invalid` | Poki Setup is not signed by team `ANVS3UQK9W` or `Q64ZL36CJN`, or not notarized. | Stop. Do not run it. Report it. |
 | `setup_app_missing` | `phones` or `diagnose` cannot find Poki Setup.app. | Run `run`, which installs it, or pass `--app-dir` or `--bridge`. |
 | `bridge_start_failed` | Poki Setup's helper did not start. | Delete `~/Applications/Poki Setup.app` if the installer put it there, and run again. |
 | `usbmuxd_unreachable` | macOS does not list the iPhone (issue #6). | Ask the user to plug it in again, unlocked. Then run `diagnose`. |

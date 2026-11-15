@@ -12,7 +12,9 @@ import { releaseCatalog, downloadCatalogAsset, ReleaseUnavailable } from './rele
 
 const exec = promisify(execFile);
 export const REPO = 'JosssphZhou/poki';
-export const TEAM_ID = 'Q64ZL36CJN';
+// Poki's Developer ID teams. Poki Setup 0.2.2 and earlier were signed by Q64ZL36CJN; releases from 0.2.3
+// on are signed by ANVS3UQK9W (Developer ID Application: YIQI XIE). Keep the old team while 0.2.2 is out there.
+export const TEAM_IDS = ['ANVS3UQK9W', 'Q64ZL36CJN'];
 const ORDER = ['stable', 'beta', 'alpha', 'pre-alpha'];
 const BRIDGE = 'Contents/MacOS/poki-setup-bridge';
 
@@ -179,15 +181,24 @@ export async function downloadSetup(release, downloads, onNote = () => {}) {
   return dmg;
 }
 
-// Developer ID team and notarization; throws setup_signature_invalid otherwise.
+// The team in `codesign -dv` output when it is one of Poki's, else null. The whole line has to match:
+// a team whose identifier merely starts with ours is another team.
+export function pokiTeamOf(codesignText) {
+  const team = /^TeamIdentifier=(.*)$/m.exec(codesignText)?.[1].trim();
+  return TEAM_IDS.includes(team) ? team : null;
+}
+
+// Developer ID team and notarization; throws setup_signature_invalid otherwise. Returns the team.
 export async function verifyApp(app) {
   try {
     await exec('codesign', ['--verify', '--deep', '--strict', app]);
     const { stderr } = await exec('codesign', ['-dv', '--verbose=2', app]);
-    if (!stderr.includes(`TeamIdentifier=${TEAM_ID}`)) throw new Error(`not signed by team ${TEAM_ID}`);
+    const team = pokiTeamOf(stderr);
+    if (!team) throw new Error(`not signed by team ${TEAM_IDS.join(' or ')}`);
     const assessed = await exec('spctl', ['-a', '-t', 'exec', '-vv', app]).catch(error => error);
     const text = `${assessed.stdout ?? ''}${assessed.stderr ?? ''}`;
     if (!/accepted/.test(text) || !/Notarized Developer ID/.test(text)) throw new Error(`Gatekeeper: ${text.trim()}`);
+    return team;
   } catch (error) {
     throw new SetupError('setup_signature_invalid', `${app}: ${error.stderr?.trim() || error.message}`);
   }
@@ -231,8 +242,8 @@ export async function ensureSetupApp({ channel, into = join(homedir(), 'Applicat
   await exec('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mount, dmg]);
   try {
     const source = join(mount, 'Poki Setup.app');
-    await verifyApp(source);
-    onNote(`Signed by Developer ID team ${TEAM_ID} and notarized`);
+    const team = await verifyApp(source);
+    onNote(`Signed by Developer ID team ${team} and notarized`);
     await mkdir(into, { recursive: true });
     const app = join(into, 'Poki Setup.app');
     await rm(app, { recursive: true, force: true });
