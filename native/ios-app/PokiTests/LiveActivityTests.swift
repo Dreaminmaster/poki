@@ -19,6 +19,14 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(activity.state.phase, .done)
     }
 
+    func testStoppingARunReturnsItsActivityStateToIdle() {
+        let activity = ActivityController()
+        activity.update { $0.phase = .working; $0.headline = "Read Notes" }
+        XCTAssertEqual(activity.state.phase, .working)
+        activity.endStoppedRun()
+        XCTAssertEqual(activity.state.phase, .idle)
+    }
+
     private var language = AppLocalization.system
 
     override func setUp() async throws {

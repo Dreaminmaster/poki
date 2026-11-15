@@ -1,3 +1,4 @@
+import ActivityKit
 import Foundation
 import Network
 import PokiCore
@@ -29,11 +30,11 @@ final class ChatHarnessTests: XCTestCase {
     /// A conversation handed over by an outside agent, on the fake endpoint. The phone's tools answer
     /// without a session (the Debug probe's call), so routines reaches the app's own memory.
     private func chat(on server: FakeCompletions, transport: HTTPTransport? = nil,
-                      activity: ActivityController? = nil, kind: SavedSession.Kind = .handoff) -> ChatModel {
+                      automation: InProcessAutomation = PKInProcess.shared(), kind: SavedSession.Kind = .handoff) -> ChatModel {
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
         ModelKeys.customModel = "fake-model"
         ModelKeys.selectedProvider = .custom
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), transport: transport, activity: activity)
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
         app.inProcessReadyForProbe()
         self.app = app
         return ChatModel(app: app, kind: kind, requester: kind == .handoff ? "Test agent" : nil)
@@ -107,14 +108,37 @@ final class ChatHarnessTests: XCTestCase {
 
     func testSplitViewStopWhileWaitingDoesNotResumeWhenThePairReturns() async throws {
         let transport = RotatingWorkspace()
-        let activity = ActivityController()
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("look", ["pane": "left"]),
             FakeCompletions.tool("look", ["pane": "right"]),
             FakeCompletions.tool("do", ["actions": [["tap": [180, 200]]]]),
         ])
-        let chat = chat(on: server, transport: transport, activity: activity)
-        defer { if chat.running { chat.stop() } }
+        let existingActivities = Set(Activity<PokiActivityAttributes>.activities.map(\.id))
+        let savedSetup = SetupState.load()
+        let defaults = UserDefaults.standard
+        let savedWantsOn = defaults.object(forKey: "wantsOn")
+        let savedRelayEnabled = defaults.object(forKey: "relayEnabled")
+        let chat = chat(on: server, transport: transport, automation: FakeAutomation())
+        let app = try XCTUnwrap(self.app)
+        defer {
+            if chat.running { chat.stop() }
+            app.stopSession()
+            savedSetup.save()
+            defaults.set(savedWantsOn, forKey: "wantsOn")
+            defaults.set(savedRelayEnabled, forKey: "relayEnabled")
+        }
+        app.loopback.simulate(.working(ms: 9))
+        app.setup.loopback = .proxy
+        app.setRelayEnabled(false)
+        app.startSession()
+        XCTAssertTrue(app.sessionOn)
+        // The in-process probe supplies the test transport, so no external runner needs to wake.
+        app.inProcessReadyForProbe()
+        app.host.setPaused(false)
+        let activity = try XCTUnwrap(Activity<PokiActivityAttributes>.activities.first {
+            !existingActivities.contains($0.id) && $0.activityState == .active
+        }, "Starting a Poki session must create an active Live Activity")
+        XCTAssertEqual(activity.content.state.phase, .idle)
         chat.send("Focus the test field in Notes after reading Safari", inSplitView: true)
 
         let pausedBy = ContinuousClock.now + .seconds(8)
@@ -122,7 +146,12 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(chat.waitingForSplitView)
         XCTAssertEqual(server.requests.count, 2)
 
-        XCTAssertEqual(activity.state.phase, .working)
+        let workingBy = ContinuousClock.now + .seconds(5)
+        while activity.content.state.phase != .working, ContinuousClock.now < workingBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(activity.content.state.phase, .working)
+        XCTAssertEqual(activity.activityState, .active)
         chat.stop()
         transport.change(to: .restored)
         let stoppedBy = ContinuousClock.now + .seconds(8)
@@ -136,11 +165,12 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(server.requests.count, 2, "A cancelled read must never return to the model")
         XCTAssertTrue(transport.restoredSides.isEmpty, "Stop must cancel the recovery polls")
         XCTAssertEqual(transport.taps, 0)
-        while activity.state.phase != .idle, ContinuousClock.now < stoppedBy {
+        while Activity<PokiActivityAttributes>.activities.contains(where: { $0.id == activity.id }),
+              ContinuousClock.now < stoppedBy {
             try await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertEqual(activity.state.phase, .idle)
-        XCTAssertFalse(activity.isRunning)
+        XCTAssertFalse(Activity<PokiActivityAttributes>.activities.contains { $0.id == activity.id },
+                       "Stop must end the Live Activity started by this session")
     }
 
     func testSplitViewStartupReplacesADifferentExistingPair() async throws {
@@ -323,7 +353,8 @@ final class ChatHarnessTests: XCTestCase {
     func testStopEndsTheStepUnderWayAtItsNextAction() async throws {
         let waits = Array(repeating: ["wait": 1000], count: 15)
         let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["actions": waits]), FakeCompletions.text("Done.")])
-        let chat = chat(on: server)
+        // The waits run in PokiCore. Keep the surrounding screen reads independent of XCTest's screenshot authorization.
+        let chat = chat(on: server, transport: RotatingWorkspace())
         func said() -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
 
         chat.send("Wait on the phone")

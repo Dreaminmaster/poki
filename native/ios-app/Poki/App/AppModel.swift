@@ -306,10 +306,9 @@ final class AppModel {
     }
 
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
-         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
-         activity: ActivityController? = nil) {
+         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil) {
         ActivityController.endAll()
-        self.activity = activity ?? ActivityController()
+        self.activity = ActivityController()
         self.automation = automation
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
