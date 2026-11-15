@@ -36,7 +36,15 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var total: Int?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
+    var textDocuments: [ChatTextDocument]?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
+
+    /// The same delimited owner request for the model, consent evidence and task routing.
+    var requestText: String {
+        let caption: String
+        switch kind { case .you(let text, _), .request(let text, _): caption = text; default: return "" }
+        return ([caption] + (textDocuments ?? []).map(\.modelText)).filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
 
     /// Browser visits belong to the request around this card, including after restoring a conversation.
     static func taskUsedBrowser(in entries: [ChatEntry], at index: Int) -> Bool {
@@ -269,14 +277,17 @@ final class ChatModel {
     /// The words may be left out.
     func send(_ text: String, attachments: [ChatAttachment]) {
         lastImages = attachments.flatMap(\.images)
-        send(text, again: false, thumbnails: attachments.map(\.thumbnail), chooseWorkspace: true)
+        let documents = attachments.compactMap { attachment in
+            attachment.textContent.map { ChatTextDocument(name: attachment.label, content: $0) }
+        }
+        send(text, again: false, thumbnails: attachments.filter { !$0.thumbnail.isEmpty }.map(\.thumbnail), documents: documents, chooseWorkspace: true)
     }
 
     /// The last message again, after a problem (the Retry button under it).
     func retry() {
         guard !running, let last = entries.last(where: { if case .you = $0.kind { return true }; return false }), case .you(let text, _) = last.kind else { return }
         while let tail = entries.last, case .note(.problem) = tail.kind { entries.removeLast() }
-        send(text, again: true, inSplitView: usesSplitView && expectedSplitViewApps == nil, chooseWorkspace: true)
+        send(text, again: true, documents: last.textDocuments ?? [], inSplitView: usesSplitView && expectedSplitViewApps == nil, chooseWorkspace: true)
     }
 
     /// The conversation ended on a problem the owner can try again.
@@ -291,30 +302,35 @@ final class ChatModel {
     /// The pictures of the owner's last message, sent again with it by Try Again.
     private var lastImages: [Data] = []
 
-    /// What was said in this chat, oldest first, for the auto-classifier.
-    var ownerContext: [String] {
+    /// Keep captions and file contents separate until the approval context is packed.
+    var ownerContext: [ApprovalClassifier.ContextTurn] {
         entries.suffix(30).compactMap { entry in
             switch entry.kind {
-            case .you(let text, _): "Owner: \(text)"
-            case .request(let text, let from): "Request from \(from): \(text)"
-            case .poki(let text): "Assistant: \(String(text.prefix(400)))"
+            case .you(let text, _):
+                .init(text: "Owner: \(text)", documents: entry.textDocuments ?? [])
+            case .request(let text, let from):
+                .init(text: "Request from \(from): \(text)", documents: entry.textDocuments ?? [])
+            case .poki(let text):
+                .init(text: "Assistant: \(String(text.prefix(400)))")
             default: nil
             }
         }
     }
 
-    private func send(_ text: String, again: Bool, thumbnails: [Data] = [], inSplitView: Bool = false, chooseWorkspace: Bool = false) {
+    private func send(_ text: String, again: Bool, thumbnails: [Data] = [], documents: [ChatTextDocument] = [], inSplitView: Bool = false, chooseWorkspace: Bool = false) {
         if let message = app.signer.installMessage {
             add(.note(.problem(message)))
             return
         }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // Pictures may go without words, and Try Again sends them again.
-        guard !text.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
+        guard !text.isEmpty || !documents.isEmpty || !thumbnails.isEmpty || (again && !lastImages.isEmpty), !running else { return }
         if isDemo { playDemo(text); return }
         // Another conversation (an outside agent's hand-off) is working the phone: one task at a time.
         if kind == .poki, let busy = ChatModel.delegatedBusy {
-            entries.append(ChatEntry(.you(text, delivered: false)))
+            var entry = ChatEntry(.you(text, delivered: false))
+            if !documents.isEmpty { entry.textDocuments = documents }
+            entries.append(entry)
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("Poki is working on a task for \(busy). Try again when it’s done.")))))
             return
         }
@@ -326,10 +342,12 @@ final class ChatModel {
         } else {
             var entry = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
             if !thumbnails.isEmpty { entry.attachments = thumbnails } else { lastImages = [] }
+            if !documents.isEmpty { entry.textDocuments = documents }
             you = entry
             entries.append(you)
         }
-        lastOwnerText = text
+        let message = you.requestText
+        lastOwnerText = message
         usesSplitView = inSplitView
         splitViewSession = inSplitView ? UUID().uuidString : nil
         expectedSplitViewApps = nil
@@ -349,7 +367,7 @@ final class ChatModel {
         if kind == .poki, !again, entries.filter({ if case .you = $0.kind { return true }; return false }).count == 1,
            let piModel = provider.piModel(model) {
             let id = sessionID
-            Task { if let name = await SessionNamer.name(for: text, provider: provider, model: piModel) { SessionStore.shared.setAutoName(id, name) } }
+            Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel) { SessionStore.shared.setAutoName(id, name) } }
         }
         running = true
         awaitingModel = true
@@ -374,7 +392,7 @@ final class ChatModel {
                 // A stopped task may still be ending its last step: this one starts after it.
                 await previous?.value
                 guard let self, self.runToken == token else { return }
-                client.say(text)
+                client.say(message)
                 self.began("direct", provider, model)
                 await self.run(client, instructions: instructions, delivered: you.id, token: token)
                 let current = self.runToken == token
@@ -446,8 +464,8 @@ final class ChatModel {
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
             let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil)
-            let instructions = Harness.instructions(for: text, inSplitView: splitSession != nil)
-            let outcome = await loop.run(text.isEmpty ? Self.picturesOnly : text, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
+            let instructions = Harness.instructions(for: message, inSplitView: splitSession != nil)
+            let outcome = await loop.run(message.isEmpty ? Self.picturesOnly : message, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
                 self.awaitingModel = false

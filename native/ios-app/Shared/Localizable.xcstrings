@@ -33188,6 +33188,54 @@
           }
         }
       }
+    },
+    "Text files must be 100 KB or smaller." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文本文件不能超过 100 KB。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文字檔案不能超過 100 KB。"
+          }
+        }
+      }
+    },
+    "This text file must use UTF-8 encoding." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文本文件必须使用 UTF-8 编码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個文字檔案必須使用 UTF-8 編碼。"
+          }
+        }
+      }
+    },
+    "Only images, PDFs, JSON, Markdown, and plain text files can be added." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能添加图片、PDF、JSON、Markdown 和纯文本文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只能加入圖片、PDF、JSON、Markdown 和純文字檔案。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

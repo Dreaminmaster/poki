@@ -672,6 +672,11 @@ struct ChatTranscript<Footer: View>: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text("^[\(pictures.count) attachment](inflect: true)"))
                 }
+                if let documents = entry.textDocuments {
+                    ForEach(Array(documents.enumerated()), id: \.offset) { _, document in
+                        ChatTextDocumentChip(document: document)
+                    }
+                }
                 if !text.isEmpty { MessageBubble(direction: .outgoing, text: text, tail: last) }
                 if last, delivered {
                     Text("Delivered").font(.caption2.weight(.medium)).foregroundStyle(Color(.secondaryLabel))
@@ -1353,7 +1358,7 @@ struct ComposerInputView: View {
             picked = []
             Task { await addPhotos(items) }
         }
-        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.image, .pdf], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             for url in urls { add { try AttachmentReader.file(url) } }
         }
@@ -1504,8 +1509,12 @@ struct ComposerInputView: View {
         do {
             let item = try read()
             withAnimation(.snappy) { attachments.append(item) }
+        } catch AttachmentReader.Failure.tooLarge {
+            problem = AppLocalization.text(LocalizedStringResource("Text files must be 100 KB or smaller."))
+        } catch AttachmentReader.Failure.invalidUTF8 {
+            problem = AppLocalization.text(LocalizedStringResource("This text file must use UTF-8 encoding."))
         } catch AttachmentReader.Failure.unsupported {
-            problem = AppLocalization.text(LocalizedStringResource("Only photos and PDFs can be added."))
+            problem = AppLocalization.text(LocalizedStringResource("Only images, PDFs, JSON, Markdown, and plain text files can be added."))
         } catch {
             problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
         }
