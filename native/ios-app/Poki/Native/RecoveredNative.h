@@ -15,6 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 @interface SRNativeSession : NSObject
+/// Loads developer frameworks without opening a daemon session or enabling Automation Mode.
+- (BOOL)loadDeveloperFrameworks:(NSError **)error;
 // Call from a worker queue: the upstream promise wait can take 3 seconds.
 - (nullable id)prepare:(NSError **)error;
 - (BOOL)isCurrent:(id)session generation:(uint64_t)generation;

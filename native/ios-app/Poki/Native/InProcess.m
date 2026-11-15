@@ -456,6 +456,10 @@ static NSData *PKCropped(NSData *png, CGRect viewport) {
 
 - (uint64_t)generation { return _sessions.generation; }
 
+- (BOOL)developerFrameworksAvailable {
+    return [_sessions loadDeveloperFrameworks:nil];
+}
+
 - (NSDictionary<NSString *, id> *)prepare {
     NSError *error;
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;

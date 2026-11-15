@@ -34,6 +34,8 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
 /// authenticate in iOS's prompt.
 @interface PKInProcess : NSObject
 + (instancetype)shared;
+/// Loads the developer frameworks only. Does not open a session or ask for the passcode.
+- (BOOL)developerFrameworksAvailable;
 /// Loads the Developer libraries, opens the daemon session and enables Automation Mode, or reuses an
 /// enable of the same session and generation. Keys: ok, code, detail, generation, reused, seconds.
 - (NSDictionary<NSString *, id> *)prepare;
