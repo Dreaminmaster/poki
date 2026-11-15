@@ -1257,7 +1257,7 @@ struct ComposerInputView: View {
         let radius = (buttonHitSide + 2 * controlInset) / 2
         return expanded ? min(24, radius) : radius
     }
-    private var expanded: Bool { focused || typeSize >= .xxxLarge }
+    private var expanded: Bool { typeSize >= .xxxLarge }
 
     private var voice: VoiceModel { model.voice }
     private var hasText: Bool { !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
