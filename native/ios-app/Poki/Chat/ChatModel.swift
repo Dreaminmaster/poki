@@ -636,11 +636,26 @@ final class ChatModel {
     /// task ended, and finish_task's summary and answer.
     func runDelegated(_ task: String) async -> (text: String, success: Bool?) {
         if let message = app.signer.installMessage { return (message, false) }
+        guard !Task.isCancelled else { return ("Poki's task was cancelled.", false) }
+        guard !running, ChatModel.delegatedBusy == nil else { return ("Poki is already running a task.", false) }
         ChatModel.delegatedBusy = requester ?? AppLocalization.text(LocalizedStringResource("an agent"))
         defer { ChatModel.delegatedBusy = nil }
         lastOutcome = nil
         send(task)
-        while running { try? await Task.sleep(for: .milliseconds(100)) }
+        if running, let started = self.task {
+            let token = runToken
+            await withTaskCancellationHandler {
+                await started.value
+            } onCancel: {
+                Task { @MainActor in
+                    guard self.runToken == token, self.running else { return }
+                    self.stop()
+                }
+            }
+            if Task.isCancelled {
+                return ("Stopped. Poki's task was cancelled.", false)
+            }
+        }
         let replies = entries.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }
         var lines: [String] = []
         if let taskResult {

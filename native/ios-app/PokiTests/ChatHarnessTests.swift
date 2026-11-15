@@ -331,6 +331,56 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(chat.running, "Scripted task did not finish")
     }
 
+    func testCancellingADelegationStopsItsChat() async throws {
+        let started = expectation(description: "Delegated request reached HTTP transport")
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.text("Late reply."),
+            FakeCompletions.text("Next reply."),
+        ], holdFirstReply: { started.fulfill() })
+        let chat = chat(on: server)
+        let run = Task { await chat.runDelegated("Wait for a reply") }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertTrue(chat.running)
+
+        run.cancel()
+        let reply = await run.value
+        XCTAssertFalse(chat.running)
+        XCTAssertNil(ChatModel.delegatedBusy)
+        XCTAssertEqual(reply.success, false)
+        XCTAssertTrue(reply.text.contains("Stopped."), reply.text)
+        XCTAssertFalse(chat.entries.contains { if case .poki("Late reply.") = $0.kind { return true }; return false })
+
+        let next = await chat.runDelegated("Try again")
+        XCTAssertTrue(next.text.contains("Next reply."), next.text)
+        XCTAssertEqual(server.requests.count, 2)
+    }
+
+    func testDelegationPropagatesModelError() async throws {
+        let server = try FakeCompletions(replies: [], responseStatus: "401 Unauthorized")
+        let chat = chat(on: server)
+        let reply = await chat.runDelegated("Report a model error")
+
+        XCTAssertTrue(reply.text.contains("error:"), reply.text)
+        XCTAssertNotEqual(reply.success, true)
+        XCTAssertFalse(chat.running)
+        XCTAssertNil(ChatModel.delegatedBusy)
+    }
+
+    func testAlreadyCancelledDelegationDoesNotStartAChat() async throws {
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Should not run.")])
+        let chat = chat(on: server)
+        let run = Task { await chat.runDelegated("Do not start") }
+        run.cancel()
+
+        let reply = await run.value
+
+        XCTAssertEqual(reply.success, false)
+        XCTAssertFalse(chat.running)
+        XCTAssertNil(ChatModel.delegatedBusy)
+        XCTAssertTrue(chat.entries.isEmpty)
+        XCTAssertTrue(server.requests.isEmpty)
+    }
+
     /// A note the agent saved during one task reaches the model with the next task of the same
     /// conversation.
     func testEachTaskTellsTheModelWhatMemoryHolds() async throws {
@@ -606,12 +656,16 @@ final class FakeCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var replies: [String]
     private var bodies: [[String: Any]] = []
+    private let responseStatus: String
+    private let holdFirstReply: (@Sendable () -> Void)?
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
 
-    init(replies: [String]) throws {
+    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil) throws {
         self.replies = replies
+        self.responseStatus = responseStatus
+        self.holdFirstReply = holdFirstReply
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -654,7 +708,12 @@ final class FakeCompletions: @unchecked Sendable {
             if let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] { bodies.append(json) }
             return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
         }
-        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
+        let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
+        if requests.count == 1, let holdFirstReply {
+            holdFirstReply()
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in connection.cancel() }
+            return
+        }
         connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
     }
 
