@@ -112,8 +112,6 @@ struct TestingOptionsView: View {
             }
             // The in-process path's switch and probes (ESP-173, ESP-175).
             InProcessSection()
-            // iPhone History's first tests: a tree read with no automation session (issue 356).
-            HistoryTestSection()
             Section {
                 LabeledContent("Port on 10.7.0.1") {
                     TextField(text: $hold.port, prompt: Text(verbatim: "49152")) { Text("Port on 10.7.0.1") }
@@ -139,6 +137,9 @@ struct TestingOptionsView: View {
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }
             }
+            // Screen History, an experiment that reads only when started here (issue 356). Last, so
+            // the sections above keep their place.
+            HistoryTestingSection()
         }
         .navigationTitle(AppLocalization.text("Testing Options"))
         .navigationBarTitleDisplayMode(.inline)

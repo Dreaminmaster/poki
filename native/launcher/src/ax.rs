@@ -282,44 +282,6 @@ async fn drain(
     }
 }
 
-/// Two subscriptions at once: the first is kept open, so the phone still has a client that needs
-/// accessibility, while a second one is made `first` later and read for `second`. Tells whether the
-/// tree an app gives depends on accessibility having been asked for a moment before.
-pub async fn read_tree_overlapped(
-    adapter: &mut AdapterHandle,
-    rsd: &RsdHandshake,
-    first: Duration,
-    second: Duration,
-) -> (Option<Json>, Vec<Attempt>) {
-    let mut one = Attempt { window_ms: first.as_millis() as u64, ..Attempt::default() };
-    let mut socket = match open(adapter, rsd).await {
-        Ok(socket) => socket,
-        Err(error) => {
-            one.error = Some(error.to_string());
-            return (None, vec![one]);
-        }
-    };
-    let early = match drain(&mut socket, false, first, true, &mut one).await {
-        Ok(tree) => tree,
-        Err(error) => {
-            one.error = Some(error.to_string());
-            None
-        }
-    };
-    one.answered = early.is_some();
-    let mut two = Attempt { window_ms: second.as_millis() as u64, ..Attempt::default() };
-    let late = match subscribe(adapter, rsd, false, second, true, &mut two).await {
-        Ok(tree) => tree,
-        Err(error) => {
-            two.error = Some(error.to_string());
-            None
-        }
-    };
-    two.answered = late.is_some();
-    close(socket).await;
-    (late.or(early), vec![one, two])
-}
-
 // AX archives contain custom classes. Keep UIDs intact and resolve only fields
 // we consume; a generic NSObject decoder loses the translation-object graph.
 struct Archive {

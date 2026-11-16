@@ -43,24 +43,15 @@ struct HistorySpan: Identifiable, Hashable {
 enum HistoryNames {
     static func app(_ id: String) -> String { AppIconStore.name(id) ?? id }
 
-    static func part(_ hour: Int) -> String {
-        switch hour {
-        case 6..<12: "Morning"
-        case 12..<18: "Afternoon"
-        case 18..<24: "Evening"
-        default: "Night"
-        }
-    }
-
     static func status(_ status: HistoryCapture.Status) -> String {
         switch status {
         case .off: "Off"
+        case .waiting: "Waiting to Read"
         case .reading: "Reading"
-        case .paused: "Paused"
-        case .outsideHours: "Outside Access Times"
+        case .finished: "Finished"
+        case .stopped: "Stopped"
         case .locked: "iPhone Locked"
         case .task: "Waiting for an Agent's Task"
-        case .testing: "Waiting for a Test"
         case .noConnection: "No Local Connection"
         case .notPaired: "Not Paired"
         }
@@ -71,61 +62,8 @@ enum HistoryNames {
         switch kind {
         case "leftOut": return "Left Out an App"
         case "cleared": return "History Cleared"
-        case "clearedApp": return "App History Cleared"
         case "clearedAll": return "All History Cleared"
         default: return kind
-        }
-    }
-
-    /// Days, newest first, each with its parts, newest first.
-    static func days(_ entries: [HistoryEntry]) -> [(day: Date, parts: [HistorySpan])] {
-        let calendar = Calendar.current
-        var parts: [Date: [HistoryEntry]] = [:]
-        for entry in entries {
-            let hour = calendar.component(.hour, from: entry.at)
-            let first = hour < 6 ? 0 : hour < 12 ? 6 : hour < 18 ? 12 : 18
-            guard let start = calendar.date(bySettingHour: first, minute: 0, second: 0, of: entry.at) else { continue }
-            parts[start, default: []].append(entry)
-        }
-        var days: [Date: [HistorySpan]] = [:]
-        for (start, entries) in parts {
-            let span = HistorySpan(start: start, end: start.addingTimeInterval(6 * 3600), entries: entries.sorted { $0.at > $1.at })
-            days[calendar.startOfDay(for: start), default: []].append(span)
-        }
-        return days.map { (day: $0.key, parts: $0.value.sorted { $0.start > $1.start }) }.sorted { $0.day > $1.day }
-    }
-
-    /// A part's blocks of 10 minutes, newest first.
-    static func blocks(_ part: HistorySpan) -> [HistorySpan] {
-        var blocks: [Int: [HistoryEntry]] = [:]
-        for entry in part.entries { blocks[Int(entry.at.timeIntervalSince1970) / 600, default: []].append(entry) }
-        return blocks.map { key, entries in
-            let start = Date(timeIntervalSince1970: Double(key) * 600)
-            return HistorySpan(start: start, end: start.addingTimeInterval(600), entries: entries.sorted { $0.at > $1.at })
-        }
-        .sorted { $0.start > $1.start }
-    }
-}
-
-// MARK: Rows
-
-/// The icons of a span's apps. Pressing and holding one offers to leave that app out from now on.
-struct HistoryIcons: View {
-    var apps: [String]
-    @ObservedObject private var capture = HistoryCapture.shared
-
-    init(apps: [String]) { self.apps = apps }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(apps.prefix(10), id: \.self) { app in
-                AppIconView(app: app, size: 24)
-                    .contextMenu {
-                        Text(verbatim: HistoryNames.app(app))
-                        Button("Exclude from Backtape") { capture.exclude(app) }
-                        Button("Delete This App's History", role: .destructive) { Task { await capture.clear(app: app) } }
-                    }
-            }
         }
     }
 }
@@ -137,7 +75,6 @@ struct HistoryPage: View {
     @ObservedObject private var lock = HistoryLock.shared
     @State private var layout = BacktapeLayout()
     @State private var loaded = false
-    @State private var asking = false
 
     var body: some View {
         Group {
@@ -146,15 +83,9 @@ struct HistoryPage: View {
                 BacktapeLockScreen()
             } else if layout.isEmpty {
                 List {
-                    if !capture.enabled {
+                    if loaded {
                         Section {
-                            Button("Turn On Backtape") { asking = true }
-                        } footer: {
-                            Text("Poki reads the text of the app in front every few seconds and keeps it on this iPhone. It takes no screenshots, and password fields are left out. Nothing is sent anywhere. Turning the local connection off stops it completely.")
-                        }
-                    } else if loaded {
-                        Section {
-                            Text("Nothing is kept yet. Use the iPhone as usual and come back.").foregroundStyle(.secondary)
+                            Text("Nothing is kept yet. Start a read in Testing Options, use another app, then come back.").foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -172,47 +103,9 @@ struct HistoryPage: View {
                     }
                     .accessibilityLabel(Text("Backtape Settings"))
                 }
-                // Its own glass, apart from Settings (the owner, 2026-11-15).
-                if #available(iOS 26.0, *) {
-                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                }
-                ToolbarItem(placement: .topBarTrailing) { recording }
             }
         }
         .task(id: capture.changes) { await load() }
-        .sensoryFeedback(.impact(weight: .heavy), trigger: capture.isPaused)
-        .sensoryFeedback(.impact(weight: .heavy), trigger: capture.enabled)
-        .alert("Turn On Backtape", isPresented: $asking) {
-            Button("Turn On") { capture.enabled = true }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Poki will read the text on screen in the apps you use and keep it on this iPhone only. You can pause it, leave apps out, set access times and clear the history at any time.")
-        }
-    }
-
-    /// Start, pause and stop, in a menu that opens in place next to the button.
-    private var recording: some View {
-        Menu {
-            if !capture.enabled {
-                Button { asking = true } label: { Label("Start Recording", systemImage: "record.circle") }
-            } else if capture.isPaused {
-                Button { capture.resume() } label: { Label("Resume Recording", systemImage: "play") }
-                Button(role: .destructive) { capture.enabled = false } label: { Label("Stop Recording", systemImage: "stop") }
-            } else {
-                Button { capture.pause(until: Date().addingTimeInterval(3600)) } label: { Label("Pause for 1 Hour", systemImage: "pause") }
-                Button {
-                    capture.pause(until: Calendar.current.startOfDay(for: Date().addingTimeInterval(86_400)))
-                } label: { Label("Pause Until Tomorrow", systemImage: "moon") }
-                Button(role: .destructive) { capture.enabled = false } label: { Label("Stop Recording", systemImage: "stop") }
-            }
-        } label: {
-            if capture.enabled, !capture.isPaused {
-                Image(systemName: "pause.fill")
-            } else {
-                Image(systemName: "record.circle").foregroundStyle(.red)
-            }
-        }
-        .accessibilityLabel(Text("Recording"))
     }
 
     private func load() async {
@@ -229,70 +122,10 @@ struct HistoryPage: View {
 struct BacktapeSettingsPage: View {
     @ObservedObject private var capture = HistoryCapture.shared
     @State private var size: (entries: Int, bytes: Int64) = (0, 0)
-    @State private var asking = false
     @State private var clearing = false
-
-    private func time(_ minutes: Binding<Int>) -> Binding<Date> {
-        Binding(get: {
-            Calendar.current.date(bySettingHour: minutes.wrappedValue / 60, minute: minutes.wrappedValue % 60, second: 0, of: Date()) ?? Date()
-        }, set: { date in
-            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-            minutes.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
-        })
-    }
 
     var body: some View {
         List {
-            Section {
-                Toggle("Backtape", isOn: Binding(get: { capture.enabled }, set: { on in
-                    if on { asking = true } else { capture.enabled = false }
-                }))
-                if capture.enabled {
-                    LabeledContent("Status") { Text(LocalizedStringKey(HistoryNames.status(capture.status))) }
-                    if capture.isPaused {
-                        Button("Resume") { capture.resume() }
-                    } else {
-                        Menu("Pause") {
-                            Button("For an Hour") { capture.pause(until: Date().addingTimeInterval(3600)) }
-                            Button("Until Tomorrow") {
-                                capture.pause(until: Calendar.current.startOfDay(for: Date().addingTimeInterval(86_400)))
-                            }
-                            Button("Until I Turn It On") { capture.pause(until: .distantFuture) }
-                        }
-                    }
-                }
-            } footer: {
-                Text("Poki reads the text of the app in front every few seconds and keeps it on this iPhone. It takes no screenshots, and password fields are left out. Nothing is sent anywhere. Turning the local connection off stops it completely.")
-            }
-            Section {
-                Toggle("Read Only at Set Times", isOn: $capture.scheduleOn)
-                if capture.scheduleOn {
-                    let symbols = Calendar.current.veryShortWeekdaySymbols
-                    HStack(spacing: 0) {
-                        ForEach(1...7, id: \.self) { day in
-                            let on = capture.weekdays.contains(day)
-                            Button {
-                                if on { capture.weekdays.removeAll { $0 == day } } else { capture.weekdays = (capture.weekdays + [day]).sorted() }
-                            } label: {
-                                Text(verbatim: symbols.indices.contains(day - 1) ? symbols[day - 1] : "\(day)")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(on ? Color.white : Color.secondary)
-                                    .frame(width: 36, height: 36)
-                                    .background(Circle().fill(on ? Color.accentColor : Color(.tertiarySystemFill)))
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    DatePicker("From", selection: time($capture.startMinute), displayedComponents: .hourAndMinute)
-                    DatePicker("Until", selection: time($capture.endMinute), displayedComponents: .hourAndMinute)
-                }
-            } header: {
-                Text("Access Times")
-            } footer: {
-                Text("Outside these times nothing is read.")
-            }
             Section {
                 NavigationLink { HistoryGate { HistoryPermissionsPage().settingsPage() } } label: {
                     LabeledContent("Permissions") {
@@ -338,12 +171,6 @@ struct BacktapeSettingsPage: View {
         .navigationTitle(AppLocalization.text("Backtape Settings"))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: capture.changes) { size = await HistoryStore.shared.size() }
-        .alert("Turn On Backtape", isPresented: $asking) {
-            Button("Turn On") { capture.enabled = true }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Poki will read the text on screen in the apps you use and keep it on this iPhone only. You can pause it, leave apps out, set access times and clear the history at any time.")
-        }
         .confirmationDialog("Clear History", isPresented: $clearing, titleVisibility: .visible) {
             Button("Last 10 Minutes", role: .destructive) { Task { await capture.clear(last: 600) } }
             Button("Last Hour", role: .destructive) { Task { await capture.clear(last: 3600) } }
@@ -351,62 +178,6 @@ struct BacktapeSettingsPage: View {
             Button("Everything", role: .destructive) { Task { await capture.clearEverything() } }
             Button("Cancel", role: .cancel) {}
         }
-    }
-}
-
-/// A block of 10 minutes: the reads kept in it, by app, with delete on each.
-struct HistoryBlockPage: View {
-    var start: Date
-    var end: Date
-    @ObservedObject private var capture = HistoryCapture.shared
-    @State private var entries: [HistoryEntry] = []
-    @Environment(\.dismiss) private var dismiss
-
-    private var apps: [String] {
-        var order: [String] = []
-        for entry in entries where !order.contains(entry.app) { order.append(entry.app) }
-        return order
-    }
-
-    var body: some View {
-        List {
-            ForEach(apps, id: \.self) { app in
-                Section {
-                    ForEach(entries.filter { $0.app == app }) { entry in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(verbatim: entry.at.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(AppLocalization.locale)))
-                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                if !entry.title.isEmpty { Text(verbatim: entry.title).font(.caption.weight(.semibold)).lineLimit(1) }
-                            }
-                            Text(verbatim: entry.text).font(.footnote).lineLimit(12).textSelection(.enabled)
-                        }
-                        .swipeActions {
-                            Button("Delete", role: .destructive) {
-                                entries.removeAll { $0.id == entry.id }
-                                Task { await capture.delete(entry) }
-                            }
-                        }
-                    }
-                } header: {
-                    HStack(spacing: 8) {
-                        AppIconView(app: app, size: 20)
-                        Text(verbatim: HistoryNames.app(app))
-                    }
-                }
-            }
-            Section {
-                Button("Delete These 10 Minutes", role: .destructive) {
-                    Task {
-                        await capture.delete(from: start, to: end)
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .navigationTitle(start.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale)))
-        .navigationBarTitleDisplayMode(.inline)
-        .task { entries = await HistoryStore.shared.entries(from: start, to: end) }
     }
 }
 
@@ -495,7 +266,7 @@ private struct HistoryRecordPage: View {
 
     private func detail(_ record: HistoryRecord) -> String {
         switch record.kind {
-        case "leftOut", "clearedApp": HistoryNames.app(record.detail)
+        case "leftOut": HistoryNames.app(record.detail)
         default: ""
         }
     }
@@ -518,5 +289,41 @@ private struct HistoryRecordPage: View {
         .navigationTitle(AppLocalization.text("Observing Record"))
         .navigationBarTitleDisplayMode(.inline)
         .task { records = await HistoryStore.shared.records() }
+    }
+}
+
+// MARK: Testing Options
+
+/// General › Testing Options › Screen History: the only place a read starts.
+struct HistoryTestingSection: View {
+    @ObservedObject var capture = HistoryCapture.shared
+    @Environment(AppModel.self) private var model
+    @State private var minutes = HistoryCapture.runMinutes[0]
+
+    var body: some View {
+        Section {
+            NavigationLink { HistoryPage().settingsPage() } label: { Text("Open Screen History") }
+            LabeledContent("Status") {
+                if let ends = capture.ends, capture.isRunning {
+                    Text(timerInterval: Date()...max(Date(), ends), countsDown: true).monospacedDigit()
+                } else {
+                    Text(LocalizedStringKey(HistoryNames.status(capture.status)))
+                }
+            }
+            Button("Read in 10 Seconds") { capture.start(model: model) }
+                .disabled(capture.isRunning)
+            Picker("Short Run", selection: $minutes) {
+                ForEach(HistoryCapture.runMinutes, id: \.self) { Text("\($0) min").tag($0) }
+            }
+            .disabled(capture.isRunning)
+            Button("Start Short Run") { capture.start(minutes: minutes, model: model) }
+                .disabled(capture.isRunning)
+            Button("Stop", role: .destructive) { capture.stop() }
+                .disabled(!capture.isRunning)
+        } header: {
+            Text("Screen History")
+        } footer: {
+            Text("An experiment. Poki reads the text of the app in front only after you start here, and keeps it on this iPhone. Leave Poki after starting. A run ends when its time is up, when the iPhone locks, or when iOS ends Poki's time in the background. Password fields are left out, and nothing is sent anywhere.")
+        }
     }
 }

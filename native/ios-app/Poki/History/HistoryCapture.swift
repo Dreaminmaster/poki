@@ -3,19 +3,22 @@ import SwiftUI
 import UIKit
 import notify
 
-/// iPhone History's capture loop and its privacy controls (issue 356).
+/// iPhone History's capture and its privacy controls (issue 356), as an experiment.
 ///
-/// While history is on, the launcher reads the app in front as text every few seconds through the
-/// accessibility service over the loopback, with no automation session. Every control is checked
-/// before a read is kept: the switch, Pause, access times, the lock and the screen, an agent's task,
-/// and the app list. A read that passes goes to `HistoryStore`. Nothing leaves the phone.
+/// Nothing is read until the owner asks in Testing Options: one read 10 seconds later, or a short
+/// run of a few minutes. The launcher then reads the app in front as text through the accessibility
+/// service over the loopback, with no automation session. A run ends when its time is up, when the
+/// iPhone locks or the screen goes dark, when an agent's task opens a session, or when iOS ends
+/// Poki's background time. No audio plays to keep Poki awake. A read that passes the app list goes
+/// to `HistoryStore`. Nothing leaves the phone.
 @MainActor
 final class HistoryCapture: ObservableObject {
     static let shared = HistoryCapture()
 
-    /// Why reading is on or not, as the panel and the observing record say it.
+    /// What the short run is doing, or why the last one ended or did not start, as Testing Options
+    /// and the observing record say it.
     enum Status: String {
-        case off, reading, paused, outsideHours, locked, task, testing, noConnection, notPaired
+        case off, waiting, reading, finished, stopped, locked, task, noConnection, notPaired
     }
 
     enum ListMode: String, CaseIterable, Identifiable {
@@ -25,18 +28,9 @@ final class HistoryCapture: ObservableObject {
 
     // MARK: Settings (kept in UserDefaults)
 
-    @Published var enabled: Bool { didSet { save(enabled, "history.enabled"); settingsChanged() } }
-    /// Until when reading is paused. The distant future is "until turned on again".
-    @Published var pausedUntil: Date? { didSet { save(pausedUntil?.timeIntervalSince1970, "history.pausedUntil"); settingsChanged() } }
     @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
     @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
     @Published var included: [String] { didSet { save(included, "history.included") } }
-    @Published var scheduleOn: Bool { didSet { save(scheduleOn, "history.scheduleOn"); settingsChanged() } }
-    /// Minutes after midnight.
-    @Published var startMinute: Int { didSet { save(startMinute, "history.startMinute"); settingsChanged() } }
-    @Published var endMinute: Int { didSet { save(endMinute, "history.endMinute"); settingsChanged() } }
-    /// Calendar weekdays, 1 for Sunday.
-    @Published var weekdays: [Int] { didSet { save(weekdays, "history.weekdays"); settingsChanged() } }
     @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); prune() } }
     /// How long the hour, day and week summaries outlive the tape, in days. 0 is as long as the tape.
     @Published var summaryDays: Int { didSet { save(summaryDays, "history.summaryDays"); prune() } }
@@ -47,22 +41,31 @@ final class HistoryCapture: ObservableObject {
         guard !loading else { return }
         HistoryStore.shared.prune(days: retentionDays, summaryDays: summaryDays, megabytes: storageMegabytes)
     }
-    @Published var seconds: Int { didSet { save(seconds, "history.seconds"); restart() } }
 
     // MARK: State
 
     @Published private(set) var status: Status = .off
+    /// When the run in progress ends.
+    @Published private(set) var ends: Date?
     /// Bumped when a read is kept or history is deleted, so an open panel reloads.
     @Published private(set) var changes = 0
     @Published private(set) var lastKept: Date?
 
-    private weak var model: AppModel?
-    private var running = false
-    private var timer: Timer?
-    private var ticks = 0
+    var isRunning: Bool { status == .waiting || status == .reading }
+
+    /// The short runs Testing Options offers, in minutes.
+    static let runMinutes = [3, 5]
+    /// The wait before a single read, time to leave Poki and put another app in front.
+    static let waitSeconds = 10
+    /// Seconds between two reads of a run.
+    static let interval = 5
+
+    /// The run in progress. Ending a run moves it on, so a late answer from an older one is ignored.
+    private var run = 0
+    private var once = false
+    private var background: UIBackgroundTaskIdentifier = .invalid
     private var lockToken: Int32 = NOTIFY_TOKEN_INVALID
     private var screenToken: Int32 = NOTIFY_TOKEN_INVALID
-    private let keepAlive = KeepAlive()
     private var lastLeftOut: String?
     private var loading = true
 
@@ -72,22 +75,15 @@ final class HistoryCapture: ObservableObject {
         "com.paypal.PPClient", "com.apple.MobileSMS", "com.tencent.xin", "net.whatsapp.WhatsApp", "ph.telegra.Telegraph",
     ]
 
-    private init() {
+    init() {
         let defaults = UserDefaults.standard
-        enabled = defaults.bool(forKey: "history.enabled")
-        pausedUntil = (defaults.object(forKey: "history.pausedUntil") as? Double).map(Date.init(timeIntervalSince1970:))
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
         // Poki's own screens are left out from the start.
         excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"]
         included = defaults.stringArray(forKey: "history.included") ?? []
-        scheduleOn = defaults.bool(forKey: "history.scheduleOn")
-        startMinute = defaults.object(forKey: "history.startMinute") as? Int ?? 8 * 60
-        endMinute = defaults.object(forKey: "history.endMinute") as? Int ?? 22 * 60
-        weekdays = defaults.array(forKey: "history.weekdays") as? [Int] ?? Array(1...7)
         retentionDays = max(3, defaults.object(forKey: "history.retentionDays") as? Int ?? 14)
         summaryDays = defaults.object(forKey: "history.summaryDays") as? Int ?? 90
         storageMegabytes = max(50, defaults.object(forKey: "history.storageMegabytes") as? Int ?? 200)
-        seconds = defaults.object(forKey: "history.seconds") as? Int ?? 5
         loading = false
     }
 
@@ -124,41 +120,6 @@ final class HistoryCapture: ObservableObject {
         if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
     }
 
-    // MARK: Starting
-
-    /// Called once when Poki starts.
-    func attach(_ model: AppModel) {
-        guard self.model == nil else { return }
-        self.model = model
-        let changed: @Sendable (Int32) -> Void = { [weak self] _ in Task { @MainActor in self?.evaluate() } }
-        notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
-        notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
-        }
-        prune()
-        evaluate()
-    }
-
-    private func tick() {
-        ticks += 1
-        // Retention and the storage cap, once an hour.
-        if ticks % 360 == 0, enabled {
-            prune()
-            // What the trees cost, for deciding the storage limit's default.
-            Task {
-                let trees = await HistoryStore.shared.trees(), size = await HistoryStore.shared.size()
-                AppLog.shared.add("history", "tape: \(size.entries) reads, \(size.bytes) bytes, \(trees.count) trees, \(trees.bytes) tree bytes")
-            }
-        }
-        evaluate()
-    }
-
-    private func settingsChanged() {
-        guard !loading else { return }
-        evaluate()
-    }
-
     // MARK: The controls
 
     private func state(_ token: Int32) -> Bool {
@@ -167,17 +128,6 @@ final class HistoryCapture: ObservableObject {
     }
 
     private var lockedOrDark: Bool { state(lockToken) || state(screenToken) }
-
-    var isPaused: Bool { pausedUntil.map { $0 > Date() } ?? false }
-
-    func insideHours(_ date: Date = Date()) -> Bool {
-        guard scheduleOn else { return true }
-        let parts = Calendar.current.dateComponents([.weekday, .hour, .minute], from: date)
-        guard weekdays.contains(parts.weekday ?? 0) else { return false }
-        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
-        if startMinute == endMinute { return true }
-        return startMinute < endMinute ? (startMinute..<endMinute).contains(minute) : (minute >= startMinute || minute < endMinute)
-    }
 
     /// Whether reads of this app are kept, by the list the owner chose.
     func keeps(_ app: String) -> Bool {
@@ -194,93 +144,121 @@ final class HistoryCapture: ObservableObject {
         excluded.append(app)
     }
 
-    func pause(until date: Date) { pausedUntil = date }
-    func resume() { pausedUntil = nil }
-
-    private func wanted() -> Status {
-        guard enabled else { return .off }
-        if isPaused { return .paused }
-        if !insideHours() { return .outsideHours }
+    /// Why a read cannot happen now, or nil when it can.
+    private func refusal(_ model: AppModel) -> Status? {
         if lockedOrDark { return .locked }
-        guard let model else { return .off }
-        if HistoryProbe.shared.running || HistoryProbe.shared.reading { return .testing }
         // Reading stays out of the way of an agent's task.
         if model.hasOpenInProcessSession { return .task }
         if model.pairingPath == nil { return .notPaired }
         if !model.loopback.isWorking { return .noConnection }
-        return .reading
+        return nil
     }
 
-    /// Checks every control and starts or stops reading to match.
-    func evaluate() {
-        if let until = pausedUntil, until <= Date() { pausedUntil = nil; return }
-        let next = wanted()
-        if next != status {
-            status = next
-            HistoryStore.shared.note(next.rawValue)
-            // The file is closed while the phone is locked, so iOS's file protection holds.
-            if next == .locked { HistoryStore.shared.close() }
-        }
-        if enabled {
-            if !keepAlive.isOn { try? keepAlive.start() }
-        } else if keepAlive.isOn {
-            keepAlive.stop()
-        }
-        if next == .reading { start() } else { stop() }
+    private func set(_ next: Status) {
+        guard next != status else { return }
+        status = next
+        HistoryStore.shared.note(next.rawValue)
     }
 
-    // MARK: Reading
+    // MARK: Short runs
 
-    private func start() {
-        guard !running, let model, let path = model.pairingPath else { return }
-        running = true
+    /// Reads once after `waitSeconds`, or every `interval` seconds for `minutes`.
+    func start(minutes: Int? = nil, model: AppModel) {
+        guard !isRunning else { return }
+        watchLock()
+        if let refused = refusal(model) { set(refused); return }
+        run += 1
+        let me = run
+        once = minutes == nil
         lastLeftOut = nil
+        lastBanner = ""
+        prune()
+        background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
+            Task { @MainActor in
+                AppLog.shared.add("history", "iOS ended the background time")
+                self?.end(me, .stopped)
+            }
+        }
+        let wait = once ? Self.waitSeconds : 0
+        set(once ? .waiting : .reading)
+        ends = Date().addingTimeInterval(Double(wait + (minutes ?? 0) * 60))
         let screen = UIScreen.main.bounds
         let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
-        let request: [String: Any] = [
-            "op": "run", "device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki", "direct_points": points,
-            "interval_ms": max(1, seconds) * 1000, "duration_s": 86_400, "include_text": true, "include_tree": true,
-        ]
         Task {
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard self.run == me else { return }
+            if let refused = self.refusal(model) { self.end(me, refused); return }
+            self.set(.reading)
+            // A single read runs for the launcher's shortest time and ends at the first kept read.
+            let request: [String: Any] = [
+                "op": "run", "device_address": "10.7.0.1", "pairing_file": model.pairingPath ?? "", "host_name": "Poki",
+                "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": max(10, (minutes ?? 0) * 60),
+                "include_text": true, "include_tree": true,
+            ]
             do {
                 _ = try await HistoryBridge.call(request) { [weak self] line in
-                    Task { @MainActor in self?.took(line) }
+                    Task { @MainActor in self?.took(line, run: me, model: model) }
                 }
             } catch {
                 AppLog.shared.add("history", "capture stopped: \(error.localizedDescription)")
             }
-            self.running = false
-            // Reading that ended by itself (a dropped connection, a day's run) starts again here.
-            self.evaluate()
+            self.end(me, .finished)
         }
     }
 
-    private func stop() {
-        guard running else { return }
-        HistoryBridge.cancel()
+    func stop() {
+        end(run, .stopped)
     }
 
-    private func restart() {
-        guard !loading, running else { return }
+    /// Ends run `me`, if it is still the one in progress.
+    private func end(_ me: Int, _ why: Status) {
+        guard me == run, isRunning else { return }
+        run += 1
         HistoryBridge.cancel()
+        set(why)
+        ends = nil
+        if background != .invalid {
+            UIApplication.shared.endBackgroundTask(background)
+            background = .invalid
+        }
+        // The file is closed when the phone locks, so iOS's file protection holds.
+        if why == .locked { HistoryStore.shared.close() }
+    }
+
+    private func watchLock() {
+        guard lockToken == NOTIFY_TOKEN_INVALID else { return }
+        let changed: @Sendable (Int32) -> Void = { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.lockedOrDark else { return }
+                self.end(self.run, .locked)
+            }
+        }
+        notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
+        notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
     }
 
     /// One read from the launcher. Only a screen whose text changed carries text.
-    private func took(_ data: Data) {
-        guard status == .reading, !lockedOrDark,
-              let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              line["ok"] as? Bool == true,
-              let read = line["text"] as? [String], !read.isEmpty else { return }
+    private func took(_ data: Data, run me: Int, model: AppModel) {
+        guard me == run, status == .reading, !lockedOrDark,
+              let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        if model.hasOpenInProcessSession { end(me, .task); return }
+        if keep(line), once { end(me, .finished) }
+    }
+
+    /// Keeps a read of the launcher's when the app lists allow it. Returns whether it was kept.
+    @discardableResult
+    func keep(_ line: [String: Any]) -> Bool {
+        guard line["ok"] as? Bool == true, let read = line["text"] as? [String], !read.isEmpty else { return false }
         var app = line["app"] as? String ?? ""
         var title = line["title"] as? String ?? ""
         var lines = read
         var tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         // System overlays are not something the owner was doing, so they are never kept.
-        if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return }
+        if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return false }
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame {
             // The Home Screen itself is left out. A notification banner over it is kept once, under
             // the name of the app that sent it.
-            guard let banner = Self.banner(in: lines), banner.app + banner.text != lastBanner else { return }
+            guard let banner = Self.banner(in: lines), banner.app + banner.text != lastBanner else { return false }
             lastBanner = banner.app + banner.text
             app = banner.app
             title = Self.bannerTitle
@@ -293,13 +271,14 @@ final class HistoryCapture: ObservableObject {
                 lastLeftOut = app
                 HistoryStore.shared.note("leftOut", app)
             }
-            return
+            return false
         }
         lastLeftOut = nil
         let now = Date()
         HistoryStore.shared.add(at: now, app: app, title: title, text: lines.joined(separator: "\n"), tree: tree)
         lastKept = now
         changes += 1
+        return true
     }
 
     // MARK: Deleting
@@ -310,20 +289,9 @@ final class HistoryCapture: ObservableObject {
         changes += 1
     }
 
-    func clear(app: String) async {
-        await HistoryStore.shared.delete(app: app)
-        HistoryStore.shared.note("clearedApp", app)
-        changes += 1
-    }
-
     func clearEverything() async {
         await HistoryStore.shared.deleteEverything()
         HistoryStore.shared.note("clearedAll")
-        changes += 1
-    }
-
-    func delete(_ entry: HistoryEntry) async {
-        await HistoryStore.shared.delete(entry: entry.id)
         changes += 1
     }
 

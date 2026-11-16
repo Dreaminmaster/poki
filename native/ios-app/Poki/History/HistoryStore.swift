@@ -214,13 +214,6 @@ final class HistoryStore: @unchecked Sendable {
         !rows(sql) { _ in true }.isEmpty
     }
 
-    func delete(entry id: Int64) async {
-        await perform {
-            self.run("DELETE FROM entries WHERE id = ?", [.integer(id)])
-            self.run("DELETE FROM notes")
-        }
-    }
-
     func delete(from start: Date, to end: Date) async {
         await perform {
             self.run("DELETE FROM entries WHERE at >= ? AND at < ?", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)])
@@ -228,13 +221,6 @@ final class HistoryStore: @unchecked Sendable {
             // Notes of an hour, a day or a week (kept a fraction of a second off the whole second,
             // see BacktapeZoom.key) that hold any of the forgotten time go too.
             self.run("DELETE FROM notes WHERE start != CAST(start AS INTEGER) AND start >= ? AND start < ?", [.real(start.timeIntervalSince1970 - 8 * 86_400), .real(end.timeIntervalSince1970)])
-        }
-    }
-
-    func delete(app: String) async {
-        await perform {
-            self.run("DELETE FROM entries WHERE app = ?", [.text(app)])
-            self.run("DELETE FROM notes")
         }
     }
 
