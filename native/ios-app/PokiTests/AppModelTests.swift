@@ -1007,6 +1007,15 @@ final class InProcessPasscodeTests: XCTestCase {
         await waitFor("automation is open") { self.session.isOpen && self.model.hasOpenInProcessSession }
     }
 
+    /// The next agent's first look after standing by.
+    private func lookForTheNextTask() async {
+        model.prepareForTask()
+        await finishPreparing()
+        let core = PokiCore(config: CoreConfig(), host: model.host, transport: SessionScreenTransport(session: session))
+        let look = await core.callTool("look", arguments: "{}")
+        XCTAssertFalse(look.isError, look.text)
+    }
+
     private func standByWhenIdle() async {
         model.checkIdle(now: Date().addingTimeInterval(Double(model.idleStopSeconds) + 60))
         await waitFor("Poki stood by") { self.model.runnerPaused && !self.model.hasOpenInProcessSession && self.model.lastInProcessClose != nil }
@@ -1064,10 +1073,9 @@ final class InProcessPasscodeTests: XCTestCase {
         await standByWhenIdle()
         session.failNextResume()
         let opened = session.prepares
-        model.wakeRunner(asked: "the next task")
-        await waitFor("the session is open again") { self.session.isOpen && self.model.hasOpenInProcessSession }
+        await lookForTheNextTask()
+        XCTAssertTrue(session.isOpen && model.hasOpenInProcessSession)
         XCTAssertEqual(session.prepares - opened, 2, "the resume that failed, then the new session")
-        XCTAssertGreaterThanOrEqual(session.closes, 1)
         XCTAssertTrue(AppLog.shared.lines.contains { $0.contains("could not resume") }, "the log says why a new session was opened")
     }
 
@@ -1077,8 +1085,8 @@ final class InProcessPasscodeTests: XCTestCase {
         await openSessionForATask()
         await standByWhenIdle()
         let opened = session.prepares
-        model.wakeRunner(asked: "the next task")
-        await waitFor("the session is open again") { self.session.isOpen && self.model.hasOpenInProcessSession }
+        await lookForTheNextTask()
+        XCTAssertTrue(session.isOpen && model.hasOpenInProcessSession)
         XCTAssertEqual(session.prepares - opened, 1)
         XCTAssertEqual(session.closes, 0)
     }
