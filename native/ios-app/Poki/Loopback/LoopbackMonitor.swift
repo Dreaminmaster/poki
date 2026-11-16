@@ -200,7 +200,9 @@ final class LoopbackMonitor {
                 }
             }
             running = false
-            if epoch != probeEpoch || checkQueued {
+            // A network change makes this answer stale: ask again. A timer tick or resume() that came
+            // while the probe was in flight does not: the answer stands, and one more check follows it.
+            if epoch != probeEpoch {
                 check()
                 return
             }
@@ -209,6 +211,7 @@ final class LoopbackMonitor {
             // Only a change is published, so the screens are not redrawn every 3 s (a redraw while
             // the person drags a list makes scrolling stutter).
             publish(next, log: true)
+            if checkQueued { check() }
         }
     }
 
