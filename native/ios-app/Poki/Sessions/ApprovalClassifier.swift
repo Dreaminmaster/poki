@@ -161,7 +161,10 @@ enum ApprovalClassifier {
         Conversation, oldest first:
         \(context.text)
         """
-        let loop = PiLoop(provider: provider, model: model, tools: []) { _ in
+        // External approvals use a separate stable ID rather than another chat's identity.
+        let approvalSessionID = AskPoki.chat?.running == true ? AskPoki.chat?.sessionID : nil
+        let loop = PiLoop(provider: provider, model: model,
+                          sessionID: approvalSessionID ?? "approval-\(approval.id)", tools: []) { _ in
             .init(text: "No tools.", jpeg: nil, isError: true)
         }
         // The first of the model's reply and the deadline answers; a late reply is dropped.
