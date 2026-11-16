@@ -440,13 +440,16 @@ struct BacktapeTileView: View {
     var note: BacktapeNote?
     var waiting: Bool
     var lit: Bool
+    /// A 10 minute row grows with the text size, so two lines of summary always fit inside it.
+    @ScaledMetric(relativeTo: .footnote) private var lineHeight = 60.0
+    @ScaledMetric(relativeTo: .subheadline) private var timeWidth = 70.0
 
     private var height: CGFloat {
         switch kind {
         case .week: 184
         case .wide: 128
         case .half: 146
-        case .line: 62
+        case .line: max(60, lineHeight)
         }
     }
 
@@ -464,7 +467,8 @@ struct BacktapeTileView: View {
     private var text: String? {
         if let note {
             let body = note.body.isEmpty ? note.title : note.body
-            return body.isEmpty ? nil : body
+            // The small models often begin a sentence without its capital.
+            return body.isEmpty ? nil : body.prefix(1).uppercased() + body.dropFirst()
         }
         if waiting { return nil }
         let summary = tile.span.summary
@@ -484,7 +488,8 @@ struct BacktapeTileView: View {
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(shape)
-        .overlay { shape.strokeBorder(Color.accentColor, lineWidth: 2).opacity(lit ? 1 : 0) }
+        // Where a zoom landed: the tiles lighten for a moment. No outline and no colour.
+        .overlay { shape.fill(Color.primary.opacity(lit ? 0.09 : 0)).allowsHitTesting(false) }
         .contentShape(shape)
     }
 
@@ -511,11 +516,13 @@ struct BacktapeTileView: View {
             Text(verbatim: tile.start.formatted(Date.FormatStyle().hour().minute().locale(AppLocalization.locale)))
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .monospacedDigit()
-                .frame(width: 62, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(width: timeWidth, alignment: .leading)
             summary
             BacktapeIconRow(span: tile.span, limit: 3, small: 24, large: 24)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
     }
 
     @ViewBuilder private var label: some View {
@@ -555,11 +562,12 @@ struct BacktapeTileView: View {
                             .frame(maxWidth: index == min(lines, 4) - 1 ? 150 : .infinity, alignment: .leading)
                     }
                 }
-                .padding(.top, 3)
+                .padding(.top, kind == .line ? 0 : 3)
                 .transition(.opacity)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // A row's words sit on its middle line, beside the time and the icons; a card's start at its top.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kind == .line ? .leading : .topLeading)
         .animation(.easeOut(duration: 0.3), value: text)
     }
 }
