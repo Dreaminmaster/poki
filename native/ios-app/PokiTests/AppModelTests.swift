@@ -60,6 +60,7 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     func pauseAutomation() -> [String: Any] {
         lock.withLock {
             guard open else { return ["paused": false, "how": "no session"] }
+            if failPause { failPause = false; return ["paused": false, "how": "none offered"] }
             paused = true
             pauseCalls += 1
             return ["paused": true, "how": "fake"]
@@ -69,6 +70,8 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     /// Sessions that were open when closed, and pauses of an open session.
     private var closeCalls = 0, pauseCalls = 0, prepareCalls = 0
     private var failResume = false
+    private var failPause = false
+    func failNextPause() { lock.withLock { failPause = true } }
     var closes: Int { lock.withLock { closeCalls } }
     var pauses: Int { lock.withLock { pauseCalls } }
     var prepares: Int { lock.withLock { prepareCalls } }
@@ -1030,6 +1033,17 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(session.isOpen, "the session that iOS already allowed stays open")
         XCTAssertEqual(session.pauses, 1)
         XCTAssertEqual(session.closes, 0)
+    }
+
+    func testOnIOS26AFailedPauseClosesTheSession() async {
+        useSystem(26)
+        await openSessionForATask()
+        session.failNextPause()
+        await standByWhenIdle()
+        XCTAssertFalse(session.isOpen, "an unavailable pause must close the session instead of leaving Automation Mode on")
+        XCTAssertEqual(model.lastInProcessClose?.closed, true)
+        await lookForTheNextTask()
+        XCTAssertTrue(session.isOpen && model.hasOpenInProcessSession)
     }
 
     /// iOS 27 does not use the session this way: standing by ends it, as before.
