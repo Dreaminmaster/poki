@@ -66,15 +66,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: .github/scripts/publish-rolling.sh prealpha "${{ steps.v.outputs.version }}" "${{ steps.v.outputs.build }}" out
 
-      # After publishing, so saving never delays the release. Same paths as the build-ipa action.
-      - if: steps.build.outputs.rust-hit != 'true'
+      # After publishing, so saving never delays the release, but also when publishing fails, so a
+      # re-run starts warm. Same paths as the build-ipa action.
+      - if: always() && steps.build.outcome == 'success' && steps.build.outputs.rust-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             ~/.cargo/registry
             native/launcher/target
           key: ${{ steps.build.outputs.rust-key }}
-      - uses: actions/cache/save@v4
+      - if: always() && steps.build.outcome == 'success'
+        uses: actions/cache/save@v4
         with:
           path: |
             build/app-external
