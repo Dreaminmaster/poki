@@ -552,6 +552,28 @@ mod tests {
     }
 
     #[test]
+    fn an_app_identity_never_falls_back_to_a_display_name_or_pid() {
+        for app in [
+            json!({"name": "com.example.bank", "pid": 412}),
+            json!({"pid": 412}),
+            json!({"bundle_id": "", "name": "Notes"}),
+            json!({"bundle_id": "Notes"}),
+            json!({"bundle_id": "no app name, pid 412"}),
+            json!({"bundle_id": "com.example bank"}),
+            json!({"bundle_id": "com..bank"}),
+            json!({"bundle_id": ".com.bank"}),
+            json!({"bundle_id": "com.bank."}),
+            json!({"bundle_id": "com.bank/app"}),
+            json!({"bundle_id": "com.b\u{e4}nk"}),
+        ] {
+            for summary in [json!({"front": app}), json!({"applications": [app]})] {
+                assert_eq!(front_name(&summary), Value::Null, "{summary}");
+            }
+        }
+        assert_eq!(front_name(&json!({"front": {"bundle_id": "com.example.Bank-2"}})), "com.example.Bank-2");
+    }
+
+    #[test]
     fn several_apps_on_screen_leave_the_front_one_unnamed() {
         let mut tree = tree();
         tree["foreground_app"] = Value::Null;
