@@ -6,6 +6,11 @@ What changed in each round, and what still needs the phone. Newest first.
 
 - Turning off Live Activities no longer marks background setup as incomplete or displays “Poki can’t stay on in the background yet” when location permission is already granted. Live Activity status and approval buttons remain optional; normal notification and in-app approvals are unchanged.
 
+## Idle return to Poki (Unreleased, 2026-11-15)
+
+Changed:
+- Returning to Poki after the idle timeout keeps automation open until the return finishes. The foreground callback and another idle timer tick no longer close the session while it is still being used.
+
 ## Developer Mode only when the phone says so (2026-11-09, on standalone)
 
 Changed:

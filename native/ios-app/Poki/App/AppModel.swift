@@ -1319,7 +1319,11 @@ final class AppModel {
         let reason = "Stopped after \(idleStopSeconds / 60 > 0 ? "\(idleStopSeconds / 60) min" : "\(idleStopSeconds) s") without agent activity"
         Task { [weak self, core] in
             guard let self, self.canStandByWhenIdle, self.lastAgentActivity == activityAtIdle else { return }
+            // Returning to Poki activates its scene before the runner answers the activation.
+            // Keep that foreground callback from closing the session underneath the return.
+            self.endingTasks += 1
             let line = await core.finishTask(ifNoLocalWorkspace: true)
+            self.endingTasks -= 1
             if let line { self.log.add("runner", line) }
             guard self.canStandByWhenIdle, self.lastAgentActivity == activityAtIdle else { return }
             self.pauseRunner(reason: reason, byOwner: false)
@@ -1331,7 +1335,7 @@ final class AppModel {
     /// phone step. Never during the chat's task, or while Split View work is under way.
     private var canStandByWhenIdle: Bool {
         sessionOn && !runnerPaused && (automationPath == .inProcess || !inFront) && idleStopSeconds > 0 && approvals.isEmpty
-            && activityText == "Idle" && !chatTaskActive
+            && activityText == "Idle" && !chatTaskActive && endingTasks == 0
             && !(AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true)
     }
 
