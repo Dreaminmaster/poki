@@ -542,9 +542,12 @@ public final class PokiCore: @unchecked Sendable {
         public let isError: Bool
         public let splitView: SplitViewRead?
         public let splitViewNeedsRead: Bool
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false) {
+        /// The app in front and its element tree as the read behind this answer saw them, free of the
+        /// read's time and of what changed since the read before; nil for an answer with no tree.
+        public let screen: String?
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
-            self.splitViewNeedsRead = splitViewNeedsRead
+            self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen
         }
     }
 
@@ -555,7 +558,7 @@ public final class PokiCore: @unchecked Sendable {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
         let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
-                          splitViewNeedsRead: output.splitViewNeedsRead)
+                          splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen)
     }
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the

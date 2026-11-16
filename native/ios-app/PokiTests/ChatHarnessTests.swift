@@ -620,6 +620,66 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
     }
 
+    /// A task that keeps moving is never stopped for its length: 70 looks at one call, each at a screen
+    /// that differs from the one before, run to the model's own answer.
+    func testALongTaskThatKeepsMakingProgressRunsPastSixtyOneSteps() async throws {
+        let steps = 70
+        let server = try FakeCompletions(replies: (0..<steps).map { _ in FakeCompletions.tool("look", [:]) } + [FakeCompletions.text("Read every page.")])
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: session, screenLabel: { "Page \(server.requests.count)" }))
+        defer { if chat.running { chat.stop() } }
+
+        try await run(chat, "Read the whole document page by page", within: .seconds(120))
+
+        XCTAssertEqual(chat.savedCalls.count, steps)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Read every page.") = $0.kind { true } else { false } })
+        XCTAssertFalse(said(chat).contains(stoppedAfter(500)) || said(chat).contains(stuckIn("Settings")), said(chat).joined(separator: "\n"))
+    }
+
+    /// The same call on the same screen six times in a row ends the task, with the app it is stuck in.
+    func testTheSameCallOnTheSameScreenSixTimesEndsTheTaskAndSaysWhere() async throws {
+        let launch = FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]])
+        let server = try FakeCompletions(replies: [launch] + (0..<10).map { _ in FakeCompletions.tool("look", [:]) } + [FakeCompletions.text("All done.")])
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: session))
+        defer { if chat.running { chat.stop() } }
+
+        try await run(chat, "Open the second page of General", within: .seconds(60))
+
+        XCTAssertEqual(chat.savedCalls.map(\.name), ["do"] + Array(repeating: "look", count: 6))
+        XCTAssertEqual(said(chat).last, stuckIn("Settings"))
+        XCTAssertFalse(said(chat).contains("All done."))
+    }
+
+    /// The ceiling that only a runaway model reaches: 500 steps, each different, then the stop line.
+    func testATaskStopsAtFiveHundredSteps() async throws {
+        let server = try FakeCompletions(replies: (0..<520).map { _ in FakeCompletions.tool("look", [:]) } + [FakeCompletions.text("Never reached.")])
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: session, screenLabel: { "Page \(server.requests.count)" }))
+        defer { if chat.running { chat.stop() } }
+
+        try await run(chat, "Keep reading forever", within: .seconds(600))
+
+        XCTAssertEqual(chat.savedCalls.count, 500)
+        XCTAssertEqual(said(chat).last, stoppedAfter(500))
+    }
+
+    private func stoppedAfter(_ steps: Int) -> String { AppLocalization.text(LocalizedStringResource("I stopped after \(steps) steps. Tell me how to go on.")) }
+
+    private func stuckIn(_ app: String) -> String { AppLocalization.text(LocalizedStringResource("I’m stuck on the same screen in \(app). Tell me how to go on.")) }
+
+    private func said(_ chat: ChatModel) -> [String] { chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } } }
+
+    private func run(_ chat: ChatModel, _ task: String, within limit: Duration) async throws {
+        chat.send(task)
+        let deadline = ContinuousClock.now + limit
+        while chat.running, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running, "the task did not end within \(limit)")
+    }
+
     func testThePromptNamesOnlyToolsTheModelHas() throws {
         let tools = Set(Harness.tools.map(\.name))
         let regex = try NSRegularExpression(pattern: "\\b[a-z]+(?:_[a-z]+)+\\b")
@@ -853,13 +913,16 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
 final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let beforeRequest: (@Sendable () async -> Void)?
+    private let screenLabel: @Sendable () -> String
     private let lock = NSLock()
     private var reads = 0
     private var firstRead: TimeInterval?
     var firstReadAt: TimeInterval? { lock.withLock { firstRead } }
     var screenReads: Int { lock.withLock { reads } }
-    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil) {
+    /// `screenLabel` is the one button the fake screen shows, read at each look.
+    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil, screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
+        self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
     }
 
@@ -881,7 +944,7 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
                 reads += 1
                 if firstRead == nil { firstRead = ProcessInfo.processInfo.systemUptime }
             }
-            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeButton name="General" label="General" x="16" y="100" width="358" height="44" /></XCUIElementTypeApplication></AppiumAUT>"#)
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeButton name="\#(screenLabel())" label="\#(screenLabel())" x="16" y="100" width="358" height="44" /></XCUIElementTypeApplication></AppiumAUT>"#)
         default: value = .null
         }
         let response: JSON = ["value": value]

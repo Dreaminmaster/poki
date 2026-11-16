@@ -13,13 +13,17 @@ import PokiCore
 /// carries the messages over; pi converts them between providers.
 @MainActor
 final class PiLoop {
-    enum Outcome: Equatable { case done, stopped, overTurns, failed(String) }
+    enum Outcome: Equatable { case done, stopped, overTurns, stuck, failed(String) }
+
+    /// This many steps in a row with the same call and the same screen end the task as stuck.
+    nonisolated static let stallSteps = 6
 
     let provider: ModelProvider
     let model: Model
     let inSplitView: Bool
     private let agent: Agent
     private let gate = StopGate()
+    private let stall = StallWatch()
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
@@ -30,16 +34,23 @@ final class PiLoop {
         self.model = model
         self.inSplitView = inSplitView
         let gate = self.gate
+        let stall = self.stall
         let agentTools = tools.map { spec in
             AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
                 if gate.stopped { return Self.result(PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true)) }
-                let arguments = (try? JSONEncoder().encode(params)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .sortedKeys
+                let arguments = (try? encoder.encode(params)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                 // pi runs its loop in tasks of its own, so stop() reaches the call under way only through
                 // `signal`: cancelling the call stops a `do` before its next action.
                 let call = Task { @MainActor in await perform(ToolCall(id: id, name: spec.name, arguments: arguments)) }
                 let forget = signal?.onCancel { call.cancel() }
                 defer { forget?() }
-                return Self.result(await call.value)
+                let answer = await call.value
+                // The call and what it left on the screen, so a task that keeps working is told from a
+                // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
+                if stall.record("\(spec.name)\n\(arguments)\n\(answer.screen ?? answer.text)", limit: Self.stallSteps) { gate.end(.stuck) }
+                return Self.result(answer)
             }
         }
         // agent/pi-session.mjs: low thinking, one tool call at a time.
@@ -51,10 +62,12 @@ final class PiLoop {
     }
 
     /// The owner's message (with the JPEGs of its photos and PDFs) under this task's instructions, then
-    /// pi's loop until the model answers without tools, `stop()` or `maxTurns` model turns. `onText`
-    /// gets each finished text block.
+    /// pi's loop until the model answers without tools, `stop()`, `stallSteps` steps in a row that go
+    /// nowhere, or `maxTurns` model turns (a ceiling for a model that runs away). `onText` gets each
+    /// finished text block.
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
+        stall.reset()
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -63,7 +76,8 @@ final class PiLoop {
         let unsubscribe = agent.subscribe { event, _ in
             switch event {
             case .turnStart:
-                if turns.increment() > maxTurns { gate.overTurns(); agent.abort() }
+                if turns.increment() > maxTurns { gate.end(.overTurns) }
+                if gate.stopped { agent.abort() }
             case .messageEnd(.assistant(let reply)):
                 if reply.stopReason == .error { failure.set(reply.errorMessage ?? "") }
                 let texts = reply.content.compactMap { block -> String? in
@@ -81,7 +95,13 @@ final class PiLoop {
         } catch {
             failure.set(error.localizedDescription)
         }
-        if gate.stopped { return gate.wasOverTurns ? .overTurns : .stopped }
+        if gate.stopped {
+            switch gate.ending {
+            case .overTurns: return .overTurns
+            case .stuck: return .stuck
+            default: return .stopped
+            }
+        }
         if let message = failure.value {
             // The owner's message goes again with the next one, as with the direct clients.
             _ = agent.dropTrailingErroredAssistant()
@@ -92,7 +112,7 @@ final class PiLoop {
 
     /// Ends the task after the step under way: nothing more is sent to the phone or the model.
     func stop() {
-        gate.stop()
+        gate.end(.stopped)
         agent.abort()
     }
 
@@ -133,15 +153,32 @@ final class PiLoop {
     }
 }
 
-/// Set by stop() or the turn limit, read by the tools on pi's tasks.
+/// Set by stop(), the turn limit or the stall watch, read by the tools on pi's tasks.
 private final class StopGate: @unchecked Sendable {
+    enum Ending { case stopped, overTurns, stuck }
     private let lock = NSLock()
-    private var stop_ = false, over = false
-    func reset() { lock.withLock { stop_ = false; over = false } }
-    func stop() { lock.withLock { stop_ = true } }
-    func overTurns() { lock.withLock { stop_ = true; over = true } }
-    var stopped: Bool { lock.withLock { stop_ } }
-    var wasOverTurns: Bool { lock.withLock { over } }
+    private var first: Ending?
+    func reset() { lock.withLock { first = nil } }
+    /// The owner's stop wins over the ending that was already there.
+    func end(_ ending: Ending) { lock.withLock { if first == nil || ending == .stopped { first = ending } } }
+    var stopped: Bool { lock.withLock { first != nil } }
+    var ending: Ending? { lock.withLock { first } }
+}
+
+/// Counts the steps in a row that were the same.
+private final class StallWatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last: String?
+    private var run = 0
+    func reset() { lock.withLock { last = nil; run = 0 } }
+    /// True when this step is the `limit`th in a row that matches the one before it.
+    func record(_ step: String, limit: Int) -> Bool {
+        lock.withLock {
+            run = step == last ? run + 1 : 1
+            last = step
+            return run >= limit
+        }
+    }
 }
 
 private final class Counter: @unchecked Sendable {

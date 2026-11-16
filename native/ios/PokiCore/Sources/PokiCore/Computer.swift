@@ -7,6 +7,11 @@ public struct ToolResult: Sendable {
     public var isError = false
     var splitView: PokiCore.SplitViewRead?
     var splitViewNeedsRead = false
+    /// What the read behind this answer saw: the app in front and its element tree, without the read's
+    /// time or the changes since the read before, and a mark that is new each time when the picture
+    /// moved with the same elements (a canvas, a web view). The same screen reads the same, so a loop
+    /// that goes nowhere can be told from a task that moves. Nil when no tree was read.
+    var screen: String?
 }
 
 /// A sent action failed: whether it may have reached the phone.
@@ -226,6 +231,7 @@ final class Computer: @unchecked Sendable {
         let visible = listable(reading.elements, screen, includeUnlabeledImages: selectedPane != nil)
         let tree = visible.map { "\($0.key)@\($0.frame.described)" }.joined(separator: "\n")
         let picture = reading.png.map { PictureSketch(png: $0) }
+        let pictureMoved = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } } ?? false
         var changedLine: String?
         if changes, treeRead, let before = lastTree {
             let pictureChanged: Bool? = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } }
@@ -423,7 +429,8 @@ final class Computer: @unchecked Sendable {
         typedInto = nil
         let footer = gone.isEmpty ? [] : ["gone since the last read: " + gone.prefix(20).map { "\($0.ref) \($0.element.type) \"\($0.element.text.prefix(40))\"" }.joined(separator: ", ")]
         // A screenshot helps the caller recover from a failed action without hiding the failure.
-        return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil)
+        return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
+                          screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
@@ -461,7 +468,7 @@ final class Computer: @unchecked Sendable {
         if let error { lines.append("error: \(error)") }
         lines += extra
         lines.append("poki: Poki is in front, showing the owner's chat with you, so no screen of the task is read yet. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved routine.")
-        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil)
+        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil, screen: "poki")
     }
 
     /// The `handoff:` line: a step handed to the owner that is waiting, or just done (reported once).

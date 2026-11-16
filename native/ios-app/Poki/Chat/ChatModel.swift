@@ -171,8 +171,10 @@ final class ChatModel {
     private var planID: UUID?
     private var noteID: UUID?
 
-    /// A task stops after this many model turns: a loop that goes nowhere still ends.
-    static let maxTurns = 60
+    /// A ceiling for a model that runs away, so it cannot spend the owner's whole quota: a task that keeps
+    /// making progress runs to its end well below it. A loop that goes nowhere ends much sooner, after
+    /// `PiLoop.stallSteps` steps (a screen and a call that do not change).
+    static let maxTurns = 500
 
     init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil) {
         self.app = app
@@ -687,6 +689,9 @@ final class ChatModel {
         case .overTurns:
             reply = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))
             add(.poki(reply ?? ""))
+        case .stuck:
+            reply = stuckWords()
+            add(.poki(reply ?? ""))
         case .failed(let words):
             reply = words
             add(.note(.problem(words)))
@@ -696,6 +701,14 @@ final class ChatModel {
         } else {
             app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView)
         }
+    }
+
+    /// Where the task is stuck: the app it was working in, when it is one Poki can name.
+    private func stuckWords() -> String {
+        guard let name = AppName.display(taskApp) else {
+            return AppLocalization.text(LocalizedStringResource("I’m stuck on the same screen. Tell me how to go on."))
+        }
+        return AppLocalization.text(LocalizedStringResource("I’m stuck on the same screen in \(name). Tell me how to go on."))
     }
 
     /// Ends the task now, as far as the chat goes: it takes the next message at once, and nothing more
