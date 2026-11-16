@@ -47,6 +47,11 @@ class JotPhone extends Devices {
       if (request.action === 'set') { this.clipboard = { items: [{ uti: 'public.utf8-plain-text', state: 'inline' }], text: request.text }; return { copied: true }; }
     }
     this.sent.push(request.op);
+    // Simulate an older/partial bridge response that cannot confirm input delivery.
+    if (request.op === this.ambiguousOp) return { outcome: 'unknown' };
+    if (request.op === this.contradictoryOp) return { sent: true, outcome: 'unknown' };
+    if (request.op === this.noReceiptOp) return {};
+    if (request.op === this.errorWithoutOutcomeOp) return { isError: true, error: 'Bridge returned an error without delivery evidence' };
     if (request.op === 'tap') { this.app.touch(request.x / 65535 * (W - 1), request.y / 65535 * (H - 1)); return { sent: true }; }
     if (request.op === 'type_keys') {
       if (this.keysFail) throw new Error('unknown variant `type_keys`');
@@ -189,4 +194,45 @@ test('on a simulator, do types with the simulator keyboard', { timeout: 30000 },
   assert.notEqual(typed.isError, true, text(typed));
   assert.match(text(typed), /type "hello" \(keys\) \(sent/);
   assert.match(text(typed), /TextField "hello"/);
+});
+
+// One ambiguous input must never authorize the remaining operations in a do call.
+// Before this regression, CUA accepted outcome=unknown and even {} as successful input.
+test('CUA refuses an ambiguous touch acknowledgement and does not run the next action', { timeout: 20000 }, async () => {
+  for (const [field, result] of [['ambiguousOp', 'unknown'], ['contradictoryOp', 'contradictory'], ['noReceiptOp', 'missing']]) {
+    const phone = new JotPhone();
+    await phone.call('look', {});
+    phone[field] = 'tap';
+    const done = await phone.call('do', { actions: [{ tap: [45, 105] }, { tap: [170, 105] }] });
+    assert.equal(done.isError, true, result);
+    assert.match(text(done), /did: .*\(unknown,/i, result);
+    assert.match(text(done), /action 1 may have been delivered/i, result);
+    assert.match(text(done), /the actions after it were not sent/i, result);
+    assert.deepEqual(phone.sent, ['tap'], result);
+    assert.equal(phone.app.page, 'home');
+  }
+});
+
+test('CUA treats an error without a delivery outcome as unknown, not a confirmed not_sent', { timeout: 20000 }, async () => {
+  const phone = new JotPhone();
+  await phone.call('look', {});
+  phone.errorWithoutOutcomeOp = 'tap';
+  const done = await phone.call('do', { actions: [{ tap: [45, 105] }, { tap: [170, 105] }] });
+  assert.equal(done.isError, true);
+  assert.match(text(done), /did: .*\(unknown,/i);
+  assert.match(text(done), /action 1 may have been delivered/i);
+  assert.deepEqual(phone.sent, ['tap']);
+});
+
+test('CUA never reports unconfirmed typing as keys sent or proceeds to the next action', { timeout: 20000 }, async () => {
+  const phone = new JotPhone();
+  await phone.call('look', {});
+  await phone.call('do', { actions: [{ tap: [45, 105] }] });
+  phone.noReceiptOp = 'type_keys';
+  const done = await phone.call('do', { actions: [{ type: 'Pay now', clear: true }, { tap: [170, 105] }] });
+  assert.equal(done.isError, true);
+  assert.match(text(done), /did: .*\(unknown,/i);
+  assert.match(text(done), /action 1 may have been delivered/i);
+  assert.deepEqual(phone.sent, ['tap', 'type_keys']);
+  assert.equal(phone.app.title, '');
 });
