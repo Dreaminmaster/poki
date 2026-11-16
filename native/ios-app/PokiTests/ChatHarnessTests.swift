@@ -620,6 +620,152 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
     }
 
+    func testStoppedConversationReachesModelAfterReload() async throws {
+        let waiting = expectation(description: "model received the published plan")
+        let ended = expectation(description: "stopped task ended")
+        let firstEnded = expectation(description: "earlier task completed")
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.text("Hello."),
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Inspect Wi-Fi", "Report the result"], "currentStep": 2]),
+        ], holdAfter: 2) { request in
+            if (request["messages"] as? [[String: Any]])?.contains(where: { $0["role"] as? String == "tool" }) == true {
+                waiting.fulfill()
+            }
+        }
+        _ = chat(on: server)
+        let app = try XCTUnwrap(self.app)
+        let original = ChatModel(app: app)
+        original.newConversation()
+        let request = "Open Settings and inspect Wi-Fi, then report what was found."
+        ChatModel.afterTask = { _ in firstEnded.fulfill() }
+        original.send("Say hello")
+        await fulfillment(of: [firstEnded], timeout: 10)
+        ChatModel.afterTask = { _ in ended.fulfill() }
+        original.send(request)
+        await fulfillment(of: [waiting], timeout: 10)
+        SessionStore.shared.flush()
+        let disk = SessionStore(folder: SessionStore.defaultFolder, defaults: .standard)
+        let saved = try XCTUnwrap(disk.session(original.sessionID))
+        original.stop()
+        await fulfillment(of: [ended], timeout: 10)
+        ChatModel.afterTask = nil
+        SessionStore.shared.flush()
+
+        XCTAssertEqual(saved.outcome, .stopped, "an interrupted live task must replace the earlier task's done outcome")
+        XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
+
+        let received = expectation(description: "continuation reached model")
+        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { _ in received.fulfill() }
+        ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
+        let restored = ChatModel(app: app)
+        restored.restore(saved)
+        restored.send("继续")
+        await fulfillment(of: [received], timeout: 10)
+        let payload = try JSONSerialization.data(withJSONObject: try XCTUnwrap(next.requests.first))
+        let sent = String(decoding: payload, as: UTF8.self)
+        XCTAssertTrue(sent.contains(request), "the restored task must reach the model, not only the screen")
+        XCTAssertTrue(sent.contains("Inspect Wi-Fi"), "the model needs the interrupted plan")
+        restored.stop()
+    }
+
+    func testTimeQualifiedContinuationRequiresTheOwnersChoice() async throws {
+        let store = SessionStore.shared
+        let previous = store.sessions.filter { $0.archived == nil }.map(\.id)
+        previous.forEach { store.archive($0) }
+        var sessions: [String] = []
+        defer {
+            sessions.forEach { store.delete($0) }
+            previous.forEach { store.unarchive($0) }
+        }
+        let tasks = ["Check the afternoon weather", "Draft the morning GitHub issue"]
+        for text in tasks {
+            let received = expectation(description: "original task received")
+            let ended = expectation(description: "original task stopped")
+            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            _ = chat(on: server)
+            let original = ChatModel(app: try XCTUnwrap(app))
+            original.newConversation()
+            ChatModel.afterTask = { _ in ended.fulfill() }
+            original.send(text)
+            await fulfillment(of: [received], timeout: 10)
+            original.stop()
+            await fulfillment(of: [ended], timeout: 10)
+            ChatModel.afterTask = nil
+            sessions.append(original.sessionID)
+
+            for current in [true, false] {
+                for request in ["继续早晨的任务", "继续早上的任务", "繼續早上的任務", "continue this morning’s task"] {
+                    let probe = ChatModel(app: try XCTUnwrap(app))
+                    if current {
+                        probe.restore(try XCTUnwrap(store.session(sessions[0])))
+                    } else {
+                        probe.newConversation()
+                    }
+                    probe.send(request)
+                    XCTAssertFalse(probe.running, "\(request), current=\(current), candidates=\(sessions.count): ask before starting the model")
+                    let question = probe.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }.last ?? ""
+                    XCTAssertTrue(question.contains("Which task"), question)
+                    for task in tasks.prefix(sessions.count) { XCTAssertTrue(question.contains(task), question) }
+                    guard !probe.running else { probe.stop(); return }
+                }
+            }
+        }
+    }
+
+    func testUnknownContinuationAsksBeforeStartingTheModel() throws {
+        let server = try FakeCompletions(replies: [FakeCompletions.tool("do", ["launch": "com.apple.Preferences"])])
+        _ = chat(on: server)
+        let chat = ChatModel(app: try XCTUnwrap(app))
+        chat.newConversation()
+        chat.send("继续那个没有记录的任务")
+        defer { chat.stop() }
+        XCTAssertFalse(chat.running, "an unidentified task must not start a model turn")
+        XCTAssertTrue(chat.entries.contains { if case .poki(let text) = $0.kind { text.contains("Which task") } else { false } },
+                      "ask the owner instead of using a remembered routine")
+        XCTAssertTrue(chat.savedCalls.isEmpty)
+    }
+
+    func testAmbiguousContinuationWaitsForTheOwnersChoice() async throws {
+        let tasks = ["Draft the clipboard issue on GitHub", "Check tomorrow's weather in Settings"]
+        var sessions: [String] = []
+        for text in tasks {
+            let received = expectation(description: "original task reached model")
+            let ended = expectation(description: "original task stopped")
+            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            _ = chat(on: server)
+            let original = ChatModel(app: try XCTUnwrap(app))
+            original.newConversation()
+            ChatModel.afterTask = { _ in ended.fulfill() }
+            original.send(text)
+            await fulfillment(of: [received], timeout: 10)
+            original.stop()
+            await fulfillment(of: [ended], timeout: 10)
+            ChatModel.afterTask = nil
+            sessions.append(original.sessionID)
+        }
+        let selected = expectation(description: "chosen task reached model")
+        let finished = expectation(description: "chosen task finished")
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")]) { _ in selected.fulfill() }
+        _ = chat(on: server)
+        let chat = ChatModel(app: try XCTUnwrap(app))
+        chat.newConversation()
+        chat.send("继续")
+        XCTAssertFalse(chat.running, "multiple stopped tasks require a choice before model execution")
+        let question = chat.entries.compactMap { if case .poki(let text) = $0.kind { text } else { nil } }.last ?? ""
+        XCTAssertTrue(question.contains(tasks[0]) && question.contains(tasks[1]), question)
+        guard !chat.running, let option = question.split(separator: "\n").first(where: { $0.contains(tasks[0]) }),
+              let number = option.split(separator: ".").first else { chat.stop(); return }
+        ChatModel.afterTask = { _ in finished.fulfill() }
+        chat.send(String(number))
+        await fulfillment(of: [selected, finished], timeout: 10)
+        ChatModel.afterTask = nil
+        XCTAssertEqual(chat.sessionID, sessions[0], "the owner's choice restores that conversation")
+        let payload = try JSONSerialization.data(withJSONObject: try XCTUnwrap(server.requests.first))
+        let sent = String(decoding: payload, as: UTF8.self)
+        XCTAssertTrue(sent.contains(tasks[0]))
+        XCTAssertFalse(sent.contains(tasks[1]), "the unrelated stopped task must not be sent as the selected task")
+    }
+
     func testThePromptNamesOnlyToolsTheModelHas() throws {
         let tools = Set(Harness.tools.map(\.name))
         let regex = try NSRegularExpression(pattern: "\\b[a-z]+(?:_[a-z]+)+\\b")
@@ -658,14 +804,20 @@ final class FakeCompletions: @unchecked Sendable {
     private var bodies: [[String: Any]] = []
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
+    private var held: [NWConnection] = []
+    private let holdAfter: Int?
+    private let onRequest: (@Sendable ([String: Any]) -> Void)?
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
 
-    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil) throws {
+    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
+         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
         self.replies = replies
         self.responseStatus = responseStatus
         self.holdFirstReply = holdFirstReply
+        self.holdAfter = holdAfter
+        self.onRequest = onRequest
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -676,7 +828,7 @@ final class FakeCompletions: @unchecked Sendable {
         guard ready.wait(timeout: .now() + 5) == .success else { throw URLError(.cannotConnectToHost) }
     }
 
-    deinit { listener.cancel() }
+    deinit { listener.cancel(); held.forEach { $0.cancel() } }
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -704,9 +856,22 @@ final class FakeCompletions: @unchecked Sendable {
     }
 
     private func answer(_ connection: NWConnection, _ body: Data) {
+        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        // The chat's own title request: answered on the side, so it takes no scripted turn.
+        if json["tools"] == nil, Self.system(json).hasPrefix("You name chat conversations") {
+            let response = #"{"choices":[{"message":{"role":"assistant","content":"Test conversation"}}]}"#
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + response).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
         let events = lock.withLock { () -> String in
-            if let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] { bodies.append(json) }
+            bodies.append(json)
             return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+        }
+        onRequest?(json)
+        if let holdAfter, requests.count > holdAfter {
+            lock.withLock { held.append(connection) }
+            return
         }
         let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
         if requests.count == 1, let holdFirstReply {
