@@ -912,6 +912,9 @@ final class FakeCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var replies: [String]
     private var bodies: [[String: Any]] = []
+    /// Capture only harmless routing fields; never Authorization, cookies or API keys.
+    private var routingHeaders: [[String: String]] = []
+    private var responseStatuses: [Int]
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
     private var held: [NWConnection] = []
@@ -920,10 +923,12 @@ final class FakeCompletions: @unchecked Sendable {
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
+    var requestHeaders: [[String: String]] { lock.withLock { routingHeaders } }
 
-    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
+    init(replies: [String], responseStatuses: [Int] = [], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
          holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
         self.replies = replies
+        self.responseStatuses = responseStatuses
         self.responseStatus = responseStatus
         self.holdFirstReply = holdFirstReply
         self.holdAfter = holdAfter
@@ -949,47 +954,67 @@ final class FakeCompletions: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
             guard let self else { return }
             let received = received + (data ?? Data())
-            if let body = Self.body(received) { return self.answer(connection, body) }
+            if let request = Self.decodedRequest(received) { return self.answer(connection, request.body, headers: request.headers) }
             if done || error != nil { return connection.cancel() }
             self.read(connection, received)
         }
     }
 
-    /// The request's body once all of it is in.
-    private static func body(_ data: Data) -> Data? {
+    /// Preserve header values exactly; HTTP header *names* alone are case insensitive.
+    private static func decodedRequest(_ data: Data) -> (body: Data, headers: [String: String])? {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let head = String(decoding: data[..<end.lowerBound], as: UTF8.self).lowercased()
+        let rawHead = String(decoding: data[..<end.lowerBound], as: UTF8.self)
+        let head = rawHead.lowercased()
         let length = head.split(separator: "\r\n").first { $0.hasPrefix("content-length:") }
             .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
         let body = data[end.upperBound...]
-        return body.count >= length ? Data(body.prefix(length)) : nil
+        guard body.count >= length else { return nil }
+        let allowed: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+        var headers: [String: String] = [:]
+        for line in rawHead.split(separator: "\r\n").dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon]).lowercased()
+            if allowed.contains(name) {
+                headers[name] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return (Data(body.prefix(length)), headers)
     }
 
-    private func answer(_ connection: NWConnection, _ body: Data) {
+    private func answer(_ connection: NWConnection, _ body: Data, headers: [String: String]) {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
-        // The chat's own title request: answered on the side, so it takes no scripted turn.
+        // Title requests use an independent reply, consuming no scripted chat turn.
+        // They still need their routing header captured for the auxiliary-request test.
         if json["tools"] == nil, Self.system(json).hasPrefix("You name chat conversations") {
+            lock.withLock { routingHeaders.append(headers) }
             let response = #"{"choices":[{"message":{"role":"assistant","content":"Test conversation"}}]}"#
             let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data((head + response).utf8), completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        let events = lock.withLock { () -> String in
+        let (payload, status, type, requestNumber) = lock.withLock { () -> (String, String, String, Int) in
+            routingHeaders.append(headers)
             bodies.append(json)
-            return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            let scripted = replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            let specified = !responseStatuses.isEmpty
+            let code = specified ? responseStatuses.removeFirst() : 200
+            let error = #"{"error":{"message":"synthetic rejection"}}"#
+            let payload = specified && code != 200 ? error : scripted
+            let status = specified ? (code == 200 ? "200 OK" : "\(code) Bad Request") : responseStatus
+            return (payload, status, specified && code != 200 ? "application/json" : "text/event-stream", bodies.count)
         }
         onRequest?(json)
-        if let holdAfter, requests.count > holdAfter {
+        if let holdAfter, requestNumber > holdAfter {
             lock.withLock { held.append(connection) }
             return
         }
-        let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
-        if requests.count == 1, let holdFirstReply {
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type)\r\nContent-Length: \(payload.utf8.count)\r\nConnection: close\r\n\r\n"
+        if requestNumber == 1, let holdFirstReply {
             holdFirstReply()
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in connection.cancel() }
             return
         }
-        connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+        connection.send(content: Data((head + payload).utf8), completion: .contentProcessed { _ in connection.cancel() })
     }
 
     private static func event(_ delta: [String: Any], finish: String) -> String {
