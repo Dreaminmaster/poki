@@ -35,8 +35,11 @@ final class LoopbackMonitor {
     private var running = false
     private var checkQueued = false
     private var probeEpoch = 0
+    typealias Probe = (_ host: String, _ port: UInt16, _ timeout: TimeInterval) async -> ProbeResult
+    private let connect: Probe
 
-    init() {
+    init(probe: @escaping Probe = { host, port, timeout in await Poki.probe(label: "loopback", host: host, port: port, timeout: timeout) }) {
+        connect = probe
         // The default path's interface types change while a proxy app's tunnel is up, so "only
         // cellular" is read from two monitors that each watch one physical interface type.
         path.pathUpdateHandler = { [weak self] path in
@@ -135,7 +138,7 @@ final class LoopbackMonitor {
         RemotePairingPort.setSearching(true)
         var answer: ProbeResult?
         let search = await RemotePairingPort.search(besides: port, browse: { await RemotePairingBrowser.ports() }) { candidate in
-            let result = await probe(label: "loopback", host: "10.7.0.1", port: candidate, timeout: 1.5)
+            let result = await self.connect("10.7.0.1", candidate, 1.5)
             if result.outcome == "connected" { answer = result }
             return result.outcome == "connected"
         }
@@ -180,11 +183,11 @@ final class LoopbackMonitor {
         let epoch = probeEpoch
         Task {
             let port = RemotePairingPort.current
-            var result = await probe(label: "loopback", host: "10.7.0.1", port: port, timeout: 1.5)
+            var result = await connect("10.7.0.1", port, 1.5)
             if result.outcome == "connected" {
                 if portLooks > 0 { resetPortSearch() }
             } else {
-                let lockdown = await probe(label: "loopback", host: "10.7.0.1", port: 62078, timeout: 1.5)
+                let lockdown = await connect("10.7.0.1", 62078, 1.5)
                 // 10.7.0.1 reaches this iPhone (lockdown answers, or the phone refused the port), and
                 // the remote pairing service is not on the port Poki uses: iOS may have moved it.
                 // Without this the page says Working while every connection is refused.
