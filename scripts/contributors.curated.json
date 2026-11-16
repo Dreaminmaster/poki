@@ -554,5 +554,59 @@
       "ko": "#354에서 iPhone Duo에 두 앱 작업 공간을 추가해, 화면을 돌리는 동안 작업이 기다렸다가 같은 앱 쌍에서 이어지도록 했습니다.",
       "es": "Añadió en #354 los espacios de trabajo con dos apps en el iPhone Duo: la tarea espera durante la rotación y continúa en el mismo par de apps."
     }
+  },
+  "soloface": {
+    "status": "counted",
+    "categories": [
+      "report"
+    ],
+    "basis": [
+      "#311"
+    ],
+    "summary": "Traced MCP 503 errors on a phone that showed online to a relay reconnect bug in #311, with a reproducing test and a patch.",
+    "lines": {
+      "en": "Traced MCP 503 errors on a phone that showed online to a relay reconnect bug in #311, with a reproducing test and a patch.",
+      "zh-CN": "在 #311 中查明手机显示在线却返回 MCP 503 错误的原因是中继重连缺陷，并附上可复现的测试和补丁。",
+      "zh-TW": "在 #311 查明手機顯示在線卻回傳 MCP 503 錯誤的原因是中繼重新連線缺陷，並附上可重現的測試和修補。",
+      "ja": "#311 で、電話がオンライン表示なのに MCP が 503 を返す原因がリレーの再接続の不具合だと突き止め、再現テストとパッチを添えました。",
+      "ko": "#311에서 휴대폰이 온라인으로 표시되는데도 MCP가 503을 반환하는 원인이 릴레이 재연결 결함임을 찾아내고, 재현 테스트와 패치를 함께 제공했습니다.",
+      "es": "Descubrió en #311 que los errores 503 de MCP con el teléfono en línea venían de un fallo de reconexión del relé, y aportó una prueba que lo reproduce y un parche."
+    }
+  },
+  "cs50Mu": {
+    "status": "counted",
+    "categories": [
+      "report"
+    ],
+    "basis": [
+      "#362"
+    ],
+    "summary": "Found in #362 that the Poki Setup macOS download only ran on Apple silicon; the universal build that followed also runs on Intel Macs.",
+    "lines": {
+      "en": "Found in #362 that the Poki Setup macOS download only ran on Apple silicon; the universal build that followed also runs on Intel Macs.",
+      "zh-CN": "在 #362 中发现 Poki Setup 的 macOS 安装包只能在 Apple 芯片上运行；随后的通用版本也能在 Intel Mac 上运行。",
+      "zh-TW": "在 #362 發現 Poki Setup 的 macOS 安裝檔只能在 Apple 晶片上執行；隨後的通用版本也能在 Intel Mac 上執行。",
+      "ja": "#362 で、Poki Setup の macOS 版が Apple シリコンでしか動かないことを見つけ、その後のユニバーサルビルドで Intel Mac でも動くようになりました。",
+      "ko": "#362에서 Poki Setup의 macOS 설치 파일이 Apple 실리콘에서만 실행된다는 것을 찾아냈고, 이후의 유니버설 빌드는 Intel Mac에서도 실행됩니다.",
+      "es": "Descubrió en #362 que la descarga de Poki Setup para macOS solo funcionaba en Apple silicon; la compilación universal posterior también funciona en Mac con Intel."
+    }
+  },
+  "mgkvibez": {
+    "status": "counted",
+    "categories": [
+      "testing"
+    ],
+    "basis": [
+      "#380"
+    ],
+    "summary": "Added four failing test cases in #380 for long button labels that slip past the risky-action check, ready for the fix.",
+    "lines": {
+      "en": "Added four failing test cases in #380 for long button labels that slip past the risky-action check, ready for the fix.",
+      "zh-CN": "在 #380 中为绕过高风险操作检查的长按钮标签补充了四个失败的测试用例，供后续修复使用。",
+      "zh-TW": "在 #380 為繞過高風險操作檢查的長按鈕標籤補上四個失敗的測試案例，供後續修正使用。",
+      "ja": "#380 で、リスクのある操作のチェックをすり抜ける長いボタンラベルについて、失敗する 4 つのテストケースを追加し、修正に備えました。",
+      "ko": "#380에서 위험 동작 검사를 빠져나가는 긴 버튼 라벨에 대해 실패하는 테스트 케이스 4개를 추가해, 수정에 대비했습니다.",
+      "es": "Añadió en #380 cuatro casos de prueba que fallan para etiquetas de botón largas que eluden la comprobación de acciones de riesgo, listos para la corrección."
+    }
   }
 }
