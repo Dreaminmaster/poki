@@ -98,15 +98,16 @@ index 9bc7854..e0744d0 100644
  #[cfg(feature = "rsd")]
  pub async fn installed_ddi(
 diff --git a/idevice/src/tss.rs b/idevice/src/tss.rs
-index 163b2dd..ddc130b 100644
+index 163b2dd..d6448a9 100644
 --- a/idevice/src/tss.rs
 +++ b/idevice/src/tss.rs
-@@ -15,10 +15,44 @@ use crate::IdeviceError;
+@@ -15,10 +15,53 @@ use crate::IdeviceError;
  const TSS_CLIENT_VERSION_STRING: &str = "libauthinstall-1033.0.2";
  /// Apple's TSS endpoint URL
  const TSS_CONTROLLER_ACTION_URL: &str = "http://gs.apple.com/TSS/controller?action=2";
 +/// TSS status returned when Apple refuses to sign the requested build for the device.
 +pub const TSS_STATUS_NOT_ELIGIBLE: i32 = 94;
++const NON_APPLE_REPLY_PREFIX: &str = "non-Apple TSS reply: ";
 +
 +#[derive(Debug, Clone, Copy)]
 +struct TssFrame<'a> {
@@ -130,6 +131,14 @@ index 163b2dd..ddc130b 100644
 +    })
 +}
 +
++fn non_apple_reply(reason: impl std::fmt::Display) -> IdeviceError {
++    IdeviceError::Http(format!("{NON_APPLE_REPLY_PREFIX}{reason}"))
++}
++
++pub fn is_non_apple_tss_reply(text: &str) -> bool {
++    text.starts_with(NON_APPLE_REPLY_PREFIX)
++}
++
 +pub fn tss_error_status(text: &str) -> Option<i32> {
 +    if !text.contains("TSS server responded") {
 +        return None;
@@ -146,7 +155,7 @@ index 163b2dd..ddc130b 100644
      /// The underlying plist dictionary containing request parameters
      inner: plist::Dictionary,
  }
-@@ -36,7 +70,16 @@ impl TSSRequest {
+@@ -36,7 +79,16 @@ impl TSSRequest {
              "@VersionInfo": TSS_CLIENT_VERSION_STRING,
              "@UUID": uuid::Uuid::new_v4().to_string().to_uppercase()
          });
@@ -164,7 +173,7 @@ index 163b2dd..ddc130b 100644
      }
 
      /// Inserts a key-value pair into the TSS request
-@@ -73,40 +116,58 @@ impl TSSRequest {
+@@ -73,40 +125,47 @@ impl TSSRequest {
              "Sending TSS request: {}",
              crate::pretty_print_dictionary(&self.inner)
          );
@@ -197,19 +206,13 @@ index 163b2dd..ddc130b 100644
 +            .await?;
 +
 +        if resp.status != 200 {
-+            return Err(IdeviceError::Http(format!(
-+                "Apple signing server returned HTTP {}",
-+                resp.status
-+            )));
++            return Err(non_apple_reply(format_args!("HTTP {}", resp.status)));
 +        }
 +
-+        let body = std::str::from_utf8(&resp.body).map_err(|_| {
-+            IdeviceError::Http("Apple signing server returned non-UTF-8 body".into())
-+        })?;
++        let body = std::str::from_utf8(&resp.body)
++            .map_err(|_| non_apple_reply("non-UTF-8 body"))?;
 +        let Some(frame) = parse_tss_frame(body) else {
-+            return Err(IdeviceError::Http(
-+                "Apple signing server returned a non-TSS body".into(),
-+            ));
++            return Err(non_apple_reply("non-TSS body"));
 +        };
 +
 +        debug!("Apple responded with STATUS={}&MESSAGE={}", frame.status, frame.message);
@@ -229,21 +232,17 @@ index 163b2dd..ddc130b 100644
 -            warn!("Response didn't contain a request string");
 -            return Err(IdeviceError::UnexpectedResponse(
 -                "TSS response missing REQUEST_STRING".into(),
+-            ));
 +        if !frame.message.starts_with("SUCCESS") {
-+            return Err(IdeviceError::Http(
-+                "Apple signing server returned an invalid STATUS=0 message".into(),
-             ));
++            return Err(non_apple_reply("invalid STATUS=0 message"));
          }
 -        Ok(plist::from_bytes(res[1].as_bytes())?)
 +        let Some(request_string) = frame.request_string else {
 +            warn!("Response didn't contain a request string");
-+            return Err(IdeviceError::Http(
-+                "Apple signing server response missing REQUEST_STRING".into(),
-+            ));
++            return Err(non_apple_reply("missing REQUEST_STRING"));
 +        };
-+        plist::from_bytes(request_string.as_bytes()).map_err(|_| {
-+            IdeviceError::Http("Apple signing server returned an invalid plist".into())
-+        })
++        plist::from_bytes(request_string.as_bytes())
++            .map_err(|_| non_apple_reply("invalid plist body"))
      }
 
      /// Sets the `@ApImg4Ticket` request flag.

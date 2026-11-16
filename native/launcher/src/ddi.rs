@@ -4,7 +4,7 @@
 //! internet. The image itself (an unpacked Cryptex1 `Restore` directory: BuildManifest.plist,
 //! Image.dmg, Image.dmg.trustcache, …) is downloaded by the app into `ddi_dir`.
 
-use crate::device::{DDI_BAD_FIX, DDI_REFUSED_FIX, DEVELOPER_MODE_FIX, Device, Failure, NETWORK_FIX, Result};
+use crate::device::{DDI_BAD_FIX, DDI_PROXY_FIX, DDI_REFUSED_FIX, DEVELOPER_MODE_FIX, Device, Failure, NETWORK_FIX, Result};
 use idevice::IdeviceError;
 use idevice::cryptexd::{Cryptex1Assets, CryptexdError, install_ddi};
 use std::path::Path;
@@ -57,6 +57,10 @@ pub fn classify(error: &IdeviceError) -> Failure {
         }
         // The phone could not install what it was given: the files are bad.
         IdeviceError::Cryptexd(CryptexdError::RoutineFailed { .. } | CryptexdError::BadDdiBundle(_)) => failure.fix(DDI_BAD_FIX).code("ddi_bad"),
+        // Connected over HTTP, but a proxy or captive portal answered instead of Apple's TSS.
+        IdeviceError::Http(text) if idevice::tss::is_non_apple_tss_reply(text) => {
+            failure.fix(DDI_PROXY_FIX).code("ddi_proxy")
+        }
         IdeviceError::Http(_) => failure.fix(NETWORK_FIX).code("network"),
         // The device tunnel failed during the mount exchange. The I/O kind can
         // distinguish EOF from a reset without logging any request or device data.
