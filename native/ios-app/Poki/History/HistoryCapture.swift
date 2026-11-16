@@ -174,7 +174,14 @@ final class HistoryCapture: ObservableObject {
     private func tick() {
         ticks += 1
         // Retention and the storage cap, once an hour.
-        if ticks % 360 == 0, enabled { prune() }
+        if ticks % 360 == 0, enabled {
+            prune()
+            // What the trees cost, for deciding the storage limit's default.
+            Task {
+                let trees = await HistoryStore.shared.trees(), size = await HistoryStore.shared.size()
+                AppLog.shared.add("history", "tape: \(size.entries) reads, \(size.bytes) bytes, \(trees.count) trees, \(trees.bytes) tree bytes")
+            }
+        }
         evaluate()
     }
 
