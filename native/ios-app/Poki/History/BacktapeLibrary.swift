@@ -186,8 +186,7 @@ enum BacktapeApps {
 
     static func name(_ app: String) -> String {
         if let service = service(app) { return AppLocalization.bundle.localizedString(forKey: service.name, value: service.name, table: nil) }
-        let name = HistoryNames.app(app)
-        return AppIconStore.shared.gone(app) ? String(format: AppLocalization.text("%@ (Deleted)"), name) : name
+        return HistoryNames.app(app)
     }
 
     /// Each app's share of a span's reads, the largest first.
@@ -215,14 +214,6 @@ struct BacktapeAppIcon: View {
                     .foregroundStyle(.secondary)
                     .frame(width: size, height: size)
                     .background(Color(.tertiarySystemFill), in: Circle())
-            } else if AppIconStore.shared.gone(app) {
-                AppIconView(app: app, size: size)
-                    .saturation(0)
-                    .opacity(0.6)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-                            .strokeBorder(Color.secondary, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-                    }
             } else {
                 AppIconView(app: app, size: size)
             }
@@ -315,7 +306,7 @@ enum BacktapeTint {
     /// The glow's colours: each app's own hue, light and clean, laid out by share. Between two apps
     /// the colour travels round the colour wheel, so a mix is never grey or dirty.
     static func stops(_ span: HistorySpan, dark: Bool) -> [Gradient.Stop] {
-        let shares = BacktapeApps.shares(span).filter { BacktapeApps.service($0.app) == nil && !AppIconStore.shared.gone($0.app) }.prefix(5)
+        let shares = BacktapeApps.shares(span).filter { BacktapeApps.service($0.app) == nil }.prefix(5)
         let total = max(0.0001, shares.reduce(0) { $0 + $1.share })
         var points: [(hue: Double, at: Double)] = []
         var edge = 0.0

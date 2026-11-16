@@ -40,7 +40,6 @@ struct PokiApp: App {
         let chat = ChatModel(app: model)
         _chat = State(initialValue: chat)
         AskPoki.install(app: model, chat: chat)
-        HistoryCapture.shared.attach(model)
     }
 
     var body: some Scene {

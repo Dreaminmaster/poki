@@ -10,9 +10,8 @@ struct BacktapeNote: Hashable, Sendable {
 }
 
 /// Writes a block's note with Apple's on-device model (the owner, 2026-11-14: where Apple
-/// Intelligence is on the iPhone, use it) or, where that is missing, with the model the owner
-/// downloaded (BacktapeModel). The text never leaves the phone. With neither, nothing is written
-/// and the page shows the screen titles as before.
+/// Intelligence is on the iPhone, use it). The text never leaves the phone. Without it, nothing is
+/// written and the page shows the screen titles as before. No model is downloaded.
 enum BacktapeWriter {
     /// Apple's own model, where Apple Intelligence is on the iPhone.
     static var apple: Bool {
@@ -24,9 +23,8 @@ enum BacktapeWriter {
         return false
     }
 
-    /// Apple's model first; the downloaded one only where Apple's is missing.
     @MainActor
-    static var available: Bool { apple || BacktapeModel.shared.ready }
+    static var available: Bool { apple }
 
     @MainActor
     static func write(_ entries: [HistoryEntry], period: String = "10 minutes") async -> BacktapeNote? {
@@ -59,13 +57,6 @@ enum BacktapeWriter {
         return BacktapeNote(title: String(title.prefix(90)), body: lines.dropFirst().joined(separator: " "))
     }
 
-    /// One answer from the model on this iPhone, for Backtape's other uses (BacktapeSuggestions).
-    @MainActor
-    static func ask(_ text: String, instructions: String) async -> String? {
-        guard available else { return nil }
-        return await answer(to: text, instructions: instructions)
-    }
-
     @MainActor
     private static func answer(to text: String, instructions: String) async -> String? {
         #if canImport(FoundationModels)
@@ -79,6 +70,6 @@ enum BacktapeWriter {
             }
         }
         #endif
-        return await BacktapeModel.shared.respond(to: text, instructions: instructions)
+        return nil
     }
 }

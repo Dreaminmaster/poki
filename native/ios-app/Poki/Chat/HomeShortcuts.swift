@@ -265,8 +265,6 @@ final class HomeShortcutStore {
     @ObservationIgnored private var basis: [String] = []
     @ObservationIgnored private var routes: [HomeShortcuts.Remembered] = []
     @ObservationIgnored private var requests: [HomeShortcuts.Request] = []
-    /// Ideas from Backtape, already checked by BacktapeSuggestions.
-    @ObservationIgnored private var suggested: [HomeShortcut] = []
     @ObservationIgnored private let defaults = UserDefaults.standard
     private static let forgottenKey = "home.shortcuts.forgotten"
     private static let editedKey = "home.shortcuts.edited"
@@ -314,22 +312,8 @@ final class HomeShortcutStore {
         defaults.set(try? JSONEncoder().encode(edits), forKey: Self.editedKey)
     }
 
-    /// Backtape's ideas join the pills, after the first one so they are in view. Forget works on
-    /// them as on any pill.
-    func suggest(_ pills: [HomeShortcut]) {
-        guard pills != suggested else { return }
-        suggested = pills
-        rank(now: Date())
-    }
-
     private func rank(now: Date) {
-        var ranked = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, pinned: [HomeIdea.star],
-                                        forgotten: forgotten, edits: edits, now: now)
-        let gone = forgotten
-        let fresh = suggested.filter { idea in
-            !gone.contains { HomeShortcuts.similar($0, idea.key) } && !ranked.contains { HomeShortcuts.similar($0.key, idea.key) }
-        }
-        ranked.insert(contentsOf: fresh, at: min(1, ranked.count))
-        shortcuts = ranked
+        shortcuts = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, pinned: [HomeIdea.star],
+                                       forgotten: forgotten, edits: edits, now: now)
     }
 }

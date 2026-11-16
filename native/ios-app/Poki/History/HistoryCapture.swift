@@ -1,7 +1,6 @@
 import Foundation
 import SwiftUI
 import UIKit
-import UserNotifications
 import notify
 
 /// iPhone History's capture loop and its privacy controls (issue 356).
@@ -26,14 +25,9 @@ final class HistoryCapture: ObservableObject {
 
     // MARK: Settings (kept in UserDefaults)
 
-    @Published var enabled: Bool { didSet { save(enabled, "history.enabled"); settingsChanged(); remind() } }
+    @Published var enabled: Bool { didSet { save(enabled, "history.enabled"); settingsChanged() } }
     /// Until when reading is paused. The distant future is "until turned on again".
     @Published var pausedUntil: Date? { didSet { save(pausedUntil?.timeIntervalSince1970, "history.pausedUntil"); settingsChanged() } }
-    @Published var showIndicator: Bool { didSet { save(showIndicator, "history.showIndicator") } }
-    /// Up to two ideas from the recent tape may join the home page's pills (BacktapeSuggestions).
-    @Published var suggests: Bool { didSet { save(suggests, "history.suggests") } }
-    /// Poki's own agent may ask Backtape about the owner (BacktapeContext). Off until the owner turns it on.
-    @Published var agentAsks: Bool { didSet { save(agentAsks, "history.agentAsks") } }
     @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
     @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
     @Published var included: [String] { didSet { save(included, "history.included") } }
@@ -53,8 +47,6 @@ final class HistoryCapture: ObservableObject {
         guard !loading else { return }
         HistoryStore.shared.prune(days: retentionDays, summaryDays: summaryDays, megabytes: storageMegabytes)
     }
-    /// How often the owner is reminded to draw insights from the tape, in days. 0 is never.
-    @Published var insightDays: Int { didSet { save(insightDays, "history.insightDays"); remind() } }
     @Published var seconds: Int { didSet { save(seconds, "history.seconds"); restart() } }
 
     // MARK: State
@@ -84,9 +76,6 @@ final class HistoryCapture: ObservableObject {
         let defaults = UserDefaults.standard
         enabled = defaults.bool(forKey: "history.enabled")
         pausedUntil = (defaults.object(forKey: "history.pausedUntil") as? Double).map(Date.init(timeIntervalSince1970:))
-        showIndicator = defaults.object(forKey: "history.showIndicator") as? Bool ?? true
-        suggests = defaults.object(forKey: "history.suggests") as? Bool ?? true
-        agentAsks = defaults.bool(forKey: "history.agentAsks")
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
         // Poki's own screens are left out from the start.
         excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"]
@@ -98,7 +87,6 @@ final class HistoryCapture: ObservableObject {
         retentionDays = max(3, defaults.object(forKey: "history.retentionDays") as? Int ?? 14)
         summaryDays = defaults.object(forKey: "history.summaryDays") as? Int ?? 90
         storageMegabytes = max(50, defaults.object(forKey: "history.storageMegabytes") as? Int ?? 200)
-        insightDays = defaults.object(forKey: "history.insightDays") as? Int ?? 0
         seconds = defaults.object(forKey: "history.seconds") as? Int ?? 5
         loading = false
     }
@@ -129,25 +117,6 @@ final class HistoryCapture: ObservableObject {
     /// Poki's own screens are never kept, whatever the lists say.
     static func isPoki(_ app: String) -> Bool {
         app.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "nz.zheha.poki") == .orderedSame || app.caseInsensitiveCompare("Poki") == .orderedSame
-    }
-
-    /// Sets or removes the repeating reminder to draw insights before tape is erased.
-    private func remind() {
-        guard !loading else { return }
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: ["backtape.insights"])
-        guard insightDays > 0, enabled else { return }
-        let days = insightDays
-        let title = AppLocalization.text("Backtape")
-        let body = AppLocalization.text("Look back at your tape and keep what matters before it is erased.")
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Double(days) * 86_400, repeats: true)
-            center.add(UNNotificationRequest(identifier: "backtape.insights", content: content, trigger: trigger))
-        }
     }
 
     private func save(_ value: Any?, _ key: String) {

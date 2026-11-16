@@ -496,7 +496,6 @@ struct HomePage<Footer: View>: View {
         .task(id: SessionStore.shared.sessions.count) {
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }
-        .task { await BacktapeSuggestions.shared.refresh() }
         .onChange(of: AppLocalization.language) { _, _ in
             shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
         }

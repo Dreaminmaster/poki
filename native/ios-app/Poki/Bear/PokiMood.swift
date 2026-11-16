@@ -103,7 +103,7 @@ struct PokiStatus: Equatable {
             case .listening, .hearing, .speaking, .interrupted: return PokiStatus(.ready, word: talk.word)
             }
         }
-        if !model.approvals.isEmpty || chat.contextAsk != nil { return PokiStatus(.needsYou) }
+        if !model.approvals.isEmpty { return PokiStatus(.needsYou) }
         if model.handoffText != nil { return PokiStatus(.yourTurn) }
         if chat.running { return PokiStatus(running(chat.entries)) }
         // An outside agent has the phone (its own MCP session, or a task it handed to Poki).

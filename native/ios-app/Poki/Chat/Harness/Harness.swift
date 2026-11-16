@@ -59,7 +59,6 @@ enum Harness {
         if ApprovalClassifier.mode == .reply {
             parts.append(replyApprovals)
         }
-        if BacktapeContext.offered { parts.append(BacktapeContext.brief) }
         if let apps = appIDs(for: task) { parts.append(apps) }
         if !brief.isEmpty { parts.append(brief) }
         return parts.joined(separator: "\n\n")
@@ -79,9 +78,7 @@ enum Harness {
     }
 
     /// Poki's own browser's tools (ESP-145) sit beside the phone's.
-    /// personal_context is always listed (the loop keeps its tools for its whole life) and answers
-    /// that it is off until the owner turns it on; the instructions name it only when it is on.
-    static let tools: [ToolSpec] = phoneTools + WebTools.specs + [BacktapeContext.spec, reportPlan, finishTask]
+    static let tools: [ToolSpec] = phoneTools + WebTools.specs + [reportPlan, finishTask]
 
     static let splitViewTools: [ToolSpec] = [
         ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
