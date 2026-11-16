@@ -58,9 +58,14 @@ final class AppModel {
     /// runner standing by on its own after the idle time. The bear sleeps and Hands reads off only for
     /// this one: standing by after a quiet minute is still ready. Cleared when the runner starts again.
     private(set) var ownerPaused = false
-    private enum IdleSessionPolicy { case close, pauseAutomation }
-    // Switch to pauseAutomation if device acceptance finds that same-process reads cannot resume.
-    private static let idleSessionPolicy = IdleSessionPolicy.close
+    /// What the in-process session does when Poki stands by between tasks (idle, the end of a task, Poki
+    /// coming to the front, a hand-off). Closing it ends the iOS session, and the next one asks for the
+    /// passcode again.
+    enum IdleSessionPolicy: Equatable {
+        case close, pauseAutomation
+        static func forSystem(_ version: OperatingSystemVersion) -> IdleSessionPolicy { .close }
+    }
+    let idleSessionPolicy: IdleSessionPolicy
     /// Agents › Approvals: how the owner is asked, or never. The saved choice (`ApprovalClassifier.mode`)
     /// is the one copy: the pages here show it, and PokiCore's rules and each approval's route read it
     /// at every step, so a change counts from the next step.
@@ -310,10 +315,12 @@ final class AppModel {
     }
 
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
-         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil) {
+         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
+         systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion) {
         ActivityController.endAll()
         self.activity = ActivityController()
         self.automation = automation
+        self.idleSessionPolicy = .forSystem(systemVersion)
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
         if SetupVault.restorePairingIfMissing() { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
@@ -1148,7 +1155,8 @@ final class AppModel {
         ownerPaused = byOwner
         if automationPath == .inProcess {
             Task { [core] in _ = await core.finishTask(switching: false) }
-            closeInProcess("standing by", keepingSession: Self.idleSessionPolicy == .pauseAutomation)
+            // The owner's own Stop ends the session; standing by on its own keeps it where the policy says so.
+            closeInProcess("standing by", keepingSession: !byOwner && idleSessionPolicy == .pauseAutomation)
             standBy(reason: reason)
             return
         }
@@ -1239,7 +1247,7 @@ final class AppModel {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, !inProcessWarming,
               stepUnderWay == nil, approvals.isEmpty, !probeDriven, endingTasks == 0 else { return }
         log.add("runner", "Poki is in front: closing the automation session at once; the banner goes with it")
-        closeInProcess("Poki in front")
+        closeInProcess("Poki in front", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
     }
 
@@ -1273,7 +1281,7 @@ final class AppModel {
     private func closeForHandoff() {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, approvals.isEmpty, !probeDriven else { return }
         log.add("runner", "the owner's turn: closing the automation session; the banner goes with it")
-        closeInProcess("the owner's turn")
+        closeInProcess("the owner's turn", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
     }
 
@@ -1282,7 +1290,7 @@ final class AppModel {
               handoffText == nil, activityText == "Idle" else { return }
         log.add("runner", "\(why): closing the automation session at once; the banner goes with it")
         ownerPaused = false
-        closeInProcess("the end of the task")
+        closeInProcess("the end of the task", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
     }
 

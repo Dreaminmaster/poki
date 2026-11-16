@@ -41,14 +41,39 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
             if let given = lock.withLock({ () -> [String: Any]? in defer { answer = nil }; return answer }) { return given }
         }
         return lock.withLock {
+            prepareCalls += 1
+            if open, paused, failResume {
+                open = false; paused = false; failResume = false
+                return ["ok": false, "code": "session_unreadable", "detail": "no element tree after resuming", "generation": 1, "seconds": 0.0]
+            }
             let reused = open
             open = true
+            paused = false
             ready = ProcessInfo.processInfo.systemUptime
             return ["ok": true, "generation": 1, "reused": reused, "seconds": 0.0]
         }
     }
-    func close() -> [String: Any] { lock.withLock { defer { open = false }; return ["closed": open, "generation": 1, "seconds": 0.0] } }
-    func pauseAutomation() -> [String: Any] { ["paused": true, "how": "fake"] }
+    func close() -> [String: Any] {
+        lock.withLock { defer { if open { closeCalls += 1 }; open = false; paused = false }; return ["closed": open, "generation": 1, "seconds": 0.0] }
+    }
+    /// Automation Mode off with the session kept, as iOS does it: the session stays open until the next prepare turns it on.
+    func pauseAutomation() -> [String: Any] {
+        lock.withLock {
+            guard open else { return ["paused": false, "how": "no session"] }
+            paused = true
+            pauseCalls += 1
+            return ["paused": true, "how": "fake"]
+        }
+    }
+    private var paused = false
+    /// Sessions that were open when closed, and pauses of an open session.
+    private var closeCalls = 0, pauseCalls = 0, prepareCalls = 0
+    private var failResume = false
+    var closes: Int { lock.withLock { closeCalls } }
+    var pauses: Int { lock.withLock { pauseCalls } }
+    var prepares: Int { lock.withLock { prepareCalls } }
+    /// The next prepare of a session that was paused cannot read again: the session ends, as a native session that fails its read check does.
+    func failNextResume() { lock.withLock { failResume = true } }
     /// How long iOS has held its "allow automation" call in the open under way.
     func setAuthorizationWait(_ seconds: Double) { lock.withLock { authorizationWait = seconds } }
     private var authorizationWait = 0.0
@@ -444,12 +469,19 @@ final class InProcessPasscodeTests: XCTestCase {
         saved = (UserDefaults.standard.string(forKey: "relayAddress"), UserDefaults.standard.object(forKey: "relayEnabled"), SetupState.load())
         session = FakeAutomation()
         launcher = FakeLauncher()
-        model = AppModel(launcher: launcher, pairer: FakePairing(), automation: session)
+        useSystem(27)
+        XCTAssertTrue(model.sessionOn)
+    }
+
+    /// A fresh model on an iPhone running this iOS major version, with Poki on.
+    private func useSystem(_ major: Int) {
+        model?.stopSession()
+        model = AppModel(launcher: launcher, pairer: FakePairing(), automation: session,
+                         systemVersion: OperatingSystemVersion(majorVersion: major, minorVersion: 6, patchVersion: 1))
         model.loopback.simulate(.working(ms: 9))
         model.setup.loopback = .proxy
         XCTAssertTrue(model.setRelay("https://relay.invalid"))
         model.startSession()
-        XCTAssertTrue(model.sessionOn)
     }
 
     override func tearDown() async throws {
@@ -966,6 +998,89 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(transport.screenReads, 1, "the first phone read succeeds without a model retry")
         XCTAssertNotEqual(PokiStatus.current(model: model, chat: chat).word, "Preparing")
         try await captureSessionState("ready", chat: chat)
+    }
+
+    /// Opens the session for a phone task and waits until it is open.
+    private func openSessionForATask() async {
+        await prepareWithoutPhoneTask()
+        model.wakeRunner()
+        await waitFor("automation is open") { self.session.isOpen && self.model.hasOpenInProcessSession }
+    }
+
+    private func standByWhenIdle() async {
+        model.checkIdle(now: Date().addingTimeInterval(Double(model.idleStopSeconds) + 60))
+        await waitFor("Poki stood by") { self.model.runnerPaused && !self.model.hasOpenInProcessSession && self.model.lastInProcessClose != nil }
+    }
+
+    /// On iOS 18 to 26 a session that ends asks for the passcode again at the next task: standing by
+    /// keeps the session and only turns Automation Mode off.
+    func testOnIOS26StandingByKeepsTheSession() async {
+        useSystem(26)
+        await openSessionForATask()
+        await standByWhenIdle()
+        XCTAssertTrue(session.isOpen, "the session that iOS already allowed stays open")
+        XCTAssertEqual(session.pauses, 1)
+        XCTAssertEqual(session.closes, 0)
+    }
+
+    /// iOS 27 does not use the session this way: standing by ends it, as before.
+    func testOnIOS27StandingByStillClosesTheSession() async {
+        useSystem(27)
+        await openSessionForATask()
+        await standByWhenIdle()
+        XCTAssertFalse(session.isOpen)
+        XCTAssertEqual(session.closes, 1)
+        XCTAssertEqual(session.pauses, 0)
+    }
+
+    /// The end of a task is the same stand-by as the idle minute: a task a minute is not enough to ask the passcode for.
+    func testOnIOS26TheEndOfATaskKeepsTheSession() async {
+        useSystem(26)
+        await openSessionForATask()
+        model.chatTaskBegan()
+        model.chatTaskEnded(reply: nil, session: "test", acted: true)
+        await waitFor("the end of the task stood by") { self.model.runnerPaused && self.model.lastInProcessClose != nil }
+        XCTAssertTrue(session.isOpen)
+        XCTAssertEqual(session.pauses, 1)
+        XCTAssertEqual(session.closes, 0)
+    }
+
+    /// The owner's own Stop still ends the session and the banner, on every iOS.
+    func testOnIOS26TheOwnersStopStillClosesTheSession() async {
+        useSystem(26)
+        await openSessionForATask()
+        model.pauseRunner(byOwner: true)
+        await waitFor("the owner's stop closed the session") { self.model.lastInProcessClose != nil }
+        XCTAssertFalse(session.isOpen)
+        XCTAssertEqual(session.closes, 1)
+        XCTAssertEqual(session.pauses, 0)
+    }
+
+    /// The kept session is the next task's session. When it cannot read again, Poki closes it and opens a
+    /// new one in the same call, so the agent's step is not lost to a dead session.
+    func testOnIOS26AKeptSessionThatCannotResumeIsClosedAndOpenedAgain() async {
+        useSystem(26)
+        await openSessionForATask()
+        await standByWhenIdle()
+        session.failNextResume()
+        let opened = session.prepares
+        model.wakeRunner(asked: "the next task")
+        await waitFor("the session is open again") { self.session.isOpen && self.model.hasOpenInProcessSession }
+        XCTAssertEqual(session.prepares - opened, 2, "the resume that failed, then the new session")
+        XCTAssertGreaterThanOrEqual(session.closes, 1)
+        XCTAssertTrue(AppLog.shared.lines.contains { $0.contains("could not resume") }, "the log says why a new session was opened")
+    }
+
+    /// A kept session that resumes is the one used, with nothing opened beside it.
+    func testOnIOS26AKeptSessionThatResumesIsReused() async {
+        useSystem(26)
+        await openSessionForATask()
+        await standByWhenIdle()
+        let opened = session.prepares
+        model.wakeRunner(asked: "the next task")
+        await waitFor("the session is open again") { self.session.isOpen && self.model.hasOpenInProcessSession }
+        XCTAssertEqual(session.prepares - opened, 1)
+        XCTAssertEqual(session.closes, 0)
     }
 
     func testSimulatedFirstScreenTimings() async throws {
