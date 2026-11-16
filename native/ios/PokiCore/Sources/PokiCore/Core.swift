@@ -1,6 +1,9 @@
 import Foundation
 
 public struct CoreConfig: Sendable {
+    /// Host application version advertised in the relay hello. Hosts supply their installed build.
+    public var relayAppVersion = "1.0"
+
     public var runnerURL: URL
     public var sensitive: SensitivityRules
     /// The owner's way of asking (the app's Approvals page), which `sensitive` is narrowed by
@@ -327,6 +330,7 @@ public final class PokiCore: @unchecked Sendable {
         let client = RelayClient(baseURL: address.phoneURL, host: host, factory: socketFactory, handler: { [weak self] request in
             await self?.handle(request) ?? RelayResponse(id: request.id, status: 503, headers: [:], body: "")
         }, emit: { [weak self] in self?.emit(.relay($0)) })
+        client.appVersion = config.relayAppVersion
         client.undelivered = { [weak self] request, response in self?.keepLost(request, response) }
         relay = client
         client.start()
