@@ -99,10 +99,19 @@ final class HistoryCapture: ObservableObject {
 
     /// Screens that sit over the app in front for a moment and say nothing about what the owner did,
     /// or that show a passcode or an Apple Account sign-in. They are never kept, whatever the lists say.
-    static let overlays = [
+    nonisolated static let overlays = [
         "com.apple.ScreenshotServicesService", "com.apple.InCallService", "com.apple.CoreAuthUI",
         "com.apple.SharingViewService", "com.apple.PassbookUIService", "com.apple.AuthKitUIService",
     ]
+
+    /// Not an app the owner was using: the Home Screen's widgets and Apple's sheets that belong to
+    /// no app. Never kept, never listed.
+    nonisolated static func isNoise(_ app: String) -> Bool {
+        let low = app.lowercased()
+        if low.isEmpty || low.hasPrefix("com.apple.chrono") || low.contains("widgetrenderer") { return true }
+        if overlays.contains(where: { $0.lowercased() == low }) { return true }
+        return low.hasPrefix("com.apple.") && (low.hasSuffix("uiservice") || low.hasSuffix("viewservice"))
+    }
 
     /// Poki's own screens are never kept, whatever the lists say.
     nonisolated static func isPoki(_ app: String) -> Bool {
@@ -169,6 +178,7 @@ final class HistoryCapture: ObservableObject {
         let me = run
         once = minutes == nil
         prune()
+        HistoryStore.shared.dropNoise()
         background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
             Task { @MainActor in
                 AppLog.shared.add("history", "iOS ended the background time")
@@ -257,7 +267,7 @@ final class HistoryCapture: ObservableObject {
         // only by its display name, so the app lists could not leave it out. A left-out app leaves
         // no trace, not even a line in the observing record.
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame { return false }
-        if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return false }
+        if Self.isNoise(app) { return false }
         guard keeps(app) else { return false }
         let tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         let now = Date()

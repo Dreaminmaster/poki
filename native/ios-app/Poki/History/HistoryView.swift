@@ -75,16 +75,24 @@ struct HistoryPage: View {
     @State private var layout = BacktapeLayout()
     @State private var loaded = false
 
+    /// What was read off the screen is behind the lock. With Screen History off the page holds only
+    /// what Poki and agents did, which the Activity Log shows openly.
+    private var locked: Bool { capture.enabled && !lock.unlocked }
+
     var body: some View {
         Group {
-            // The whole page opens only after Face ID, Touch ID or Poki's PIN.
-            if !lock.unlocked {
+            // With Screen History on, the whole page opens only after Face ID, Touch ID or Poki's PIN.
+            if locked {
                 BacktapeLockScreen()
             } else if layout.isEmpty {
                 List {
                     if loaded {
                         Section {
-                            Text("Nothing is kept yet. Start a read in Testing Options, use another app, then come back.").foregroundStyle(.secondary)
+                            if capture.enabled {
+                                Text("Nothing is kept yet. Start a read in Testing Options, use another app, then come back.").foregroundStyle(.secondary)
+                            } else {
+                                Text("Nothing here yet. What Poki and agents do on this iPhone shows up here.").foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -95,20 +103,23 @@ struct HistoryPage: View {
         .navigationTitle(AppLocalization.text("Screen History"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if lock.unlocked {
+            if !locked {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink { HistoryGate { BacktapeSettingsPage().settingsPage() } } label: {
+                    NavigationLink { HistoryGate(whenOff: true) { BacktapeSettingsPage().settingsPage() } } label: {
                         Image(systemName: "slider.horizontal.3")
                     }
                     .accessibilityLabel(Text("Screen History Settings"))
                 }
             }
         }
-        .task(id: capture.changes) { await load() }
+        .task(id: "\(capture.changes) \(capture.enabled)") { await load() }
     }
 
+    /// The owner's reads while Screen History is on, and what Poki did either way, newest first.
     private func load() async {
-        let entries = await HistoryStore.shared.recent()
+        let kept = capture.enabled ? await HistoryStore.shared.recent() : []
+        let steps = BacktapeActivity.entries()
+        let entries = steps.isEmpty ? kept : (kept + steps).sorted { $0.at > $1.at }
         layout = BacktapeLayout.build(entries)
         loaded = true
     }
@@ -279,9 +290,15 @@ private struct HistoryPermissionsPage: View {
         for app in suggested + seen + KnownApps.all.map(\.id) where !all.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) {
             all.append(app)
         }
-        let open = all.filter { app in !HistoryCapture.isPoki(app) && !chosen.contains { $0.caseInsensitiveCompare(app) == .orderedSame } }
+        let open = all.filter { app in
+            !HistoryCapture.isPoki(app) && !HistoryCapture.isNoise(app) && !chosen.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
+        }
         let wanted = search.trimmingCharacters(in: .whitespaces)
-        guard !wanted.isEmpty else { return open }
+        // Unsearched, only what Poki can show properly: an app it knows or has an icon for. Anything
+        // else is still found by searching its name or bundle ID.
+        guard !wanted.isEmpty else {
+            return open.filter { KnownApps.byID[$0.lowercased()] != nil || AppIconStore.shared.icon($0) != nil }
+        }
         return open.filter { $0.localizedCaseInsensitiveContains(wanted) || HistoryNames.app($0).localizedCaseInsensitiveContains(wanted) }
     }
 

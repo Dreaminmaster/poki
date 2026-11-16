@@ -10,6 +10,9 @@ struct HistoryEntry: Identifiable, Hashable {
     let app: String
     let title: String
     let text: String
+    /// Who did it. nil: the owner, read off the screen. "": Poki, for its own chat. Otherwise the
+    /// outside agent Poki worked for (BacktapeActivity).
+    var by: String? = nil
 }
 
 /// One line of the observing record: when reading was on, paused, blocked or left an app out.
@@ -209,6 +212,14 @@ final class HistoryStore: @unchecked Sendable {
                 self.run("VACUUM")
                 rounds += 1
             }
+        }
+    }
+
+    /// Removes reads kept before `HistoryCapture.isNoise` left them out.
+    func dropNoise() {
+        queue.async {
+            let apps = self.rows("SELECT DISTINCT app FROM entries") { Self.string($0, 0) }.filter(HistoryCapture.isNoise)
+            for app in apps { self.run("DELETE FROM entries WHERE app = ?", [.text(app)]) }
         }
     }
 
