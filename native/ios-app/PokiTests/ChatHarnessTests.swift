@@ -667,7 +667,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(chat.savedCalls.map(\.name), ["do"] + Array(repeating: "look", count: 10) + ["do"])
         XCTAssertEqual(said(chat).last, "Verification finished.")
         XCTAssertEqual(chat.savedCalls.filter { $0.name == "look" && $0.answer.contains("handoff: waiting") }.count, 10)
-        XCTAssertTrue(chat.savedCalls.last?.answer.contains("handoff: done") == true)
+        XCTAssertTrue(chat.savedCalls.last?.answer.contains("handoff: taken back") == true)
     }
 
     /// The ceiling that only a runaway model reaches: 500 steps, each different, then the stop line.
