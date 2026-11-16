@@ -81,6 +81,7 @@ struct RootView: View {
     /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
     @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
+    @State private var searchJump: ConversationSearchJump?
     /// The first run is up, over everything (`FirstRunGuide`).
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
@@ -93,9 +94,16 @@ struct RootView: View {
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
 
     private func show(_ route: HomeRoute) {
+        // Ordinary navigation must not replay a previously selected search result.
+        searchJump = nil
         if threadsOpen { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = false } }
         wide = route
         home = route == .chat ? NavigationPath() : NavigationPath([route])
+    }
+
+    private func consumeSearchJump(_ requestID: UUID) {
+        guard searchJump?.requestID == requestID else { return }
+        searchJump = nil
     }
 
     private func openDetails(_ items: [any Hashable] = []) {
@@ -142,6 +150,8 @@ struct RootView: View {
             openSetup: { fix(.setup, split: split) },
             openSetupStep: { fix(.step($0), split: split) },
             openModel: { fix(.model, split: split) },
+            searchJump: searchJump?.sessionID == chat.sessionID ? searchJump : nil,
+            onSearchJumpApplied: consumeSearchJump,
             openVoiceKey: { openDetails([DetailsRoute.voiceKey]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
             openAgents: { fix(.agents, split: split) },
@@ -170,7 +180,9 @@ struct RootView: View {
             .background(Site.blue.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         case .session(let id):
-            SessionView(id: id, back: { show(.chat) })
+            SessionView(id: id, back: { show(.chat) },
+                        searchJump: searchJump?.sessionID == id ? searchJump : nil,
+                        onSearchJumpApplied: consumeSearchJump)
         case .setup:
             SetupChecklist().toolbar(.visible, for: .navigationBar)
         }
@@ -228,10 +240,13 @@ struct RootView: View {
                 next.append(DetailsRoute.connection)
                 detailsPath = next
             },
-            openSession: { id in
-                detailsOpen = false
-                openRun(id)
+            openSession: { id, entryID in
+                // Keep the active composer mounted behind Settings during a live task.
+                if !(id != chat.sessionID && (chat.running || width == .regular)) { detailsOpen = false }
+                openRun(id, entryID: entryID)
             },
+            searchJump: searchJump,
+            onSearchJumpApplied: consumeSearchJump,
             path: $detailsPath
         )
         // Presented on its own, so it says the edge's style itself rather than counting on the
@@ -375,18 +390,26 @@ struct RootView: View {
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.
-    private func openRun(_ id: String) {
+    private func openRun(_ id: String, entryID: UUID? = nil) {
+        // Replacing the right-hand ChatView on iPad would destroy its unsent draft
+        // and attachments. Open history within Settings while a live task is running.
+        if id != chat.sessionID && (chat.running || width == .regular) {
+            searchJump = entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }
+            detailsPath.append(DetailsRoute.sessionPreview(id))
+            return
+        }
         if let session = SessionStore.shared.session(id), session.kind == .poki {
             if session.id != chat.sessionID { chat.restore(session) }
             show(.chat)
         } else {
             show(.session(id))
         }
+        // show() clears the old request; install a new one after routing.
+        searchJump = entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }
     }
 
-    /// `-pokiScreen setup` (connect, debug, activity, details, model, voice…) opens that screen at launch,
-    /// for the build's screenshots; `-pokiSetupStep 3` opens setup at that step. The names are the ones
-    /// the build's scripts already pass; each opens where that screen lives now.
+    /// Opens an initial screen from the app's local screenshot/test launch flags.
+    /// These launch arguments remain unchanged by conversation search.
     private func openLaunchScreen() {
         let defaults = UserDefaults.standard
         if let address = defaults.string(forKey: "pokiVoiceBridge") { _ = model.voice.setBridge(address) }
