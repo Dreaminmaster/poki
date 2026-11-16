@@ -58,9 +58,18 @@ final class AppModel {
     /// runner standing by on its own after the idle time. The bear sleeps and Hands reads off only for
     /// this one: standing by after a quiet minute is still ready. Cleared when the runner starts again.
     private(set) var ownerPaused = false
-    private enum IdleSessionPolicy { case close, pauseAutomation }
-    // Switch to pauseAutomation if device acceptance finds that same-process reads cannot resume.
-    private static let idleSessionPolicy = IdleSessionPolicy.close
+    /// What the in-process session does when Poki stands by between tasks (idle, the end of a task, Poki
+    /// coming to the front, a hand-off). Closing it ends the iOS session, and the next one asks for the
+    /// passcode again.
+    enum IdleSessionPolicy: Equatable {
+        case close, pauseAutomation
+        /// iOS 18 to 26 run Poki on an XCTest session, and iOS asks for the passcode again for each new
+        /// one, so there the session stays and only Automation Mode goes off. iOS 27 keeps closing it.
+        static func forSystem(_ version: OperatingSystemVersion) -> IdleSessionPolicy {
+            version.majorVersion >= 27 ? .close : .pauseAutomation
+        }
+    }
+    let idleSessionPolicy: IdleSessionPolicy
     /// Agents › Approvals: how the owner is asked, or never. The saved choice (`ApprovalClassifier.mode`)
     /// is the one copy: the pages here show it, and PokiCore's rules and each approval's route read it
     /// at every step, so a change counts from the next step.
@@ -314,10 +323,12 @@ final class AppModel {
     }
 
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
-         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil) {
+         automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
+         systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion) {
         ActivityController.endAll()
         self.activity = ActivityController()
         self.automation = automation
+        self.idleSessionPolicy = .forSystem(systemVersion)
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
         if SetupVault.restorePairingIfMissing() { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
@@ -478,7 +489,11 @@ final class AppModel {
     /// Counts closes, so an open that began before one is not taken as the state after it.
     private var inProcessEpoch = 0
     private var inProcessWarmToken = 0
+    /// Standing by kept the session with Automation Mode off: the
+    /// next open resumes it instead of making a new one, and a resume that fails is closed and opened again.
+    private var sessionKept = false
     private var afterInProcessClose: [@MainActor () -> Void] = []
+    private var pendingInProcessClose: String?
     /// A close of the in-process session once iOS has answered it: what it was for, and whether a
     /// session was open. The lifecycle check waits for this, not for the state to say closing.
     struct InProcessClose { let number: Int; let why: String; let closed: Bool; let seconds: Double }
@@ -487,7 +502,10 @@ final class AppModel {
     func closeInProcess(_ why: String, keepingSession: Bool = false, then: (@MainActor () -> Void)? = nil) {
         guard automationPath == .inProcess else { return }
         if let then { afterInProcessClose.append(then) }
-        if case .closing = inProcessSession { return }
+        if case .closing = inProcessSession {
+            if !keepingSession { pendingInProcessClose = why }
+            return
+        }
         inProcessSession = .closing(reopen: false)
         inProcessEpoch += 1
         inProcessWarming = false
@@ -495,17 +513,28 @@ final class AppModel {
         retriedLocalDDIOnLoopback = false
         endPasscodeWait(opened: false)
         DispatchQueue.global(qos: .userInitiated).async { [automation] in
-            let result = keepingSession ? automation.pauseAutomation() : automation.close()
+            var result = keepingSession ? automation.pauseAutomation() : automation.close()
+            let kept = keepingSession && result["paused"] as? Bool == true && result["how"] as? String != "no session"
+            if keepingSession, !kept { result = automation.close() }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let reopen: Bool
                 if case .closing(let requested) = self.inProcessSession { reopen = requested } else { reopen = false }
                 self.inProcessSession = .idle
-                self.log.add("runner", keepingSession
+                self.sessionKept = kept
+                let pendingClose = self.pendingInProcessClose
+                self.pendingInProcessClose = nil
+                if kept, let pendingClose {
+                    self.closeInProcess(pendingClose)
+                    if reopen { self.inProcessSession = .closing(reopen: true) }
+                    return
+                }
+                if keepingSession, !kept { self.log.add("runner", "Automation Mode could not pause for \(why): closing the session instead") }
+                self.log.add("runner", kept
                     ? "Automation Mode pause for \(why): \(result["paused"] as? Bool == true ? "paused" : "unavailable")"
                     : "in-process session close for \(why): \(result["closed"] as? Bool == true ? "closed" : "already closed")")
                 self.lastInProcessClose = InProcessClose(number: (self.lastInProcessClose?.number ?? 0) + 1, why: why,
-                                                         closed: !keepingSession && result["closed"] as? Bool == true,
+                                                         closed: !kept && result["closed"] as? Bool == true,
                                                          seconds: result["seconds"] as? Double ?? 0)
                 let callbacks = self.afterInProcessClose
                 self.afterInProcessClose.removeAll()
@@ -551,12 +580,19 @@ final class AppModel {
         inProcessWarmStarted = Date()
         inProcessWarmToken += 1
         let epoch = inProcessEpoch, token = inProcessWarmToken
+        let resuming = sessionKept
         if inProcessSession != .open, inProcessSession != .opening, inProcessSession != .waitingForPasscode {
             inProcessSession = .opening
             host.update(runner: coreState(of: runner))
         }
         DispatchQueue.global(qos: .userInitiated).async { [automation] in
-            let result = InProcessWDA.openThroughGate { automation.prepare() }
+            var result = InProcessWDA.openThroughGate { automation.prepare() }
+            var resumeFailure: String?
+            if resuming, Self.shouldOpenNewSessionAfterFailedResume(result) {
+                resumeFailure = "\(result["code"] ?? "unknown")"
+                _ = automation.close()
+                result = InProcessWDA.openThroughGate { automation.prepare() }
+            }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard epoch == self.inProcessEpoch else {
@@ -585,6 +621,10 @@ final class AppModel {
                 }
                 guard accepted else { return }
                 if token == self.inProcessWarmToken { self.inProcessWarming = false }
+                self.sessionKept = false
+                if let resumeFailure {
+                    self.log.add("runner", "the kept session could not resume (\(resumeFailure)): it was closed and a new one opened for \(why)")
+                }
                 let waitedForPasscode = self.inProcessPasscode
                 self.endPasscodeWait(opened: ok)
                 let seconds = String(format: "%.2f", result["seconds"] as? Double ?? 0)
@@ -615,6 +655,15 @@ final class AppModel {
                 self.inProcessSession = ok ? .open : passcodeMissed ? .passcodeMissed : .failed(code: "\(result["code"] ?? "unknown")", detail: detail)
             }
         }
+    }
+
+    /// A kept session that does not come back is replaced. Not when the open was refused before it began, nor
+    /// when the owner let iOS's passcode screen time out: that is the owner's answer, and a new session
+    /// would put the same screen up again.
+    private static func shouldOpenNewSessionAfterFailedResume(_ result: [String: Any]) -> Bool {
+        guard result["ok"] as? Bool != true else { return false }
+        if ["passcode_declined", "open_poki_first", "open_under_way"].contains("\(result["code"] ?? "")") { return false }
+        return !("\(result["detail"] ?? "")".localizedCaseInsensitiveContains("enabling automation mode"))
     }
 
     /// A local open failed after the launcher found only the mounted image: once the loopback answers,
@@ -1142,7 +1191,7 @@ final class AppModel {
     func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
         let splitChat = byOwner && AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true ? AskPoki.chat : nil
         splitChat?.stop()
-        guard sessionOn, !runnerPaused else { return }
+        guard sessionOn, !runnerPaused || byOwner else { return }
         // Allow on the Live Activity is followed by its layout changing under the finger: a Stop
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
         // Allow, then "Stopped from the Live Activity" 0.7 s after the approval ended). A running
@@ -1153,9 +1202,14 @@ final class AppModel {
         }
         guard approvals.isEmpty || splitChat != nil else { return }
         ownerPaused = byOwner
+        if runnerPaused {
+            if automationPath == .inProcess { closeInProcess("stopped by the owner") }
+            return
+        }
         if automationPath == .inProcess {
             Task { [core] in _ = await core.finishTask(switching: false) }
-            closeInProcess("standing by", keepingSession: Self.idleSessionPolicy == .pauseAutomation)
+            // The owner's own Stop ends the session; standing by on its own keeps it where the policy says so.
+            closeInProcess("standing by", keepingSession: !byOwner && idleSessionPolicy == .pauseAutomation)
             standBy(reason: reason)
             return
         }
@@ -1211,7 +1265,10 @@ final class AppModel {
 
     func pauseByOwner() {
         guard sessionOn else { return }
-        if runnerPaused { ownerPaused = true } else { pauseRunner() }
+        if runnerPaused {
+            ownerPaused = true
+            if automationPath == .inProcess { closeInProcess("stopped by the owner") }
+        } else { pauseRunner() }
     }
 
     /// The runner is off and starts on the next agent request.
@@ -1246,7 +1303,7 @@ final class AppModel {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, !inProcessWarming,
               stepUnderWay == nil, approvals.isEmpty, !probeDriven, endingTasks == 0 else { return }
         log.add("runner", "Poki is in front: closing the automation session at once; the banner goes with it")
-        closeInProcess("Poki in front")
+        closeInProcess("Poki in front", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
     }
 
@@ -1280,7 +1337,7 @@ final class AppModel {
     private func closeForHandoff() {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, approvals.isEmpty, !probeDriven else { return }
         log.add("runner", "the owner's turn: closing the automation session; the banner goes with it")
-        closeInProcess("the owner's turn")
+        closeInProcess("the owner's turn", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
     }
 
@@ -1289,7 +1346,7 @@ final class AppModel {
               handoffText == nil, activityText == "Idle" else { return }
         log.add("runner", "\(why): closing the automation session at once; the banner goes with it")
         ownerPaused = false
-        closeInProcess("the end of the task")
+        closeInProcess("the end of the task", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
     }
 

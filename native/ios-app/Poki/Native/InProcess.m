@@ -1214,7 +1214,13 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
              @"detail": [_sessions closeDetail] ?: @""};
 }
 
-- (NSDictionary<NSString *, id> *)pauseAutomation { return [_sessions pauseAutomation]; }
+/// Standing by with the session kept: nobody watches it, and the owner can end Automation Mode from iOS's
+/// banner meanwhile (the reads then fail as "no_front_app"). The next prepare proves it reads again.
+- (NSDictionary<NSString *, id> *)pauseAutomation {
+    NSDictionary *result = [_sessions pauseAutomation];
+    @synchronized (self) { _readableGeneration = 0; }
+    return result;
+}
 
 /// The prepared session and its generation, or why there is none.
 - (id)current:(uint64_t *)generation outcome:(PKOutcome **)outcome {
