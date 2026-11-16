@@ -336,16 +336,13 @@ fn hash_of(value: &Value) -> u64 {
 
 fn front_name(summary: &Value) -> Value {
     let app = if summary["front"].is_object() { &summary["front"] } else { &summary["applications"][0] };
-    if let Some(id) = app["bundle_id"].as_str() {
-        return id.into();
-    }
-    if let Some(name) = app["name"].as_str().filter(|name| !name.is_empty()) {
-        return name.into();
-    }
-    match app["pid"].as_u64() {
-        Some(pid) => format!("no app name, pid {pid}").into(),
-        None => Value::Null,
-    }
+    app["bundle_id"]
+        .as_str()
+        .filter(|id| {
+            id.contains('.') && id.split('.').all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
+        })
+        .map(Value::from)
+        .unwrap_or(Value::Null)
 }
 
 /// The screen's title: its first heading that is not a password field.
