@@ -224,10 +224,12 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Reads, summaries and the observing record: nothing is left.
     func deleteEverything() async {
         await perform {
             self.run("DELETE FROM entries")
             self.run("DELETE FROM notes")
+            self.run("DELETE FROM record")
             self.run("VACUUM")
         }
     }

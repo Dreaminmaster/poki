@@ -62,7 +62,6 @@ enum HistoryNames {
         switch kind {
         case "leftOut": return "Left Out an App"
         case "cleared": return "History Cleared"
-        case "clearedAll": return "All History Cleared"
         default: return kind
         }
     }
@@ -165,7 +164,7 @@ struct BacktapeSettingsPage: View {
                 LabeledContent("Reads Kept") { Text(verbatim: "\(size.entries)").monospacedDigit() }
             }
             Section {
-                Button("Clear History", role: .destructive) { clearing = true }.disabled(size.entries == 0)
+                Button("Clear History", role: .destructive) { clearing = true }
             }
         }
         .navigationTitle(AppLocalization.text("Backtape Settings"))
