@@ -9,18 +9,52 @@ import PokiCore
 final class DiskImageStore {
     enum State: Equatable { case missing, downloading(String), downloaded(String), ready(String), failed(String) }
     private(set) var state: State = .missing
+    private var checkTask: Task<Void, Never>?
     static let unavailableMessage: LocalizedStringResource = "The disk image is downloaded, but its developer tools are not available on this iPhone. Try turning Automation on. If it still fails, connect to a computer and prepare this iPhone again in Poki Setup."
     static let loadFailureMessage: LocalizedStringResource = "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki and turn Automation on."
 
-    init() {
-        if let build = try? DeveloperDiskImage.verify(AppFiles.ddiDirectory) { record(build) }
+    init(verifySynchronously: Bool = false) {
+        if verifySynchronously {
+            if let build = try? DeveloperDiskImage.verify(AppFiles.ddiDirectory) { record(build) }
+        } else {
+            checkTask = Task { [weak self] in
+                await self?.verifyInBackground()
+            }
+        }
+    }
+
+    func ensureChecked() async {
+        if let checkTask {
+            await checkTask.value
+            return
+        }
+        if case .missing = state {
+            await verifyInBackground()
+        }
+    }
+
+    private func verifyInBackground() async {
+        let dir = AppFiles.ddiDirectory
+        let result = await Task.detached(priority: .userInitiated) { () -> (build: String, ready: Bool)? in
+            guard let build = try? DeveloperDiskImage.verify(dir) else { return nil }
+            let ready = PKInProcess.shared().developerFrameworksAvailable()
+            return (build, ready)
+        }.value
+        if case .downloading = state { return }
+        if let result {
+            state = result.ready ? .ready(result.build) : .downloaded(result.build)
+        }
+        checkTask = nil
     }
 
     /// Files that appeared since (Poki Setup puts them in the container): counted without downloading.
     func notice() {
-        if hasFiles { refreshAvailability(); return }
-        guard let build = try? DeveloperDiskImage.verify(AppFiles.ddiDirectory) else { return }
-        record(build)
+        if case .ready = state { return }
+        if case .downloading = state { return }
+        guard checkTask == nil else { return }
+        checkTask = Task { [weak self] in
+            await self?.verifyInBackground()
+        }
     }
 
     func refreshAvailability() {

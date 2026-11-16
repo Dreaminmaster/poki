@@ -494,10 +494,10 @@ struct HomePage<Footer: View>: View {
             }
         }
         .task(id: SessionStore.shared.sessions.count) {
-            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+            shortcutStore.refreshInBackground(sessions: SessionStore.shared.sessions, routines: { RoutineStore.shared.routines })
         }
         .onChange(of: AppLocalization.language) { _, _ in
-            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+            shortcutStore.refreshInBackground(sessions: SessionStore.shared.sessions, routines: { RoutineStore.shared.routines })
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { page = $0 }
         // The menu, over the pill (the owner: it opened under the pill, on the message field). The

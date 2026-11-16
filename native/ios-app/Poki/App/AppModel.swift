@@ -420,7 +420,11 @@ final class AppModel {
             if let text { problem = text; tunnelAttention = text }
             else if problem == tunnelAttention { problem = nil; tunnelAttention = nil }
         }
-        if !diskImage.hasFiles { Task { await diskImage.download() } }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.diskImage.ensureChecked()
+            if !self.diskImage.hasFiles { await self.diskImage.download() }
+        }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
         if UserDefaults.standard.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
@@ -743,6 +747,7 @@ final class AppModel {
     private func turnOnIfWanted() {
         Task {
             await tunnel.refresh()
+            await diskImage.ensureChecked()
             if wantsOn, !sessionOn, pairingPath != nil, diskImage.hasFiles { startSession(reconnectLocal: false) }
         }
     }

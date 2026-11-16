@@ -202,8 +202,11 @@ final class SessionStore {
     }
     static let shared: SessionStore = {
         let sample = UserDefaults.standard.bool(forKey: "pokiSample") || UserDefaults.standard.string(forKey: "pokiSessions") != nil
-        return SessionStore(folder: defaultFolder, defaults: .standard, samples: sample)
+        return SessionStore(folder: defaultFolder, defaults: .standard, samples: sample, deferLoad: true)
     }()
+    static func launchStore(folder: URL, defaults: UserDefaults) -> SessionStore {
+        SessionStore(folder: folder, defaults: defaults, samples: false, deferLoad: true)
+    }
     /// The most conversations the list keeps; archived ones are not counted.
     static let limit = 200
     /// Set once the conversations saved before archiving existed have been archived.
@@ -212,10 +215,17 @@ final class SessionStore {
     static let agentIdle: TimeInterval = 10 * 60
 
     private(set) var sessions: [SavedSession] = []
+    private(set) var isLoaded = false
     private let folder: URL
     private let defaults: UserDefaults
     private var pendingWrites: Set<String> = []
     private var writeTask: Task<Void, Never>?
+    private var loadTask: Task<Void, Never>?
+    private var touchedIDs: Set<String> = []
+    private var deletedIDs: Set<String> = []
+    private var initialLoadWaiters: [() -> Void] = []
+    private var fullLoadWaiters: [() -> Void] = []
+    private let writeQueue = DispatchQueue(label: "nz.zheha.poki.session-writes", qos: .utility)
     /// The outside agent sessions seen since launch: id → client name.
     /// Each MCP session's client name (its clientInfo at initialize), kept across launches: an agent
     /// keeps its session while Poki restarts or the session is closed for being idle, and its next
@@ -246,16 +256,151 @@ final class SessionStore {
     /// The outside agent session whose call is running, if any.
     var activeSessionID: String? { currentSession }
 
-    init(folder: URL, defaults: UserDefaults, samples: Bool = false) {
+    init(folder: URL, defaults: UserDefaults, samples: Bool = false, deferLoad: Bool = false) {
         self.folder = folder
         self.defaults = defaults
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if samples {
             sessions = Self.samples()
+            isLoaded = true
             return
         }
-        let complete = load()
-        if complete { archiveEarlier() }
+        if deferLoad {
+            startBackgroundLoad()
+        } else {
+            let complete = load()
+            isLoaded = true
+            if complete { archiveEarlier() }
+        }
+    }
+
+    func whenInitialReady(_ action: @escaping () -> Void) {
+        if isLoaded { action(); return }
+        initialLoadWaiters.append(action)
+    }
+
+    func waitUntilLoaded() async {
+        if isLoaded { return }
+        await withCheckedContinuation { continuation in
+            fullLoadWaiters.append { continuation.resume() }
+        }
+    }
+
+    private func notifyInitialWaiters() {
+        let waiters = initialLoadWaiters
+        initialLoadWaiters.removeAll()
+        for waiter in waiters { waiter() }
+    }
+
+    private func notifyFullWaiters() {
+        notifyInitialWaiters()
+        let waiters = fullLoadWaiters
+        fullLoadWaiters.removeAll()
+        for waiter in waiters { waiter() }
+    }
+
+    private func startBackgroundLoad() {
+        let folder = self.folder
+        let needsArchiveEarlier = !defaults.bool(forKey: Self.archivedEarlierKey)
+        loadTask = Task { [weak self] in
+            let listing = await Task.detached(priority: .userInitiated) { () -> (urls: [URL], complete: Bool) in
+                let keys: [URLResourceKey] = [.contentModificationDateKey]
+                guard let items = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else {
+                    return ([], false)
+                }
+                let jsonFiles = items.filter { $0.pathExtension == "json" }
+                let sorted = jsonFiles.sorted { a, b in
+                    let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return da > db
+                }
+                return (sorted, true)
+            }.value
+
+            var complete = listing.complete
+            let urls = listing.urls
+            let firstChunkSize = 20
+            let nextChunkSize = 50
+            var offset = 0
+
+            while offset < urls.count {
+                guard let self, !Task.isCancelled else { return }
+                let chunkSize = offset == 0 ? firstChunkSize : nextChunkSize
+                let end = min(offset + chunkSize, urls.count)
+                let slice = Array(urls[offset..<end])
+                let wasFirstBatch = offset == 0
+                offset = end
+
+                let decoded = await Task.detached(priority: .userInitiated) { () -> (sessions: [SavedSession], complete: Bool) in
+                    let decoder = JSONDecoder()
+                    var batchComplete = true
+                    var loaded: [SavedSession] = []
+                    loaded.reserveCapacity(slice.count)
+                    for url in slice {
+                        guard let data = try? Data(contentsOf: url) else { batchComplete = false; continue }
+                        if var session = try? decoder.decode(SavedSession.self, from: data) {
+                            if session.live { session.live = false; session.outcome = .stopped }
+                            loaded.append(session)
+                        }
+                    }
+                    return (loaded, batchComplete)
+                }.value
+
+                if !decoded.complete { complete = false }
+                self.mergeLoadedBatch(decoded.sessions)
+                if wasFirstBatch && !needsArchiveEarlier {
+                    self.notifyInitialWaiters()
+                }
+                await Task.yield()
+            }
+
+            guard let self, !Task.isCancelled else { return }
+            self.isLoaded = true
+            self.trim()
+            if complete && needsArchiveEarlier {
+                await self.archiveEarlierInBackground()
+            }
+            self.notifyFullWaiters()
+        }
+    }
+
+    private func mergeLoadedBatch(_ batch: [SavedSession]) {
+        guard !batch.isEmpty else { return }
+        let existing = Set(sessions.map(\.id))
+        var added = false
+        for session in batch {
+            guard !deletedIDs.contains(session.id), !touchedIDs.contains(session.id), !existing.contains(session.id) else { continue }
+            sessions.append(session)
+            added = true
+        }
+        if added {
+            sessions.sort { $0.updated > $1.updated }
+        }
+    }
+
+    private func archiveEarlierInBackground() async {
+        guard !defaults.bool(forKey: Self.archivedEarlierKey) else { return }
+        let now = Date()
+        var snapshots: [(URL, SavedSession)] = []
+        for i in sessions.indices where sessions[i].archived == nil && !touchedIDs.contains(sessions[i].id) {
+            sessions[i].archived = now
+            snapshots.append((file(sessions[i].id), sessions[i]))
+        }
+        if !snapshots.isEmpty {
+            let queue = self.writeQueue
+            await withCheckedContinuation { continuation in
+                queue.async {
+                    let encoder = JSONEncoder()
+                    encoder.dateEncodingStrategy = .deferredToDate
+                    for (url, session) in snapshots {
+                        guard let data = try? encoder.encode(session) else { continue }
+                        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                    }
+                    continuation.resume()
+                }
+            }
+        }
+        defaults.set(true, forKey: Self.archivedEarlierKey)
     }
 
     /// The saved sessions from their files; false when a file could not be read (before the first unlock).
@@ -448,8 +593,11 @@ final class SessionStore {
     }
 
     func delete(_ id: String) {
+        deletedIDs.insert(id)
+        pendingWrites.remove(id)
         sessions.removeAll { $0.id == id }
-        try? FileManager.default.removeItem(at: file(id))
+        let url = file(id)
+        writeQueue.async { try? FileManager.default.removeItem(at: url) }
     }
 
     // MARK: Outside agents
@@ -599,6 +747,8 @@ final class SessionStore {
     // MARK: Files
 
     private func put(_ session: SavedSession) {
+        touchedIDs.insert(session.id)
+        deletedIDs.remove(session.id)
         if let i = sessions.firstIndex(where: { $0.id == session.id }) { sessions[i] = session } else { sessions.insert(session, at: 0); trim() }
         guard !UserDefaults.standard.bool(forKey: "pokiSample") else { return }
         pendingWrites.insert(session.id)
@@ -606,20 +756,39 @@ final class SessionStore {
         // Writes are gathered for half a second: a task changes its session many times a second.
         writeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            self?.flush()
+            self?.flushInBackground()
+        }
+    }
+
+    private func flushInBackground() {
+        writeTask = nil
+        let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
+        pendingWrites = []
+        guard !snapshots.isEmpty else { return }
+        writeQueue.async {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .deferredToDate
+            for (url, session) in snapshots {
+                guard let data = try? encoder.encode(session) else { continue }
+                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
         }
     }
 
     /// Writes the changed sessions now, rather than after the half-second gathering.
     func flush() {
+        writeTask?.cancel()
         writeTask = nil
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .deferredToDate
-        for id in pendingWrites {
-            guard let session = session(id), let data = try? encoder.encode(session) else { continue }
-            try? data.write(to: file(id), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        }
+        let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
         pendingWrites = []
+        writeQueue.sync {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .deferredToDate
+            for (url, session) in snapshots {
+                guard let data = try? encoder.encode(session) else { continue }
+                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
+        }
     }
 
     /// Past the limit, the oldest conversations in the list go, one just brought back from the archive
@@ -629,8 +798,11 @@ final class SessionStore {
         let listed = sessions.filter { $0.archived == nil }
         guard listed.count > Self.limit else { return }
         let gone = Set(listed.sorted { $0.keptSince > $1.keptSince }[Self.limit...].map(\.id))
-        for id in gone { try? FileManager.default.removeItem(at: file(id)) }
+        let urls = gone.map { file($0) }
         sessions.removeAll { gone.contains($0.id) }
+        writeQueue.async {
+            for url in urls { try? FileManager.default.removeItem(at: url) }
+        }
     }
 
     private func file(_ id: String) -> URL {

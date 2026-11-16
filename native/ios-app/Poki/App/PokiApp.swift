@@ -31,8 +31,8 @@ struct PokiApp: App {
         #if DEBUG && targetEnvironment(simulator)
         TestCredential.importIfGiven()
         #endif
-        // A memory backup Poki Setup put back (Documents/AgentBackup) is merged in before any agent asks.
-        _ = RoutineStore.shared.importRestoredBackup()
+        // A memory backup Poki Setup put back (Documents/AgentBackup) is merged in off the main thread.
+        Task.detached(priority: .utility) { _ = RoutineStore.shared.importRestoredBackup() }
         // The three-dimensional bear loads while the app starts, to be there when Poki's picture first shows.
         BearModel.shared.load()
         let model = AppModel()

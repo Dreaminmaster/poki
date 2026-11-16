@@ -193,11 +193,31 @@ final class ChatModel {
         if requester == nil { app.voice.onConversationEnded = { [weak self] lines, started in self?.appendVoice(lines, started: started) } }
         if let scene = UserDefaults.standard.string(forKey: "pokiChat") { loadSample(scene); return }
         // The last in-app conversation comes back at launch, as in Messages.
-        if let last = SessionStore.shared.latestPoki(), Date().timeIntervalSince(last.updated) < 12 * 3600 {
-            restore(last)
+        if SessionStore.shared.isLoaded {
+            if let last = SessionStore.shared.latestPoki(), Date().timeIntervalSince(last.updated) < 12 * 3600 {
+                restore(last)
+            } else {
+                greet()
+            }
         } else {
             greet()
+            SessionStore.shared.whenInitialReady { [weak self] in
+                self?.restoreLatestIfUntouched()
+            }
         }
+    }
+
+    private var userChoseConversation = false
+
+    private func restoreLatestIfUntouched() {
+        guard !running, !isSample, kind == .poki, !userChoseConversation else { return }
+        let hasMessages = entries.contains {
+            if case .you = $0.kind { return true }
+            if case .request = $0.kind { return true }
+            return false
+        }
+        guard !hasMessages, let last = SessionStore.shared.latestPoki(), Date().timeIntervalSince(last.updated) < 12 * 3600 else { return }
+        restore(last)
     }
 
     private var greeting: [ChatEntry] {
@@ -241,6 +261,7 @@ final class ChatModel {
     }
 
     func newConversation() {
+        userChoseConversation = true
         stop()
         if isDemo { entries = [ChatEntry(.time(Date()))] + greeting.dropFirst(); return }
         loop = nil
@@ -256,6 +277,7 @@ final class ChatModel {
     /// screen as context only from the next message on (pi's messages are not kept on disk).
     func restore(_ session: SavedSession) {
         guard session.kind == .poki, !running else { return }
+        userChoseConversation = true
         loop = nil
         client = nil
         planID = nil; noteID = nil; modelPlan = nil

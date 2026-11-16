@@ -245,10 +245,22 @@ struct SessionsView: View {
     /// The conversations by day, each day keeping the store's order.
     private var grouped: [(day: Day, sessions: [SavedSession])] {
         let all = shown
-        return Day.allCases.compactMap { day in
-            let sessions = all.filter { Day.of($0) == day }
-            return sessions.isEmpty ? nil : (day, sessions)
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
+        var today: [SavedSession] = []
+        var yesterday: [SavedSession] = []
+        var earlier: [SavedSession] = []
+        for session in all {
+            if session.live || session.updated >= todayStart {
+                today.append(session)
+            } else if session.updated >= yesterdayStart {
+                yesterday.append(session)
+            } else {
+                earlier.append(session)
+            }
         }
+        return [(.today, today), (.yesterday, yesterday), (.earlier, earlier)].compactMap { $0.1.isEmpty ? nil : $0 }
     }
 
     /// Held by a step that waits for the owner: its own last plan says so, or it is the conversation
