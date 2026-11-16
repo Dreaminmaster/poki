@@ -1737,8 +1737,11 @@ final class AppModel {
             if !inFront, let reply, session == AskPoki.chat?.sessionID { postReply(reply) }
             return
         }
+        // On a Dynamic Island the activity's own pop-up says the task is over: no banner on top of it.
+        let islandTold = activity.finishNow(alert: true)
         if !inSplitView {
             finishTask { [weak self] in
+                guard !islandTold else { return }
                 // A task ends in Poki or with a notice that breaks through: when the phone could not be
                 // brought back to Poki, the owner is told where they are.
                 Task { @MainActor [weak self] in
@@ -1751,7 +1754,6 @@ final class AppModel {
                 }
             }
         }
-        activity.finishNow(alert: true)
     }
 
     /// A reply that touched no phone, while Poki is not in front (Send Task to Poki from a shortcut): the
