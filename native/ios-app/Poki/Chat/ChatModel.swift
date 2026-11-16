@@ -408,7 +408,7 @@ final class ChatModel {
         if kind == .poki, !again, entries.filter({ if case .you = $0.kind { return true }; return false }).count == 1,
            let piModel = provider.piModel(model) {
             let id = sessionID
-            Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel) { SessionStore.shared.setAutoName(id, name) } }
+            Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel, sessionID: id) { SessionStore.shared.setAutoName(id, name) } }
         }
         running = true
         awaitingModel = true
@@ -459,7 +459,7 @@ final class ChatModel {
             var pair: [String] = []
             if !inSplitView, namedApps.count >= 2 {
                 let plannedAt = ContinuousClock.now
-                let choice = await self.chooseSplitView(text: text, apps: namedApps, provider: provider, model: piModel)
+                let choice = await self.chooseSplitView(text: text, apps: namedApps, provider: provider, model: piModel, sessionID: runSession)
                 guard self.runToken == token else { return }
                 AppLog.shared.add("chat", "workspace planning took \(plannedAt.duration(to: .now))")
                 switch choice {
@@ -505,7 +505,7 @@ final class ChatModel {
                 }
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
-            let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil)
+            let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil, sessionID: runSession)
             let instructions = [Harness.instructions(for: resumedTask ?? message, inSplitView: splitSession != nil), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(message.isEmpty ? Self.picturesOnly : message, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
@@ -601,10 +601,10 @@ final class ChatModel {
         return Task.isCancelled || runToken != token ? .stopped : .unavailable
     }
 
-    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model) async -> WorkspaceChoice {
+    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model, sessionID: String) async -> WorkspaceChoice {
         let names = apps.enumerated().map { "\($0.offset + 1). \(AppIconStore.name($0.element) ?? $0.element)" }.joined(separator: "\n")
         let instructions = "Choose whether two candidate iPhone apps should work side by side for the owner's request. A word may describe an item and just happen to match an app name (for example 写一封邮件 can describe a message, or 照片 can mean an image in Safari). Select only the two apps actually requested. For a side-by-side task such as dragging, comparing, or transferring between two apps, output SPLIT followed by their two numbers separated by spaces, source first if there is a source. Otherwise output NORMAL. Output only that line."
-        let planner = PiLoop(provider: provider, model: model, tools: []) { _ in
+        let planner = PiLoop(provider: provider, model: model, sessionID: sessionID, tools: []) { _ in
             PokiCore.ToolAnswer(text: "Planning only.", jpeg: nil, isError: true)
         }
         var answer = ""
@@ -635,11 +635,12 @@ final class ChatModel {
         AppLocalization.text(LocalizedStringResource("Poki couldn't determine whether to use Split View. Try sending the task again."))
     }
 
-    private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool) -> PiLoop {
+    private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool, sessionID: String) -> PiLoop {
         let changedWorkspace = loop.map { $0.inSplitView != inSplitView } ?? false
-        if let loop, loop.provider == provider, loop.model.id == model.id, !changedWorkspace { return loop }
-        // A different workspace starts without old screen evidence.
-        let next = PiLoop(provider: provider, model: model, tools: inSplitView ? Harness.splitViewTools : Harness.tools,
+        if let loop, loop.provider == provider, loop.model.id == model.id,
+           loop.sessionID == sessionID, !changedWorkspace { return loop }
+        // A different workspace starts without old screen evidence; model switches keep the saved chat ID.
+        let next = PiLoop(provider: provider, model: model, sessionID: sessionID, tools: inSplitView ? Harness.splitViewTools : Harness.tools,
                           inSplitView: inSplitView, carrying: changedWorkspace ? [] : loop?.messages ?? []) { [weak self] call in
             guard let self else { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
             return await self.perform(call)
