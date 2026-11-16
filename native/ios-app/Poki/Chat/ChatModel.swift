@@ -171,9 +171,9 @@ final class ChatModel {
     private var planID: UUID?
     private var noteID: UUID?
 
-    /// A ceiling for a model that runs away, so it cannot spend the owner's whole quota: a task that keeps
-    /// making progress runs to its end well below it. A loop that goes nowhere ends much sooner, after
-    /// `PiLoop.stallSteps` steps (a screen and a call that do not change).
+    /// A ceiling for a runaway model's quota use. On an unchanged screen, PiLoop stops after
+    /// `stallSteps` identical calls or `stallPairs` repetitions of a call pair. Waiting for the owner
+    /// or runner startup resets that history, but does not remove this ceiling.
     static let maxTurns = 500
 
     init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil) {

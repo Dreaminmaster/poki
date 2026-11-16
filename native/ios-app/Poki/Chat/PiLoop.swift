@@ -17,6 +17,7 @@ final class PiLoop {
 
     /// This many steps in a row with the same call and the same screen end the task as stuck.
     nonisolated static let stallSteps = 6
+    nonisolated static let stallPairs = 4
 
     let provider: ModelProvider
     let model: Model
@@ -51,7 +52,7 @@ final class PiLoop {
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
                 if answer.waitingForOwner {
                     stall.reset()
-                } else if stall.record("\(spec.name)\n\(arguments)\n\(answer.screen ?? answer.text)", limit: Self.stallSteps) {
+                } else if stall.record(call: "\(spec.name)\n\(arguments)", screen: answer.screen ?? answer.text) {
                     gate.end(.stuck)
                 }
                 return Self.result(answer)
@@ -66,9 +67,9 @@ final class PiLoop {
     }
 
     /// The owner's message (with the JPEGs of its photos and PDFs) under this task's instructions, then
-    /// pi's loop until the model answers without tools, `stop()`, `stallSteps` steps in a row that go
-    /// nowhere, or `maxTurns` model turns (a ceiling for a model that runs away). `onText` gets each
-    /// finished text block.
+    /// pi's loop until the model answers without tools, `stop()`, a repeated call or pair on the same
+    /// screen, or `maxTurns` model turns (a ceiling for a model that runs away). Owner waits reset the
+    /// stall history. `onText` gets each finished text block.
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
@@ -169,18 +170,22 @@ private final class StopGate: @unchecked Sendable {
     var ending: Ending? { lock.withLock { first } }
 }
 
-/// Counts the steps in a row that were the same.
 private final class StallWatch: @unchecked Sendable {
     private let lock = NSLock()
-    private var last: String?
-    private var run = 0
-    func reset() { lock.withLock { last = nil; run = 0 } }
-    /// True when this step is the `limit`th in a row that matches the one before it.
-    func record(_ step: String, limit: Int) -> Bool {
+    private var steps: [(call: String, screen: String)] = []
+    func reset() { lock.withLock { steps.removeAll() } }
+    func record(call: String, screen: String) -> Bool {
         lock.withLock {
-            run = step == last ? run + 1 : 1
-            last = step
-            return run >= limit
+            steps.append((call, screen))
+            let pairSteps = PiLoop.stallPairs * 2
+            let capacity = max(PiLoop.stallSteps, pairSteps)
+            if steps.count > capacity { steps.removeFirst(steps.count - capacity) }
+            let repeated = steps.suffix(PiLoop.stallSteps)
+            if repeated.count == PiLoop.stallSteps,
+               repeated.allSatisfy({ $0.call == call && $0.screen == screen }) { return true }
+            let alternating = steps.suffix(pairSteps)
+            return alternating.count == pairSteps && alternating.allSatisfy { $0.screen == screen }
+                && zip(alternating.dropFirst(2), alternating).allSatisfy { $0.0.call == $0.1.call }
         }
     }
 }
