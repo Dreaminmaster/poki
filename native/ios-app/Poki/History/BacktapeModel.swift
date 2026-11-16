@@ -22,21 +22,47 @@ final class BacktapeModel {
         case failed
     }
 
-    /// Qwen3 1.7B, 4-bit, Apache 2.0, about 0.98 GB. Pinned so every phone gets the same files.
-    static let repo = "mlx-community/Qwen3-1.7B-4bit"
-    static let revision = "3b1b1768f8f8cf8351c712464f906e86c2b8269e"
-    static let files: [(name: String, bytes: Int64)] = [
-        ("config.json", 937),
-        ("added_tokens.json", 707),
-        ("special_tokens_map.json", 613),
-        ("tokenizer_config.json", 9_706),
-        ("model.safetensors.index.json", 49_731),
-        ("merges.txt", 1_671_853),
-        ("vocab.json", 2_776_833),
-        ("tokenizer.json", 11_422_654),
-        ("model.safetensors", 968_080_210),
+    /// A model the owner can pick. Each is pinned to one revision so every phone gets the same files.
+    struct Choice: Identifiable, Equatable {
+        let id: String
+        let name: String
+        let repo: String
+        let revision: String
+        let files: [String]
+        let sizes: [Int64]
+        var bytes: Int64 { sizes.reduce(0, +) }
+    }
+
+    /// Both Apache 2.0, 4-bit, from mlx-community on Hugging Face (the owner, 2026-11-15: let people
+    /// choose between Qwen 3 and Qwen 3.5).
+    static let choices: [Choice] = [
+        Choice(
+            id: "qwen3", name: "Qwen 3 1.7B", repo: "mlx-community/Qwen3-1.7B-4bit",
+            revision: "3b1b1768f8f8cf8351c712464f906e86c2b8269e",
+            files: ["config.json", "added_tokens.json", "special_tokens_map.json", "tokenizer_config.json",
+                    "model.safetensors.index.json", "merges.txt", "vocab.json", "tokenizer.json", "model.safetensors"],
+            sizes: [937, 707, 613, 9_706, 49_731, 1_671_853, 2_776_833, 11_422_654, 968_080_210]
+        ),
+        Choice(
+            id: "qwen35", name: "Qwen 3.5 2B", repo: "mlx-community/Qwen3.5-2B-4bit",
+            revision: "674aaa7240b91e8012fcad5d791b7dfe5ba90207",
+            files: ["config.json", "tokenizer_config.json", "chat_template.jinja", "model.safetensors.index.json",
+                    "vocab.json", "tokenizer.json", "model.safetensors"],
+            sizes: [3_113, 1_139, 7_755, 81_722, 6_722_759, 19_989_343, 1_722_271_785]
+        ),
     ]
-    static let bytes: Int64 = files.reduce(0) { $0 + $1.bytes }
+
+    /// The picked model. Picking another removes the files of the one before, so only one is kept.
+    var choice: Choice {
+        didSet {
+            guard choice != oldValue else { return }
+            UserDefaults.standard.set(choice.id, forKey: "history.summaryModel")
+            dropJob()
+            release()
+            try? FileManager.default.removeItem(at: Self.base)
+            state = .missing
+        }
+    }
 
     /// MLX needs a real GPU and room for about 1 GB of weights beside the app.
     static var supported: Bool {
@@ -55,6 +81,8 @@ final class BacktapeModel {
     #endif
 
     private init() {
+        let kept = UserDefaults.standard.string(forKey: "history.summaryModel")
+        choice = Self.choices.first { $0.id == kept } ?? Self.choices[0]
         if FileManager.default.fileExists(atPath: folder.appendingPathComponent(".complete").path) { state = .ready }
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
@@ -65,30 +93,33 @@ final class BacktapeModel {
 
     var ready: Bool { state == .ready }
 
-    private var folder: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Poki/BacktapeModel/\(Self.revision.prefix(12))", isDirectory: true)
+    private static var base: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Poki/BacktapeModel", isDirectory: true)
     }
+
+    private var folder: URL { Self.base.appendingPathComponent(String(choice.revision.prefix(12)), isDirectory: true) }
 
     // MARK: Download
 
     func download() {
         guard Self.supported, job == nil, state != .ready else { return }
+        let picked = choice
         state = .downloading(0)
         job = Task { [weak self] in
             guard let self else { return }
+            var failed = false
             do {
                 try await self.fetch()
-                self.state = .ready
-                AppLog.shared.add("history", "summary model downloaded")
             } catch {
-                if Task.isCancelled {
-                    self.state = .missing
-                } else {
-                    self.state = .failed
+                failed = true
+                if !Task.isCancelled {
                     AppLog.shared.add("history", "summary model download failed: \(error.localizedDescription)")
                 }
             }
+            // Another model was picked meanwhile: that pick already reset everything.
+            guard self.choice == picked else { return }
+            self.state = failed ? (Task.isCancelled ? .missing : .failed) : .ready
             self.job = nil
         }
     }
@@ -97,37 +128,45 @@ final class BacktapeModel {
         job?.cancel()
     }
 
+    private func dropJob() {
+        job?.cancel()
+        job = nil
+    }
+
     func remove() {
         job?.cancel()
         release()
-        try? FileManager.default.removeItem(at: folder.deletingLastPathComponent())
+        try? FileManager.default.removeItem(at: Self.base)
         state = .missing
     }
 
     /// Files that are already whole are kept, so a broken download goes on where it stopped.
     private func fetch() async throws {
         let manager = FileManager.default
+        let picked = choice, folder = self.folder, total = picked.bytes
         try manager.createDirectory(at: folder, withIntermediateDirectories: true)
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
-        var kept = folder.deletingLastPathComponent()
+        var kept = Self.base
         try? kept.setResourceValues(values)
 
         var done: Int64 = 0
-        for file in Self.files {
+        for (name, bytes) in zip(picked.files, picked.sizes) {
             try Task.checkCancellation()
+            let file = (name: name, bytes: bytes)
             let target = folder.appendingPathComponent(file.name)
             let size = (try? manager.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value
             if size != file.bytes {
                 try? manager.removeItem(at: target)
-                let url = URL(string: "https://huggingface.co/\(Self.repo)/resolve/\(Self.revision)/\(file.name)")!
+                let url = URL(string: "https://huggingface.co/\(picked.repo)/resolve/\(picked.revision)/\(file.name)")!
                 let watch = BacktapeDownloadWatch()
                 let before = done
                 let meter = Task { [weak self] in
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .milliseconds(400))
                         let now = before + watch.received
-                        self?.state = .downloading(min(0.999, Double(now) / Double(Self.bytes)))
+                        guard let self, self.choice == picked else { return }
+                        self.state = .downloading(min(0.999, Double(now) / Double(total)))
                     }
                 }
                 defer { meter.cancel() }
@@ -138,7 +177,8 @@ final class BacktapeModel {
                 try manager.moveItem(at: temporary, to: target)
             }
             done += file.bytes
-            state = .downloading(min(0.999, Double(done) / Double(Self.bytes)))
+            guard choice == picked else { throw CancellationError() }
+            state = .downloading(min(0.999, Double(done) / Double(total)))
         }
         manager.createFile(atPath: folder.appendingPathComponent(".complete").path, contents: Data())
     }

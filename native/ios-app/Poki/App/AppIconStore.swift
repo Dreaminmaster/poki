@@ -63,6 +63,23 @@ final class AppIconStore {
         return found
     }
 
+    @ObservationIgnored private var goneApps: [String: Bool] = [:]
+
+    /// Whether `app` is gone from this iPhone. Said only when iOS hands out installed icons here (it
+    /// has Safari's) and has none for this app; a name that is not a bundle ID, or one of Apple's own,
+    /// is never called gone.
+    func gone(_ app: String) -> Bool {
+        if let known = goneApps[app] { return known }
+        var answer = false
+        if let id = Self.bundleID(app), id.contains("."), !id.lowercased().hasPrefix("com.apple."),
+           installedIcon("com.apple.mobilesafari", false).map(Self.isVisible) == true {
+            let ids = KnownApps.byID[id.lowercased()]?.ids ?? [id]
+            answer = !ids.contains { self.installedIcon($0, false).map(Self.isVisible) == true }
+        }
+        goneApps[app] = answer
+        return answer
+    }
+
     /// Fetches the App Store's icon for `app` when nothing nearer has one, and keeps it. Returns when it
     /// has arrived or failed.
     func load(_ app: String) async {

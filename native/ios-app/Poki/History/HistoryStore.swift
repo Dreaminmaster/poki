@@ -169,6 +169,9 @@ final class HistoryStore: @unchecked Sendable {
         await perform {
             self.run("DELETE FROM entries WHERE at >= ? AND at < ?", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)])
             self.run("DELETE FROM notes WHERE start >= ? AND start < ?", [.real(start.timeIntervalSince1970 - 600), .real(end.timeIntervalSince1970)])
+            // Notes of an hour, a day or a week (kept a fraction of a second off the whole second,
+            // see BacktapeZoom.key) that hold any of the forgotten time go too.
+            self.run("DELETE FROM notes WHERE start != CAST(start AS INTEGER) AND start >= ? AND start < ?", [.real(start.timeIntervalSince1970 - 8 * 86_400), .real(end.timeIntervalSince1970)])
         }
     }
 
@@ -207,7 +210,7 @@ final class HistoryStore: @unchecked Sendable {
     // MARK: Reading
 
     /// The newest entries with only the start of their text, for the list of blocks.
-    func recent(limit: Int = 20_000) async -> [HistoryEntry] {
+    func recent(limit: Int = 60_000) async -> [HistoryEntry] {
         await fetch {
             self.rows("SELECT id, at, app, title, substr(text, 1, 240) FROM entries ORDER BY at DESC LIMIT ?", [.integer(Int64(limit))], Self.entry)
         }

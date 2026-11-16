@@ -29,19 +29,22 @@ enum BacktapeWriter {
     static var available: Bool { apple || BacktapeModel.shared.ready }
 
     @MainActor
-    static func write(_ entries: [HistoryEntry]) async -> BacktapeNote? {
+    static func write(_ entries: [HistoryEntry], period: String = "10 minutes") async -> BacktapeNote? {
         guard available, !entries.isEmpty else { return nil }
-        // The models' windows are small: the start of each read, up to about 3,000 characters.
+        // The models' windows are small: up to 14 reads spread evenly over the time, the start of
+        // each, about 3,000 characters in all.
+        let take = min(entries.count, 14)
+        let room = max(160, 3000 / take - 40)
+        let long = entries.count > 1 && (entries.last!.at.timeIntervalSince(entries.first!.at)).magnitude > 20 * 3600
         var text = ""
-        for entry in entries {
-            let time = entry.at.formatted(date: .omitted, time: .shortened)
-            let piece = "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text.prefix(400))\n\n"
-            if text.count + piece.count > 3000 { break }
-            text += piece
+        for index in 0..<take {
+            let entry = entries[index * entries.count / take]
+            let time = entry.at.formatted(date: long ? .abbreviated : .omitted, time: .shortened)
+            text += "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text.prefix(room))\n\n"
         }
         let language = Locale(identifier: "en").localizedString(forIdentifier: AppLocalization.locale.identifier) ?? "English"
         let instructions = """
-        You describe what a person did on their iPhone during 10 minutes, from the text that was on \
+        You describe what a person did on their iPhone during \(period), from the text that was on \
         the screen. Write in \(language). First line: a title of at most 8 words. Then 2 or 3 plain \
         sentences that address the person as "you". Leave out buttons, menus, tab names and status \
         bar items. Say only what the text shows. No lists, no headings, no quotation marks.

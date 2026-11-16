@@ -67,6 +67,14 @@ final class HistoryLock: ObservableObject {
         if passed { opened() }
     }
 
+    /// Asks for Face ID or Touch ID again, for something that cannot be undone. The page stays as it is.
+    func confirm(_ reason: String) async -> Bool {
+        guard usesBiometrics else { return false }
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        return (try? await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)) ?? false
+    }
+
     // MARK: PIN
 
     private static func stored() -> Data? {

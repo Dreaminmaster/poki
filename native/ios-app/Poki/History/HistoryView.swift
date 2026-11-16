@@ -1,9 +1,8 @@
 import SwiftUI
 
-// Backtape's page (issue 356): the deck on top (BacktapeDeck.swift), a tape of 10 minute blocks under
-// a playhead, and under it the privacy controls. A block opens into the reads kept in it.
-// Titles and descriptions are made on the phone without a model: app names, screen titles and the
-// first lines read.
+// Backtape's page (issue 356): the library of tiles (BacktapeLibrary.swift) behind the lock, with
+// recording and settings in the bar. This file holds the grouping the tiles are built from, the
+// page itself and Backtape Settings.
 
 // MARK: Grouping
 
@@ -136,63 +135,31 @@ struct HistoryIcons: View {
 struct HistoryPage: View {
     @ObservedObject private var capture = HistoryCapture.shared
     @ObservedObject private var lock = HistoryLock.shared
-    /// Blocks of 10 minutes, oldest first.
-    @State private var blocks: [HistorySpan] = []
-    /// The block under the playhead.
-    @State private var selected: Date?
-    @State private var note: BacktapeNote?
+    @State private var layout = BacktapeLayout()
+    @State private var loaded = false
     @State private var asking = false
-    @State private var presses = 0
-
-    private var index: Int {
-        guard let selected, let found = blocks.firstIndex(where: { $0.id == selected }) else { return max(0, blocks.count - 1) }
-        return found
-    }
-
-    private var current: HistorySpan? { blocks.indices.contains(index) ? blocks[index] : nil }
-    private var progress: Double { blocks.count > 1 ? Double(index) / Double(blocks.count - 1) : 1 }
-
-    /// Days on the tape, newest first.
-    private var days: [Date] {
-        var found: [Date] = []
-        for block in blocks.reversed() {
-            let day = Calendar.current.startOfDay(for: block.start)
-            if found.last != day { found.append(day) }
-        }
-        return found
-    }
 
     var body: some View {
-        List {
+        Group {
             // The whole page opens only after Face ID, Touch ID or Poki's PIN.
             if !lock.unlocked {
-                HistoryUnlockSections()
-            } else if blocks.isEmpty, !capture.enabled {
-                Section {
-                    Button("Turn On Backtape") { asking = true }
-                } footer: {
-                    Text("Poki reads the text of the app in front every few seconds and keeps it on this iPhone. It takes no screenshots, and password fields are left out. Nothing is sent anywhere. Turning the local connection off stops it completely.")
+                List { HistoryUnlockSections() }
+            } else if layout.isEmpty {
+                List {
+                    if !capture.enabled {
+                        Section {
+                            Button("Turn On Backtape") { asking = true }
+                        } footer: {
+                            Text("Poki reads the text of the app in front every few seconds and keeps it on this iPhone. It takes no screenshots, and password fields are left out. Nothing is sent anywhere. Turning the local connection off stops it completely.")
+                        }
+                    } else if loaded {
+                        Section {
+                            Text("Nothing is kept yet. Use the iPhone as usual and come back.").foregroundStyle(.secondary)
+                        }
+                    }
                 }
             } else {
-                Section {
-                    BacktapeCassette(block: current, index: index, progress: progress, days: days) { move($0) }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                    if !blocks.isEmpty {
-                        BacktapeTape(blocks: blocks, selected: $selected)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-                }
-                if let current {
-                    details(current)
-                } else {
-                    Section {
-                        Text("Nothing is kept yet. Use the iPhone as usual and come back.").foregroundStyle(.secondary)
-                    }
-                }
+                BacktapeLibrary(layout: layout)
             }
         }
         .navigationTitle(AppLocalization.text("Backtape"))
@@ -205,14 +172,16 @@ struct HistoryPage: View {
                     }
                     .accessibilityLabel(Text("Backtape Settings"))
                 }
+                // Its own glass, apart from Settings (the owner, 2026-11-15).
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+                ToolbarItem(placement: .topBarTrailing) { recording }
             }
         }
         .task(id: capture.changes) { await load() }
-        .task(id: selected) { await write() }
-        .onChange(of: lock.unlocked) { _, _ in Task { await write() } }
-        .sensoryFeedback(.selection, trigger: selected)
-        .sensoryFeedback(.impact(weight: .medium), trigger: presses)
         .sensoryFeedback(.impact(weight: .heavy), trigger: capture.isPaused)
+        .sensoryFeedback(.impact(weight: .heavy), trigger: capture.enabled)
         .alert("Turn On Backtape", isPresented: $asking) {
             Button("Turn On") { capture.enabled = true }
             Button("Cancel", role: .cancel) {}
@@ -221,91 +190,35 @@ struct HistoryPage: View {
         }
     }
 
-    /// What the block under the playhead held: the note, each app's line, and the way to the reads.
-    @ViewBuilder
-    private func details(_ block: HistorySpan) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(verbatim: note?.title ?? block.title).font(.headline)
-                let text = note?.body ?? block.summary
-                if !text.isEmpty { Text(verbatim: text).font(.subheadline).foregroundStyle(.secondary) }
-                if note != nil {
-                    Text("Written on this iPhone by Apple Intelligence").font(.caption).foregroundStyle(.tertiary)
-                }
+    /// Start, pause and stop, in a menu that opens in place next to the button.
+    private var recording: some View {
+        Menu {
+            if !capture.enabled {
+                Button { asking = true } label: { Label("Start Recording", systemImage: "record.circle") }
+            } else if capture.isPaused {
+                Button { capture.resume() } label: { Label("Resume Recording", systemImage: "play") }
+                Button(role: .destructive) { capture.enabled = false } label: { Label("Stop Recording", systemImage: "stop") }
+            } else {
+                Button { capture.pause(until: Date().addingTimeInterval(3600)) } label: { Label("Pause for 1 Hour", systemImage: "pause") }
+                Button {
+                    capture.pause(until: Calendar.current.startOfDay(for: Date().addingTimeInterval(86_400)))
+                } label: { Label("Pause Until Tomorrow", systemImage: "moon") }
+                Button(role: .destructive) { capture.enabled = false } label: { Label("Stop Recording", systemImage: "stop") }
             }
-            .padding(.vertical, 4)
-        }
-        Section {
-            ForEach(Array(block.apps.prefix(6)), id: \.self) { app in
-                HStack(spacing: 12) {
-                    AppIconView(app: app, size: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: HistoryNames.app(app))
-                        let line = Self.line(app, in: block)
-                        if !line.isEmpty { Text(verbatim: line).font(.footnote).foregroundStyle(.secondary).lineLimit(2) }
-                    }
-                }
+        } label: {
+            if capture.enabled, !capture.isPaused {
+                Image(systemName: "pause.fill")
+            } else {
+                Image(systemName: "record.circle").foregroundStyle(.red)
             }
         }
-        Section {
-            NavigationLink { HistoryGate { HistoryBlockPage(start: block.start, end: block.end).settingsPage() } } label: {
-                LabeledContent("Screen Text") { Text(verbatim: "\(block.entries.count)").monospacedDigit() }
-            }
-            Button("Delete These 10 Minutes", role: .destructive) {
-                Task { await capture.delete(from: block.start, to: block.end) }
-            }
-        }
-    }
-
-    /// What one app showed in a block: its screen titles, or for a notification its text.
-    private static func line(_ app: String, in block: HistorySpan) -> String {
-        var seen: [String] = []
-        for entry in block.entries.reversed() where entry.app == app {
-            let title = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let text = title.isEmpty || title == HistoryCapture.bannerTitle
-                ? (entry.text.split(separator: "\n").first.map(String.init) ?? "") : title
-            if !text.isEmpty, !seen.contains(text) { seen.append(text) }
-            if seen.count == 3 { break }
-        }
-        return seen.joined(separator: ", ")
-    }
-
-    private func move(_ step: BacktapeMove) {
-        presses += 1
-        var target: HistorySpan?
-        switch step {
-        case .back: target = blocks.indices.contains(index - 1) ? blocks[index - 1] : nil
-        case .forward: target = blocks.indices.contains(index + 1) ? blocks[index + 1] : nil
-        case .now: target = blocks.last
-        case .day(let day): target = blocks.last(where: { Calendar.current.startOfDay(for: $0.start) == day })
-        }
-        guard let target else { return }
-        withAnimation(.snappy) { selected = target.id }
+        .accessibilityLabel(Text("Recording"))
     }
 
     private func load() async {
         let entries = await HistoryStore.shared.recent()
-        blocks = HistoryNames.blocks(HistorySpan(start: .distantPast, end: .distantFuture, entries: entries)).reversed()
-        if let selected, blocks.contains(where: { $0.id == selected }) { return }
-        selected = blocks.last?.id
-    }
-
-    /// Shows the kept note of the block under the playhead, or has one written once the block is over
-    /// and the playhead has rested on it.
-    private func write() async {
-        note = nil
-        guard lock.unlocked, let block = current else { return }
-        if let kept = await HistoryStore.shared.note(start: block.start) {
-            if !Task.isCancelled { note = kept }
-            return
-        }
-        guard block.end < Date(), BacktapeWriter.available else { return }
-        try? await Task.sleep(for: .milliseconds(700))
-        guard !Task.isCancelled else { return }
-        let entries = await HistoryStore.shared.entries(from: block.start, to: block.end)
-        guard let written = await BacktapeWriter.write(entries) else { return }
-        HistoryStore.shared.keep(written, start: block.start)
-        if !Task.isCancelled { note = written }
+        layout = BacktapeLayout.build(entries)
+        loaded = true
     }
 }
 
@@ -325,6 +238,13 @@ private struct BacktapeSummarySection: View {
                 }
             }
             if !BacktapeWriter.apple, BacktapeModel.supported {
+                Picker("Model", selection: Binding(get: { model.choice.id }, set: { id in
+                    if let picked = BacktapeModel.choices.first(where: { $0.id == id }) { model.choice = picked }
+                })) {
+                    ForEach(BacktapeModel.choices) { choice in
+                        Text(verbatim: "\(choice.name), \(ByteCountFormatter.string(fromByteCount: choice.bytes, countStyle: .file))").tag(choice.id)
+                    }
+                }
                 switch model.state {
                 case .missing, .failed:
                     Button("Download Summary Model") { model.download() }
@@ -364,7 +284,7 @@ private struct BacktapeSummarySection: View {
         case .failed:
             return "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped."
         default:
-            return "This iPhone has no Apple Intelligence. Download a model of about 1 GB to write a short note for each 10 minutes on this iPhone. Nothing is sent anywhere."
+            return "This iPhone has no Apple Intelligence. Download a model to write short notes on this iPhone. Only one model is kept, and picking another removes the one before. Nothing is sent anywhere."
         }
     }
 }
