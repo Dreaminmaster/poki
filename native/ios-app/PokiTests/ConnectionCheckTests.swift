@@ -1,24 +1,76 @@
 import XCTest
 @testable import Poki
 
-/// A custom model endpoint served without the network, through URLSession.shared as pi sends it: each
-/// test sets what it answers, or makes it time out.
+/// Stubs model endpoints without the network, through URLSession.shared as pi sends requests.
 final class ModelServerStub: URLProtocol {
+    struct Sent {
+        let url: URL?
+        let body: Data
+        var json: [String: Any] {
+            (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        }
+    }
+
+    private static let lock = NSLock()
     nonisolated(unsafe) static var answer: (status: Int, body: String)?
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == "model-server.test" }
+    nonisolated(unsafe) static var responder: (@Sendable (URLRequest, Data) -> (status: Int, type: String, body: String))?
+    nonisolated(unsafe) private static var recorded: [Sent] = []
+
+    static var requests: [Sent] { lock.withLock { recorded } }
+    static func recordedReset() { lock.withLock { recorded.removeAll() } }
+    static func clear() {
+        lock.withLock {
+            answer = nil
+            responder = nil
+            recorded.removeAll()
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        guard let host = request.url?.host() else { return false }
+        return ["model-server.test", "openrouter.ai", "api.anthropic.com"].contains(host)
+    }
+
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
     override func startLoading() {
-        guard let answer = Self.answer else {
+        let body = Self.bodyData(from: request)
+        let customResponder = Self.lock.withLock { () -> (@Sendable (URLRequest, Data) -> (status: Int, type: String, body: String))? in
+            Self.recorded.append(Sent(url: request.url, body: body))
+            return Self.responder
+        }
+        let reply: (status: Int, type: String, body: String)
+        if let customResponder {
+            reply = customResponder(request, body)
+        } else if let answer = Self.lock.withLock({ Self.answer }) {
+            reply = (answer.status, answer.status == 200 ? "text/event-stream" : "application/json", answer.body)
+        } else {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
             return
         }
-        let type = answer.status == 200 ? "text/event-stream" : "application/json"
-        let response = HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: "HTTP/1.1", headerFields: ["content-type": type])!
+        let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: ["content-type": reply.type])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(answer.body.utf8))
+        client?.urlProtocol(self, didLoad: Data(reply.body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
+
     override func stopLoading() {}
+
+    /// URLSession moves httpBody into httpBodyStream before handing a request to URLProtocol.
+    private static func bodyData(from request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count > 0 else { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }
 
 /// Test Connection on the key page: one real request through pi to a custom endpoint, and the line the
@@ -27,18 +79,53 @@ final class ModelServerStub: URLProtocol {
 final class ConnectionCheckTests: XCTestCase {
     private let key = "placeholder-test-key"
     private var language = AppLocalization.system
+    private var savedDefaults: [String: Any] = [:]
+    private var savedOpenRouterKey: String?
+    private var savedAnthropicKey: String?
+    private let defaultsKeys = [
+        "chat.provider",
+        "chat.model.openrouter",
+        "models.listed.openrouter",
+        "models.enabled.openrouter",
+        "models.reasoning.openrouter",
+    ]
 
     /// The result's words follow Poki's language; these tests read the English ones.
     override func setUp() {
+        ModelServerStub.clear()
         URLProtocol.registerClass(ModelServerStub.self)
         language = AppLocalization.shared.preference
         AppLocalization.shared.preference = "en"
+        savedOpenRouterKey = ModelKeys.key(.openrouter)
+        savedAnthropicKey = ModelKeys.key(.anthropic)
+        savedDefaults = [:]
+        for k in defaultsKeys {
+            if let value = UserDefaults.standard.object(forKey: k) { savedDefaults[k] = value }
+            UserDefaults.standard.removeObject(forKey: k)
+        }
     }
 
     override func tearDown() {
         URLProtocol.unregisterClass(ModelServerStub.self)
-        ModelServerStub.answer = nil
+        ModelServerStub.clear()
         AppLocalization.shared.preference = language
+        for k in defaultsKeys {
+            if let value = savedDefaults[k] {
+                UserDefaults.standard.set(value, forKey: k)
+            } else {
+                UserDefaults.standard.removeObject(forKey: k)
+            }
+        }
+        if let savedOpenRouterKey {
+            try? ModelKeys.save(savedOpenRouterKey, for: .openrouter)
+        } else {
+            ModelKeys.remove(.openrouter)
+        }
+        if let savedAnthropicKey {
+            try? ModelKeys.save(savedAnthropicKey, for: .anthropic)
+        } else {
+            ModelKeys.remove(.anthropic)
+        }
     }
 
     private func check(_ answer: (status: Int, body: String)?) async -> ConnectionCheck.Result {
@@ -72,5 +159,200 @@ final class ConnectionCheckTests: XCTestCase {
             XCTAssertFalse(result.words.contains(key))
             XCTAssertFalse(result.detail?.contains(key) ?? false)
         }
+    }
+
+    func testUncataloguedOpenRouterModelOmitsThinkingParameters() async throws {
+        let modelID = "openai/gpt-6.1-terra"
+        UserDefaults.standard.set([modelID], forKey: "models.listed.openrouter")
+        ModelCatalog.set(modelID, on: true, for: .openrouter)
+        ModelKeys.selectedProvider = .openrouter
+        ModelKeys.selectedModel = modelID
+        XCTAssertEqual(ModelKeys.model(for: .openrouter), modelID)
+
+        let sse = #"data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"openai/gpt-6.1-terra-20261026","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"# + "\n\ndata: [DONE]\n\n"
+        ModelServerStub.responder = { _, body in
+            let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+            if json["thinking"] != nil || json["reasoning"] != nil || json["reasoning_effort"] != nil || json["output_config"] != nil {
+                return (400, "application/json", #"{"error":{"message":"Thinking.block_binding is not supported on openai/gpt-6.1-terra-20261026","code":400}}"#)
+            }
+            return (200, "text/event-stream", sse)
+        }
+
+        let checkResult = await ConnectionCheck.run(.openrouter, key: key)
+        XCTAssertEqual(checkResult, .works(model: "openai/gpt-6.1-terra-20261026"))
+        let first = try XCTUnwrap(ModelServerStub.requests.first)
+        XCTAssertEqual(first.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
+        XCTAssertEqual(first.json["model"] as? String, modelID)
+        XCTAssertNil(first.json["thinking"])
+        XCTAssertNil(first.json["reasoning"])
+        XCTAssertNil(first.json["reasoning_effort"])
+        XCTAssertNil(first.json["output_config"])
+
+        try ModelKeys.save(key, for: .openrouter)
+        let model = try XCTUnwrap(ModelProvider.openrouter.piModel(modelID))
+        let loop = PiLoop(provider: .openrouter, model: model, tools: []) { _ in
+            .init(text: "", jpeg: nil, isError: false)
+        }
+        let turnOutcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+        XCTAssertEqual(turnOutcome, .done)
+        let second = try XCTUnwrap(ModelServerStub.requests.last)
+        XCTAssertEqual(second.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
+        XCTAssertNil(second.json["thinking"])
+        XCTAssertNil(second.json["reasoning"])
+        XCTAssertNil(second.json["reasoning_effort"])
+        XCTAssertNil(second.json["output_config"])
+    }
+
+    func testOpenRouterModelListEnablesReasoningOnlyWhenSupported() async throws {
+        try ModelKeys.save(key, for: .openrouter)
+        let catalogJSON = #"""
+        {"data":[
+          {"id":"openai/gpt-6.1-terra","supported_parameters":["max_completion_tokens","reasoning","reasoning_effort","tools"]},
+          {"id":"vendor/plain-chat","supported_parameters":["max_tokens","temperature","tools"]}
+        ]}
+        """#
+        let sse = #"data: {"id":"gen-2","object":"chat.completion.chunk","created":1,"model":"served","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"# + "\n\ndata: [DONE]\n\n"
+        ModelServerStub.responder = { request, _ in
+            if request.url?.path == "/api/v1/models" {
+                return (200, "application/json", catalogJSON)
+            }
+            return (200, "text/event-stream", sse)
+        }
+
+        let count = try await ModelCatalog.refresh(.openrouter)
+        XCTAssertEqual(count, 2)
+
+        ModelServerStub.recordedReset()
+        ModelCatalog.set("vendor/plain-chat", on: true, for: .openrouter)
+        ModelKeys.selectedProvider = .openrouter
+        ModelKeys.selectedModel = "vendor/plain-chat"
+        let plainModel = try XCTUnwrap(ModelProvider.openrouter.piModel("vendor/plain-chat"))
+        let plainLoop = PiLoop(provider: .openrouter, model: plainModel, tools: []) { _ in
+            .init(text: "", jpeg: nil, isError: false)
+        }
+        let plainOutcome = await plainLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+        XCTAssertEqual(plainOutcome, .done)
+        let plainSent = try XCTUnwrap(ModelServerStub.requests.last)
+        XCTAssertNil(plainSent.json["reasoning"])
+        XCTAssertNil(plainSent.json["thinking"])
+
+        ModelServerStub.recordedReset()
+        ModelCatalog.set("openai/gpt-6.1-terra", on: true, for: .openrouter)
+        ModelKeys.selectedModel = "openai/gpt-6.1-terra"
+        let checkResult = await ConnectionCheck.run(.openrouter, key: key)
+        XCTAssertEqual(checkResult, .works(model: "served"))
+        let checkSent = try XCTUnwrap(ModelServerStub.requests.first)
+        XCTAssertNil(checkSent.json["reasoning"])
+        XCTAssertNil(checkSent.json["thinking"])
+
+        let reasoningModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-terra"))
+        let reasoningLoop = PiLoop(provider: .openrouter, model: reasoningModel, tools: []) { _ in
+            .init(text: "", jpeg: nil, isError: false)
+        }
+        let reasoningOutcome = await reasoningLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+        XCTAssertEqual(reasoningOutcome, .done)
+        let reasoningSent = try XCTUnwrap(ModelServerStub.requests.last)
+        XCTAssertEqual((reasoningSent.json["reasoning"] as? [String: Any])?["effort"] as? String, "low")
+        XCTAssertNil(reasoningSent.json["thinking"])
+    }
+
+    func testCataloguedModelsKeepTheirConfiguredBehavior() async throws {
+        try ModelKeys.save(key, for: .openrouter)
+        let anthropicSSE = """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"anthropic/claude-sonnet-5.5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """
+        let openAISSE = #"data: {"id":"gen-3","object":"chat.completion.chunk","created":1,"model":"openai/gpt-6.1-sol","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"# + "\n\ndata: [DONE]\n\n"
+        ModelServerStub.responder = { request, _ in
+            if request.url?.path == "/api/v1/messages" {
+                return (200, "text/event-stream", anthropicSSE)
+            }
+            return (200, "text/event-stream", openAISSE)
+        }
+
+        ModelKeys.selectedProvider = .openrouter
+        ModelKeys.selectedModel = "anthropic/claude-sonnet-5.5"
+        let sonnetCheck = await ConnectionCheck.run(.openrouter, key: key)
+        XCTAssertEqual(sonnetCheck, .works(model: "anthropic/claude-sonnet-5.5"))
+        let sonnetSent = try XCTUnwrap(ModelServerStub.requests.first)
+        XCTAssertEqual(sonnetSent.url?.absoluteString, "https://openrouter.ai/api/v1/messages")
+        XCTAssertEqual((sonnetSent.json["thinking"] as? [String: Any])?["type"] as? String, "adaptive")
+
+        ModelServerStub.recordedReset()
+        let solModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-sol"))
+        let solLoop = PiLoop(provider: .openrouter, model: solModel, tools: []) { _ in
+            .init(text: "", jpeg: nil, isError: false)
+        }
+        let solOutcome = await solLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+        XCTAssertEqual(solOutcome, .done)
+        let solSent = try XCTUnwrap(ModelServerStub.requests.last)
+        XCTAssertEqual(solSent.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
+        XCTAssertEqual((solSent.json["reasoning"] as? [String: Any])?["effort"] as? String, "low")
+
+        let builtInTerra = try XCTUnwrap(ModelProvider.openai.piModel("gpt-6.1-terra"))
+        XCTAssertEqual(builtInTerra.api, .openAIResponses)
+        XCTAssertTrue(builtInTerra.reasoning)
+    }
+
+    /// The conservative setup is OpenRouter's alone: another provider's unlisted model (a dated Anthropic id
+    /// from "Refresh the list") still takes its provider's built-in setup, thinking and output limit.
+    func testUncataloguedDirectAnthropicModelKeepsThinkingAndOutputLimit() async throws {
+        try ModelKeys.save(key, for: .anthropic)
+        let sse = """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"served","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """
+        ModelServerStub.responder = { _, _ in (200, "text/event-stream", sse) }
+
+        func chatRequest(_ modelID: String) async throws -> ModelServerStub.Sent {
+            ModelServerStub.recordedReset()
+            let model = try XCTUnwrap(ModelProvider.anthropic.piModel(modelID))
+            let loop = PiLoop(provider: .anthropic, model: model, tools: []) { _ in
+                .init(text: "", jpeg: nil, isError: false)
+            }
+            let outcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+            XCTAssertEqual(outcome, .done)
+            return try XCTUnwrap(ModelServerStub.requests.last)
+        }
+
+        let listed = try XCTUnwrap(ModelProvider.anthropic.models.first?.id)
+        let builtIn = try await chatRequest(listed)
+        let dated = try await chatRequest(listed + "-20261001")
+        XCTAssertEqual(dated.url?.absoluteString, builtIn.url?.absoluteString)
+        XCTAssertEqual((dated.json["thinking"] as? [String: Any])?["type"] as? String, "adaptive")
+        XCTAssertEqual(dated.json["max_tokens"] as? Int, builtIn.json["max_tokens"] as? Int)
+        XCTAssertGreaterThan(dated.json["max_tokens"] as? Int ?? 0, 8_192)
     }
 }
