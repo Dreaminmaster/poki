@@ -86,7 +86,7 @@ result and the time next to each line.
 - [ ] Decline: `not_sent: the owner declined`.
 - [ ] While an approval is pending, have the agent tap the Live Activity's Approve button (`do` with the button's point): the pending request is withdrawn first, so nothing is approved.
 - [ ] Typing into a password field asks first, and the Live Activity hides the text.
-- [ ] A fresh install (or an alpha that never touched the switch): Agents › Approvals › Ask Before Sensitive Steps is on, and the first Delete asks.
+- [ ] A fresh install (or a phone that never touched Approvals): Approval Method reads Never Ask, the first Send goes through without asking, and the first Delete still asks. Don't ask again on a card for a message turns approvals off, and the chat says how to turn them back on.
 - [ ] With Poki in front while an agent's approval waits (the Dynamic Island hides Poki's own Live Activity then): the chat shows Allow this step? with Allow and Don't Allow; Allow runs the step and the phone goes back to the app the agent was in.
 - [ ] Leave an approval unanswered and send nothing more: after 2 minutes the Live Activity leaves Approval, Poki says the approval ran out, and the idle stop works again.
 - [ ] In Wallet: the agent can wait, hand the screen to you and press Home without being asked; a tap asks.

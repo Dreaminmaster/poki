@@ -196,7 +196,7 @@ struct ChatView: View {
     @ViewBuilder private var asks: some View {
         if sampleScene == "approval" {
             let sample = ChatModel.Sample.approval
-            ApprovalAskCard(title: sample.question, expires: sample.expires, answer: { _ in })
+            ApprovalAskCard(title: sample.question, expires: sample.expires, answer: { _ in }, stopAsking: {})
         } else if sampleScene == "handoff" {
             TurnCard(text: Self.local(AppModel.handoffWording(.passcode)), done: {})
         } else if let ask = chat.demoAsk {
@@ -204,7 +204,8 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let approval = model.approvals.first {
             ApprovalAskCard(title: approval.question, expires: approval.expires,
-                            answer: { approved in model.resolve(approval, approved: approved) })
+                            answer: { approved in model.resolve(approval, approved: approved) },
+                            stopAsking: approval.offersStopAsking ? { model.stopAsking(approval) } : nil)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if model.passcodeHint {
             Label(Self.local(AppModel.handoffWording(.automationPasscode)), systemImage: "lock")

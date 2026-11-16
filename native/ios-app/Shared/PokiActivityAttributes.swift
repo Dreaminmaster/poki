@@ -119,6 +119,15 @@ struct PendingApproval: Codable, Hashable {
     var reason: String
     var expires: Date
 
+    /// PokiCore's word on whether turning asking off (Never Ask) would stop every step this approval
+    /// covers from asking; nil from a state saved before it existed. Not the reason's wording: a tap in a
+    /// chat app on a screen not read yet reads as sending, and stops, while a payment, a deletion, Wallet
+    /// and a tap after a launch do not.
+    var stopsWhenOff: Bool? = nil
+
+    /// The card offers Don’t Ask Again.
+    var offersStopAsking: Bool { stopsWhenOff == true }
+
     /// The approval as one short question, the same on every card, the island, the Lock Screen and
     /// the notification. It comes from the kind the rules saw in PokiCore's reason, never from the
     /// agent's words ("Allow payment?").

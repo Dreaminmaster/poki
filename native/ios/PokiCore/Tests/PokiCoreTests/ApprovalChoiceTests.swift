@@ -57,6 +57,8 @@ final class ApprovalChoiceTests: XCTestCase {
                         if let left { saved["approvals.mode"] = left }
                         let now = ApprovalChoice.resolve { saved[$0] }
                         let asked = Self.asking(now.mode, now.level)
+                        // An owner who saved nothing at all was never asked a question: Never Ask is the default.
+                        if saved.isEmpty { XCTAssertEqual(now.mode, .off, "a phone that saved nothing"); continue }
                         let owner = "ask \(ask.map(String.init) ?? "unset"), classifier \(classifier.map(String.init) ?? "unset"), sensitivity \(level ?? "unset"), approvals.mode \(left.map { "\($0)" } ?? "unset"): \(now)"
                         XCTAssertGreaterThanOrEqual(asked, Self.asked752(ask: ask, classifier: classifier, level: level), "asks less than 0.3.1 did: " + owner)
                         // An owner who chose in the test build saw that choice and was asked by it.
@@ -69,7 +71,11 @@ final class ApprovalChoiceTests: XCTestCase {
 
     func testWhereEachOwnerLands() {
         let rows: [(name: String, saved: [String: Any], mode: ApprovalMode, level: ApprovalLevel)] = [
-            ("never chose", [:], .confirm, .everything),
+            ("never chose", [:], .off, .everything),
+            ("updated from a version that saved only unrelated settings", ["wantsOn": true, "idleStopSeconds.v4": 120], .off, .everything),
+            ("turned Ask Me on", ["approvals.ask": true], .confirm, .everything),
+            ("saved a sensitivity and nothing else", ["approvals.classifier.level": "strict"], .confirm, .everything),
+            ("turned the classifier off", ["approvals.classifier": false], .confirm, .everything),
             ("turned Ask Me off", ["approvals.ask": false], .off, .everything),
             ("turned the classifier on", ["approvals.classifier": true], .reply, .balanced),
             ("turned the classifier on at Strict", ["approvals.ask": true, "approvals.classifier": true, "approvals.classifier.level": "strict"], .reply, .strict),

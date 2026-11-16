@@ -4,12 +4,16 @@ import UserNotifications
 /// A time-sensitive notification for an approval when no Live Activity can ask (off, dismissed, or
 /// never started), so the person still hears about it. Never both: AppModel's askOwner posts it only
 /// without a Live Activity. Touch and hold
-/// it for Allow (Face ID or the passcode first) and Don't Allow. PokiCore sends no input while an
+/// it for Allow (Face ID or the passcode first), Don't Allow, and on a step that turning asking off
+/// reaches, Don't Ask Again (Face ID or the passcode first). PokiCore sends no input while an
 /// approval waits, so only the person can press them.
 enum ApprovalNotice {
     static let category = "approval"
+    /// The same buttons and Don't Ask Again, for a step the owner can stop being asked about.
+    static let optionalCategory = "approval.optional"
     static let allow = "approval.allow"
     static let deny = "approval.deny"
+    static let stopAsking = "approval.stop"
 
     /// Allow and Don't Allow on the notification itself (touch and hold it, or pull it down), so an
     /// approval can be answered without opening Poki. Allow asks for Face ID or the passcode first.
@@ -18,10 +22,14 @@ enum ApprovalNotice {
                                                options: [.authenticationRequired], icon: UNNotificationActionIcon(systemImageName: "checkmark"))
         let denyAction = UNNotificationAction(identifier: deny, title: AppLocalization.text(LocalizedStringResource("Don’t Allow")),
                                               options: [.destructive], icon: UNNotificationActionIcon(systemImageName: "xmark"))
+        let stopAction = UNNotificationAction(identifier: stopAsking, title: AppLocalization.text(LocalizedStringResource("Don’t ask again")),
+                                              options: [.authenticationRequired], icon: UNNotificationActionIcon(systemImageName: "bell.slash"))
         let approvals = UNNotificationCategory(identifier: category, actions: [allowAction, denyAction], intentIdentifiers: [],
                                                options: [.hiddenPreviewsShowTitle])
+        let optional = UNNotificationCategory(identifier: optionalCategory, actions: [allowAction, denyAction, stopAction], intentIdentifiers: [],
+                                              options: [.hiddenPreviewsShowTitle])
         let center = UNUserNotificationCenter.current()
-        center.setNotificationCategories([approvals])
+        center.setNotificationCategories([approvals, optional])
         center.delegate = ApprovalNoticeDelegate.shared
     }
 
@@ -36,7 +44,7 @@ enum ApprovalNotice {
         let content = UNMutableNotificationContent()
         // The one question, as on the card: from the rules' kind, never the agent's words.
         content.title = approval.question
-        content.categoryIdentifier = category
+        content.categoryIdentifier = approval.offersStopAsking ? optionalCategory : category
         content.userInfo = ["approval": approval.id]
         content.sound = .default
         content.interruptionLevel = .timeSensitive
@@ -62,8 +70,9 @@ final class ApprovalNoticeDelegate: NSObject, UNUserNotificationCenterDelegate, 
             defer { completionHandler() }
             guard let id = response.notification.request.content.userInfo["approval"] as? String else { return }
             let action = response.actionIdentifier
-            guard action == ApprovalNotice.allow || action == ApprovalNotice.deny else { return }
-            ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action == ApprovalNotice.allow))
+            guard [ApprovalNotice.allow, ApprovalNotice.deny, ApprovalNotice.stopAsking].contains(action) else { return }
+            ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action != ApprovalNotice.deny,
+                                                         stopAsking: action == ApprovalNotice.stopAsking))
         }
     }
 

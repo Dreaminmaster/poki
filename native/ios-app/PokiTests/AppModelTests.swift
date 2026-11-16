@@ -308,6 +308,8 @@ final class ApprovalDefaultTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: ApprovalClassifier.modeKey)
         UserDefaults.standard.removeObject(forKey: ApprovalChoice.earlierModeKey)
         UserDefaults.standard.removeObject(forKey: ApprovalClassifier.levelKey)
+        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.onKey)
     }
     override func tearDown() {
         for key in keys { UserDefaults.standard.set(saved[key], forKey: key) }
@@ -338,15 +340,67 @@ final class ApprovalDefaultTests: XCTestCase {
         XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).classifierLevel, .everything, "after a restart")
     }
 
-    /// A phone that never chose (a new install, or an alpha tester who left the switch alone) asks the
-    /// owner before a sensitive step: the Send tap in Messages waits for an answer instead of going
-    /// through, and the switch reads on.
-    func testAPhoneThatNeverChoseAsksBeforeASensitiveTap() async {
-        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+    /// A phone that never chose (a new install, or an owner of an earlier version who never opened
+    /// Approvals) is not asked: the Send tap in Messages goes through, and the page reads Never Ask.
+    func testAPhoneThatNeverChoseIsNotAsked() async {
+        let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
+        let tap = await core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.2)
+        XCTAssertEqual(tap, .clear)
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .off)
+    }
+
+    /// An owner who chose a way of asking, here or on 0.3.1, is still asked after updating.
+    func testAnOwnerWhoChoseKeepsTheirChoice() async {
+        UserDefaults.standard.set(ApprovalClassifier.Mode.reply.rawValue, forKey: ApprovalClassifier.modeKey)
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .reply)
+        UserDefaults.standard.removeObject(forKey: ApprovalClassifier.modeKey)
+        UserDefaults.standard.set(true, forKey: LiveCore.askKey)
         let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
         let tap = await core.clearTap(on: "Send", inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.2)
         XCTAssertFalse(tap.mayTap, "\(tap)")
-        XCTAssertNotEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .off)
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .confirm)
+    }
+
+    /// Don’t Ask Again, from the Live Activity or a notification (the intent) or from the card in Poki:
+    /// approvals are off from then on, after a restart too, and the chat says how to turn them back on.
+    func testDontAskAgainTurnsApprovalsOff() async throws {
+        let language = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = language }
+        UserDefaults.standard.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: model)
+        XCTAssertEqual(model.approvalMode, .confirm)
+        _ = try await StopAskingIntent(approvalID: "answered-elsewhere").perform()
+        XCTAssertEqual(model.approvalMode, .off)
+        XCTAssertEqual(AppModel(launcher: FakeLauncher(), pairer: FakePairing()).approvalMode, .off, "after a restart")
+        let said = chat.entries.compactMap { entry -> String? in if case .poki(let text) = entry.kind { text } else { nil } }
+        XCTAssertTrue(said.contains { $0.contains("Approvals are off") && $0.contains("poki://approvals") }, "\(said)")
+
+        model.approvalMode = .confirm
+        model.stopAsking(PendingApproval(id: "card", app: "Messages", summary: "Tap Send", reason: "sending a message (\"send\")", expires: Date().addingTimeInterval(60)))
+        XCTAssertEqual(model.approvalMode, .off)
+    }
+
+    /// The card offers Don’t Ask Again where Never Ask would stop the asking, as PokiCore judges the steps
+    /// (a message, not a payment or a deletion), so a payment cannot be allowed by a tap on it.
+    func testTheCardOffersDontAskAgainOnlyWhereNeverAskStopsAsking() async throws {
+        UserDefaults.standard.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
+        var pending: [PendingApproval] = []
+        let eventsTask = Task { @MainActor in
+            for await event in core.events { if case .approvalRequested(let approval) = event { pending.append(approval) } }
+        }
+        defer { eventsTask.cancel() }
+        for (label, offered) in [("Send", true), ("Pay", false), ("Delete", false)] {
+            pending.removeAll()
+            _ = await core.clearTap(on: label, inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.3)
+            let approval = try XCTUnwrap(pending.first, "\(label) raised no approval")
+            XCTAssertEqual(approval.offersStopAsking, offered, "\(label): \(approval.reason)")
+            var card = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
+            card.approval = approval
+            XCTAssertEqual(card.face.offersStopAsking, offered, label)
+        }
     }
 
     /// An owner who turned asking off keeps that choice.
@@ -377,7 +431,7 @@ final class ApprovalDefaultTests: XCTestCase {
     /// or refuses it. The bridge handler is AppModel's forwarding without its pause for the island to
     /// fold (AppModel.decide), which this does not cover.
     func testLiveActivityAllowAndDenyAnswerTheWaitingTap() async throws {
-        UserDefaults.standard.removeObject(forKey: LiveCore.askKey)
+        UserDefaults.standard.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
         let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
         var pending: [PendingApproval] = []
         let eventsTask = Task { @MainActor in

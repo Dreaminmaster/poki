@@ -4147,6 +4147,89 @@
         }
       }
     },
+    "Don’t ask again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不再询问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不再詢問"
+          }
+        }
+      }
+    },
+    "Approvals are off. Turn them back on in [Settings › Approvals](poki://approvals)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭审批，可以在 [设置 › 审批](poki://approvals) 里重新打开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已關閉審批，可以在 [設定 › 審批](poki://approvals) 裡重新開啟"
+          }
+        }
+      }
+    },
+    "Allows this step and turns approvals off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许这一步，并关闭审批。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許這一步，並關閉審批。"
+          }
+        }
+      }
+    },
+    "Allow and stop asking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许并不再询问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許並不再詢問"
+          }
+        }
+      }
+    },
+    "Lets the agent do the step that is waiting for you and turns approvals off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许智能体执行待批准的步骤，并关闭审批。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許智慧體執行待批准的步驟，並關閉審批。"
+          }
+        }
+      }
+    },
     "Don’t open Poki Runner yourself. Poki starts it when an agent needs this iPhone." : {
       "extractionState" : "manual",
       "localizations" : {
