@@ -914,7 +914,8 @@ final class Computer: @unchecked Sendable {
                     }
                 }
                 let approval = approvals.pending.flatMap { $0.fingerprint == fingerprint && $0.workspaceSession == workspaceSession ? $0 : nil }
-                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, fingerprint: fingerprint, workspaceSession: workspaceSession)
+                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, fingerprint: fingerprint, workspaceSession: workspaceSession,
+                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))
@@ -1470,12 +1471,13 @@ final class Computer: @unchecked Sendable {
     }
 
     /// Each action of a batch that needs the owner's approval, and why, judged on the latest read.
-    func sensitiveSteps(_ actions: [JSON]) -> [(at: Int, reason: String)] {
+    /// `rules`: judged by these instead of the ones the way of asking leaves (`stopsWhenOff`).
+    func sensitiveSteps(_ actions: [JSON], under rules: SensitivityRules? = nil) -> [(at: Int, reason: String)] {
         guard config.sensitive.enabled else { return [] }
         var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
         var matches: [(at: Int, reason: String)] = []
         for (at, action) in actions.enumerated() {
-            if let reason = sensitive(action, &scan) { matches.append((at, reason)) }
+            if let reason = sensitive(action, &scan, under: rules) { matches.append((at, reason)) }
         }
         return matches
     }
@@ -1534,8 +1536,8 @@ final class Computer: @unchecked Sendable {
 
     /// Why this action needs the owner's approval, or nil; `scan` moves on past it. `do` checks its
     /// actions with it before sending any, and a routine run each step before it sends it.
-    func sensitive(_ action: JSON, _ scan: inout SensitiveScan) -> String? {
-        let rules = config.rules
+    func sensitive(_ action: JSON, _ scan: inout SensitiveScan, under override: SensitivityRules? = nil) -> String? {
+        let rules = override ?? config.rules
         guard rules.enabled, let kind = ActionKind(action) else { return nil }
         defer { if kind.movesScreen { scan.moved = true } }
         let messaging = scan.front?.bundleID.map(rules.messagingApps.contains) ?? false

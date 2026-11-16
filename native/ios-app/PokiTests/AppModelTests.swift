@@ -359,13 +359,24 @@ final class ApprovalDefaultTests: XCTestCase {
         XCTAssertEqual(model.approvalMode, .off)
     }
 
-    /// A payment, a deletion or a protected app is asked about whatever the owner chose, so its card
-    /// does not offer Don’t Ask Again.
-    func testOnlyAStepTurningAskingOffReachesOffersDontAskAgain() {
-        for (reason, offered) in [("sending a message (\"send\")", true), ("a payment (\"pay\")", false), ("deleting (\"delete\")", false)] {
+    /// The card offers Don’t Ask Again where Never Ask would stop the asking, as PokiCore judges the steps
+    /// (a message, not a payment or a deletion), so a payment cannot be allowed by a tap on it.
+    func testTheCardOffersDontAskAgainOnlyWhereNeverAskStopsAsking() async throws {
+        UserDefaults.standard.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        let core = LiveCore(host: AppCoreHost(), transport: URLSessionTransport())
+        var pending: [PendingApproval] = []
+        let eventsTask = Task { @MainActor in
+            for await event in core.events { if case .approvalRequested(let approval) = event { pending.append(approval) } }
+        }
+        defer { eventsTask.cancel() }
+        for (label, offered) in [("Send", true), ("Pay", false), ("Delete", false)] {
+            pending.removeAll()
+            _ = await core.clearTap(on: label, inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.3)
+            let approval = try XCTUnwrap(pending.first, "\(label) raised no approval")
+            XCTAssertEqual(approval.offersStopAsking, offered, "\(label): \(approval.reason)")
             var card = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
-            card.approval = PendingApproval(id: "a", app: "Messages", summary: "Tap", reason: reason, expires: Date().addingTimeInterval(60))
-            XCTAssertEqual(card.face.offersStopAsking, offered, reason)
+            card.approval = approval
+            XCTAssertEqual(card.face.offersStopAsking, offered, label)
         }
     }
 

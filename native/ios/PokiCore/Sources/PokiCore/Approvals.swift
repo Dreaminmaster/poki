@@ -109,6 +109,10 @@ public struct Approval: Sendable, Equatable {
     public var reason: String
     public var requested: Date
     public var expires: Date
+    /// Turning asking off (Never Ask) would stop every step this approval covers from asking: the owner
+    /// can be offered Don't Ask Again. False where a payment, a deletion, Wallet or a screen not read yet
+    /// would still ask.
+    public var stopsWhenOff = false
     /// The actions it covers, as a fingerprint: the same actions sent again run once it is granted.
     var fingerprint: String
     var workspaceSession: String?
@@ -170,9 +174,9 @@ final class Approvals: @unchecked Sendable {
         return found?.value.approval
     }
 
-    func request(app: String, summary: String, reason: String, fingerprint: String, workspaceSession: String? = nil) -> Approval {
+    func request(app: String, summary: String, reason: String, fingerprint: String, workspaceSession: String? = nil, stopsWhenOff: Bool = false) -> Approval {
         let date = Date()
-        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), fingerprint: fingerprint, workspaceSession: workspaceSession)
+        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), stopsWhenOff: stopsWhenOff, fingerprint: fingerprint, workspaceSession: workspaceSession)
         lock.lock()
         // One pending at a time: a new request replaces an older one, which ends unanswered.
         let replaced = entries.values.filter { $0.decision == nil }

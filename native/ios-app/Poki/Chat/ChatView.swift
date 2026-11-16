@@ -205,7 +205,7 @@ struct ChatView: View {
         } else if let approval = model.approvals.first {
             ApprovalAskCard(title: approval.question, expires: approval.expires,
                             answer: { approved in model.resolve(approval, approved: approved) },
-                            stopAsking: approval.alwaysAsksOwner ? nil : { model.stopAsking(approval) })
+                            stopAsking: approval.offersStopAsking ? { model.stopAsking(approval) } : nil)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if model.passcodeHint {
             Label(Self.local(AppModel.handoffWording(.automationPasscode)), systemImage: "lock")

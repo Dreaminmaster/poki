@@ -790,11 +790,44 @@ final class ApprovalTests: XCTestCase {
         }
     }
 
+    private func messages(_ bundle: String = "com.apple.MobileSMS", rows: [(String, String)]) -> FakeWDA { messages(bundle, rows) }
     private func messages(_ bundle: String = "com.apple.MobileSMS", _ rows: [(String, String)] = [("Cell", "Mom"), ("Cell", "Work")]) -> FakeWDA {
         let wda = FakeWDA()
         wda.source(rows, app: "Messages")
         wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": .string(bundle), "name": "Messages"]]) }
         return wda
+    }
+
+    /// An approval says whether turning asking off (Never Ask) would stop every step it covers from asking,
+    /// which is when the owner is offered Don't Ask Again: not where a payment, a deletion, Wallet or a
+    /// tap on a screen not read yet would still ask. A message, a call, a batch of them, and a tap in a chat
+    /// app after an earlier tap changed the screen (judged as sending until the screen is read) all stop.
+    func testAnApprovalSaysWhetherNeverAskWouldStopIt() async {
+        let send = ("Button", "Send"), pay = ("Button", "Pay"), mom = ("Cell", "Mom"), work = ("Cell", "Work")
+        let phone = FakeWDA()
+        phone.source([("Cell", "Mom")], app: "Phone")
+        phone.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobilephone", "name": "Phone"]]) }
+        let shop = FakeWDA()
+        shop.source([("Button", "Delete Photo"), pay], app: "Shop")
+        let cases: [(label: String, wda: FakeWDA, actions: [JSON], stops: Bool)] = [
+            ("a message", messages(rows: [send]), [["tap": 1]], true),
+            ("two messages in one batch", messages(rows: [send, send]), [["tap": 1], ["tap": 2]], true),
+            ("a tap in a chat app after a tap that changed the screen", messages(rows: [mom, work]), [["tap": 1], ["tap": 2]], true),
+            ("a call", phone, [["tap": 1]], true),
+            ("a payment", shop, [["tap": 2]], false),
+            ("a deletion", shop, [["tap": 1]], false),
+            ("a message and a payment in one batch", messages(rows: [send, pay]), [["tap": 1], ["tap": 2]], false),
+            ("a tap in Wallet", wallet(), [["tap": 1]], false),
+            ("a tap in a chat app on a screen not read yet after a launch", messages(rows: [mom]), [["launch": "com.apple.MobileSMS"], ["tap": [350, 790]]], false),
+        ]
+        for (label, wda, actions, stops) in cases {
+            let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+            _ = await core.call("look", [:])
+            _ = await core.call("do", ["actions": .array(actions)])
+            let pending = core.pendingApproval
+            XCTAssertNotNil(pending, "\(label): no request")
+            XCTAssertEqual(pending?.stopsWhenOff, stops, "\(label): \(pending?.reason ?? "no request")")
+        }
     }
 
     func testAPointAfterATapReturnsAFreshScreenBeforeChoosingWhetherToAsk() async {

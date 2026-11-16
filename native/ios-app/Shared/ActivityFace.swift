@@ -298,7 +298,7 @@ extension PokiState {
                     meta: .none,
                     content: question,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
-                    offersStopAsking: !approval.alwaysAsksOwner,
+                    offersStopAsking: approval.offersStopAsking,
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
             }
@@ -308,7 +308,7 @@ extension PokiState {
                 meta: .countdown(approval.expires),
                 content: question,
                 bottom: .approval(id: approval.id),
-                offersStopAsking: !approval.alwaysAsksOwner,
+                offersStopAsking: approval.offersStopAsking,
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))
         case .done:

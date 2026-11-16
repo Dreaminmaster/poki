@@ -43,7 +43,7 @@ enum ApprovalNotice {
         let content = UNMutableNotificationContent()
         // The one question, as on the card: from the rules' kind, never the agent's words.
         content.title = approval.question
-        content.categoryIdentifier = approval.alwaysAsksOwner ? category : optionalCategory
+        content.categoryIdentifier = approval.offersStopAsking ? optionalCategory : category
         content.userInfo = ["approval": approval.id]
         content.sound = .default
         content.interruptionLevel = .timeSensitive
