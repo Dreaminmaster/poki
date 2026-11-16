@@ -56,6 +56,19 @@ int32_t poki_signer_set_vault(poki_vault_get_cb get, poki_vault_set_cb set, poki
 // Returns -1 when the request is unreadable (no events follow), else 0.
 int32_t poki_signer_call(const char *request_json, poki_event_cb cb, void *context);
 
+// iPhone History tests (native/launcher/src/history.rs): the screen read as text through the
+// accessibility audit service, on a tunnel of its own and with no XCTest session.
+// request_json: {"op": "read_once", "device_address": "10.7.0.1", "pairing_file": "...",
+//   "host_name": "Poki", "include_text": false} or {"op": "run", ..., "interval_ms": 5000,
+//   "duration_s": 1800}.
+// Events: {"event": "progress", "progress": {"n", "at_s", "ok", "ms", "elements", "app", "changed"}}
+// for every read of a run, then one {"event": "result", "ok": true, "value": {...}} or
+// {"event": "result", "ok": false, "error": "...", "fix": "...", "code": "..."}.
+// Returns -1 when the request is unreadable (no events follow), else 0.
+int32_t poki_history_call(const char *request_json, poki_event_cb cb, void *context);
+// Ends the run in progress; it answers with what it measured so far.
+void poki_history_cancel(void);
+
 #ifdef __cplusplus
 }
 #endif

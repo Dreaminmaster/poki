@@ -1,6 +1,9 @@
 import Foundation
 
 public struct CoreConfig: Sendable {
+    /// Host application version advertised in the relay hello. Hosts supply their installed build.
+    public var relayAppVersion = "1.0"
+
     public var runnerURL: URL
     public var sensitive: SensitivityRules
     /// The owner's way of asking (the app's Approvals page), which `sensitive` is narrowed by
@@ -327,6 +330,7 @@ public final class PokiCore: @unchecked Sendable {
         let client = RelayClient(baseURL: address.phoneURL, host: host, factory: socketFactory, handler: { [weak self] request in
             await self?.handle(request) ?? RelayResponse(id: request.id, status: 503, headers: [:], body: "")
         }, emit: { [weak self] in self?.emit(.relay($0)) })
+        client.appVersion = config.relayAppVersion
         client.undelivered = { [weak self] request, response in self?.keepLost(request, response) }
         relay = client
         client.start()
@@ -375,7 +379,9 @@ public final class PokiCore: @unchecked Sendable {
         // No readable text: the rules cannot tell what it does, so the owner is asked.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
-        let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, fingerprint: "tap:\(UUID().uuidString)")
+        // Never Ask would not stop a tap the rules cannot read, nor one they hold back whatever the way of asking.
+        let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false) == nil
+        let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, fingerprint: "tap:\(UUID().uuidString)", stopsWhenOff: stopsWhenOff)
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:
             _ = approvals.consumeGrant(fingerprint: approval.fingerprint)
@@ -542,9 +548,14 @@ public final class PokiCore: @unchecked Sendable {
         public let isError: Bool
         public let splitView: SplitViewRead?
         public let splitViewNeedsRead: Bool
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false) {
+        /// The app in front and its element tree as the read behind this answer saw them, free of the
+        /// read's time and of what changed since the read before; nil for an answer with no tree.
+        public let screen: String?
+        /// Handoff, a locked phone, or runner startup requires waiting rather than model progress.
+        public let waitingForOwner: Bool
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
-            self.splitViewNeedsRead = splitViewNeedsRead
+            self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
         }
     }
 
@@ -555,7 +566,7 @@ public final class PokiCore: @unchecked Sendable {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
         let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
-                          splitViewNeedsRead: output.splitViewNeedsRead)
+                          splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner)
     }
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the
@@ -683,12 +694,15 @@ public final class PokiCore: @unchecked Sendable {
     }
 
     func status() -> ToolResult {
-        var lines = ["runner: \(host?.currentRunner.describe ?? "unknown")"]
+        let state = host?.currentRunner
+        var waitingForOwner = computer.handoffWaiting
+        if case .starting? = state { waitingForOwner = true }
+        var lines = ["runner: \(state?.describe ?? "unknown")"]
         if let relay { lines.append("relay: \(relay.stateDescription)") }
         if let p = approvals.pending { lines.append("approval waiting on the phone: \(p.summary) (\(p.reason), id \(p.id))") }
         if let line = computer.handoffLine(clear: false) { lines.append(line) }
         if let current = gate.current { lines.append("running: \(current)") }
-        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil)
+        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, waitingForOwner: waitingForOwner)
     }
 }
 

@@ -62,6 +62,7 @@ result and the time next to each line.
 - [ ] `running` within 60 s, then the Poki log shows `in-process session ready` (the first time, iOS may ask for the passcode to allow automation). Note the seconds it reports. Then PokiCore `look` answers.
 - [ ] Cancel the passcode prompt on a first open: the log shows `in-process session not ready`, and the agent's next `look` answers at once with `runner: failed` and the reason, not `starting` after 15 s. The call after that opens the session again.
 - [ ] Background Poki and use other apps for 5 minutes: `look` and `do` still answer; if the session ended, the first call opens it again. Note what that first call answers and how long it took.
+- [ ] iOS 26 standby: complete a phone task, then repeat with an outside agent that reaches the idle timeout. The automation banner disappears in both cases. Without restarting Poki, start another phone task and check that it reads successfully without another passcode prompt. Record the iOS version, pause result, and whether the session resumes or opens again. If pausing fails, the log must report a close instead, and the banner must disappear. During another standby transition, try Stop, Turn Off, and an update separately. Each must close the session even if the pause has not finished; the update must wait for the close. These checks require a physical iPhone.
 - [ ] Lock the phone for 2 minutes, unlock, then `do` once: the action is not sent to the ended session; a new session is opened and the action goes there. Note the time until it is back.
 - [ ] Runner path only: states pass through launching; kill Poki Runner from the app switcher and within about 10 s the launcher relaunches it (`launching`, then `running`).
 - [ ] Runner path only: background Poki for 5 minutes and lock the phone for 2 minutes; the runner stays up (the runner dies about 30 s after the launcher's connections close).
@@ -86,7 +87,7 @@ result and the time next to each line.
 - [ ] Decline: `not_sent: the owner declined`.
 - [ ] While an approval is pending, have the agent tap the Live Activity's Approve button (`do` with the button's point): the pending request is withdrawn first, so nothing is approved.
 - [ ] Typing into a password field asks first, and the Live Activity hides the text.
-- [ ] A fresh install (or an alpha that never touched the switch): Agents › Approvals › Ask Before Sensitive Steps is on, and the first Delete asks.
+- [ ] A fresh install (or a phone that never touched Approvals): Approval Method reads Never Ask, the first Send goes through without asking, and the first Delete still asks. Don't ask again on a card for a message turns approvals off, and the chat says how to turn them back on.
 - [ ] With Poki in front while an agent's approval waits (the Dynamic Island hides Poki's own Live Activity then): the chat shows Allow this step? with Allow and Don't Allow; Allow runs the step and the phone goes back to the app the agent was in.
 - [ ] Leave an approval unanswered and send nothing more: after 2 minutes the Live Activity leaves Approval, Poki says the approval ran out, and the idle stop works again.
 - [ ] In Wallet: the agent can wait, hand the screen to you and press Home without being asked; a tap asks.

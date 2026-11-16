@@ -59,7 +59,7 @@ struct PokiDetailsView: View {
                 Section {
                     NavigationLink(value: DetailsRoute.connection) {
                         SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue,
-                                    valueIsAction: !isSample && !model.setupComplete)
+                                    valueIsAction: !isSample && !model.setupReadyForUse)
                     }
                     .accessibilityIdentifier("details.hands")
                     NavigationLink(value: DetailsRoute.model) {
@@ -203,7 +203,7 @@ struct PokiDetailsView: View {
     /// Setup first, then whether Poki is on.
     private var connectionValue: String {
         if isSample { return AppLocalization.text(LocalizedStringResource("On")) }
-        if !model.setupComplete {
+        if !model.setupReadyForUse {
             return AppLocalization.text(LocalizedStringResource("Finish Setup"))
         }
         if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Off")) }
@@ -397,14 +397,14 @@ struct ConnectionView: View {
 
             Section {
                 ForEach(SetupStep.shown) { step in
-                    let done = model.isDone(step)
+                    let done = model.stepReadyForUse(step)
                     NavigationLink(value: step) {
                         SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : AppLocalization.text(LocalizedStringResource("Turn On")),
                                     warns: !done, accessory: done ? .done : nil)
                     }
                 }
                 Button { guiding = true } label: {
-                    SettingsRow(title: model.setupComplete ? "Set Up Again" : "Continue Setup", symbol: "checklist")
+                    SettingsRow(title: model.setupReadyForUse ? "Set Up Again" : "Continue Setup", symbol: "checklist")
                 }
                 .accessibilityIdentifier("moreSettings.setup")
                 FirstRunAgain(row: true)
@@ -418,7 +418,7 @@ struct ConnectionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
         .sheet(isPresented: $guiding) {
-            SetupGuide(start: SetupStep.shown.first { !model.isDone($0) })
+            SetupGuide(start: SetupStep.shown.first { !model.stepReadyForUse($0) })
         }
     }
 
@@ -675,8 +675,8 @@ private struct LanguageSettingsView: View {
 }
 
 /// Approvals (ESP-469 board "03 审批"): what always needs you, how Poki asks before a sensitive step, and
-/// how much your chat model may approve by itself. The way of asking is chosen on Poki's card only (the
-/// owner: one setting in one place); this page says which is in use and what it does. The sensitivity's
+/// how much your chat model may approve by itself. The way of asking is chosen here and on Poki's card (the
+/// same setting); the chat's Approvals are off line links here to turn them back on. The sensitivity's
 /// four levels are segments in their own order, least asking first.
 struct ApprovalsSettingsView: View {
     @Environment(AppModel.self) private var model
@@ -697,11 +697,12 @@ struct ApprovalsSettingsView: View {
             }
 
             Section {
-                LabeledContent("Approval Method", value: model.approvalMode.title)
-                    .accessibilityIdentifier("approvals.mode.current")
+                Picker("Approval Method", selection: $model.approvalMode) {
+                    ForEach(ApprovalClassifier.Mode.allCases) { Text($0.title).tag($0) }
+                }
+                .accessibilityIdentifier("approvals.mode.picker")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Change it on Poki’s card: tap Poki’s picture at the top of the chat.")
                     switch model.approvalMode {
                     case .reply: Text("Poki asks in the chat and proceeds after you reply.")
                     case .confirm: Text("Tap Allow or Don’t Allow in the Live Activity, a notification, or Poki.")

@@ -19,7 +19,7 @@ struct SettingsEntryButton: View {
     var controlSize = CompactControlMetrics()
 
     private var needsYou: Bool {
-        !ModelKeys.hasUsableKey || !model.setupComplete || model.signer.updateNotReady || model.signer.next?.kind == "update" || model.relayStatus.isOffline
+        !ModelKeys.hasUsableKey || !model.setupReadyForUse || model.signer.updateNotReady || model.signer.next?.kind == "update" || model.relayStatus.isOffline
     }
 
     var body: some View {

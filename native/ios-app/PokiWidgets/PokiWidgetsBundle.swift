@@ -16,7 +16,8 @@ struct PokiWidgetsBundle: WidgetBundle {
 /// Poki's Live Activity: what the agent is doing on the phone, or what it needs from you. The pairing
 /// code while pairing, the current setup step while setting up, and Allow/Deny for sensitive actions.
 /// The buttons are for the person; PokiCore sends no input while an approval waits, so the runner never
-/// taps them. A tap anywhere else opens the screen the state is about (`ActivityFace.link`).
+/// taps them. A tap anywhere else opens the screen the state is about (`ActivityFace.link`), except on
+/// the expanded island while the agent may be acting, where it does nothing (`TapShield`).
 struct PokiLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PokiActivityAttributes.self) { context in
@@ -32,9 +33,9 @@ struct PokiLiveActivity: Widget {
         } dynamicIsland: { context in
             let face = context.face
             return DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale) }
-                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale) }
-                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale) }
+                DynamicIslandExpandedRegion(.leading) { IslandLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale).modifier(TapShield(on: face.shieldsTaps)) }
+                DynamicIslandExpandedRegion(.trailing) { IslandTrailing(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale).modifier(TapShield(on: face.shieldsTaps)) }
+                DynamicIslandExpandedRegion(.bottom) { IslandBottom(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale).modifier(TapShield(on: face.shieldsTaps)) }
             } compactLeading: {
                 CompactLeading(face: face).dynamicTypeSize(...ActivityMetrics.largestType).environment(\.locale, AppLocalization.locale)
             } compactTrailing: {

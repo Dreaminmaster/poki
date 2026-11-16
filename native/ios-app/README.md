@@ -118,14 +118,18 @@ Poki ships English, Simplified Chinese and Traditional Chinese. Settings › Lan
   or acting. Poki shows Preparing during this wait, then continues the same step without a model
   retry. Session timing events record submission, the open request, readiness and successful reads.
 - Once opened, the session stays open while a task works, including pauses between its phone steps.
-  It closes the moment the task ends (the chat's turn ended, or an outside agent ended its MCP
-  session and no other agent is at work), as soon as Poki comes to the front for the owner, and
-  when a step hands the screen to the owner. Stop and Turn Off also close it, and Turn On opens a new
-  one in the same process. The idle timeout (default 60 s) remains for outside agents that go quiet
-  without ending their session. Nothing is tapped or typed while Poki itself is in front. A later
-  phone step opens a new session; there is no Hide Banner When Idle setting.
-  `AppModel.idleSessionPolicy` selects full close by default and retains a pause-automation fallback
-  for device compatibility.
+  Poki stands by when the task ends, when Poki comes to the front, or when a step hands the screen
+  to the owner. An outside agent's task ends when its MCP session ends and no other agent is at work.
+  The idle timeout, 60 s by default, also puts Poki on standby when an outside agent goes quiet.
+  `AppModel.idleSessionPolicy` selects the standby behavior by iOS version. On iOS 18 to 26, Poki
+  turns Automation Mode off and keeps the session for the next phone step. If the pause fails,
+  Poki closes the session instead. On iOS 27 and later, standby closes the session as before.
+  Stop, Turn Off, and an update close the session on every version, even if a pause is still in
+  progress. An update waits for that close before it continues. A later phone step opens a new
+  session after a close, or resumes a kept session and checks that it can still read. If a resume
+  fails, Poki closes the session and tries a new one, except when opening was refused or iOS's
+  passcode prompt timed out. Nothing is tapped or typed while Poki itself is in front.
+  There is no Hide Banner When Idle setting.
 - A new session is ready only once it has answered with an element tree. One that cannot read is
   closed, the step fails with the reason (`session_unreadable`), nothing is sent to it, and the next
   phone step opens a new session. An app that is slow to answer is not a session failure.
@@ -342,7 +346,7 @@ Setup
 Turned on
 - [ ] Turn on or bring Poki to the foreground: no automation banner. Focus the field, start dictation, choose a shortcut, and complete a pure-chat or sandbox-browser task: still no banner.
 - [ ] Connect an agent and call `status`: no banner or automation passcode prompt. Its first phone step shows Preparing, opens the session, and reads the screen successfully; steps show on the Lock Screen and in the chat.
-- [ ] After a completed phone task and the idle timeout, the banner disappears. A second phone task in the same app launch reopens the session and reads successfully. If this fails on the release candidate, use the internal pause-automation fallback and repeat the device check.
+- [ ] After a phone task ends, and separately after an outside agent reaches the idle timeout, the banner disappears. On iOS 18 to 26, the next phone task in the same app launch resumes the kept session and reads successfully without another passcode prompt. On iOS 27 and later, the next task opens a new session and reads successfully. Check both behaviors on physical phones; simulator tests do not establish them. If a pause fails, the log reports a close instead, and the banner must still disappear.
 - [ ] No banner flicker during a run; a slow swipe or drag does not reopen the session.
 - [ ] Runner path only: no banner until an agent's first call starts the runner; opening Poki Runner while in use shows "Poki is using this iPhone"; Stop on the Live Activity or in Poki takes the banner away within seconds and the next call starts it again; after the idle time with no calls, the banner goes away by itself.
 - [ ] Ten minutes in the background: the location pill shows and agents still reach the phone.

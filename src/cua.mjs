@@ -158,10 +158,13 @@ function refsIn(action) {
 // anything reached the phone) or unknown (it may have been delivered).
 async function send(ctx, request) {
   const answer = await ctx.input(request);
-  if (!answer?.isError && answer?.sent !== false && answer?.outcome !== 'not_sent') return answer;
-  const why = answer?.error ?? answer?.message ?? answer?.outcome ?? 'the device refused the input';
+  // An absent or contradictory delivery receipt cannot authorize the next input.
+  // Unknown delivery must stay unknown: it may already have reached the iPhone.
+  if (answer?.sent === true && !answer.isError && !answer.stopped && !['unknown', 'not_sent'].includes(answer.outcome)) return answer;
+  const why = answer?.error ?? answer?.message ?? 'the bridge did not confirm input delivery';
   const failure = new Error(why);
-  failure.delivery = answer?.outcome === 'unknown' ? 'unknown' : 'not_sent';
+  failure.delivery = answer?.outcome === 'unknown' ? 'unknown'
+    : answer?.sent === false || answer?.outcome === 'not_sent' ? 'not_sent' : 'unknown';
   throw failure;
 }
 
@@ -193,7 +196,7 @@ async function restoreClipboard(ctx, saved) {
 async function typeText(ctx, text, clear = false) {
   const simulator = (await ctx.target()).kind === 'simulator';
   const typed = await ctx.input(simulator ? { op: 'type_text', text, clear, submit: false } : { op: 'type_keys', text, clear });
-  if (!typed?.isError && typed?.sent !== false) return typed?.clipboard_changed ? "pasted; the simulator's clipboard keeps the text" : 'keys';
+  if (typed?.sent === true && !typed.isError && !typed.stopped && !['unknown', 'not_sent'].includes(typed.outcome)) return typed?.clipboard_changed ? "pasted; the simulator's clipboard keeps the text" : 'keys';
   // A backend that types every character in one request (WebDriverAgent, a simulator) has no paste to fall back on.
   if (ctx.typesEverything || simulator) { const e = new Error(`typing failed: ${typed?.error ?? typed?.instruction ?? 'no answer'}`); e.delivery = typed?.outcome === 'not_sent' ? 'not_sent' : 'unknown'; throw e; }
   // Only a request the bridge refused before sending (a character with no key, an older bridge) may

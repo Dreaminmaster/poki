@@ -49,6 +49,30 @@
         }
       }
     },
+    "NSFaceIDUsageDescription" : {
+      "comment" : "Info.plist",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki uses Face ID to unlock Screen History, so only you can open it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用面容 ID 解锁屏幕历史，确保只有你能打开。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用 Face ID 解鎖螢幕歷史，確保只有你能打開。"
+          }
+        }
+      }
+    },
     "NSLocalNetworkUsageDescription" : {
       "comment" : "Info.plist",
       "extractionState" : "manual",

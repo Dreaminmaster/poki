@@ -37,6 +37,8 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
     var textDocuments: [ChatTextDocument]?
+    var continuationChoices: [String]?
+    var continuedTask: String?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
     /// The same delimited owner request for the model, consent evidence and task routing.
@@ -141,6 +143,7 @@ final class ChatModel {
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
     private var client: ModelClient?
+    private var restoredContext: String?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
     private var modelPlan: [String]?
 
@@ -171,8 +174,10 @@ final class ChatModel {
     private var planID: UUID?
     private var noteID: UUID?
 
-    /// A task stops after this many model turns: a loop that goes nowhere still ends.
-    static let maxTurns = 60
+    /// A ceiling for a runaway model's quota use. On an unchanged screen, PiLoop stops after
+    /// `stallSteps` identical calls or `stallPairs` repetitions of a call pair. Waiting for the owner
+    /// or runner startup resets that history, but does not remove this ceiling.
+    static let maxTurns = 500
 
     init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil) {
         self.app = app
@@ -183,6 +188,7 @@ final class ChatModel {
         app.addApprovalObserver { [weak self] id in self?.waitsForOwner(id) }
         if kind == .handoff { return }
         app.addApprovalModeObserver { [weak self] in self?.approvalsChanged() }
+        app.addStopAskingObserver { [weak self] in self?.approvalsStopped() }
         // A live voice conversation is part of this chat: what was said and done stays in its history.
         if requester == nil { app.voice.onConversationEnded = { [weak self] lines, started in self?.appendVoice(lines, started: started) } }
         if let scene = UserDefaults.standard.string(forKey: "pokiChat") { loadSample(scene); return }
@@ -223,6 +229,12 @@ final class ChatModel {
         greet()
     }
 
+    /// Don’t Ask Again turned approvals off: one line in the chat, with the way back.
+    private func approvalsStopped() {
+        guard !isSample else { return }
+        add(.poki(AppLocalization.text(LocalizedStringResource("Approvals are off. Turn them back on in [Settings › Approvals](poki://approvals)."))))
+    }
+
     /// A live voice conversation that just ended, into this chat's history (and its saved session).
     func appendVoice(_ lines: [VoiceLine], started: Date) {
         entries.append(contentsOf: SessionStore.entries(voice: lines, started: started))
@@ -233,6 +245,7 @@ final class ChatModel {
         if isDemo { entries = [ChatEntry(.time(Date()))] + greeting.dropFirst(); return }
         loop = nil
         client = nil
+        restoredContext = nil
         calls = []
         planID = nil; noteID = nil; modelPlan = nil
         sessionID = UUID().uuidString.lowercased()
@@ -248,6 +261,7 @@ final class ChatModel {
         planID = nil; noteID = nil; modelPlan = nil
         sessionID = session.id
         calls = session.calls
+        restoredContext = session.modelContext
         entries = session.entries.isEmpty ? greeting : session.entries
     }
 
@@ -334,6 +348,32 @@ final class ChatModel {
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("Poki is working on a task for \(busy). Try again when it’s done.")))))
             return
         }
+        var resumedTask: String?
+        if kind == .poki, thumbnails.isEmpty, lastImages.isEmpty {
+            switch ChatContinuation.resolve(text, current: sessionID, choices: entries.last?.continuationChoices,
+                                            sessions: SessionStore.shared.sessions) {
+            case .newTask: break
+            case .resume(let session):
+                resumedTask = session.continuationTask
+                if session.id != sessionID { restore(session) }
+            case .clarify(let sessions):
+                entries.append(ChatEntry(.you(text, delivered: true)))
+                let question = AppLocalization.text(LocalizedStringResource("Which task would you like to continue?"))
+                let explanation: String
+                if sessions.isEmpty {
+                    explanation = AppLocalization.text(LocalizedStringResource("I couldn't find a matching task. Tell me what you wanted to do and where it stopped."))
+                } else {
+                    explanation = AppLocalization.text(LocalizedStringResource("Here are your recent tasks. Reply with a number or the task's name."))
+                }
+                let options = sessions.enumerated().map {
+                    "\($0.offset + 1). \(String(($0.element.continuationTask ?? $0.element.title).prefix(160)))"
+                }.joined(separator: "\n")
+                var reply = ChatEntry(.poki([question, explanation, options].filter { !$0.isEmpty }.joined(separator: "\n\n")))
+                reply.continuationChoices = sessions.map(\.id)
+                entries.append(reply)
+                return
+            }
+        }
         // A pause of half an hour or more gets its own time line, as in Messages.
         if !again, let lastAt = entries.last?.at, Date().timeIntervalSince(lastAt) > 1800 { entries.append(ChatEntry(.time(Date()))) }
         let you: ChatEntry
@@ -341,6 +381,7 @@ final class ChatModel {
             you = last
         } else {
             var entry = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
+            entry.continuedTask = resumedTask
             if !thumbnails.isEmpty { entry.attachments = thumbnails } else { lastImages = [] }
             if !documents.isEmpty { entry.textDocuments = documents }
             you = entry
@@ -374,12 +415,13 @@ final class ChatModel {
         stopAsked = false
         planID = nil; noteID = nil; modelPlan = nil
         taskApp = nil
-        taskApps = TaskApps(); taskRequest = text; toolRoute = nil
+        taskApps = TaskApps(); taskRequest = resumedTask ?? text; toolRoute = nil
+        let continuation = resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
         let images = lastImages
         let namedApps = chooseWorkspace && kind == .poki && app.canPlanSplitView
             ? AppIconStore.bundleIDs(namedIn: text) : []
         if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
-            let instructions = Harness.instructions(for: text)
+            let instructions = [Harness.instructions(for: resumedTask ?? text), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
                 client = provider == .openai ? OpenAIClient(key: key, model: model) : AnthropicClient(key: key, model: model)
@@ -464,7 +506,7 @@ final class ChatModel {
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
             let loop = self.modelLoop(provider: provider, model: piModel, inSplitView: splitSession != nil)
-            let instructions = Harness.instructions(for: message, inSplitView: splitSession != nil)
+            let instructions = [Harness.instructions(for: resumedTask ?? message, inSplitView: splitSession != nil), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(message.isEmpty ? Self.picturesOnly : message, images: images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(you.id)
@@ -687,6 +729,9 @@ final class ChatModel {
         case .overTurns:
             reply = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))
             add(.poki(reply ?? ""))
+        case .stuck:
+            reply = stuckWords()
+            add(.poki(reply ?? ""))
         case .failed(let words):
             reply = words
             add(.note(.problem(words)))
@@ -696,6 +741,14 @@ final class ChatModel {
         } else {
             app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView)
         }
+    }
+
+    /// Where the task is stuck: the app it was working in, when it is one Poki can name.
+    private func stuckWords() -> String {
+        guard let name = AppName.display(taskApp) else {
+            return AppLocalization.text(LocalizedStringResource("I’m stuck on the same screen. Tell me how to go on."))
+        }
+        return AppLocalization.text(LocalizedStringResource("I’m stuck on the same screen in \(name). Tell me how to go on."))
     }
 
     /// Ends the task now, as far as the chat goes: it takes the next message at once, and nothing more

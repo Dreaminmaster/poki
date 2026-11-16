@@ -511,6 +511,8 @@ final class VoiceModel {
                 try await link.connect(secret: retry.value, microphone: microphone, direct: true)
             }
             guard number == session else { link.close(); return }
+            lastActivity = time.now()
+            watchForStall(session: number)
             link.setRemoteVolume(muted ? 0 : 1)
             log.add("voice", "connected (\(token.model)), session \(number)")
             if microphone { link.diagnose { [log] line in log.add("voice", line) } }
@@ -601,7 +603,7 @@ final class VoiceModel {
     /// The server owes something: the end of the person's speech, an answer, the end of the audio. A step
     /// that is running is not the server's to answer for, and it has its own time limits.
     private var waitingOnServer: Bool {
-        (awaitingAnswer || activeResponse != nil || wantsResponse || phase == .hearing || phase == .speaking)
+        !ready || (awaitingAnswer || activeResponse != nil || wantsResponse || phase == .hearing || phase == .speaking)
             && !calls.contains { $0.state == .running }
     }
 

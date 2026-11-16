@@ -331,6 +331,8 @@ struct RootView: View {
             openDetails([DetailsRoute.connection])
         } else if url.host() == "log" {
             openDetails([DetailsRoute.history])
+        } else if url.host() == "approvals" {
+            openDetails([DetailsRoute.approvals])
         } else if url.host() == "voice" {
             detailsOpen = false
             model.voice.open(url)

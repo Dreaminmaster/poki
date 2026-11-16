@@ -706,7 +706,15 @@ extension Computer {
         guard let field = await fieldOnScreen(target: target, timeout: 1.5).field else {
             throw ActionFailure(message: "no field to paste into is listed (tap the field first, or name it with ref)", delivery: .notSent)
         }
-        let (x, y, w, h) = (field.frame.x, field.frame.y, field.frame.width, field.frame.height)
+        let screen = try await screenSize(until: until)
+        func pastePoint(_ element: Element, delivery: Delivery = .notSent) throws -> (x: Double, y: Double) {
+            guard let hit = Layout(all: [element], screen: screen).touchPoint(element) else {
+                throw ActionFailure(message: "not_hittable: the paste target is off the screen", delivery: delivery)
+            }
+            return hit.point
+        }
+        // Resolve the field before clearing it: an off-screen target must not lose its old text.
+        let holdPoint = try pastePoint(field)
         var restored = false
         func restore() async {
             guard !restored else { return }
@@ -724,7 +732,7 @@ extension Computer {
                 await restore()
                 throw ActionFailure(message: "the clipboard could not be set to the text (the runner's write did not take), so nothing was pasted; type the text instead", delivery: .notSent)
             }
-            try await longPress((x + w / 2, y + h / 2), seconds: 0.7, within: field.frame)
+            try await longPress(holdPoint, seconds: 0.7, within: field.frame)
             var item: Element?
             let menuBy = min(until - 0.3, now() + 2)
             while item == nil, now() < menuBy {
@@ -737,7 +745,7 @@ extension Computer {
                 await restore()
                 throw ActionFailure(message: "the field's menu showed no Paste item; the text was not pasted (a long press was sent)", delivery: .sent)
             }
-            try await tap(item.frame.centre, within: item.frame)
+            try await tap(try pastePoint(item, delivery: .sent), within: item.frame)
             // The paste has landed when the field shows the text; until then the clipboard stays.
             let landedBy = min(until - 0.3, now() + 2.5)
             var landed = false
