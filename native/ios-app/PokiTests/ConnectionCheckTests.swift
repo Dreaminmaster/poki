@@ -28,7 +28,7 @@ final class ModelServerStub: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host() else { return false }
-        return host == "model-server.test" || host == "openrouter.ai"
+        return ["model-server.test", "openrouter.ai", "api.anthropic.com"].contains(host)
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -81,6 +81,7 @@ final class ConnectionCheckTests: XCTestCase {
     private var language = AppLocalization.system
     private var savedDefaults: [String: Any] = [:]
     private var savedOpenRouterKey: String?
+    private var savedAnthropicKey: String?
     private let defaultsKeys = [
         "chat.provider",
         "chat.model.openrouter",
@@ -96,6 +97,7 @@ final class ConnectionCheckTests: XCTestCase {
         language = AppLocalization.shared.preference
         AppLocalization.shared.preference = "en"
         savedOpenRouterKey = ModelKeys.key(.openrouter)
+        savedAnthropicKey = ModelKeys.key(.anthropic)
         savedDefaults = [:]
         for k in defaultsKeys {
             if let value = UserDefaults.standard.object(forKey: k) { savedDefaults[k] = value }
@@ -118,6 +120,11 @@ final class ConnectionCheckTests: XCTestCase {
             try? ModelKeys.save(savedOpenRouterKey, for: .openrouter)
         } else {
             ModelKeys.remove(.openrouter)
+        }
+        if let savedAnthropicKey {
+            try? ModelKeys.save(savedAnthropicKey, for: .anthropic)
+        } else {
+            ModelKeys.remove(.anthropic)
         }
     }
 
@@ -301,5 +308,51 @@ final class ConnectionCheckTests: XCTestCase {
         let builtInTerra = try XCTUnwrap(ModelProvider.openai.piModel("gpt-6.1-terra"))
         XCTAssertEqual(builtInTerra.api, .openAIResponses)
         XCTAssertTrue(builtInTerra.reasoning)
+    }
+
+    /// The conservative setup is OpenRouter's alone: another provider's unlisted model (a dated Anthropic id
+    /// from "Refresh the list") still takes its provider's built-in setup, thinking and output limit.
+    func testUncataloguedDirectAnthropicModelKeepsThinkingAndOutputLimit() async throws {
+        try ModelKeys.save(key, for: .anthropic)
+        let sse = """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"served","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """
+        ModelServerStub.responder = { _, _ in (200, "text/event-stream", sse) }
+
+        func chatRequest(_ modelID: String) async throws -> ModelServerStub.Sent {
+            ModelServerStub.recordedReset()
+            let model = try XCTUnwrap(ModelProvider.anthropic.piModel(modelID))
+            let loop = PiLoop(provider: .anthropic, model: model, tools: []) { _ in
+                .init(text: "", jpeg: nil, isError: false)
+            }
+            let outcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+            XCTAssertEqual(outcome, .done)
+            return try XCTUnwrap(ModelServerStub.requests.last)
+        }
+
+        let listed = try XCTUnwrap(ModelProvider.anthropic.models.first?.id)
+        let builtIn = try await chatRequest(listed)
+        let dated = try await chatRequest(listed + "-20261001")
+        XCTAssertEqual(dated.url?.absoluteString, builtIn.url?.absoluteString)
+        XCTAssertEqual((dated.json["thinking"] as? [String: Any])?["type"] as? String, "adaptive")
+        XCTAssertEqual(dated.json["max_tokens"] as? Int, builtIn.json["max_tokens"] as? Int)
+        XCTAssertGreaterThan(dated.json["max_tokens"] as? Int ?? 0, 8_192)
     }
 }
