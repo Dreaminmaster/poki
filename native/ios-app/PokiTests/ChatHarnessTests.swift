@@ -687,6 +687,22 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(said(chat).contains("All done."))
     }
 
+    func testAlternatingTapAndLookKeepsGoingWhenTheScreenChanges() async throws {
+        let launch = FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]])
+        let pair = [FakeCompletions.tool("do", ["actions": [["tap": [180, 122]]]]), FakeCompletions.tool("look", [:])]
+        let server = try FakeCompletions(replies: [launch] + (0..<5).flatMap { _ in pair } + [FakeCompletions.text("Read every page.")])
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: session, screenLabel: { "Page \(server.requests.count)" }))
+        defer { if chat.running { chat.stop() } }
+
+        try await run(chat, "Read the next five pages in Settings", within: .seconds(60))
+
+        XCTAssertEqual(chat.savedCalls.map(\.name), ["do"] + (0..<5).flatMap { _ in ["do", "look"] })
+        XCTAssertTrue(chat.savedCalls.allSatisfy(\.ok))
+        XCTAssertEqual(said(chat).last, "Read every page.")
+    }
+
     /// The ceiling that only a runaway model reaches: 500 steps, each different, then the stop line.
     func testATaskStopsAtFiveHundredSteps() async throws {
         let server = try FakeCompletions(replies: (0..<520).map { _ in FakeCompletions.tool("look", [:]) } + [FakeCompletions.text("Never reached.")])
