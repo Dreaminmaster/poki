@@ -311,9 +311,9 @@
       "#69",
       "#70"
     ],
-    "summary": "Posted a full timeline of Runner pairing failing after 25 idle minutes in #69; Setup now points to Loopback and Pairing (#70).",
+    "summary": "Shared a full timeline of Runner pairing failing after 25 idle minutes in #69; Poki Setup now points to Loopback and Pairing (#70).",
     "lines": {
-      "en": "Posted a full timeline of Runner pairing failing after 25 idle minutes in #69; Setup now points to Loopback and Pairing (#70).",
+      "en": "Shared a full timeline of Runner pairing failing after 25 idle minutes in #69; Poki Setup now points to Loopback and Pairing (#70).",
       "zh-CN": "在 #69 中给出了 Runner 空闲约 25 分钟后配对失败的完整时间线；设置页现在会指向回环和配对检查（#70）。",
       "zh-TW": "在 #69 中提供了 Runner 閒置約 25 分鐘後配對失敗的完整時間線；設定頁現在會指向回環和配對檢查（#70）。",
       "ja": "#69 で Runner が約 25 分の待機後にペアリングに失敗する経過を詳しく記録。Setup は Loopback と Pairing の確認を案内するようになりました（#70）。",
@@ -422,7 +422,7 @@
     "categories": [
       "community"
     ],
-    "summary": "Reported a foldable iPhone whose accessibility and touch used the wrong panel in #20 and shared experiments in #47; tracking continues in #47 and #76.",
+    "summary": "Reported in #20 that accessibility and touch targeted the wrong panel on a foldable iPhone, and shared experiments in #47; tracking continues in #47 and #76.",
     "basis": [
       "#20",
       "#47"
