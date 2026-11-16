@@ -146,6 +146,17 @@ final class HomeShortcutsTests: XCTestCase {
         XCTAssertEqual(chinesePills.first?.prompt, "用微信发一条消息给")
 
         AppLocalization.shared.preference = "en"
+        for pill in HomeIdea.examples(for: .simplifiedChinese) {
+            XCTAssertFalse(pill.text.unicodeScalars.contains { $0.properties.isIdeographic }, "English text should not contain CJK: \(pill.text)")
+            XCTAssertFalse(pill.prompt.unicodeScalars.contains { $0.properties.isIdeographic }, "English prompt should not contain CJK: \(pill.prompt)")
+        }
+
+        AppLocalization.shared.preference = "zh-Hant"
+        let traditionalChinesePills = HomeIdea.examples(for: .simplifiedChinese)
+        XCTAssertEqual(traditionalChinesePills.first?.text, "傳訊息")
+        XCTAssertEqual(traditionalChinesePills.first?.prompt, "用微信傳一則訊息給")
+
+        AppLocalization.shared.preference = "en"
     }
 
     func testTappingHomeShortcutAfterSwitchingLanguageProducesLocalizedPrompt() throws {
