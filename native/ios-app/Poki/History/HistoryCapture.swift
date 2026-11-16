@@ -115,6 +115,7 @@ final class HistoryCapture: ObservableObject {
 
     /// Whether reads of this app are kept, by the list the owner chose.
     func keeps(_ app: String) -> Bool {
+        guard app.range(of: #"\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z"#, options: .regularExpression) != nil else { return false }
         if Self.isPoki(app) { return false }
         return switch listMode {
         case .exclude: !excluded.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
