@@ -21,6 +21,8 @@ final class PiLoop {
 
     let provider: ModelProvider
     let model: Model
+    /// Saved conversation identity for provider routing.
+    let sessionID: String
     let inSplitView: Bool
     private let agent: Agent
     private let gate = StopGate()
@@ -29,10 +31,21 @@ final class PiLoop {
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
 
-    init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
+    /// Use the real app identity for custom provider calls.
+    static func clientIdentity(version: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) -> ClientIdentity {
+        let cleanVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agent = "Poki/\(cleanVersion.flatMap { $0.isEmpty ? nil : $0 } ?? "dev")"
+        return ClientIdentity(
+            userAgent: .custom(agent),
+            attribution: .value(ClientAttribution(name: "Poki", url: "https://github.com/JosssphZhou/poki"))
+        )
+    }
+
+    init(provider: ModelProvider, model: Model, sessionID: String, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
         self.provider = provider
         self.model = model
+        self.sessionID = sessionID
         self.inSplitView = inSplitView
         let gate = self.gate
         let stall = self.stall
@@ -61,6 +74,9 @@ final class PiLoop {
         // agent/pi-session.mjs: low thinking, one tool call at a time.
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low, tools: agentTools, messages: messages),
+            // PiSwift scopes OpenCode session headers to matching provider targets.
+            sessionId: sessionID,
+            identity: provider == .custom ? Self.clientIdentity() : nil,
             getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
             toolExecution: .sequential
         ))
