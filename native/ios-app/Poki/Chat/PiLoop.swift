@@ -49,7 +49,11 @@ final class PiLoop {
                 let answer = await call.value
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
-                if stall.record("\(spec.name)\n\(arguments)\n\(answer.screen ?? answer.text)", limit: Self.stallSteps) { gate.end(.stuck) }
+                if answer.waitingForOwner {
+                    stall.reset()
+                } else if stall.record("\(spec.name)\n\(arguments)\n\(answer.screen ?? answer.text)", limit: Self.stallSteps) {
+                    gate.end(.stuck)
+                }
                 return Self.result(answer)
             }
         }
