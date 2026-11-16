@@ -54,6 +54,12 @@ impl Signer {
                 Ok(None)
             }
             SignInOutcome::NeedsCode(p) => {
+                // The code is checked with the anisette identity that asked for it. Keep the server
+                // that answered (the client may have moved to a fallback), so a second run
+                // (`poki-setup login --code`) checks the code as the same "Mac".
+                let saved_password = self.account.password.clone();
+                self.remember_anisette();
+                store::save(&store::Account { password: saved_password, ..self.account.clone() })?;
                 self.account.password = keep_password.then(|| password.to_string());
                 Ok(Some(p))
             }

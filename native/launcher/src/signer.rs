@@ -161,8 +161,15 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "finish_sign_in" => {
             let mut state = STATE.lock().await;
             let code = str_of(&request, "code")?.to_string();
-            let pending = state.pending.take().ok_or_else(|| fail("Sign in again; the verification step has expired.", "needs_person"))?;
-            signer(&mut state).await?.finish_sign_in(pending, &code).await?;
+            let pending = state.pending.take().ok_or_else(|| fail("Sign in again. The verification step has expired.", "needs_person"))?;
+            let keep = pending.clone();
+            let result = signer(&mut state).await?.finish_sign_in(pending, &code).await;
+            if let Err(e) = result {
+                // A wrong code: keep the waiting sign-in so the code can be typed again. Starting
+                // over would ask Apple for another code, which replaces this one.
+                state.pending = Some(keep);
+                return Err(e.into());
+            }
             Ok(json!({}))
         }
         "sign_out" => {
