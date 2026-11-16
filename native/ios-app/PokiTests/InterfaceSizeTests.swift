@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ObjectiveC.runtime
 import XCTest
 @testable import Poki
 
@@ -78,23 +79,81 @@ final class InterfaceSizeTests: XCTestCase {
             window.isHidden = true
             defaults.set(original, forKey: AppInterfaceSize.defaultsKey)
         }
-        try await Task.sleep(for: .milliseconds(100))
-        window.layoutIfNeeded()
+        await waitUntil { window.layoutIfNeeded(); return slider(in: host.view) != nil }
         func slider(in view: UIView) -> UISlider? {
             if let slider = view as? UISlider { return slider }
             return view.subviews.lazy.compactMap { slider(in: $0) }.first
         }
         let control = try XCTUnwrap(slider(in: host.view))
         // Programmatic/accessibility changes have no active touch tracking and must save
-        // immediately. Actual drag tracking is checked with a finger and device recording.
+        // immediately. The editing test below covers deferred persistence.
         XCTAssertFalse(control.isTracking)
         for index in [0, 3, 5, 8, 11, 2] {
             control.value = control.minimumValue + (control.maximumValue - control.minimumValue) * Float(index) / 11
             control.sendActions(for: .valueChanged)
-            try await Task.sleep(for: .milliseconds(500))
-            window.layoutIfNeeded()
+            await waitUntil {
+                window.layoutIfNeeded()
+                return defaults.string(forKey: AppInterfaceSize.defaultsKey) == AppInterfaceSize.categories[index].rawValue
+            }
             XCTAssertEqual(defaults.string(forKey: AppInterfaceSize.defaultsKey), AppInterfaceSize.categories[index].rawValue)
         }
+    }
+
+    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(condition(), file: file, line: line)
+    }
+
+    func testEditingSliderUpdatesPreviewBeforeSavingOnEnd() async throws {
+        let defaults = UserDefaults.standard
+        let original = defaults.object(forKey: AppInterfaceSize.defaultsKey)
+        let initial = UIContentSizeCategory.large.rawValue
+        defaults.set(initial, forKey: AppInterfaceSize.defaultsKey)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app, kind: .handoff, requester: "Interface size test")
+        let host = UIHostingController(rootView: InterfaceSizeSettingsView().environment(app).environment(chat))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            defaults.set(original, forKey: AppInterfaceSize.defaultsKey)
+        }
+        func find<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+            if let match = view as? T { return match }
+            return view.subviews.lazy.compactMap { find(type, in: $0) }.first
+        }
+        await waitUntil { window.layoutIfNeeded(); return find(UISlider.self, in: host.view) != nil && find(CapsuleTextView.self, in: host.view)?.font != nil }
+        let slider = try XCTUnwrap(find(UISlider.self, in: host.view))
+        let preview = try XCTUnwrap(find(CapsuleTextView.self, in: host.view))
+        let initialFont = try XCTUnwrap(preview.font).pointSize
+        // Keep SwiftUI's real slider and target/action wiring, while reporting an active drag.
+        let originalClass = try XCTUnwrap(object_getClass(slider))
+        let trackingClass = try XCTUnwrap(objc_allocateClassPair(originalClass, "InterfaceSizeTrackingSlider_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))", 0))
+        let getter = try XCTUnwrap(class_getInstanceMethod(originalClass, #selector(getter: UIControl.isTracking)))
+        let tracking: @convention(block) (AnyObject) -> Bool = { _ in true }
+        let implementation = imp_implementationWithBlock(tracking)
+        XCTAssertTrue(class_addMethod(trackingClass, #selector(getter: UIControl.isTracking), implementation, method_getTypeEncoding(getter)))
+        objc_registerClassPair(trackingClass)
+        object_setClass(slider, trackingClass)
+        defer {
+            object_setClass(slider, originalClass)
+            objc_disposeClassPair(trackingClass)
+            imp_removeBlock(implementation)
+        }
+        XCTAssertTrue(slider.isTracking)
+        slider.value = slider.maximumValue
+        slider.sendActions(for: .valueChanged)
+        await waitUntil { window.layoutIfNeeded(); return (preview.font?.pointSize ?? 0) > initialFont }
+        XCTAssertEqual(defaults.string(forKey: AppInterfaceSize.defaultsKey), initial)
+        object_setClass(slider, originalClass)
+        XCTAssertFalse(slider.isTracking)
+        slider.sendActions(for: .valueChanged)
+        await waitUntil { defaults.string(forKey: AppInterfaceSize.defaultsKey) == AppInterfaceSize.categories.last?.rawValue }
     }
 
     func testNavigationFontsUseTheEffectiveWindowCategory() throws {
