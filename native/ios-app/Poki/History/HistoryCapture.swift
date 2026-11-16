@@ -66,10 +66,10 @@ final class HistoryCapture: ObservableObject {
     private var background: UIBackgroundTaskIdentifier = .invalid
     private var lockToken: Int32 = NOTIFY_TOKEN_INVALID
     private var screenToken: Int32 = NOTIFY_TOKEN_INVALID
-    private var lastLeftOut: String?
     private var loading = true
 
-    /// Suggested for the excluded list: passwords, banking, payments and messages.
+    /// Passwords, banking, payments and messages: left out on a fresh install, and offered again on
+    /// the Permissions page when removed.
     static let suggested = [
         "com.apple.Passwords", "com.agilebits.onepassword-ios", "com.apple.Passbook", "com.alipay.iphoneclient",
         "com.paypal.PPClient", "com.apple.MobileSMS", "com.tencent.xin", "net.whatsapp.WhatsApp", "ph.telegra.Telegraph",
@@ -78,8 +78,8 @@ final class HistoryCapture: ObservableObject {
     init() {
         let defaults = UserDefaults.standard
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
-        // Poki's own screens are left out from the start.
-        excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"]
+        // Poki's own screens and the suggested apps are left out from the start.
+        excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"] + Self.suggested
         included = defaults.stringArray(forKey: "history.included") ?? []
         retentionDays = max(3, defaults.object(forKey: "history.retentionDays") as? Int ?? 14)
         summaryDays = defaults.object(forKey: "history.summaryDays") as? Int ?? 90
@@ -87,28 +87,12 @@ final class HistoryCapture: ObservableObject {
         loading = false
     }
 
-    /// Screens that sit over the app in front for a moment and say nothing about what the owner did.
+    /// Screens that sit over the app in front for a moment and say nothing about what the owner did,
+    /// or that show a passcode or an Apple Account sign-in. They are never kept, whatever the lists say.
     static let overlays = [
         "com.apple.ScreenshotServicesService", "com.apple.InCallService", "com.apple.CoreAuthUI",
-        "com.apple.SharingViewService", "com.apple.PassbookUIService",
+        "com.apple.SharingViewService", "com.apple.PassbookUIService", "com.apple.AuthKitUIService",
     ]
-
-    /// The title a kept notification carries, so the page can tell it from a screen.
-    static let bannerTitle = "Notification"
-    private var lastBanner = ""
-
-    /// The notification banner in a read of the Home Screen: the sending app's name as the banner
-    /// shows it, and the text. The banner's element reads "Notification" and the next one
-    /// "APP, now, dot, text". Only English and Chinese labels are known so far.
-    static func banner(in lines: [String]) -> (app: String, text: String)? {
-        guard let mark = lines.firstIndex(where: { ["Notification", "通知"].contains($0) }), lines.indices.contains(mark + 1) else { return nil }
-        let parts = lines[mark + 1].components(separatedBy: ", ")
-        guard parts.count >= 2 else { return nil }
-        let rest = parts.count >= 4 && parts[2] == "dot" ? parts[3...] : parts[1...]
-        let text = rest.joined(separator: ", ").trimmingCharacters(in: .whitespacesAndNewlines)
-        let app = parts[0].trimmingCharacters(in: .whitespaces)
-        return app.isEmpty || text.isEmpty ? nil : (app.localizedCapitalized, text)
-    }
 
     /// Poki's own screens are never kept, whatever the lists say.
     static func isPoki(_ app: String) -> Bool {
@@ -170,8 +154,6 @@ final class HistoryCapture: ObservableObject {
         run += 1
         let me = run
         once = minutes == nil
-        lastLeftOut = nil
-        lastBanner = ""
         prune()
         background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
             Task { @MainActor in
@@ -249,33 +231,16 @@ final class HistoryCapture: ObservableObject {
     @discardableResult
     func keep(_ line: [String: Any]) -> Bool {
         guard line["ok"] as? Bool == true, let read = line["text"] as? [String], !read.isEmpty else { return false }
-        var app = line["app"] as? String ?? ""
-        var title = line["title"] as? String ?? ""
-        var lines = read
-        var tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
-        // System overlays are not something the owner was doing, so they are never kept.
+        let app = line["app"] as? String ?? ""
+        // The Home Screen is left out with its notification banners: a banner names the sending app
+        // only by its display name, so the app lists could not leave it out. A left-out app leaves
+        // no trace, not even a line in the observing record.
+        if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame { return false }
         if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return false }
-        if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame {
-            // The Home Screen itself is left out. A notification banner over it is kept once, under
-            // the name of the app that sent it.
-            guard let banner = Self.banner(in: lines), banner.app + banner.text != lastBanner else { return false }
-            lastBanner = banner.app + banner.text
-            app = banner.app
-            title = Self.bannerTitle
-            lines = [banner.text]
-            tree = nil
-        }
-        guard keeps(app) else {
-            // The observing record names an app left out once each time it comes to the front.
-            if lastLeftOut != app {
-                lastLeftOut = app
-                HistoryStore.shared.note("leftOut", app)
-            }
-            return false
-        }
-        lastLeftOut = nil
+        guard keeps(app) else { return false }
+        let tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         let now = Date()
-        HistoryStore.shared.add(at: now, app: app, title: title, text: lines.joined(separator: "\n"), tree: tree)
+        HistoryStore.shared.add(at: now, app: app, title: line["title"] as? String ?? "", text: read.joined(separator: "\n"), tree: tree)
         lastKept = now
         changes += 1
         return true
@@ -291,7 +256,6 @@ final class HistoryCapture: ObservableObject {
 
     func clearEverything() async {
         await HistoryStore.shared.deleteEverything()
-        HistoryStore.shared.note("clearedAll")
         changes += 1
     }
 

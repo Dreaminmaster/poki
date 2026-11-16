@@ -361,8 +361,22 @@ fn title_of(tree: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Words that name a secret, in an element's label or identifier.
+const SECRET_NAMES: [&str; 8] = ["password", "passcode", "verification code", "one-time code", "密码", "密碼", "验证码", "驗證碼"];
+
+/// A password field, by its role or trait, or any element with a value whose name says it holds a
+/// secret. A direct read carries no element type, and a web page's password field or a password
+/// shown in clear may not set the trait, so the name is checked too.
 fn is_secure(element: &Value) -> bool {
-    element["role"] == "SecureTextField" || element["traits"].as_u64().unwrap_or(0) & SECURE_TRAIT != 0
+    if element["role"] == "SecureTextField" || element["traits"].as_u64().unwrap_or(0) & SECURE_TRAIT != 0 {
+        return true;
+    }
+    let has_value = element["value"].as_str().is_some_and(|value| !value.trim().is_empty());
+    has_value
+        && ["label", "identifier"].iter().any(|field| {
+            let name = element[*field].as_str().unwrap_or("").to_lowercase();
+            SECRET_NAMES.iter().any(|secret| name.contains(secret))
+        })
 }
 
 fn is_key(element: &Value) -> bool {
@@ -511,6 +525,20 @@ mod tests {
         assert_eq!(summary["applications"].as_array().unwrap().len(), 1);
         assert!(summary.get("text").is_none());
         assert_eq!(summary["text_lines"], 5);
+    }
+
+    #[test]
+    fn a_value_named_as_a_secret_gives_no_text_without_the_password_trait() {
+        let tree = json!({"elements": [
+            {"role": "Other", "label": "Verification Code", "value": "482913"},
+            {"label": "密码", "value": "s3cret"},
+            {"role": "StaticText", "label": "Password"},
+        ]});
+        let summary = summarize(&tree, true);
+        assert_eq!(summary["text"], json!(["Password"]));
+        assert_eq!(summary["secure_fields_left_out"], 2);
+        let rows = compact(&tree).to_string();
+        assert!(!rows.contains("482913") && !rows.contains("s3cret"));
     }
 
     #[test]
