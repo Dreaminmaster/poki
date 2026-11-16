@@ -160,7 +160,7 @@ final class HistoryLock: ObservableObject {
 
 /// Shows its content only while iPhone History is unlocked.
 struct HistoryGate<Content: View>: View {
-    @ObservedObject private var lock = HistoryLock.shared
+    @ObservedObject var lock = HistoryLock.shared
     @ViewBuilder var content: () -> Content
 
     var body: some View {

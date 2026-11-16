@@ -635,8 +635,8 @@ final class BacktapeFrames {
 
 struct BacktapeLibrary: View {
     var layout: BacktapeLayout
-    @ObservedObject private var capture = HistoryCapture.shared
-    @ObservedObject private var lock = HistoryLock.shared
+    @ObservedObject var capture = HistoryCapture.shared
+    @ObservedObject var lock = HistoryLock.shared
     @State private var notes = BacktapeNotes()
     @State private var zoom: BacktapeZoom = .hours
     @State private var inward = true
