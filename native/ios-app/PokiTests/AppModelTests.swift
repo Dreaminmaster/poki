@@ -1297,6 +1297,140 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertNotNil(runnerIssue, "#78: PokiDetailsView Issue.current(model) includes the runner failure")
         XCTAssertEqual(runnerIssue?.fix, .setup)
     }
+
+    func testSwitchingNetworksWithWorkingLoopbackClearsLoopbackPrompts() async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "relayAddress", "relayEnabled", "wantsOn"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+
+        let pairing = AppFiles.phonePairingFile
+        if !FileManager.default.fileExists(atPath: pairing.path) {
+            try Data("pairing".utf8).write(to: pairing)
+            addTeardownBlock { try? FileManager.default.removeItem(at: pairing) }
+        }
+        UserDefaults.standard.removeObject(forKey: "relayAddress")
+        UserDefaults.standard.set(false, forKey: "relayEnabled")
+        ModelKeys.customURL = "http://127.0.0.1:9/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+
+        let launcher = FakeLauncher()
+        let model = AppModel(launcher: launcher, pairer: FakePairing(), automation: FakeAutomation())
+        defer { model.stopSession() }
+        model.setup.runnerInstalled = true
+        model.setup.developerMode = true
+        model.setup.uiAutomation = true
+        model.setup.loopback = .proxy
+
+        XCTAssertEqual(model.loopback.state, .checking)
+        model.setup.uiAutomation = false
+        XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.automation), "Home chat must not treat an unfinished loopback check as off")
+        XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.automation), "Conversation chat must not treat an unfinished loopback check as off")
+        model.setup.uiAutomation = true
+        let checkingLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
+        XCTAssertFalse(checkingLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+                       "Connection must not ask to turn on a configured loopback while checking: \(checkingLabels)")
+
+        model.loopback.simulate(.working(ms: 6))
+        model.startSession()
+        model.wakeRunner()
+        await waitOnMain { ["failed", "running"].contains(model.runner.state) }
+        model.runnerChanged(RunnerStatus(state: "running"))
+
+        model.loopback.simulate(.noAnswer)
+        model.runnerChanged(RunnerStatus(
+            state: "failed",
+            detail: "remote pairing handshake failed",
+            fix: "Open Setup › Loopback and check the loopback, then pair this iPhone again in Setup › Pairing with the loopback on.",
+            code: "handshake"
+        ))
+        XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.loopback))
+
+        let restartsBefore = launcher.restarts
+        model.loopback.simulate(.checking)
+        model.loopback.simulate(.working(ms: 11))
+        XCTAssertEqual(launcher.restarts, restartsBefore + 1, "working loopback after re-checking must restart the runner")
+        XCTAssertNil(SetupIssueHint.homeLine(model: model), "Home chat must clear the loopback prompt once 10.7.0.1 answers")
+        XCTAssertNil(SetupIssueHint.first(model: model), "Conversation chat must clear the loopback prompt once 10.7.0.1 answers")
+        XCTAssertFalse(Issue.current(model).contains { $0.id == "loopback" || $0.id == "runner" },
+                       "Settings must clear stale loopback and runner issues once 10.7.0.1 answers")
+
+        model.loopback.simulate(.off)
+        model.runnerChanged(RunnerStatus(
+            state: "waiting_network",
+            detail: "remote pairing connect failed",
+            fix: "Turn on the loopback in your proxy app.",
+            code: "loopback"
+        ))
+        XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" })
+        model.loopback.simulate(.checking)
+        model.loopback.simulate(.working(ms: 9))
+        XCTAssertFalse(Issue.current(model).contains { $0.id == "loopback" || $0.id == "runner" },
+                       "Settings must clear waiting_network loopback issues once 10.7.0.1 answers")
+
+        let chatLabels = try await renderedLabels(
+            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            model: model
+        )
+        XCTAssertFalse(chatLabels.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") },
+                       "Chat screen must not prompt for Local Connection when 10.7.0.1 answers: \(chatLabels)")
+        let connectionLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
+        XCTAssertFalse(connectionLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+                       "Connection screen must not prompt to turn on Local Connection when 10.7.0.1 answers: \(connectionLabels)")
+        XCTAssertTrue(connectionLabels.contains { $0.contains("Set Up Again") },
+                      "Connection screen must report setup complete when 10.7.0.1 answers: \(connectionLabels)")
+
+        model.loopback.simulate(.noAnswer)
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        let cellularLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
+        XCTAssertFalse(cellularLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+                       "Connection screen must not prompt to turn on Local Connection when local_ddi is active: \(cellularLabels)")
+    }
+
+    private func waitOnMain(_ condition: @escaping () -> Bool) async {
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+        await fulfillment(of: [done], timeout: 5)
+    }
+
+    private func renderedLabels<Content: View>(of view: Content, model: AppModel) async throws -> [String] {
+        let chat = ChatModel(app: model)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(
+            rootView: view.environment(model).environment(chat).environment(\.accessibilityEnabled, true)
+        )
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let drawn = expectation(description: "rendered view")
+        let frames = SessionEvidenceFrames { drawn.fulfill() }
+        let display = CADisplayLink(target: frames, selector: #selector(SessionEvidenceFrames.tick))
+        display.add(to: .main, forMode: .common)
+        await fulfillment(of: [drawn], timeout: 5)
+        display.invalidate()
+        return Self.collectLabels(in: window)
+    }
+
+    private static func collectLabels(in root: NSObject) -> [String] {
+        var labels: [String] = []
+        var pending = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            if let label = item.accessibilityLabel, !label.isEmpty { labels.append(label) }
+            if let value = item.accessibilityValue, !value.isEmpty { labels.append(value) }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for index in 0..<count {
+                    if let child = item.accessibilityElement(at: index) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return labels
+    }
 }
 
 @MainActor
