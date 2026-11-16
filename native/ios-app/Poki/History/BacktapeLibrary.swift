@@ -185,7 +185,7 @@ enum BacktapeApps {
     static func service(_ app: String) -> (name: String, symbol: String)? { services[app.lowercased()] }
 
     static func name(_ app: String) -> String {
-        if let service = service(app) { return AppLocalization.text(service.name) }
+        if let service = service(app) { return AppLocalization.bundle.localizedString(forKey: service.name, value: service.name, table: nil) }
         let name = HistoryNames.app(app)
         return AppIconStore.shared.gone(app) ? String(format: AppLocalization.text("%@ (Deleted)"), name) : name
     }
@@ -843,7 +843,7 @@ struct BacktapeLibrary: View {
     private func ask(_ tile: BacktapeTile) {
         if lock.usesBiometrics {
             Task {
-                if await lock.confirm(AppLocalization.text(tile.zoom.forget)) { await forget(tile) }
+                if await lock.confirm(AppLocalization.bundle.localizedString(forKey: tile.zoom.forget, value: tile.zoom.forget, table: nil)) { await forget(tile) }
             }
         } else {
             pin = ""
