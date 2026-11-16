@@ -2,6 +2,10 @@
 
 This note is for the people who maintain the install. The agent-facing guide is the skill [skills/install-poki/SKILL.md](../skills/install-poki/SKILL.md).
 
+## First-install completion
+
+Use the [first-install completion checklist](../skills/install-poki/SKILL.md#finish-a-first-installation) after the runner returns. The installed version, remaining manual checks, model account, first task and signing renewal are separate results. `ok:true` does not prove the model can answer or Notes contains the requested note. Keep the one-click installation heading and place the required user actions directly below it; the user supplies their own model account.
+
 ## Update preservation audit
 
 This source audit is against `main` at `60c75491`. It is not a physical-iPhone preservation test. For a user asking to update, follow the separate [update branch](../skills/install-poki/SKILL.md#update-an-installed-poki), not the first-install command.
@@ -41,7 +45,7 @@ The new protocol prepares one inspected archive in the helper process and consum
 | 1 | Download Poki Setup, check SHA-256, Developer ID and notarization | agent | Done by `bin/install-iphone.mjs`. A file fetched with `curl` carries no quarantine flag, so macOS shows no "downloaded from the internet" dialog, and the helper runs without the window. |
 | 2 | Start Poki Setup | agent | The shipped `poki-setup-bridge` (JSON lines over stdio) is the headless mode. No change to Poki Setup was needed. |
 | 3 | Find the Beta update | agent | `set_channel` resolves historical preferences to Beta. |
-| 4 | Apple Account password | input | Cannot go away: Apple's GSA sign-in needs it. Moved to the start, before any phone step. Typed once into the Mac's keychain with `security add-generic-password -w`, never in chat. Poki Setup keeps it for renewals, so it is asked once per Mac. |
+| 4 | Apple Account password | input | Cannot go away: Apple's GSA sign-in needs it. Moved to the start, before any phone step. Entered in the Poki Setup sign-in window, never in agent chat. Without a screen, run `security add-generic-password -U -s poki-setup-install -a YOUR_APPLE_ACCOUNT_EMAIL -w` in your own Terminal to store it in the Mac keychain; macOS prompts for the password without showing it. Poki Setup keeps it for renewals, so it is asked once per Mac. |
 | 5 | Two-factor code | input | Cannot go away. Once per Mac, since Poki Setup keeps the session. The code can arrive on the same iPhone. |
 | 6 | Plug in by USB and unlock | phone | Needed for the first pairing and the install. |
 | 7 | Trust This Computer and passcode | phone | Cannot go away: lockdown pairing needs the owner's consent. The RemotePairing record for iOS 26.4 and later is made in the same visit. Skipped when this Mac is already paired. |
@@ -49,9 +53,9 @@ The new protocol prepares one inspected archive in the helper process and consum
 | 9 | Sign and install Poki, pairing file, disk image | agent | Done by the bridge's `install`. |
 | 10 | Trust the developer in VPN & Device Management | phone | Required for free accounts. Unverified: whether a paid team needs it, and whether `xcrun devicectl device process launch --payload-url "prefs:root=General&path=ManagedConfigurationList" com.apple.Preferences` can open that page directly (needs Xcode). |
 | 11 | Open Poki once | phone | Poki writes `Documents/PokiSetup/poki-hello.json` each time it runs, and the installer reads it through the bridge's `container_read` (Poki Setup after 0.2.1) or `xcrun devicectl device copy from` (Xcode). Only with neither does the agent confirm with `done open_poki`. Poki then turns itself on: a first launch that finds Poki Setup's `signing-identity.json` sets `wantsOn`. Turning on asks for Automation Mode at once: the owner taps Continue and enters the iPhone passcode on iOS's screen. If they cancel, Poki does not ask again until it is turned on again. |
-| 12 | Poki's Settings > Automation > Setup checklist (system permission prompts) | phone | iOS permission alerts need a tap. Not needed to finish the install; they come up the first time Poki needs each one. |
+| 12 | Poki's Settings > Connection checklist (system permission prompts) | phone | iOS permission alerts need a tap. Not needed to finish the install; they come up the first time Poki needs each one. |
 | 13 | Model API key for chat and voice | agent, when asked | `--model-key <provider>` reads the Mac keychain item `<provider>-api-key` and carries it sealed (below). Off by default. Without it, or with no way into Poki's files, typed on the phone. |
-| 13a | Local connection (10.7.0.1) | phone | Poki Setup strips packet-tunnel extensions for both free and paid teams. A VPN app supplies the local connection; Settings > Automation > Setup > Local Connection includes LocalDevVPN instructions. Poki's hello carries one sentence for the VPN app it finds (`ProxyApps`), and the installer waits until Poki says it answers. |
+| 13a | Local connection (10.7.0.1) | phone | Poki Setup strips packet-tunnel extensions for both free and paid teams. A VPN app supplies the local connection; Settings > Connection > Local Connection includes LocalDevVPN instructions. Poki's hello carries one sentence for the VPN app it finds (`ProxyApps`), and the installer waits until Poki says it answers. |
 | 14 | Relay | input | The Cloudflare token comes from `CLOUDFLARE_API_TOKEN` or the token Poki Setup keeps; the deploy is agent work. Scanning the relay QR on the phone is still a person step. Next stage: hand the relay address over like the pairing file. |
 | 15 | Self-check | agent | Install record, Developer Mode, pairing, disk image mount, relay check. |
 
@@ -84,9 +88,9 @@ Asked for on Nov 8: Poki Setup's first page asks for a model key, and an agent b
 
 ## Version, UI and renewal checks
 
-Read the release selected by the installer, its installed version and build, and the phone's Settings > General > Updates > Poki Version. The Mac's saved install record is not a phone readback. Release suffixes such as `beta.1` are not the IPA's numeric build. See the skill's version-mismatch branch.
+Read the release selected by the installer, its installed version and build, and the phone's Settings > Signing & Updates > Poki Version. The Mac's saved install record is not a phone readback. Release suffixes such as `beta.1` are not the IPA's numeric build. See the skill's version-mismatch branch.
 
-In 0.4.0, Settings opens from the button at the bottom of the conversations drawer. Models > Add Account replaces the old Agents > Accounts and Models instruction. The local connection is under Automation > Setup > Local Connection, which opens Turn On Loopback. External Agents > Address under MCP Relay opens the Relay page; General > Updates contains Signing Options, Apple Account and Release Channel. These names are checked against the views and localization strings, not a live UI session.
+In current builds, Settings opens from the button at the bottom of the conversations drawer. Models > Add Account contains model accounts. Connection > Local Connection opens Turn On Loopback. Signing & Updates is a separate Settings row with Poki Version and Signing Options > Apple Account. Older builds may use Automation > Setup, General > Updates, or Connection > Signing & Updates. These names are checked against the views and localization strings, not a live UI session.
 
 The installer closes its headless helper when it exits (`src/install/run.mjs:598-600`). It does not leave a renewal service running. The Poki Setup Mac app stays open after its last window closes (`desktop/mac/Sources/PokiSetup/App.swift:48`), checks every six hours (`AppModel.swift:113-120`) and renews with two days or fewer remaining (`desktop/core/src/keeper.rs:6,33-35`). The renewal task requires a kept password (`AppModel.swift:330-333`) and a reachable trusted phone. Keep the Mac awake and Poki Setup running for that method. Automatic renewal while locked, asleep or disconnected is not verified here.
 

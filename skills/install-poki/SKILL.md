@@ -16,7 +16,7 @@ Pick one branch:
 - **Update.** Poki is on the iPhone and the user asks to update it, or Poki's own update failed, could not download or stopped moving. Follow "Update an installed Poki". Poki's own update downloads from R2 with a GitHub network-failure fallback on the iPhone, and that download sometimes cannot reach GitHub; this branch is the backup, where the Mac downloads the build and installs it over USB.
 - **Stuck on "Finishing the update".** Follow "When Poki's own update stalls".
 
-In Poki 0.4.0, open the conversations drawer and tap the Settings button at the bottom. Paths below such as Settings > General > Updates start there. Current builds group these pages under Settings > Connection: Settings > General > Updates is Settings > Connection > Signing & Updates, and Settings > Automation > Setup is Settings > Connection. Give the user the path their build shows.
+In current builds, open the conversations drawer and tap Settings at the bottom. Local Connection is under Settings > Connection; model accounts are under Settings > Models; version and renewal are under Settings > Signing & Updates. Older builds may place these under Automation > Setup, General > Updates, or Connection > Signing & Updates. Give the user the path their build shows.
 
 ## Before you start
 
@@ -25,6 +25,8 @@ In Poki 0.4.0, open the conversations drawer and tap the Settings button at the 
 1. Find or make a Poki checkout. In a checkout, `bin/install-iphone.mjs` exists. Otherwise run `git clone https://github.com/JosssphZhou/poki.git` and work in that folder. An existing checkout on `main` with no local changes can take `git pull --ff-only` first, so the installer is current; leave any other checkout as it is and use a separate clone of `main`. Done when the checkout contains the current installer.
 2. Check: a Mac with macOS 14 or later, Node.js 24 or later, an iPhone on iOS 18 or later, a USB data cable, and the user's Apple Account. A free account works with 7-day signing; see "No paid developer account" below. The iPhone also needs a VPN app that routes 10.7.0.1 back to the iPhone; see "No VPN app" below. On iOS 27 and later Poki controls the iPhone through its native services by default; on iOS 18 to 26 it uses the XCTest session, which needs UI Automation. That path was not tested on a physical iPhone below iOS 27 for this release: tell the user so before installing on an older iOS. Xcode is not required. With Xcode installed, the installer can see when Poki opens and give it the model key even with an older Poki Setup. Without Node.js 24, or on Windows, use "Without Node.js, or on Windows" below instead of the checkout. Done when the prerequisites are present and the user has confirmed the phone is ready.
 3. Ask the user one question: "Should I also give Poki on the iPhone your model API key from this Mac's keychain?" Default is no. On yes, ask which provider (`openai`, `anthropic`, `deepseek`, `gemini` or `openrouter`) and add `--model-key <provider>` below. The installer reads the keychain item `<provider>-api-key` (for example `openai-api-key`; another name with `--model-key-item <item>`). Never read the key yourself and never ask for it in chat. Done when the user has chosen whether to transfer a key.
+
+Before starting, describe this as the recommended one-click installation. Under that heading, tell the user: "You only need to connect and unlock your iPhone, sign in when prompted, and complete the iPhone permissions, local connection and model-account steps." The iPhone app uses the user’s own model account; the coding agent’s subscription does not connect it automatically.
 
 ## Which Poki you get
 
@@ -54,7 +56,7 @@ Each line is one JSON event with an `at` time:
 - `{"event":"result","ok":true,"check":{...}}` is the last line only when the checks passed without manual steps left unverified.
 - A result with `ok:false` and `unverified` exits with code 3. Relay every entry's `say`, including instructions from skipped steps. Have the user finish them in Poki and confirm each result. Report what was manually confirmed and what remains unverified; do not call the phone ready just because the app was installed. Older Poki Setup without Xcode can require manual model-key entry and loopback setup.
 
-Some helper prompts still name older pages. After relaying the prompt, give the 0.4.0 path: Setup > Connect to this iPhone means Settings > Connection > Local Connection (Settings > Automation > Setup > Local Connection in older 0.4.0 builds); Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
+Some helper prompts still name older pages. After relaying the prompt, give the current path: Setup > Connect to this iPhone means Settings > Connection > Local Connection (Settings > Automation > Setup > Local Connection in older 0.4.0 builds); Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
 
 Several iPhones plugged in: list them with `node bin/install-iphone.mjs phones` and add `--udid <udid>`.
 
@@ -74,7 +76,7 @@ The installer runs these in order. Most need nobody. Each step is complete when 
 10. **`relay`** Deploys the relay when `CLOUDFLARE_API_TOKEN` is set or Poki Setup keeps a token. Skipped otherwise. Poki and its own chat work without it; agents on other computers need it.
 11. **`check`** Self-check: the install record, Developer Mode, pairing, disk image and relay.
 
-Poki turns itself on after this install, and ticks Developer Mode and UI Automation in Settings > Automation > Setup once it runs. The iPhone's own switch for UI Automation (iOS Settings > Developer > Enable UI Automation) is still the user's to turn on; Poki's UI Automation row and Allow UI Automation page says so. When Poki first opens it asks for Automation Mode: tell the user to tap Continue and enter the iPhone passcode on iOS's screen. If they cancel, Poki does not ask again until they turn it on again.
+Poki turns itself on after this install, and ticks Developer Mode and UI Automation in Settings > Connection once it runs. The iPhone's own switch for UI Automation (iOS Settings > Developer > Enable UI Automation) is still the user's to turn on; Poki's UI Automation row and Allow UI Automation page says so. When Poki first opens it asks for Automation Mode: tell the user to tap Continue and enter the iPhone passcode on iOS's screen. If they cancel, Poki does not ask again until they turn it on again.
 
 ## Download source and failures
 
@@ -108,7 +110,7 @@ An installation is complete only after the installer reports success and the pho
 
 1. The `install` step's `Poki <version> (<build>) installed`.
 2. The `open_poki` step's `Poki <version> (<build>) is open on the iPhone`. Poki writes this itself when it starts, so it is the iPhone's own answer. The result's `check.poki` is only this Mac's install record.
-3. What the user reads in Poki at Settings > General > Updates > Poki Version.
+3. What the user reads in Poki at Settings > Signing & Updates > Poki Version.
 
 When `open_poki` ended with "the person said Poki is open" or "a version that does not write its hello yet", the third is the only readback: ask the user for it. Tell the user the version, the build and the channel it came from.
 
@@ -126,17 +128,31 @@ A paid developer membership is not required. A free Apple Account works. Poki Se
 
 ## No VPN app
 
-Poki reaches the iPhone's developer services at 10.7.0.1, and a VPN app on the phone routes that address back to the phone. Poki offers instructions for the free LocalDevVPN from the App Store. In Poki it is listed at Settings > Automation > Setup > Local Connection (the Turn On Loopback page), under Use Your Proxy App, with its steps. At the `loopback` stop, tell the user `say`, and to install LocalDevVPN when they have no VPN app. Done when the `loopback` step ends `done`. If the user does not want a VPN app now, Poki stays installed but cannot operate other apps: after 15 minutes the installer exits with code 3; report the local connection as not set up.
+Poki reaches the iPhone's developer services at 10.7.0.1, and a VPN app on the phone routes that address back to the phone. Poki offers instructions for the free LocalDevVPN from the App Store. In Poki it is listed at Settings > Connection > Local Connection (the Turn On Loopback page), under Use Your Proxy App, with its steps. At the `loopback` stop, tell the user `say`, and to install LocalDevVPN when they have no VPN app. Done when the `loopback` step ends `done`. If the user does not want a VPN app now, Poki stays installed but cannot operate other apps: after 15 minutes the installer exits with code 3; report the local connection as not set up.
 
 ## What to keep running
 
 Tell the user these after the result:
 
 - **Poki Setup on the Mac renews Poki.** The installer runs Poki Setup's helper only while it runs. Renewal on the Mac is done by the Poki Setup app while it is open (closing its window leaves it in the menu bar): every 6 hours it renews each iPhone this Mac set up that has 2 days of signing left or fewer, with the Apple Account password it kept. The Mac must be awake and the iPhone reachable and trusted. USB is the fallback when network discovery on the same Wi-Fi does not find it. Ask the user to open Poki Setup and keep it open, and not to sign out of it or delete it.
-- **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > General > Updates > Signing Options > Apple Account, Poki prepares a refreshed build 3 days before signing ends and asks the user to tap Install Refresh or Install Update.
+- **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > Signing & Updates > Signing Options > Apple Account, Poki prepares a refreshed build 3 days before signing ends and asks the user to tap Install Refresh or Install Update.
 - **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and refreshes.
 
 With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command refuses equal builds; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
+
+## Finish a first installation
+
+After the installer exits, use the version checks above and report the installed version and numeric build, the selected release, and every `unverified` item. An `ok:true` result confirms the installer’s checks, not a working model account or a completed phone task. Keep the installation incomplete if a required check remains unverified.
+
+Tell the user where to finish the local connection and model-account steps. Use their existing model account; Poki does not provide model credits. Never request credentials in chat. Explain the signing expiry and the renewal method actually configured, using "What to keep running" above.
+
+Once setup is complete, offer this first task for the user to send in Poki:
+
+```text
+Create a new note in Notes titled "Poki Demo" with these three lines: Milk, Eggs, Coffee. Open the note when finished. Leave existing notes unchanged.
+```
+
+Verify the title and three separate lines in Notes, or ask the user to confirm them when you cannot inspect the screen. Report whether the result was observed, user-confirmed, or untested. If Notes is unavailable, the model request fails, or setup is incomplete, name that step and leave the task unfinished. After an interruption, check for an existing note before retrying. Done when the installation result, remaining steps, first-task result and renewal instructions are clear; never claim the first task succeeded from an installer result or model reply alone.
 
 ## Update an installed Poki
 
@@ -154,11 +170,11 @@ Use this branch when an existing Poki cannot download its update on the iPhone. 
 5. On exit **3**, report installation as failed or unconfirmed and keep Poki installed. On exit **4**, report that installation finished but the target version was not verified. Resolve the named failure before another update-only attempt. Never describe either result as success.
 6. Exit **0** means the live installed version and build matched the inspected target after guarded renewal. A result with `simulated: true` proves only the simulated path. For a real update, ask the user to open Poki and confirm conversations, model accounts, settings, signing options, release channel, connections and required extensions. Do not display secret values. Done only when the version matches and those retained items are confirmed.
 
-In current builds the update page is Settings > Connection > Signing & Updates; older 0.4.0 builds use Settings > General > Updates. This path only installs a higher numeric build. An equal-build signature refresh is a separate operation and must not be substituted automatically. Physical-device preservation remains unverified until the checks above are performed on the intended phone.
+In current builds the update page is Settings > Signing & Updates; earlier builds may use Settings > Connection > Signing & Updates or Settings > General > Updates. This path only installs a higher numeric build. An equal-build signature refresh is a separate operation and must not be substituted automatically. Physical-device preservation remains unverified until the checks above are performed on the intended phone.
 
 ## When Poki's own update stalls
 
-After the user taps Install Update or Download and Install Update in Poki (Settings > General > Updates), Poki can stay on "Finishing the update: Poki will close to finish it", after the alert "Poki Will Close to Finish the Update". Poki shows this once iOS has begun installing the new copy, and iOS finishes only after the old Poki leaves the screen. For the reported 0.4.0 case where installation has succeeded, tell the user the new version is installed and to swipe Poki away in the app switcher and reopen it. This closes the process without deleting the app or its data. The status text alone is not proof that installation succeeded; always read back the version. Done when Settings > General > Updates > Poki Version shows the new build. If it still shows the old build a minute later, or Poki does not open, follow "Update an installed Poki".
+After the user taps Install Update or Download and Install Update in Poki (Settings > Signing & Updates in current builds), Poki can stay on "Finishing the update: Poki will close to finish it", after the alert "Poki Will Close to Finish the Update". Poki shows this once iOS has begun installing the new copy, and iOS finishes only after the old Poki leaves the screen. For the reported 0.4.0 case where installation has succeeded, tell the user the new version is installed and to swipe Poki away in the app switcher and reopen it. This closes the process without deleting the app or its data. The status text alone is not proof that installation succeeded; always read back the version. Done when Settings > Signing & Updates > Poki Version shows the new build. If it still shows the old build a minute later, or Poki does not open, follow "Update an installed Poki".
 
 ## When a step fails
 

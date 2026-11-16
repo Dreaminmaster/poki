@@ -38,26 +38,6 @@ Poki は iPhone を操作するアプリです。画面を読み取り、実際�
 - **Windows では**、Windows 版 Poki Setup をダウンロードして画面の案内に従います。USB で iPhone を認識できるよう、先に Apple Devices または iTunes をインストールしてください。エージェントから Poki Setup 内蔵のコマンドラインツールを使うこともできます。
 - **インストール後は**、iPhone だけで作業を実行できます。無料の Apple Account の署名は 7 日間有効で、パソコン上で Poki Setup を起動しておくと更新できます。[よくある質問](#よくある質問)をご覧ください。
 
-### エージェントに頼む（推奨）
-
-Claude Code や Codex などのエージェントに、次のように伝えます。
-
-```text
-https://github.com/JosssphZhou/poki から私の iPhone に Poki をインストールして
-```
-
-エージェントは [install-poki スキル](skills/install-poki/SKILL.md)に従い、`bin/install-iphone.mjs` で自動化できる手順を進めます。あなたが行うのは、Mac の Poki Setup 画面での Apple Account 入力、iPhone での「信頼」、デベロッパモードの有効化、開発者の信頼、Poki の起動です。初回起動でオートメーションモードを求められたら「続ける」をタップし、iPhone のパスコードを入力します。キャンセルした場合は、Poki を再び有効にすると確認が表示されます。操作が必要になるたびに、エージェントが案内します。無料の Apple Account も使えます。
-
-インストーラは既定で Alpha チャンネルを使います。Beta などを希望する場合はエージェントに伝えてください。ビルドは先に Alpha で公開され、追加のテスト後に同じビルドが Beta に進みます。
-
-Node.js 24 がない場合や Windows でも、Poki Setup をインストールすれば同じ依頼文を使えます。エージェントが内蔵のコマンドラインツールを使います。依頼文は Poki Setup のメニューからもコピーできます。Mac は Poki > Copy Prompt for Your Agent、Windows は Settings > Use an agent です。
-
-リリース情報の取得中に GitHub が 403 や 429 を返す場合、同じネットワークで共有する匿名リクエストの時間単位の上限が原因であることが多いです。別のネットワークやプロキシ接続先で再試行するか、1 時間待ってください。
-
-### Poki Setup を使う
-
-自分で操作する場合は、[Alpha リリース](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)から macOS 版（`.dmg`）または Windows 版（`.exe`、[ZhehanZhang](https://github.com/ZhehanZhang) が提供）の Poki Setup をダウンロードし、画面の案内に従います。Beta リリースにも同じ Poki Setup ファイルがあります。設定でチャンネルを選ぶまでは最新の Stable を、Stable がなければ Beta をインストールします。詳しい手順は [Poki Setup](desktop/README.md) にあります。
-
 ### 必要なもの
 
 | 項目 | 要件 |
@@ -69,6 +49,40 @@ Node.js 24 がない場合や Windows でも、Poki Setup をインストール�
 | モデルのアカウント | ご自身で用意します。ChatGPT Plus または Pro でのログインが手軽です。Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter の API キーや、独自の OpenAI 互換サーバーも使えます。Claude のサブスクリプションではログインできないため、Anthropic の API キーを使ってください。 |
 
 iOS 27 以降ではネイティブサービスで iPhone を操作します。iOS 18 から 26 では XCTest セッションを使うため、iPhone のデベロッパ設定で UI オートメーションを有効にしてください。iPadOS 18 以降の iPad にもインストールできます。
+
+iPhone アプリには自分のモデルアカウントを使います。コーディングエージェントの契約が Poki に自動で引き継がれるわけではありません。既存のエージェントで Poki MCP だけを使う場合は、[MCP のインストール手順](docs/install.md)に従ってください。MCP はそのクライアントのモデル接続を使います。
+
+### ワンクリックインストール（推奨）
+
+あなたが行うのは、iPhone の接続とロック解除、案内に従ったログイン、iPhone の権限、ローカル接続、モデルアカウントの設定だけです。
+
+Claude Code や Codex などのエージェントに、次のように伝えます。
+
+```text
+https://github.com/JosssphZhou/poki から私の iPhone に Poki をインストールして
+```
+
+エージェントは [install-poki スキル](skills/install-poki/SKILL.md)に従い、`bin/install-iphone.mjs` で自動化できる手順を進めます。あなたが行うのは、Mac の Poki Setup 画面での Apple Account 入力、iPhone での「信頼」、デベロッパモードの有効化、開発者の信頼、Poki の起動です。初回起動でオートメーションモードを求められたら「続ける」をタップし、iPhone のパスコードを入力します。キャンセルした場合は、Poki を再び有効にすると確認が表示されます。操作が必要になるたびに、エージェントが案内します。無料の Apple Account も使えます。
+
+現在のインストーラは Beta を選びます。以前の Stable、Alpha、Pre-alpha の設定も Beta として扱い、Beta がなければ停止します。インストール済みの古い Poki Setup は以前の選択方法を使う場合があるため、今回表示されたバージョンを確認してください。
+
+Node.js 24 がない場合や Windows でも、Poki Setup をインストールすれば同じ依頼文を使えます。エージェントが内蔵のコマンドラインツールを使います。依頼文は Poki Setup のメニューからもコピーできます。Mac は Poki > Copy Prompt for Your Agent、Windows は Settings > Use an agent です。
+
+リリース情報の取得中に GitHub が 403 や 429 を返す場合、同じネットワークで共有する匿名リクエストの時間単位の上限が原因であることが多いです。別のネットワークやプロキシ接続先で再試行するか、1 時間待ってください。
+
+### Poki Setup を使う
+
+インストーラを含む最新の [Beta リリース](https://github.com/JosssphZhou/poki/releases)から macOS 版（`.dmg`）または Windows 版（`.exe`、[ZhehanZhang](https://github.com/ZhehanZhang) が提供）の Poki Setup をダウンロードし、画面の案内に従ってください。詳しくは [Poki Setup](desktop/README.md) をご覧ください。
+
+### 最初のタスクを実行する
+
+インストールされたバージョンを確認し、ローカル接続とモデルアカウントの設定を終えたら、Poki で次の依頼を送信します。
+
+```text
+メモに「Poki Demo」という新しいメモを作成し、本文を Milk、Eggs、Coffee の3行にしてください。完了したらそのメモを開いてください。既存のメモは変更しないでください。
+```
+
+メモアプリで、タイトルが「Poki Demo」、本文の各行が Milk、Eggs、Coffee になっていることを確認します。完了メッセージだけでは成功の証明になりません。メモアプリがない場合や設定が未完了の場合は、先にその手順を完了してください。中断後に再試行する前には、メモが作成済みか確認してください。
 
 ### よくある質問
 
@@ -88,7 +102,7 @@ iOS 27 以降ではネイティブサービスで iPhone を操作します。iO
 
 ## Poki を更新する
 
-- **iPhone で更新。** 0.4.0 では設定 > 接続 > 署名と更新を開きます。新しいビルドがあればダウンロードとインストールを選べます。ログインを求められた場合は、パソコンからインストールしたため iPhone に Apple Account が保存されていません。インストール時のアカウントでログインするか、パソコンから更新してください。
+- **iPhone で更新。** 現在のビルドでは設定 > 署名と更新を開きます。古いビルドでは「接続」の下にある場合があります。新しいビルドがあればダウンロードとインストールを選べます。ログインを求められた場合は、パソコンからインストールしたため iPhone に Apple Account が保存されていません。インストール時のアカウントでログインするか、パソコンから更新してください。
 - **パソコンで更新。** Poki Setup の Renew は選択中のチャンネルの最新ビルドを既存アプリに上書きインストールします。Mac ではエージェントに「iPhone の Poki を更新して」と頼むこともできます。install-poki スキルの更新手順は、先に現在のバージョンと署名の識別情報を確認します。
 - 「Finishing the update」で止まったら、アプリスイッチャーで Poki を終了して開き直し、設定でバージョンを確認してください。変わっていなければパソコンの Poki Setup から更新します。更新の修復のために Poki を削除しないでください。会話も消えます。
 

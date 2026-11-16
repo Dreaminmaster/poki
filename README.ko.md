@@ -38,26 +38,6 @@ Poki는 iPhone을 조작하는 앱입니다. 화면을 읽고 실제 앱에서 �
 - **Windows에서는** Windows용 Poki Setup을 내려받아 안내를 따르세요. USB로 iPhone을 인식할 수 있도록 Apple Devices 또는 iTunes를 먼저 설치하세요. 에이전트가 Poki Setup에 포함된 명령줄 도구를 사용할 수도 있습니다.
 - **설치 후에는** 컴퓨터 없이 iPhone에서 작업을 실행합니다. 무료 Apple 계정의 서명은 7일간 유효하며, 컴퓨터에서 Poki Setup을 계속 실행하면 갱신할 수 있습니다. [자주 묻는 질문](#자주-묻는-질문)을 참고하세요.
 
-### 에이전트로 설치하기 (권장)
-
-Claude Code나 Codex 같은 에이전트에게 다음과 같이 요청하세요.
-
-```text
-https://github.com/JosssphZhou/poki 에서 내 iPhone에 Poki를 설치해 줘
-```
-
-에이전트는 [install-poki 스킬](skills/install-poki/SKILL.md)에 따라 `bin/install-iphone.mjs`를 실행해 자동화할 수 있는 단계를 처리합니다. 사용자는 Mac의 Poki Setup 창에서 Apple 계정 입력, iPhone에서 신뢰 선택, 개발자 모드 활성화, 개발자 신뢰, Poki 실행을 직접 합니다. 처음 열 때 자동화 모드를 요청하면 계속을 누르고 iPhone 암호를 입력하세요. 취소했다면 Poki를 다시 켜면 요청이 다시 표시됩니다. 직접 해야 할 단계마다 에이전트가 안내합니다. 무료 Apple 계정도 사용할 수 있습니다.
-
-설치 프로그램은 기본적으로 Alpha 채널을 사용합니다. Beta 등 다른 채널을 원하면 에이전트에게 알려 주세요. 빌드는 Alpha에 먼저 공개되며, 추가 테스트를 거친 뒤 같은 빌드가 Beta로 이동합니다.
-
-Node.js 24가 없거나 Windows를 사용하나요? Poki Setup을 설치하면 같은 요청을 사용할 수 있습니다. 에이전트가 내장 명령줄 도구를 사용합니다. Poki Setup 메뉴에서도 요청문을 복사할 수 있습니다. Mac은 Poki > Copy Prompt for Your Agent, Windows는 Settings > Use an agent입니다.
-
-설치 프로그램이 릴리스 정보를 읽다가 GitHub에서 403 또는 429를 받으면, 같은 네트워크에서 공유하는 시간당 익명 요청 한도에 도달한 경우가 많습니다. 다른 네트워크나 프록시 서버로 다시 시도하거나 한 시간 기다리세요.
-
-### Poki Setup으로 설치하기
-
-직접 설치하려면 [Alpha 릴리스](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest)에서 macOS용 Poki Setup(`.dmg`) 또는 Windows용(`.exe`, [ZhehanZhang](https://github.com/ZhehanZhang) 기여)을 내려받아 안내를 따르세요. Beta 릴리스에도 같은 Poki Setup 파일이 있습니다. 설정에서 채널을 선택하기 전에는 최신 Stable을 설치하고, Stable이 없으면 Beta를 설치합니다. 단계별 설명은 [Poki Setup](desktop/README.md)을 참고하세요.
-
 ### 준비할 것
 
 | 항목 | 요구 사항 |
@@ -69,6 +49,40 @@ Node.js 24가 없거나 Windows를 사용하나요? Poki Setup을 설치하면 �
 | 모델 계정 | 본인 계정이 필요합니다. ChatGPT Plus 또는 Pro 로그인이 간편한 시작 방법입니다. Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter의 API 키나 자체 OpenAI 호환 서버도 사용할 수 있습니다. Claude 구독으로는 로그인할 수 없으므로 Anthropic API 키를 사용하세요. |
 
 iOS 27 이상에서는 네이티브 서비스로 iPhone을 조작합니다. iOS 18부터 26까지는 XCTest 세션을 사용하므로 iPhone 개발자 설정에서 UI 자동화를 켜야 합니다. iPadOS 18 이상인 iPad에도 설치할 수 있습니다.
+
+iPhone 앱에는 본인의 모델 계정이 필요합니다. 코딩 에이전트의 구독이 Poki에 자동으로 연결되지는 않습니다. 기존 에이전트에서 Poki MCP만 사용하려면 [MCP 설치 안내](docs/install.md)를 따르세요. MCP는 해당 클라이언트의 모델 연결을 사용합니다.
+
+### 원클릭 설치 (권장)
+
+직접 할 일은 iPhone 연결과 잠금 해제, 안내에 따른 로그인, iPhone 권한, 로컬 연결, 모델 계정 설정뿐입니다.
+
+Claude Code나 Codex 같은 에이전트에게 다음과 같이 요청하세요.
+
+```text
+https://github.com/JosssphZhou/poki 에서 내 iPhone에 Poki를 설치해 줘
+```
+
+에이전트는 [install-poki 스킬](skills/install-poki/SKILL.md)에 따라 `bin/install-iphone.mjs`를 실행해 자동화할 수 있는 단계를 처리합니다. 사용자는 Mac의 Poki Setup 창에서 Apple 계정 입력, iPhone에서 신뢰 선택, 개발자 모드 활성화, 개발자 신뢰, Poki 실행을 직접 합니다. 처음 열 때 자동화 모드를 요청하면 계속을 누르고 iPhone 암호를 입력하세요. 취소했다면 Poki를 다시 켜면 요청이 다시 표시됩니다. 직접 해야 할 단계마다 에이전트가 안내합니다. 무료 Apple 계정도 사용할 수 있습니다.
+
+현재 설치 프로그램은 Beta를 선택합니다. 이전 Stable, Alpha, Pre-alpha 설정도 Beta로 처리하며, Beta가 없으면 중단합니다. 이미 설치한 구버전 Poki Setup은 이전 선택 방식을 사용할 수 있으므로 이번 설치에 표시되는 버전을 확인하세요.
+
+Node.js 24가 없거나 Windows를 사용하나요? Poki Setup을 설치하면 같은 요청을 사용할 수 있습니다. 에이전트가 내장 명령줄 도구를 사용합니다. Poki Setup 메뉴에서도 요청문을 복사할 수 있습니다. Mac은 Poki > Copy Prompt for Your Agent, Windows는 Settings > Use an agent입니다.
+
+설치 프로그램이 릴리스 정보를 읽다가 GitHub에서 403 또는 429를 받으면, 같은 네트워크에서 공유하는 시간당 익명 요청 한도에 도달한 경우가 많습니다. 다른 네트워크나 프록시 서버로 다시 시도하거나 한 시간 기다리세요.
+
+### Poki Setup으로 설치하기
+
+설치 파일이 포함된 최신 [Beta 릴리스](https://github.com/JosssphZhou/poki/releases)에서 macOS용 Poki Setup(`.dmg`) 또는 Windows용(`.exe`, [ZhehanZhang](https://github.com/ZhehanZhang) 기여)을 내려받아 안내를 따르세요. 자세한 단계는 [Poki Setup](desktop/README.md)을 참고하세요.
+
+### 첫 작업 실행하기
+
+설치된 버전을 확인하고 로컬 연결과 모델 계정 설정을 마쳤다면 Poki에서 다음 요청을 보내세요.
+
+```text
+메모 앱에 제목이 "Poki Demo"인 새 메모를 만들고 Milk, Eggs, Coffee를 각각 한 줄씩 적어 주세요. 완료하면 해당 메모를 열어 주세요. 기존 메모는 변경하지 마세요.
+```
+
+메모 앱에서 제목이 "Poki Demo"이고 본문 세 줄이 각각 Milk, Eggs, Coffee인지 확인하세요. 완료 메시지만으로는 성공을 확인할 수 없습니다. 메모 앱이 없거나 설정이 끝나지 않았다면 먼저 해당 단계를 완료하세요. 중단 후 다시 시도하기 전에 메모가 이미 만들어졌는지 확인하세요.
 
 ### 자주 묻는 질문
 
@@ -88,7 +102,7 @@ iOS 27 이상에서는 네이티브 서비스로 iPhone을 조작합니다. iOS 
 
 ## Poki 업데이트하기
 
-- **iPhone에서 업데이트.** 0.4.0에서는 설정 > 연결 > 서명 및 업데이트를 여세요. 새 빌드가 있으면 다운로드하고 설치할 수 있습니다. 먼저 로그인을 요청한다면 컴퓨터에서 설치했기 때문에 iPhone에 Apple 계정이 아직 없는 상태입니다. 설치할 때 쓴 계정으로 로그인하거나 컴퓨터에서 업데이트하세요.
+- **iPhone에서 업데이트.** 현재 빌드에서는 설정 > 서명 및 업데이트를 여세요. 구버전에서는 연결 아래에 있을 수 있습니다. 새 빌드가 있으면 다운로드하고 설치할 수 있습니다. 먼저 로그인을 요청한다면 컴퓨터에서 설치했기 때문에 iPhone에 Apple 계정이 아직 없는 상태입니다. 설치할 때 쓴 계정으로 로그인하거나 컴퓨터에서 업데이트하세요.
 - **컴퓨터에서 업데이트.** Poki Setup의 Renew는 선택한 채널의 최신 빌드를 기존 앱 위에 설치합니다. Mac에서는 에이전트에게 “내 iPhone의 Poki를 업데이트해 줘”라고 요청할 수도 있습니다. install-poki 스킬은 설치된 버전과 서명 정보를 먼저 확인하는 별도 업데이트 절차를 제공합니다.
 - 업데이트가 “Finishing the update”에서 멈추면 앱 전환기에서 Poki를 종료한 뒤 다시 열고 설정에서 버전을 확인하세요. 버전이 바뀌지 않았다면 컴퓨터의 Poki Setup으로 업데이트하세요. 업데이트 문제를 해결하려고 Poki를 삭제하지 마세요. 대화도 함께 삭제됩니다.
 

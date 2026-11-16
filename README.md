@@ -38,26 +38,6 @@ You need a computer once, to install Poki: a Mac or a Windows PC.
 - **On Windows**, download Poki Setup for Windows and follow its window. Install Apple Devices or iTunes first, so the PC can find the iPhone over USB. Your agent can also run Poki Setup's own command line tool.
 - **After that**, Poki runs tasks on the iPhone without the computer. With a free Apple Account the signature lasts 7 days, and Poki Setup renews it while it stays open on the computer. See [Common questions](#common-questions).
 
-### With your agent (recommended)
-
-Tell your agent, such as Claude Code or Codex:
-
-```text
-Install Poki on my iPhone from https://github.com/JosssphZhou/poki
-```
-
-The agent follows the [install-poki skill](skills/install-poki/SKILL.md) and runs `bin/install-iphone.mjs`, which does every step it can by itself. You only do what iOS asks of you: type your Apple Account into a Poki Setup window on the Mac, tap Trust and turn on Developer Mode on the iPhone, trust the developer, and open Poki. When Poki first opens it asks for Automation Mode: tap Continue and enter the iPhone passcode. If you cancel, turn Poki on again to be asked again. The agent tells you each step in a sentence when it comes up. A free Apple Account works.
-
-The installer uses the Alpha channel unless you ask your agent for another one, such as Beta. Alpha gets each build first and Beta gets the same build after more testing.
-
-No Node.js 24, or on Windows? The same prompt works once Poki Setup is installed: the agent then uses the command line tool inside Poki Setup. Poki Setup's own menu also copies a prompt for your agent (Poki > Copy Prompt for Your Agent on a Mac, Settings > Use an agent on Windows).
-
-If GitHub answers 403 or 429 while the installer reads Poki's releases, it is usually GitHub's hourly limit on anonymous requests, which everyone on your network shares. Switch to another network or proxy node and run it again, or wait an hour.
-
-### With Poki Setup
-
-Prefer clicking through it yourself? Download Poki Setup for macOS (`.dmg`) or Windows (`.exe`, contributed by [ZhehanZhang](https://github.com/ZhehanZhang)) from the [Alpha release](https://github.com/JosssphZhou/poki/releases/tag/app-alpha-latest) and follow its window. The Beta release carries the same Poki Setup files. Until you pick a channel in its Settings, Poki Setup installs the newest Stable release, or the Beta while there is no Stable release yet. What Poki Setup does, step by step, is in [Poki Setup](desktop/README.md).
-
 ### What you need
 
 | | Requirement |
@@ -69,6 +49,40 @@ Prefer clicking through it yourself? Download Poki Setup for macOS (`.dmg`) or W
 | Model account | Your own. Signing in with a ChatGPT Plus or Pro plan is the easiest start. You can also paste an API key from Anthropic, OpenAI, Gemini, DeepSeek or OpenRouter, or use your own OpenAI-compatible server. A Claude subscription cannot sign in, so use an Anthropic API key instead. |
 
 On iOS 27 and later Poki controls the iPhone through its native services. On iOS 18 to 26 it uses an XCTest session instead, which needs UI Automation turned on in the iPhone's Developer settings. The app also installs on iPad with iPadOS 18 or later.
+
+The iPhone app uses your own model account. Your coding agent’s subscription does not automatically connect that account to Poki. If you only want Poki MCP in your existing coding agent, follow [MCP installation](docs/install.md) instead; MCP uses that client’s model access.
+
+### One-click installation (recommended)
+
+You only need to connect and unlock your iPhone, sign in when prompted, and complete the iPhone permissions, local connection and model-account steps.
+
+Tell your agent, such as Claude Code or Codex:
+
+```text
+Install Poki on my iPhone from https://github.com/JosssphZhou/poki
+```
+
+The agent follows the [install-poki skill](skills/install-poki/SKILL.md) and runs `bin/install-iphone.mjs`, which does every step it can by itself. You only do what iOS asks of you: type your Apple Account into a Poki Setup window on the Mac, tap Trust and turn on Developer Mode on the iPhone, trust the developer, and open Poki. When Poki first opens it asks for Automation Mode: tap Continue and enter the iPhone passcode. If you cancel, turn Poki on again to be asked again. The agent tells you each step in a sentence when it comes up. A free Apple Account works.
+
+The current installer selects Beta. Historical Stable, Alpha and Pre-alpha preferences also resolve to Beta. It stops if no Beta is available. Older installed copies of Poki Setup may retain their previous channel behavior; read the version selected by your run.
+
+No Node.js 24, or on Windows? The same prompt works once Poki Setup is installed: the agent then uses the command line tool inside Poki Setup. Poki Setup's own menu also copies a prompt for your agent (Poki > Copy Prompt for Your Agent on a Mac, Settings > Use an agent on Windows).
+
+If GitHub answers 403 or 429 while the installer reads Poki's releases, it is usually GitHub's hourly limit on anonymous requests, which everyone on your network shares. Switch to another network or proxy node and run it again, or wait an hour.
+
+### With Poki Setup
+
+Download Poki Setup for macOS (`.dmg`) or Windows (`.exe`, contributed by [ZhehanZhang](https://github.com/ZhehanZhang)) from the newest [Beta release](https://github.com/JosssphZhou/poki/releases) that includes the installer, then follow its window. See [Poki Setup](desktop/README.md) for the steps.
+
+### Run your first task
+
+After the installer has verified the installed version and you have finished the local connection and model-account steps, open Poki and send:
+
+```text
+Create a new note in Notes titled "Poki Demo" with these three lines: Milk, Eggs, Coffee. Open the note when finished. Leave existing notes unchanged.
+```
+
+Check the new note in Notes: the title must be "Poki Demo" and the body must contain Milk, Eggs and Coffee on separate lines. A completion message alone is not proof. If Notes is unavailable or setup is incomplete, finish that step first. After an interruption, check whether the note already exists before trying again.
 
 ### Common questions
 
@@ -88,7 +102,7 @@ On iOS 27 and later Poki controls the iPhone through its native services. On iOS
 
 ## Update Poki
 
-- **On the iPhone.** Open Poki's signing and updates page: Settings > Connection > Signing & Updates in 0.4.0. When a newer build is out, the page offers to download and install it. If it asks you to sign in first, Poki was installed from a computer and the iPhone does not have your Apple Account yet. Sign in with the account you installed with, or update from the computer instead.
+- **On the iPhone.** Open Poki's signing and updates page: Settings > Signing & Updates in current builds. Older builds may place it under Connection. When a newer build is out, the page offers to download and install it. If it asks you to sign in first, Poki was installed from a computer and the iPhone does not have your Apple Account yet. Sign in with the account you installed with, or update from the computer instead.
 - **From the computer.** Renew in Poki Setup installs the newest build on its channel over the installed app. On a Mac you can also tell your agent "Update Poki on my iPhone"; the install-poki skill has a separate update path that checks the installed version and signing identity first.
 - If an update stops at "Finishing the update", swipe Poki away in the app switcher and open it again, then check the version in Settings. If the version did not change, update from Poki Setup on the computer. Do not delete Poki to fix an update: deleting it deletes its conversations.
 
