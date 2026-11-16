@@ -58,13 +58,19 @@ enum BacktapeContext {
             .filter { capture.keeps($0.app) && BacktapeApps.service($0.app) == nil }
         guard !entries.isEmpty else { return .nothing }
 
-        let picked = pick(entries, for: question)
-        let long = span > 20 * 3600
-        let room = max(160, 3000 / picked.count - 40)
+        // The summaries are the map: the model picks the moments that may hold the answer, and only
+        // those moments' screen text is read in full (the owner, 2026-11-15). With no summaries yet,
+        // or none picked, the reads that share words with the question stand in.
+        let words = terms(question)
         var text = ""
-        for entry in picked {
-            let time = entry.at.formatted(date: long ? .abbreviated : .omitted, time: .shortened)
-            text += "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text.prefix(room))\n\n"
+        let spots = await moments(for: question, from: Date().addingTimeInterval(-span), to: Date())
+        if !spots.isEmpty {
+            let inside = entries.filter { entry in spots.contains { $0.start <= entry.at && entry.at < $0.end } }
+            text = passages(inside, words: words, long: span > 20 * 3600)
+            AppLog.shared.add("history", "personal context: \(spots.count) moments, \(inside.count) reads")
+        }
+        if text.isEmpty {
+            text = passages(pick(entries, for: question), words: words, long: span > 20 * 3600)
         }
         let instructions = """
         You answer one question about what a person did on their iPhone, from text that was on the \
@@ -113,15 +119,83 @@ enum BacktapeContext {
         return (word == "SHARE", reason)
     }
 
+    /// The blocks of the tape the model on this iPhone picks from their summaries, up to 3.
+    @MainActor private static func moments(for question: String, from start: Date, to end: Date) async -> [(start: Date, end: Date)] {
+        // Ten-minute and hour notes; a note's key carries its zoom in its fraction (BacktapeZoom.key).
+        let kept = await HistoryStore.shared.notes(from: start.addingTimeInterval(-3600), to: end).compactMap { row -> (start: Date, end: Date, note: BacktapeNote)? in
+            let whole = row.start.rounded(.down)
+            let zoom: BacktapeZoom? = row.start - whole < 0.1 ? .all : abs(row.start - whole - 0.25) < 0.1 ? .hours : nil
+            guard let zoom else { return nil }
+            let from = Date(timeIntervalSince1970: whole)
+            return (from, zoom.end(from), row.note)
+        }
+        guard !kept.isEmpty else { return [] }
+        // The newest 40, in about 3,000 characters.
+        let listed = Array(kept.suffix(40))
+        let room = max(60, 3000 / listed.count - 50)
+        var index = ""
+        for (number, item) in listed.enumerated() {
+            let time = item.start.formatted(date: .abbreviated, time: .shortened)
+            let minutes = Int(item.end.timeIntervalSince(item.start) / 60)
+            index += "\(number + 1). [\(time), \(minutes) min] \(item.note.title). \(item.note.body.prefix(room))\n"
+        }
+        let instructions = """
+        Below is a numbered list of summaries of what a person did on their iPhone, each with its \
+        time. Pick the entries most likely to hold the answer to the question. Reply with up to 3 \
+        numbers separated by commas and nothing else. If none fits, reply NONE.
+        """
+        guard let raw = await BacktapeWriter.ask("Question: \(question)\n\n\(index)", instructions: instructions) else { return [] }
+        let numbers = raw.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
+        var out: [(start: Date, end: Date)] = []
+        for number in numbers where (1...listed.count).contains(number) {
+            let item = listed[number - 1]
+            if !out.contains(where: { $0.start == item.start && $0.end == item.end }) { out.append((item.start, item.end)) }
+            if out.count == 3 { break }
+        }
+        return out
+    }
+
+    /// The screen text of some reads for the model's window, about 3,000 characters: of each read,
+    /// the part around the question's words when it has them, else its start. Reads that hold the
+    /// words come first when there are too many.
+    @MainActor private static func passages(_ entries: [HistoryEntry], words: [String], long: Bool) -> String {
+        guard !entries.isEmpty else { return "" }
+        var chosen = entries
+        if chosen.count > 14 { chosen = pick(chosen, words: words) }
+        let room = max(160, 3000 / chosen.count - 40)
+        var text = ""
+        for entry in chosen {
+            let time = entry.at.formatted(date: long ? .abbreviated : .omitted, time: .shortened)
+            text += "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(excerpt(entry.text, words: words, room: room))\n\n"
+        }
+        return text
+    }
+
+    /// `room` characters of a read: from a little before the first of the question's words in it.
+    private static func excerpt(_ text: String, words: [String], room: Int) -> String {
+        guard text.count > room else { return text }
+        let low = text.lowercased()
+        var first: String.Index?
+        for word in words {
+            if let found = low.range(of: word)?.lowerBound, first.map({ found < $0 }) ?? true { first = found }
+        }
+        guard let first else { return String(text.prefix(room)) }
+        let offset = max(0, low.distance(from: low.startIndex, to: first) - room / 4)
+        return String(text.dropFirst(min(offset, max(0, text.count - room))).prefix(room))
+    }
+
     /// Up to 14 reads for the model's small window: those that share words with the question first,
     /// the rest spread evenly over the time, in the order they happened.
     @MainActor private static func pick(_ entries: [HistoryEntry], for question: String) -> [HistoryEntry] {
+        pick(entries, words: terms(question))
+    }
+
+    @MainActor private static func pick(_ entries: [HistoryEntry], words: [String]) -> [HistoryEntry] {
         let room = 14
         guard entries.count > room else { return entries }
-        let words = terms(question)
         var scored: [(index: Int, score: Int)] = []
         for (index, entry) in entries.enumerated() {
-            let hay = "\(HistoryNames.app(entry.app)) \(entry.title) \(entry.text.prefix(600))".lowercased()
+            let hay = "\(HistoryNames.app(entry.app)) \(entry.title) \(entry.text.prefix(4000))".lowercased()
             let score = words.reduce(0) { $0 + (hay.contains($1) ? 1 : 0) }
             if score > 0 { scored.append((index, score)) }
         }

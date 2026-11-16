@@ -207,6 +207,15 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// The kept notes whose blocks start in a span, oldest first, with the key each was kept under.
+    func notes(from start: Date, to end: Date) async -> [(start: Double, note: BacktapeNote)] {
+        await fetch {
+            self.rows("SELECT start, title, body FROM notes WHERE start >= ? AND start < ? ORDER BY start", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)]) {
+                (start: sqlite3_column_double($0, 0), note: BacktapeNote(title: Self.string($0, 1), body: Self.string($0, 2)))
+            }
+        }
+    }
+
     // MARK: Reading
 
     /// The newest entries with only the start of their text, for the list of blocks.
