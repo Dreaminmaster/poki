@@ -485,7 +485,7 @@ final class AppModel {
     /// Counts closes, so an open that began before one is not taken as the state after it.
     private var inProcessEpoch = 0
     private var inProcessWarmToken = 0
-    /// Standing by kept the session (Automation Mode is off, or iOS offered no way to turn it off): the
+    /// Standing by kept the session with Automation Mode off: the
     /// next open resumes it instead of making a new one, and a resume that fails is closed and opened again.
     private var sessionKept = false
     private var afterInProcessClose: [@MainActor () -> Void] = []
@@ -505,18 +505,21 @@ final class AppModel {
         retriedLocalDDIOnLoopback = false
         endPasscodeWait(opened: false)
         DispatchQueue.global(qos: .userInitiated).async { [automation] in
-            let result = keepingSession ? automation.pauseAutomation() : automation.close()
+            var result = keepingSession ? automation.pauseAutomation() : automation.close()
+            let kept = keepingSession && result["paused"] as? Bool == true && result["how"] as? String != "no session"
+            if keepingSession, !kept { result = automation.close() }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let reopen: Bool
                 if case .closing(let requested) = self.inProcessSession { reopen = requested } else { reopen = false }
                 self.inProcessSession = .idle
-                self.sessionKept = keepingSession && result["how"] as? String != "no session"
-                self.log.add("runner", keepingSession
+                self.sessionKept = kept
+                if keepingSession, !kept { self.log.add("runner", "Automation Mode could not pause for \(why): closing the session instead") }
+                self.log.add("runner", kept
                     ? "Automation Mode pause for \(why): \(result["paused"] as? Bool == true ? "paused" : "unavailable")"
                     : "in-process session close for \(why): \(result["closed"] as? Bool == true ? "closed" : "already closed")")
                 self.lastInProcessClose = InProcessClose(number: (self.lastInProcessClose?.number ?? 0) + 1, why: why,
-                                                         closed: !keepingSession && result["closed"] as? Bool == true,
+                                                         closed: !kept && result["closed"] as? Bool == true,
                                                          seconds: result["seconds"] as? Double ?? 0)
                 let callbacks = self.afterInProcessClose
                 self.afterInProcessClose.removeAll()
