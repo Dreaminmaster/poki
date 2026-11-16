@@ -311,6 +311,64 @@ struct HistoryPage: View {
 
 // MARK: Settings
 
+/// Who writes the notes: Apple Intelligence, the downloaded model, or nobody yet.
+private struct BacktapeSummarySection: View {
+    let model = BacktapeModel.shared
+
+    var body: some View {
+        Section {
+            LabeledContent("Summaries") {
+                if !BacktapeWriter.apple, BacktapeModel.supported, case .downloading(let part) = model.state {
+                    Text(verbatim: "\(Int(part * 100)) %").monospacedDigit()
+                } else {
+                    Text(LocalizedStringKey(status))
+                }
+            }
+            if !BacktapeWriter.apple, BacktapeModel.supported {
+                switch model.state {
+                case .missing, .failed:
+                    Button("Download Summary Model") { model.download() }
+                case .downloading(let part):
+                    ProgressView(value: part)
+                    Button("Cancel Download") { model.cancel() }
+                case .ready:
+                    Button("Remove Summary Model", role: .destructive) { model.remove() }
+                }
+            }
+        } footer: {
+            Text(LocalizedStringKey(footer))
+        }
+    }
+
+    private var status: String {
+        if BacktapeWriter.apple { return "On This iPhone" }
+        guard BacktapeModel.supported else { return "Not Available" }
+        switch model.state {
+        case .missing: return "Not Downloaded"
+        case .downloading: return "Not Downloaded"
+        case .ready: return "Downloaded Model"
+        case .failed: return "Download Failed"
+        }
+    }
+
+    private var footer: String {
+        if BacktapeWriter.apple {
+            return "Apple Intelligence writes a short note for each 10 minutes on this iPhone. Nothing is sent anywhere."
+        }
+        guard BacktapeModel.supported else {
+            return "This iPhone has no Apple Intelligence, so each 10 minutes shows its screen titles."
+        }
+        switch model.state {
+        case .ready:
+            return "A downloaded model writes a short note for each 10 minutes on this iPhone. Nothing is sent anywhere."
+        case .failed:
+            return "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped."
+        default:
+            return "This iPhone has no Apple Intelligence. Download a model of about 1 GB to write a short note for each 10 minutes on this iPhone. Nothing is sent anywhere."
+        }
+    }
+}
+
 /// Everything that sets Backtape up, on a page of its own: the switch, pause, access times, apps,
 /// how long tape is kept, the reminder, the lock and the record.
 struct BacktapeSettingsPage: View {
@@ -403,15 +461,7 @@ struct BacktapeSettingsPage: View {
             } footer: {
                 Text("Older tape is erased by itself. The reminder comes before that, so you can keep what matters.")
             }
-            Section {
-                LabeledContent("Summaries") {
-                    Text(LocalizedStringKey(BacktapeWriter.available ? "On This iPhone" : "Not Available"))
-                }
-            } footer: {
-                Text(LocalizedStringKey(BacktapeWriter.available
-                    ? "Apple Intelligence writes a short note for each 10 minutes on this iPhone. Nothing is sent anywhere."
-                    : "This iPhone has no Apple Intelligence, so each 10 minutes shows its screen titles."))
-            }
+            BacktapeSummarySection()
             Section {
                 NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Backtape Lock") }
                 NavigationLink { HistoryGate { HistoryRecordPage().settingsPage() } } label: { Text("Observing Record") }
