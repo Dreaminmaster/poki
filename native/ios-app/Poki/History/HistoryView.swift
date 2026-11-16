@@ -92,7 +92,7 @@ struct HistoryPage: View {
                 BacktapeLibrary(layout: layout)
             }
         }
-        .navigationTitle(AppLocalization.text("Backtape"))
+        .navigationTitle(AppLocalization.text("Screen History"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if lock.unlocked {
@@ -100,7 +100,7 @@ struct HistoryPage: View {
                     NavigationLink { HistoryGate { BacktapeSettingsPage().settingsPage() } } label: {
                         Image(systemName: "slider.horizontal.3")
                     }
-                    .accessibilityLabel(Text("Backtape Settings"))
+                    .accessibilityLabel(Text("Screen History Settings"))
                 }
             }
         }
@@ -153,10 +153,10 @@ struct BacktapeSettingsPage: View {
                     Text(verbatim: "2 GB").tag(2048)
                 }
             } footer: {
-                Text("Whichever limit is reached first starts erasing the oldest tape in layers. Screen structure goes first, then screen text, and the summaries last.")
+                Text("Whichever limit is reached first starts erasing the oldest history in layers. Screen structure goes first, then screen text, and the summaries last.")
             }
             Section {
-                NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Backtape Lock") }
+                NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Screen History Lock") }
                 NavigationLink { HistoryGate { HistoryRecordPage().settingsPage() } } label: { Text("Observing Record") }
                 LabeledContent("Storage Used") {
                     Text(verbatim: "\(ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file))")
@@ -167,7 +167,7 @@ struct BacktapeSettingsPage: View {
                 Button("Clear History", role: .destructive) { clearing = true }
             }
         }
-        .navigationTitle(AppLocalization.text("Backtape Settings"))
+        .navigationTitle(AppLocalization.text("Screen History Settings"))
         .navigationBarTitleDisplayMode(.inline)
         .task(id: capture.changes) { size = await HistoryStore.shared.size() }
         .confirmationDialog("Clear History", isPresented: $clearing, titleVisibility: .visible) {

@@ -703,7 +703,7 @@ struct BacktapeLibrary: View {
             }
             Button("Cancel", role: .cancel) { pin = "" }
         } message: {
-            Text("Enter the Backtape PIN to forget this. It cannot be brought back.")
+            Text("Enter the Screen History PIN to forget this. It cannot be brought back.")
         }
         .alert("Wrong PIN", isPresented: $wrong) {
             Button("OK", role: .cancel) {}

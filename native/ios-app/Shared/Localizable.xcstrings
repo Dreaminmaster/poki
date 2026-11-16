@@ -33151,38 +33151,6 @@
         }
       }
     },
-    "Keep Poki Awake During the Test" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "测试期间保持 Poki 运行"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "測試期間保持 Poki 執行"
-          }
-        }
-      }
-    },
-    "Minutes to Run" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "运行分钟数"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "執行分鐘數"
-          }
-        }
-      }
-    },
     "Read in 10 Seconds" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33195,150 +33163,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "10 秒後讀取"
-          }
-        }
-      }
-    },
-    "Read Screen Once" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读取一次屏幕"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "讀取一次螢幕"
-          }
-        }
-      }
-    },
-    "Reads the screen as text through the accessibility service, with no automation session. Nothing is stored, and the log holds only counts, timings and app names. After a read, note whether iOS showed a banner, an indicator or a prompt. For the background run, tap Start, use the iPhone as usual, then come back." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "通过辅助功能服务以文本方式读取屏幕，不开启自动化会话。不会存储任何内容，日志只包含数量、耗时和 App 名称。读取后，请留意 iOS 是否显示了横幅、指示器或提示。进行后台运行测试时，轻点“开始”，照常使用 iPhone，然后返回。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "透過輔助使用服務以文字方式讀取螢幕，不開啟自動化工作階段。不會儲存任何內容，日誌只包含數量、耗時和 App 名稱。讀取後，請留意 iOS 是否顯示了橫幅、指示器或提示。進行背景執行測試時，輕點「開始」，照常使用 iPhone，然後返回。"
-          }
-        }
-      }
-    },
-    "Seconds Between Reads" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读取间隔秒数"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "讀取間隔秒數"
-          }
-        }
-      }
-    },
-    "Start Background Run" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开始后台运行测试"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開始背景執行測試"
-          }
-        }
-      }
-    },
-    "Watch Screen for 30 Seconds" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "观察屏幕 30 秒"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "觀察螢幕 30 秒"
-          }
-        }
-      }
-    },
-    "Check Front App in 10 Seconds" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10 秒后检查前台 App"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10 秒後檢查前景 App"
-          }
-        }
-      }
-    },
-    "End Sleep Screen and Check in 10 Seconds" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "结束睡眠屏幕并在 10 秒后检查"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "結束睡眠螢幕並在 10 秒後檢查"
-          }
-        }
-      }
-    },
-    "Read Front App Tree in 10 Seconds" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10 秒后读取前台 App 的界面树"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10 秒後讀取前景 App 的介面樹"
-          }
-        }
-      }
-    },
-    "1 Day" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 天"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 天"
           }
         }
       }
@@ -33391,22 +33215,6 @@
         }
       }
     },
-    "Access Times" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "访问时间"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取用時間"
-          }
-        }
-      }
-    },
     "Add App" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33419,70 +33227,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入 App"
-          }
-        }
-      }
-    },
-    "Afternoon" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下午"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下午"
-          }
-        }
-      }
-    },
-    "All History Cleared" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已清除全部历史记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已清除所有歷史記錄"
-          }
-        }
-      }
-    },
-    "Always" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "始终"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "永遠"
-          }
-        }
-      }
-    },
-    "App History Cleared" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已清除 App 的历史记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已清除 App 的歷史記錄"
           }
         }
       }
@@ -33535,70 +33279,6 @@
         }
       }
     },
-    "Days" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "日期"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "日子"
-          }
-        }
-      }
-    },
-    "Delete These 10 Minutes" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除这 10 分钟"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刪除這 10 分鐘"
-          }
-        }
-      }
-    },
-    "Delete This App's History" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除此 App 的历史记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刪除此 App 的歷史記錄"
-          }
-        }
-      }
-    },
-    "Evening" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "晚上"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "晚上"
-          }
-        }
-      }
-    },
     "Everything" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33643,38 +33323,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已排除"
-          }
-        }
-      }
-    },
-    "For an Hour" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一小时"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一小時"
-          }
-        }
-      }
-    },
-    "From" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從"
           }
         }
       }
@@ -33807,22 +33455,6 @@
         }
       }
     },
-    "Morning" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上午"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上午"
-          }
-        }
-      }
-    },
     "New PIN" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33835,22 +33467,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新 PIN"
-          }
-        }
-      }
-    },
-    "Night" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "夜间"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "夜間"
           }
         }
       }
@@ -33919,22 +33535,6 @@
         }
       }
     },
-    "Nothing is kept yet. Use the iPhone as usual and come back." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没有保存任何内容。照常使用 iPhone，稍后再回来看。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "還沒有儲存任何內容。照常使用 iPhone，稍後再回來看。"
-          }
-        }
-      }
-    },
     "Observing Record" : {
       "localizations" : {
         "zh-Hans" : {
@@ -33963,38 +33563,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Optic ID"
-          }
-        }
-      }
-    },
-    "Outside Access Times" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不在访问时间内"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "不在取用時間內"
-          }
-        }
-      }
-    },
-    "Outside these times nothing is read." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在这些时间之外不会读取任何内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在這些時間之外不會讀取任何內容。"
           }
         }
       }
@@ -34043,54 +33611,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki PIN"
-          }
-        }
-      }
-    },
-    "Poki reads the text of the app in front every few seconds and keeps it on this iPhone. It takes no screenshots, and password fields are left out. Nothing is sent anywhere. Turning the local connection off stops it completely." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 每隔几秒读取前台 App 的文字，并保存在这台 iPhone 上。它不截屏，也不读取密码栏。任何内容都不会发送出去。关闭本地连接即可完全停止。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 每隔幾秒讀取前景 App 的文字，並儲存在這台 iPhone 上。它不截圖，也不讀取密碼欄位。任何內容都不會傳送出去。關閉本機連線即可完全停止。"
-          }
-        }
-      }
-    },
-    "Poki will read the text on screen in the apps you use and keep it on this iPhone only. You can pause it, leave apps out, set access times and clear the history at any time." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 将读取你所用 App 屏幕上的文字，并且只保存在这台 iPhone 上。你可以随时暂停、排除 App、设置访问时间和清除历史记录。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 將讀取你所用 App 螢幕上的文字，並且只儲存在這台 iPhone 上。你可以隨時暫停、排除 App、設定取用時間和清除歷史記錄。"
-          }
-        }
-      }
-    },
-    "Read Only at Set Times" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅在设定的时间读取"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "僅在設定的時間讀取"
           }
         }
       }
@@ -34187,22 +33707,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "設定 PIN"
-          }
-        }
-      }
-    },
-    "Show Indicator" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示指示"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "顯示指示"
           }
         }
       }
@@ -34351,70 +33855,6 @@
         }
       }
     },
-    "Until" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "到"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "到"
-          }
-        }
-      }
-    },
-    "Until I Turn It On" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "直到我重新打开"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "直到我重新開啟"
-          }
-        }
-      }
-    },
-    "Until Tomorrow" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "直到明天"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "直到明天"
-          }
-        }
-      }
-    },
-    "Waiting for a Test" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等待测试结束"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等待測試結束"
-          }
-        }
-      }
-    },
     "Waiting for an Agent's Task" : {
       "localizations" : {
         "zh-Hans" : {
@@ -34479,246 +33919,6 @@
         }
       }
     },
-    "Backtape" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒带"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒帶"
-          }
-        }
-      }
-    },
-    "Make a PIN for Backtape" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "为倒带设置 PIN"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "為倒帶設定 PIN"
-          }
-        }
-      }
-    },
-    "Turn On Backtape" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开倒带"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟倒帶"
-          }
-        }
-      }
-    },
-    "Unlock Backtape" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解锁倒带"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解鎖倒帶"
-          }
-        }
-      }
-    },
-    "Exclude from Backtape" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从倒带中排除"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從倒帶中排除"
-          }
-        }
-      }
-    },
-    "Backtape Lock" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒带锁"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒帶鎖"
-          }
-        }
-      }
-    },
-    "Backtape Is Locked" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒带已锁定"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒帶已鎖定"
-          }
-        }
-      }
-    },
-    "Backtape is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒带由一个只属于 Poki 的 4 到 8 位 PIN 锁定。iPhone 的密码无法打开它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒帶由一個只屬於 Poki 的 4 到 8 位 PIN 鎖定。iPhone 的密碼無法打開它。"
-          }
-        }
-      }
-    },
-    "Back One Hour" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "后退一小时"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "後退一小時"
-          }
-        }
-      }
-    },
-    "Forward One Hour" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "前进一小时"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "前進一小時"
-          }
-        }
-      }
-    },
-    "Latest" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最新"
-          }
-        }
-      }
-    },
-    "Backtape Settings" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒带设置"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒帶設定"
-          }
-        }
-      }
-    },
-    "Rewind" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒带"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "倒帶"
-          }
-        }
-      }
-    },
-    "Fast Forward" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快进"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快轉"
-          }
-        }
-      }
-    },
-    "Now" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "现在"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "現在"
-          }
-        }
-      }
-    },
     "2 Weeks" : {
       "localizations" : {
         "zh-Hans" : {
@@ -34747,294 +33947,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 個月"
-          }
-        }
-      }
-    },
-    "Remind Me to Draw Insights" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提醒我提炼洞察"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提醒我提煉洞察"
-          }
-        }
-      }
-    },
-    "Every 3 Days" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 3 天"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 3 天"
-          }
-        }
-      }
-    },
-    "Every Week" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每周"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每週"
-          }
-        }
-      }
-    },
-    "Every 2 Weeks" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 2 周"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每 2 週"
-          }
-        }
-      }
-    },
-    "Older tape is erased by itself. The reminder comes before that, so you can keep what matters." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "较早的磁带会自动抹掉。提醒会在那之前到来，让你留下重要的内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "較早的磁帶會自動抹除。提醒會在那之前到來，讓你留下重要的內容。"
-          }
-        }
-      }
-    },
-    "Summaries" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "摘要"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "摘要"
-          }
-        }
-      }
-    },
-    "Apple Intelligence writes a short note for each 10 minutes on this iPhone. Nothing is sent anywhere." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple 智能在这台 iPhone 上为每 10 分钟写一段简短的记录。不会发送到任何地方。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple Intelligence 在這台 iPhone 上為每 10 分鐘寫一段簡短的記錄。不會傳送到任何地方。"
-          }
-        }
-      }
-    },
-    "This iPhone has no Apple Intelligence, so each 10 minutes shows its screen titles." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 iPhone 没有 Apple 智能，因此每 10 分钟只显示屏幕标题。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "這台 iPhone 沒有 Apple Intelligence，因此每 10 分鐘只顯示螢幕標題。"
-          }
-        }
-      }
-    },
-    "Written on this iPhone by Apple Intelligence" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "由 Apple 智能在这台 iPhone 上撰写"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "由 Apple Intelligence 在這台 iPhone 上撰寫"
-          }
-        }
-      }
-    },
-    "Look back at your tape and keep what matters before it is erased." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在磁带被抹掉之前回看一下，留下重要的内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在磁帶被抹除之前回看一下，留下重要的內容。"
-          }
-        }
-      }
-    },
-    "Download Summary Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载摘要模型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載摘要模型"
-          }
-        }
-      }
-    },
-    "Cancel Download" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取消下载"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取消下載"
-          }
-        }
-      }
-    },
-    "Remove Summary Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除摘要模型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除摘要模型"
-          }
-        }
-      }
-    },
-    "Not Downloaded" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未下载"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未下載"
-          }
-        }
-      }
-    },
-    "Downloaded Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下载的模型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下載的模型"
-          }
-        }
-      }
-    },
-    "Download Failed" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载失败"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載失敗"
-          }
-        }
-      }
-    },
-    "A downloaded model writes a short note for each 10 minutes on this iPhone. Nothing is sent anywhere." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下载的模型会在这台 iPhone 上为每 10 分钟写一段简短的记录。不会发送到任何地方。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下載的模型會在這台 iPhone 上為每 10 分鐘寫一段簡短的記錄。不會傳送到任何地方。"
-          }
-        }
-      }
-    },
-    "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载没有完成。请在 Wi-Fi 下重试，会从中断的地方继续。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載沒有完成。請在 Wi-Fi 下重試，會從中斷的地方繼續。"
           }
         }
       }
@@ -35185,22 +34097,6 @@
         }
       }
     },
-    "%@ (Deleted)" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@（已删除）"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@（已刪除）"
-          }
-        }
-      }
-    },
     "Screenshot" : {
       "localizations" : {
         "zh-Hans" : {
@@ -35281,262 +34177,6 @@
         }
       }
     },
-    "Enter the Backtape PIN to forget this. It cannot be brought back." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "输入倒带的 PIN 以忘记这段内容。忘记后无法恢复。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "輸入倒帶的 PIN 以忘記這段內容。忘記後無法復原。"
-          }
-        }
-      }
-    },
-    "Start Recording" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开始记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開始記錄"
-          }
-        }
-      }
-    },
-    "Resume Recording" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "继续记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "繼續記錄"
-          }
-        }
-      }
-    },
-    "Stop Recording" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停止记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停止記錄"
-          }
-        }
-      }
-    },
-    "Pause for 1 Hour" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂停 1 小时"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暫停 1 小時"
-          }
-        }
-      }
-    },
-    "Pause Until Tomorrow" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂停到明天"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暫停到明天"
-          }
-        }
-      }
-    },
-    "Recording" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "記錄"
-          }
-        }
-      }
-    },
-    "This iPhone has no Apple Intelligence. Download a model to write short notes on this iPhone. Only one model is kept, and picking another removes the one before. Nothing is sent anywhere." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 iPhone 没有 Apple 智能。下载一个模型，即可在这台 iPhone 上写简短的记录。只保留一个模型，选择另一个会移除之前的。不会发送到任何地方。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "這台 iPhone 沒有 Apple Intelligence。下載一個模型，即可在這台 iPhone 上寫簡短的記錄。只保留一個模型，選擇另一個會移除之前的。不會傳送到任何地方。"
-          }
-        }
-      }
-    },
-    "Suggestions on Home" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在主页显示建议"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在主畫面顯示建議"
-          }
-        }
-      }
-    },
-    "Up to two ideas from your recent tape can join the suggestions on the home page. They are made on this iPhone, only when clearly useful, and leave out anything private. They show without unlocking Backtape." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最多两条来自近期倒带的想法会加入主页的建议。它们在这台 iPhone 上生成，只在明显有用时出现，并且不包含任何私密内容。无需解锁倒带即可看到。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最多兩條來自近期倒帶的想法會加入主畫面的建議。它們在這台 iPhone 上產生，只在明顯有用時出現，並且不包含任何私密內容。無需解鎖倒帶即可看到。"
-          }
-        }
-      }
-    },
-    "Poki Can Ask Backtape" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 可以询问倒带"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 可以詢問倒帶"
-          }
-        }
-      }
-    },
-    "During a task, Poki can ask what you recently did. A model on this iPhone writes a short answer and decides whether you must approve it before it goes to the model Poki runs on. Your screen text never leaves this iPhone. Each answer is listed in Observing Record." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "任务进行时，Poki 可以询问你最近做了什么。这台 iPhone 上的模型会写出简短回答，并判断在发送给 Poki 所用的模型之前是否需要你批准。屏幕文字不会离开这台 iPhone。每条回答都会列在读取记录中。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "任務進行時，Poki 可以詢問你最近做了什麼。這部 iPhone 上的模型會寫出簡短回答，並判斷在傳送給 Poki 所用的模型之前是否需要你批准。螢幕文字不會離開這部 iPhone。每則回答都會列在讀取記錄中。"
-          }
-        }
-      }
-    },
-    "Answer Shared With Poki's Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已与 Poki 的模型共享回答"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已與 Poki 的模型分享回答"
-          }
-        }
-      }
-    },
-    "Answer Not Shared" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未共享回答"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未分享回答"
-          }
-        }
-      }
-    },
-    "Share This From Backtape?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要共享倒带中的这段内容吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要分享倒帶中的這段內容嗎？"
-          }
-        }
-      }
-    },
-    "It may hold something private." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其中可能包含隐私内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其中可能包含隱私內容。"
-          }
-        }
-      }
-    },
     "Keep Summaries For" : {
       "localizations" : {
         "zh-Hans" : {
@@ -35613,38 +34253,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "儲存上限"
-          }
-        }
-      }
-    },
-    "Whichever limit is reached first starts erasing the oldest tape in layers. Screen structure goes first, then screen text, and the summaries last. The reminder comes before that, so you can keep what matters." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "先达到的那个上限会开始分层清除最旧的记录。先清除屏幕结构，再清除屏幕文字，最后才是摘要。提醒会在此之前出现，方便你保留重要内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "先達到的那個上限會開始分層清除最舊的記錄。先清除螢幕結構，再清除螢幕文字，最後才是摘要。提醒會在此之前出現，方便你保留重要內容。"
-          }
-        }
-      }
-    },
-    "Unlock to view what Backtape kept on this iPhone." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解锁后才能查看倒带在这台 iPhone 上保留的内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解鎖後才能查看倒帶在這部 iPhone 上保留的內容。"
           }
         }
       }
@@ -35739,6 +34347,278 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 透過 Poki 使用了這部 iPhone。開啟 Poki 檢視它做了什麼。"
+          }
+        }
+      }
+    },
+    "An experiment. Poki reads the text of the app in front only after you start here, and keeps it on this iPhone. Leave Poki after starting. A run ends when its time is up, when the iPhone locks, or when iOS ends Poki's time in the background. Password fields are left out, and nothing is sent anywhere." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实验功能。只有在这里开始后，Poki 才会读取前台应用的文字，并只保存在这台 iPhone 上。开始后请离开 Poki。时间到、iPhone 锁定，或 iOS 结束 Poki 的后台时间时，读取就会停止。密码栏不会被读取，也不会发送到任何地方。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "實驗功能。只有在這裡開始後，Poki 才會讀取前景 App 的文字，並只保存在這台 iPhone 上。開始後請離開 Poki。時間到、iPhone 鎖定，或 iOS 結束 Poki 的背景時間時，讀取就會停止。密碼欄不會被讀取，也不會傳送到任何地方。"
+          }
+        }
+      }
+    },
+    "Enter the Screen History PIN to forget this. It cannot be brought back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入屏幕历史的 PIN 以忘记这段内容。忘记后无法恢复。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入螢幕歷史的 PIN 以忘記這段內容。忘記後無法復原。"
+          }
+        }
+      }
+    },
+    "Make a PIN for Screen History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为屏幕历史设置 PIN"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為螢幕歷史設定 PIN"
+          }
+        }
+      }
+    },
+    "Nothing is kept yet. Start a read in Testing Options, use another app, then come back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有保存任何内容。请在测试选项里开始读取，去用别的应用，再回来查看。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒有保存任何內容。請在測試選項中開始讀取，去用別的 App，再回來查看。"
+          }
+        }
+      }
+    },
+    "Open Screen History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开屏幕历史"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開螢幕歷史"
+          }
+        }
+      }
+    },
+    "Screen History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史"
+          }
+        }
+      }
+    },
+    "Screen History Is Locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史已锁定"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史已鎖定"
+          }
+        }
+      }
+    },
+    "Screen History Lock" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史锁"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史鎖"
+          }
+        }
+      }
+    },
+    "Screen History Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史設定"
+          }
+        }
+      }
+    },
+    "Short Run" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "限时读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "限時讀取"
+          }
+        }
+      }
+    },
+    "Start Short Run" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始限时读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始限時讀取"
+          }
+        }
+      }
+    },
+    "Unlock Screen History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁屏幕历史"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖螢幕歷史"
+          }
+        }
+      }
+    },
+    "Unlock to view what Screen History kept on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁后才能查看屏幕历史在这台 iPhone 上保存的内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖後才能查看螢幕歷史在這台 iPhone 上保存的內容。"
+          }
+        }
+      }
+    },
+    "Waiting to Read" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待讀取"
+          }
+        }
+      }
+    },
+    "Whichever limit is reached first starts erasing the oldest history in layers. Screen structure goes first, then screen text, and the summaries last." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先达到的那个上限会开始分层清除最旧的记录。先清除屏幕结构，再清除屏幕文字，最后才清除总结。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先達到的那個上限會開始分層清除最舊的記錄。先清除螢幕結構，再清除螢幕文字，最後才清除總結。"
+          }
+        }
+      }
+    },
+    "%lld min" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分鐘"
+          }
+        }
+      }
+    },
+    "Screen History is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史由一个只属于 Poki 的 4 到 8 位 PIN 锁定。iPhone 的密码无法打开它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史由一個只屬於 Poki 的 4 到 8 位 PIN 鎖定。iPhone 的密碼無法打開它。"
           }
         }
       }

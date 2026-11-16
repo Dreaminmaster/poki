@@ -62,7 +62,7 @@ final class HistoryLock: ObservableObject {
         let context = LAContext()
         // No "Enter Passcode" button: the iPhone's passcode does not open history.
         context.localizedFallbackTitle = ""
-        let reason = AppLocalization.text("Unlock Backtape")
+        let reason = AppLocalization.text("Unlock Screen History")
         let passed = (try? await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)) ?? false
         if passed { opened() }
     }
@@ -172,7 +172,7 @@ struct HistoryGate<Content: View>: View {
 private struct HistoryLockedPage: View {
     var body: some View {
         BacktapeLockScreen()
-            .navigationTitle(AppLocalization.text("Backtape"))
+            .navigationTitle(AppLocalization.text("Screen History"))
             .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -201,8 +201,8 @@ struct BacktapeLockScreen: View {
                         .padding(.top, 36)
                         .accessibilityHidden(true)
                     VStack(spacing: 6) {
-                        Text("Backtape Is Locked").font(.title2.weight(.semibold))
-                        Text("Unlock to view what Backtape kept on this iPhone.")
+                        Text("Screen History Is Locked").font(.title2.weight(.semibold))
+                        Text("Unlock to view what Screen History kept on this iPhone.")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 32)
@@ -323,9 +323,9 @@ struct HistoryUnlockSections: View {
                     }
                     .disabled(!HistoryLock.valid(pin) || again.isEmpty)
                 } header: {
-                    Text("Make a PIN for Backtape")
+                    Text("Make a PIN for Screen History")
                 } footer: {
-                    Text(LocalizedStringKey(wrong ? "The two PINs did not match. Try again." : "Backtape is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it."))
+                    Text(LocalizedStringKey(wrong ? "The two PINs did not match. Try again." : "Screen History is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it."))
                 }
             } else {
                 if lock.usesBiometrics {
@@ -334,7 +334,7 @@ struct HistoryUnlockSections: View {
                             Text(verbatim: String(format: AppLocalization.text("Unlock with %@"), lock.biometricsLabel))
                         }
                     } header: {
-                        Text("Backtape Is Locked")
+                        Text("Screen History Is Locked")
                     }
                 }
                 if lock.hasPIN {
@@ -396,7 +396,7 @@ struct HistoryLockSettings: View {
                 Text(LocalizedStringKey(mismatch ? "The two PINs did not match. Try again." : "A PIN of 4 to 8 digits that belongs to Poki alone. One of the two ways in always stays on."))
             }
         }
-        .navigationTitle(AppLocalization.text("Backtape Lock"))
+        .navigationTitle(AppLocalization.text("Screen History Lock"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
