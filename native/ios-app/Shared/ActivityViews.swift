@@ -223,6 +223,24 @@ struct LockScreenCard: View {
 
 // MARK: Dynamic Island, expanded
 
+/// Lays NoTapIntent under a region of the expanded island while `on` (`ActivityFace.shieldsTaps`): iOS
+/// opens the activity's app on any tap no control takes, and this button takes it and does nothing.
+/// Allow, Don't Allow, Stop and Continue sit above it and still work.
+struct TapShield: ViewModifier {
+    var on: Bool
+    func body(content: Content) -> some View {
+        if on {
+            content.background {
+                Button(intent: NoTapIntent()) { Color.clear.contentShape(.rect) }
+                    .buttonStyle(.plain)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// Beside the camera, left: nothing. The bear stands in the bottom-left corner and says the state.
 struct IslandLeading: View {
     var face: ActivityFace

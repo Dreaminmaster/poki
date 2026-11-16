@@ -1,8 +1,9 @@
 import Foundation
 import UserNotifications
 
-/// A time-sensitive notification for each approval, so the person hears about it even when the Live
-/// Activity is off, dismissed or hidden (and, before iOS 26, as the way to answer it). Touch and hold
+/// A time-sensitive notification for an approval when no Live Activity can ask (off, dismissed, or
+/// never started), so the person still hears about it. Never both: AppModel's askOwner posts it only
+/// without a Live Activity. Touch and hold
 /// it for Allow (Face ID or the passcode first) and Don't Allow. PokiCore sends no input while an
 /// approval waits, so only the person can press them.
 enum ApprovalNotice {

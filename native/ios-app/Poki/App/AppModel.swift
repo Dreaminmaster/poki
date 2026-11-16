@@ -1811,16 +1811,22 @@ final class AppModel {
                              caller: currentCaller, kind: .approval, detail: detail, why: approval.reason)
     }
 
-    /// Each request is answered by the owner on its own card or notification.
+    /// Each request is answered by the owner on the Live Activity, or on a notification when there is none.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-        // The Live Activity pops up for it, but iOS folds the island back after a few seconds and a tap
-        // on the folded island opens Poki. The notification's Allow and Don't Allow answer it without
-        // opening Poki, with or without a Live Activity (ESP-467).
-        ApprovalNotice.post(approval, caller: caller)
+        // One surface per approval. With a Live Activity, its alert is the ask (Allow and Don't Allow
+        // on the expanded island and the Lock Screen card): a banner on top of it put two asks over the
+        // top of the screen, and a tap on the banner opens Poki in the middle of the task. The
+        // time-sensitive notification is for when there is no Live Activity to pop up: off in
+        // Settings, dismissed, or Poki turned on from the background, where iOS starts none.
+        if activity.isRunning {
+            log.add("approval", "asked on the Live Activity only, no notification")
+        } else {
+            ApprovalNotice.post(approval, caller: caller)
+        }
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {

@@ -1193,7 +1193,7 @@ final class Computer: @unchecked Sendable {
         }
         do {
             _ = try await runner.call("POST", "/wda/apps/activate", ["bundleId": .string(app)], timeout: 4)
-            return "note: Poki was in front \(why); \(before?.describe ?? app) was brought back. Nothing was sent into Poki."
+            return "note: Poki was in front \(why); \(before?.describe ?? app) was brought back. Nothing was sent into Poki. Poki's Live Activity can still be open over the top of the screen for a few seconds: before tapping near the top again, wait ({wait: 2000}) and look, so the tap does not land on it once more."
         } catch {
             return "note: Poki was in front \(why), and \(before?.describe ?? app) could not be brought back (\(error)). Launch it, or ask the owner."
         }
