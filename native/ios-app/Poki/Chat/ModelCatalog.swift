@@ -49,6 +49,11 @@ enum ModelCatalog {
         (UserDefaults.standard.stringArray(forKey: "models.listed.\(provider.rawValue)") ?? []).map { ChatModelChoice(id: $0, name: $0) }
     }
 
+    static func supportsReasoning(_ id: String, for provider: ModelProvider) -> Bool {
+        guard provider == .openrouter else { return false }
+        return (UserDefaults.standard.stringArray(forKey: "models.reasoning.openrouter") ?? []).contains(id)
+    }
+
     /// No-thinking, fast models first: Terra, Haiku, Flash.
     static func fast(_ id: String) -> Bool {
         ["terra", "haiku", "flash", "mini"].contains { id.lowercased().contains($0) }
@@ -68,6 +73,15 @@ enum ModelCatalog {
         if provider == .openai {
             let voice = items.compactMap { $0["id"] as? String }.filter { $0.contains("realtime") && !$0.contains("transcribe") }.sorted()
             UserDefaults.standard.set(voice, forKey: "models.listed.voice")
+        }
+        if provider == .openrouter {
+            let reasoning = items.compactMap { item -> String? in
+                guard let id = item["id"] as? String, usable(id, provider),
+                      let parameters = item["supported_parameters"] as? [String],
+                      parameters.contains("reasoning") || parameters.contains("reasoning_effort") else { return nil }
+                return id
+            }
+            UserDefaults.standard.set(Array(Set(reasoning)).sorted(), forKey: "models.reasoning.openrouter")
         }
         ids = Array(Set(ids)).sorted { fast($0) == fast($1) ? $0 < $1 : fast($0) }
         UserDefaults.standard.set(ids, forKey: "models.listed.\(provider.rawValue)")

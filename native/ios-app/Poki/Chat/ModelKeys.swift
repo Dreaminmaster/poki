@@ -135,25 +135,38 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
     /// pi's model for one of `models`. `customURL` is an address not saved yet (the connection test on the
     /// key page); without it a custom endpoint uses the saved one.
     func piModel(_ id: String, customURL: String? = nil) -> Model? {
-        guard let piProvider else { return nil }
+        guard let piProvider, !id.isEmpty else { return nil }
         if self == .custom {
             let base = (customURL ?? ModelKeys.customURL).trimmingCharacters(in: .whitespaces)
-            guard !base.isEmpty, !id.isEmpty else { return nil }
+            guard !base.isEmpty else { return nil }
             return Model(id: id, name: id, api: .openAICompletions, provider: piProvider, baseUrl: base, reasoning: false,
                          input: [.text, .image], cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
                          contextWindow: 128_000, maxTokens: 8_192)
         }
         if let model = getModel(provider: piProvider, modelId: id) { return model }
-        // PiSwift's catalog (pi-mono, October 2026) lacks gpt-6.1-terra, which pi-ai 1.5.0 lists with the
-        // same API and inputs as gpt-6.1-sol.
-        // A model from the provider's own list that pi's catalog lacks takes the shape of a built-in one of
-        // the same provider (same API and inputs), with its own id.
-        let template = (self == .openai || self == .chatgpt) && id == "gpt-6.1-terra" ? "gpt-6.1-sol" : models.lazy.compactMap { getModel(provider: piProvider, modelId: $0.id) }.first?.id
-        guard let template, let base = getModel(provider: piProvider, modelId: template),
-              var json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(base))) as? [String: Any] else { return nil }
-        json["id"] = id
-        json["name"] = id == "gpt-6.1-terra" ? "GPT-6.1 Terra" : id
-        return (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(Model.self, from: $0) }
+        // PiSwift's pinned catalog predates gpt-6.1-terra, which shares gpt-6.1-sol's OpenAI Responses setup.
+        if (self == .openai || self == .chatgpt), id == "gpt-6.1-terra",
+           let base = getModel(provider: piProvider, modelId: "gpt-6.1-sol"),
+           var json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(base))) as? [String: Any] {
+            json["id"] = id
+            json["name"] = "GPT-6.1 Terra"
+            return (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(Model.self, from: $0) }
+        }
+        let reasoning = ModelCatalog.supportsReasoning(id, for: self)
+        let endpoint: (api: Api, baseUrl: String, compat: OpenAICompat?) = switch self {
+        case .anthropic: (.anthropicMessages, "https://api.anthropic.com", nil)
+        case .openai, .chatgpt: (.openAIResponses, "https://api.openai.com/v1", nil)
+        case .deepseek: (.openAICompletions, "https://api.deepseek.com", OpenAICompat(requiresReasoningContentOnAssistantMessages: false))
+        case .gemini: (.googleGenerativeAI, "https://generativelanguage.googleapis.com/v1beta", nil)
+        case .openrouter: (.openAICompletions, "https://openrouter.ai/api/v1", nil)
+        case .custom: (.openAICompletions, "", nil)
+        }
+        // `[.off: nil]` prevents OpenRouter's middleware from sending `reasoning.effort = "none"` when no effort was requested.
+        return Model(id: id, name: id, api: endpoint.api, provider: piProvider, baseUrl: endpoint.baseUrl,
+                     reasoning: reasoning, input: [.text, .image],
+                     cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
+                     contextWindow: 128_000, maxTokens: 8_192, compat: endpoint.compat,
+                     thinkingLevelMap: reasoning ? [.off: nil] : nil)
     }
 }
 
