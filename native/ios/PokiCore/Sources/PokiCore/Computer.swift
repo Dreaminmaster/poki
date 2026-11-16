@@ -7,6 +7,12 @@ public struct ToolResult: Sendable {
     public var isError = false
     var splitView: PokiCore.SplitViewRead?
     var splitViewNeedsRead = false
+    /// What the read behind this answer saw: the app in front and its element tree, without the read's
+    /// time or the changes since the read before, and a mark that is new each time when the picture
+    /// moved with the same elements (a canvas, a web view). The same screen reads the same, so a loop
+    /// that goes nowhere can be told from a task that moves. Nil when no tree was read.
+    var screen: String?
+    var waitingForOwner = false
 }
 
 /// A sent action failed: whether it may have reached the phone.
@@ -226,6 +232,7 @@ final class Computer: @unchecked Sendable {
         let visible = listable(reading.elements, screen, includeUnlabeledImages: selectedPane != nil)
         let tree = visible.map { "\($0.key)@\($0.frame.described)" }.joined(separator: "\n")
         let picture = reading.png.map { PictureSketch(png: $0) }
+        let pictureMoved = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } } ?? false
         var changedLine: String?
         if changes, treeRead, let before = lastTree {
             let pictureChanged: Bool? = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } }
@@ -423,7 +430,9 @@ final class Computer: @unchecked Sendable {
         typedInto = nil
         let footer = gone.isEmpty ? [] : ["gone since the last read: " + gone.prefix(20).map { "\($0.ref) \($0.element.type) \"\($0.element.text.prefix(40))\"" }.joined(separator: ", ")]
         // A screenshot helps the caller recover from a failed action without hiding the failure.
-        return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil)
+        return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
+                          screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
+                          waitingForOwner: handoffWaiting)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
@@ -461,7 +470,7 @@ final class Computer: @unchecked Sendable {
         if let error { lines.append("error: \(error)") }
         lines += extra
         lines.append("poki: Poki is in front, showing the owner's chat with you, so no screen of the task is read yet. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved routine.")
-        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil)
+        return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil, screen: "poki", waitingForOwner: handoffWaiting)
     }
 
     /// The `handoff:` line: a step handed to the owner that is waiting, or just done (reported once).
@@ -557,6 +566,7 @@ final class Computer: @unchecked Sendable {
         var lines = result.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         lines.insert("screen: locked (the owner has to unlock the phone before anything can be done)", at: min(1, lines.count))
         result.text = lines.joined(separator: "\n")
+        result.waitingForOwner = true
         result.splitView = nil
         return result
     }
@@ -573,7 +583,7 @@ final class Computer: @unchecked Sendable {
             return side == "auto" ? nil : ToolResult(text: "Split View targeting is unavailable on this automation path", jpeg: nil, isError: true)
         }
         guard !handoffWaiting || side == "auto" else {
-            return ToolResult(text: "the owner has control; wait for them to finish before selecting a pane", jpeg: nil, isError: true)
+            return ToolResult(text: "the owner has control; wait for them to finish before selecting a pane", jpeg: nil, isError: true, waitingForOwner: true)
         }
         do {
             let reply = try await runner.call("POST", "/poki/pane", ["side": .string(side)], timeout: min(6, max(0.5, until - now())))
@@ -728,7 +738,9 @@ final class Computer: @unchecked Sendable {
     /// its last calls got nothing and that the runner is a fresh one (its numbers start over).
     func restartNote(_ result: ToolResult) -> ToolResult {
         guard let why = runner.lastRestart.update({ r -> String? in defer { r = nil }; return r }) else { return result }
-        return ToolResult(text: "runner: \(why); this is the new runner\n" + result.text, jpeg: result.jpeg, isError: result.isError)
+        var result = result
+        result.text = "runner: \(why); this is the new runner\n" + result.text
+        return result
     }
 
     /// WDA's lock state, without a session; unknown counts as unlocked (a failed read must not block).
@@ -762,7 +774,7 @@ final class Computer: @unchecked Sendable {
         if case .failed = state {
             return ToolResult(text: "runner: \(state.describe)\nNothing was sent. Fix it on the phone, then call look again.", jpeg: nil, isError: true)
         }
-        return ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. It is still starting (the first start after a restart can wait for the owner to enter their password on the phone, which the phone asks them for); call look or status again every few seconds, and go on with the task when it answers with the screen.", jpeg: nil, isError: false)
+        return ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. It is still starting (the first start after a restart can wait for the owner to enter their password on the phone, which the phone asks them for); call look or status again every few seconds, and go on with the task when it answers with the screen.", jpeg: nil, isError: false, waitingForOwner: true)
     }
 
     // MARK: do
@@ -842,11 +854,13 @@ final class Computer: @unchecked Sendable {
                               jpeg: nil, isError: true)
         }
         if !harmless, handoffWaiting, let h = handoff.value {
-            return await withPicture("not_sent: a step is handed to the owner (\(h.kind): \"\(h.text.prefix(80))\"), so no input is sent until they tap Done on the phone or you send {handoff: false}. Keep polling with look, or {wait_until: {handoff_done: true, ms: 10000}}.", timeout: until - now() - 0.5, isErrorWithoutPicture: false)
+            var result = await withPicture("not_sent: a step is handed to the owner (\(h.kind): \"\(h.text.prefix(80))\"), so no input is sent until they tap Done on the phone or you send {handoff: false}. Keep polling with look, or {wait_until: {handoff_done: true, ms: 10000}}.", timeout: until - now() - 0.5, isErrorWithoutPicture: false)
+            result.waitingForOwner = true
+            return result
         }
         let onlyButtons = actions.allSatisfy { $0["button"] != nil || $0["wait"] != nil }
         if !onlyButtons, await isLocked() {
-            return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true)
+            return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
         }
 
         // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.

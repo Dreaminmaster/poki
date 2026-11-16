@@ -5789,6 +5789,50 @@
         }
       }
     },
+    "I’m stuck on the same screen in %@. Tell me how to go on." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I’m stuck on the same screen in %@. Tell me how to go on."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我卡在「%@」的同一个画面上了。接下来怎么处理？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我卡在「%@」的同一個畫面上了。接下來怎麼處理？"
+          }
+        }
+      }
+    },
+    "I’m stuck on the same screen. Tell me how to go on." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I’m stuck on the same screen. Tell me how to go on."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我卡在同一个画面上了。接下来怎么处理？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我卡在同一個畫面上了。接下來怎麼處理？"
+          }
+        }
+      }
+    },
     "Keep IPv6 out of the tun address list." : {
       "extractionState" : "manual",
       "localizations" : {
