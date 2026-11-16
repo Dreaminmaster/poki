@@ -41,6 +41,7 @@ struct ContentView: View {
             }
         }
         .animation(.snappy, value: model.banner)
+        .sheet(isPresented: $model.needsCode) { VerificationCodeSheet() }
         .alert("Poki Setup \(displayVersion(model.updatePrompt ?? "")) is available", isPresented: Binding(get: { model.updatePrompt != nil }, set: { if !$0 { model.updatePrompt = nil } })) {
             Button("Restart to Update") {
                 Task {
@@ -58,16 +59,19 @@ struct ContentView: View {
 private struct SidebarFooter: View {
     @EnvironmentObject var model: AppModel
 
+    private var signedIn: Bool { model.account?.signedIn == true }
+    private var hasKeychainError: Bool { !signedIn && model.accountError != nil }
+
     var body: some View {
         HStack(spacing: 10) {
-            AccountBadge(name: model.account?.name, appleID: model.account?.appleId, signedIn: model.account?.signedIn == true)
+            AccountBadge(name: model.account?.name, appleID: model.account?.appleId, signedIn: signedIn)
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.account?.signedIn == true ? (model.account?.name ?? "Signed In") : "Not Signed In")
+                Text(signedIn ? (model.account?.name ?? "Signed In") : hasKeychainError ? "Keychain Locked" : "Not Signed In")
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
-                Text(model.account?.signedIn == true ? (model.account?.appleId ?? "") : "Sign in to set up Poki")
+                Text(signedIn ? (model.account?.appleId ?? "") : hasKeychainError ? "Choose “Always Allow” and retry" : "Sign in to set up Poki")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(hasKeychainError ? Color.orange : Color.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -76,6 +80,66 @@ private struct SidebarFooter: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture { model.page = .account }
+    }
+}
+
+private struct VerificationCodeSheet: View {
+    @EnvironmentObject var model: AppModel
+    @State private var code = ""
+    @State private var working = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.shield").font(.system(size: 40)).foregroundStyle(Color.pokiBlue)
+            Text("Two-Factor Authentication").font(.title2.weight(.semibold))
+            Text(model.codeVia == "sms" ? "Enter the code Apple sent to your phone number." : "Enter the verification code shown on your other Apple devices.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("6-digit code", text: $code)
+                .font(.system(size: 24, weight: .medium, design: .monospaced))
+                .multilineTextAlignment(.center)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 200)
+                .onSubmit { Task { await verify() } }
+                .onChange(of: code) { _, new in
+                    let digits = new.filter(\.isNumber)
+                    if digits != new { code = digits }
+                    if digits.count == 6 { Task { await verify() } }
+                }
+            if let error { Text(error).foregroundStyle(.red).font(.callout) }
+            HStack {
+                Button("Cancel") {
+                    model.needsCode = false
+                    code = ""
+                    error = nil
+                }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                if working { ProgressView().controlSize(.small) }
+                Button("Verify") { Task { await verify() } }
+                    .pokiProminentButton()
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(code.count != 6 || working)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
+    }
+
+    private func verify() async {
+        guard !working, code.count == 6 else { return }
+        working = true
+        error = nil
+        defer { working = false }
+        do {
+            try await model.finishSignIn(code: code)
+            code = ""
+        } catch {
+            self.error = error.localizedDescription
+            code = ""
+        }
     }
 }
 

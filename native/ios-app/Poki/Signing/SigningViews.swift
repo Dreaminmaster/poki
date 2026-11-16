@@ -12,7 +12,17 @@ struct AccountPage: View {
     private var signer: SelfSigner { model.signer }
 
     var body: some View {
-        if signer.signedIn {
+        if signer.needsCode {
+            Section {
+                TextField("Verification Code", text: $code)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                Button("Verify") { Task { await signer.finishSignIn(code: code); code = "" } }
+                    .disabled(code.count != 6 || signer.working != nil)
+            } footer: {
+                Text("Apple sent a six-digit code to your trusted devices or phone number.")
+            }
+        } else if signer.signedIn {
             Section {
                 LabeledContent("Apple Account", value: signer.status?.apple_id ?? "")
                 if let name = signer.status?.name, name != signer.status?.apple_id { LabeledContent("Name", value: name) }
@@ -32,16 +42,6 @@ struct AccountPage: View {
             }
             .task { if signer.teams.isEmpty { await signer.loadTeams() } }
             Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
-        } else if signer.needsCode {
-            Section {
-                TextField("Verification Code", text: $code)
-                    .keyboardType(.numberPad)
-                    .textContentType(.oneTimeCode)
-                Button("Verify") { Task { await signer.finishSignIn(code: code); code = "" } }
-                    .disabled(code.count != 6 || signer.working != nil)
-            } footer: {
-                Text("Apple sent a six-digit code to your trusted devices or phone number.")
-            }
         } else {
             Section {
                 TextField("Apple ID", text: $appleID)
@@ -138,6 +138,13 @@ struct SigningSection: View {
                 // the row looks again every few seconds instead of staying as it was first drawn.
                 TimelineView(.periodic(from: .now, by: 5)) { _ in
                     SignerAction(signer: signer, title: next.kind == "update" ? "Install Update" : "Install Refresh", systemImage: "arrow.down.app") { await signer.install() }
+                }
+            }
+            if signer.needsCode {
+                Button {
+                    signer.presentCodeSheet()
+                } label: {
+                    Label("Enter Verification Code…", systemImage: "lock.shield")
                 }
             }
             if signer.signedIn {
@@ -305,6 +312,13 @@ struct SigningOptionsPage: View {
                 Text("Apple’s sign-in needs device headers that only Apple hardware makes. Poki gets them from this anisette server. It never sees your Apple ID or password.")
             }
             Section {
+                if signer.needsCode {
+                    Button {
+                        signer.presentCodeSheet()
+                    } label: {
+                        Label("Enter Verification Code…", systemImage: "lock.shield")
+                    }
+                }
                 NavigationLink {
                     Form { AccountPage() }
                         .navigationTitle(AppLocalization.text("Apple Account"))
@@ -325,5 +339,58 @@ struct SigningOptionsPage: View {
         .navigationTitle(AppLocalization.text("Signing"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { anisette = signer.status?.anisette ?? "" }
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var pokiDetailsOpen = false
+}
+
+/// Six-digit 2FA verification sheet shown when renewing a saved-password Apple session requires a code.
+struct VerificationCodeSheet: View {
+    @Environment(AppModel.self) private var model
+    @State private var code = ""
+
+    private var signer: SelfSigner { model.signer }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("6-Digit Code", text: $code)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .onChange(of: code) { _, new in
+                            let digits = String(new.filter(\.isNumber).prefix(6))
+                            if digits != new { code = digits }
+                            if digits.count == 6, signer.working == nil {
+                                submit()
+                            }
+                        }
+                } header: {
+                    Text("Two-Factor Authentication")
+                } footer: {
+                    Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
+                }
+                SignerActivityRows(signer: signer)
+            }
+            .navigationTitle(AppLocalization.text("Verification Code"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { signer.dismissCodeSheet() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Verify") { submit() }
+                        .disabled(code.count != 6 || signer.working != nil)
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        let entered = code
+        code = ""
+        Task { await signer.finishSignIn(code: entered) }
     }
 }

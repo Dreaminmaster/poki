@@ -104,7 +104,15 @@ async fn with_signer<T>(state: &Shared, f: impl AsyncFnOnce(&mut setup::Signer) 
     if guard.is_none() {
         *guard = Some(setup::Signer::open()?);
     }
-    Ok(f(guard.as_mut().unwrap()).await?)
+    match f(guard.as_mut().unwrap()).await {
+        Ok(v) => Ok(v),
+        Err(Error::NeedsCode(pending)) => {
+            let msg = Error::NeedsCode(pending.clone()).to_string();
+            *state.pending.lock().await = Some(*pending);
+            Err(Failure { kind: "needs_code", message: msg })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[tokio::main]
@@ -347,7 +355,19 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
         "renew_due" => {
             let r = out.reporter("renew");
             let results = with_signer(state, async |s| Ok(setup::renew_due(s, &r).await)).await?;
-            ok(results.into_iter().map(|(udid, res)| json!({ "udid": udid, "ok": res.is_ok(), "error": res.err().map(|e| e.to_string()) })).collect::<Vec<_>>())
+            let mut rows = Vec::with_capacity(results.len());
+            for (udid, res) in results {
+                match res {
+                    Ok(_) => rows.push(json!({ "udid": udid, "ok": true, "error": Value::Null })),
+                    Err(Error::NeedsCode(pending)) => {
+                        let msg = Error::NeedsCode(pending.clone()).to_string();
+                        *state.pending.lock().await = Some(*pending);
+                        rows.push(json!({ "udid": udid, "ok": false, "error": msg, "kind": "needs_code" }));
+                    }
+                    Err(e) => rows.push(json!({ "udid": udid, "ok": false, "error": e.to_string() })),
+                }
+            }
+            ok(rows)
         }
         "forget_phone" => {
             let udid: String = arg(a, "udid")?;
