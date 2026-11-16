@@ -51,7 +51,7 @@ final class LoopbackMonitor {
                 self.pathSummary = summary
                 let wifiChanged = self.onWiFi != wifi
                 self.onWiFi = wifi
-                if wifiChanged || pathChanged { self.networkChanged() }
+                if wifiChanged || pathChanged { self.networkChanged(physical: wifiChanged) }
             }
         }
         wifiPath.pathUpdateHandler = { [weak self] path in
@@ -72,12 +72,14 @@ final class LoopbackMonitor {
         let before = (wifiUp, cellularUp, cellularOnly)
         update(self)
         cellularOnly = Self.forcedCellular || (cellularUp && !wifiUp)
-        if (wifiUp, cellularUp, cellularOnly) != before { networkChanged() }
+        if (wifiUp, cellularUp, cellularOnly) != before { networkChanged(physical: true) }
     }
 
-    private func networkChanged() {
+    /// Whatever was probed before is stale. The Bonjour budget starts over only when a physical
+    /// interface came or went: the path summary also changes when a proxy's tunnel rebinds.
+    private func networkChanged(physical: Bool) {
         probeEpoch &+= 1
-        resetPortSearch()
+        if physical { resetPortSearch() }
         if !isWorking { publish(.checking, log: false) }
         check()
     }

@@ -1404,8 +1404,12 @@ final class AppModel {
                 }
                 if starts { launcher.restart() }
             }
+            // The loopback answers: a failed local open goes the normal way, and the pairing is checked
+            // now, before anything needs it.
             _ = retryLocalDDIOverLoopbackIfNeeded()
             Task { await verifyPairing(force: wasSilent) }
+            // The signer's check at launch ran before the loopback was up and skipped the download: it
+            // looks again now that it can reach the phone.
             signer.maintain()
         }
         if sessionOn { host.update(runner: coreState(of: runner)) }
