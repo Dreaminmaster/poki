@@ -383,6 +383,11 @@ struct BacktapeSettingsPage: View {
             }
             BacktapeSummarySection()
             Section {
+                Toggle("Suggestions on Home", isOn: $capture.suggests)
+            } footer: {
+                Text("Up to two ideas from your recent tape can join the suggestions on the home page. They are made on this iPhone, only when clearly useful, and leave out anything private. They show without unlocking Backtape.")
+            }
+            Section {
                 NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Backtape Lock") }
                 NavigationLink { HistoryGate { HistoryRecordPage().settingsPage() } } label: { Text("Observing Record") }
                 LabeledContent("Storage Used") {

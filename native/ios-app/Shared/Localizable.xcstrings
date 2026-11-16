@@ -35409,6 +35409,38 @@
         }
       }
     },
+    "Suggestions on Home" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在主页显示建议"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在主畫面顯示建議"
+          }
+        }
+      }
+    },
+    "Up to two ideas from your recent tape can join the suggestions on the home page. They are made on this iPhone, only when clearly useful, and leave out anything private. They show without unlocking Backtape." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最多两条来自近期倒带的想法会加入主页的建议。它们在这台 iPhone 上生成，只在明显有用时出现，并且不包含任何私密内容。无需解锁倒带即可看到。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最多兩條來自近期倒帶的想法會加入主畫面的建議。它們在這台 iPhone 上產生，只在明顯有用時出現，並且不包含任何私密內容。無需解鎖倒帶即可看到。"
+          }
+        }
+      }
+    },
     "Text files must be 100 KB or smaller." : {
       "localizations" : {
         "zh-Hans" : {

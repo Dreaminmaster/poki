@@ -30,6 +30,8 @@ final class HistoryCapture: ObservableObject {
     /// Until when reading is paused. The distant future is "until turned on again".
     @Published var pausedUntil: Date? { didSet { save(pausedUntil?.timeIntervalSince1970, "history.pausedUntil"); settingsChanged() } }
     @Published var showIndicator: Bool { didSet { save(showIndicator, "history.showIndicator") } }
+    /// Up to two ideas from the recent tape may join the home page's pills (BacktapeSuggestions).
+    @Published var suggests: Bool { didSet { save(suggests, "history.suggests") } }
     @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
     @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
     @Published var included: [String] { didSet { save(included, "history.included") } }
@@ -72,6 +74,7 @@ final class HistoryCapture: ObservableObject {
         enabled = defaults.bool(forKey: "history.enabled")
         pausedUntil = (defaults.object(forKey: "history.pausedUntil") as? Double).map(Date.init(timeIntervalSince1970:))
         showIndicator = defaults.object(forKey: "history.showIndicator") as? Bool ?? true
+        suggests = defaults.object(forKey: "history.suggests") as? Bool ?? true
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
         // Poki's own screens are left out from the start.
         excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"]
