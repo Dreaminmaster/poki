@@ -222,7 +222,7 @@ Poki를 열지 않고 부를 수도 있습니다. 동작 버튼을 길게 눌러
     <tr>
       <td align="center" valign="top" width="33%"><a href="https://github.com/whiteluw"><img src="https://avatars.githubusercontent.com/u/86720151?v=4&size=240" width="120" height="120" alt="whiteluw"/><br /><sub><b>whiteluw</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/pull/326">#326</a>에서 iPhone의 3D 곰 초기화 중 발생하는 충돌을 수정했습니다.</td>
       <td align="center" valign="top" width="33%"><a href="https://github.com/cs50Mu"><img src="https://avatars.githubusercontent.com/u/4456781?v=4&size=240" width="120" height="120" alt="cs50Mu"/><br /><sub><b>cs50Mu</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/issues/362">#362</a>에서 Poki Setup의 macOS 설치 파일이 Apple 실리콘에서만 실행된다는 것을 찾아냈고, 이후의 유니버설 빌드는 Intel Mac에서도 실행됩니다.</td>
-      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/pull/380">#380</a>에서 위험 동작 검사를 빠져나가는 긴 버튼 라벨에 대해 실패하는 테스트 케이스 4개를 추가해, 수정에 대비했습니다.</td>
+      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/pull/380">#380</a>에서 결제 판단이 메시지 전송 판단보다 먼저 이루어지도록 지키는 테스트를 추가해, Mail의 “Send money” 같은 버튼도 계속 승인을 먼저 받습니다.</td>
     </tr>
   </tbody>
 </table>

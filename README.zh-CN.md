@@ -222,7 +222,7 @@ iPhone App 使用你自备的模型账号，电脑上编码智能体的订阅不
     <tr>
       <td align="center" valign="top" width="33%"><a href="https://github.com/whiteluw"><img src="https://avatars.githubusercontent.com/u/86720151?v=4&size=240" width="120" height="120" alt="whiteluw"/><br /><sub><b>whiteluw</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/pull/326">#326</a> 中修复 iPhone 上三维小熊初始化时的闪退。</td>
       <td align="center" valign="top" width="33%"><a href="https://github.com/cs50Mu"><img src="https://avatars.githubusercontent.com/u/4456781?v=4&size=240" width="120" height="120" alt="cs50Mu"/><br /><sub><b>cs50Mu</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/issues/362">#362</a> 中发现 Poki Setup 的 macOS 安装包只能在 Apple 芯片上运行；随后的通用版本也能在 Intel Mac 上运行。</td>
-      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/pull/380">#380</a> 中为绕过高风险操作检查的长按钮标签补充了四个失败的测试用例，供后续修复使用。</td>
+      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/pull/380">#380</a> 中新增一个测试，保证付款判断先于发送消息判断，因此 Mail 里的 “Send money” 这类按钮仍需先审批。</td>
     </tr>
   </tbody>
 </table>

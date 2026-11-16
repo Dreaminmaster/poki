@@ -222,7 +222,7 @@ Poki を開かずに呼び出すこともできます。アクションボタン
     <tr>
       <td align="center" valign="top" width="33%"><a href="https://github.com/whiteluw"><img src="https://avatars.githubusercontent.com/u/86720151?v=4&size=240" width="120" height="120" alt="whiteluw"/><br /><sub><b>whiteluw</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/pull/326">#326</a> で iPhone の 3D クマの初期化時に発生するクラッシュを修正しました。</td>
       <td align="center" valign="top" width="33%"><a href="https://github.com/cs50Mu"><img src="https://avatars.githubusercontent.com/u/4456781?v=4&size=240" width="120" height="120" alt="cs50Mu"/><br /><sub><b>cs50Mu</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/issues/362">#362</a> で、Poki Setup の macOS 版が Apple シリコンでしか動かないことを見つけ、その後のユニバーサルビルドで Intel Mac でも動くようになりました。</td>
-      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/pull/380">#380</a> で、リスクのある操作のチェックをすり抜ける長いボタンラベルについて、失敗する 4 つのテストケースを追加し、修正に備えました。</td>
+      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br /><a href="https://github.com/JosssphZhou/poki/pull/380">#380</a> で、支払いの判定をメッセージ送信の判定より先に行う順序を守るテストを追加し、Mail の “Send money” のようなボタンでも承認が必要なままになります。</td>
     </tr>
   </tbody>
 </table>

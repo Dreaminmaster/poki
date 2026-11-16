@@ -599,14 +599,14 @@
     "basis": [
       "#380"
     ],
-    "summary": "Added four failing test cases in #380 for long button labels that slip past the risky-action check, ready for the fix.",
+    "summary": "Added a test in #380 that keeps payment checks ahead of message sending, so a Send money button in Mail still asks for approval.",
     "lines": {
-      "en": "Added four failing test cases in #380 for long button labels that slip past the risky-action check, ready for the fix.",
-      "zh-CN": "在 #380 中为绕过高风险操作检查的长按钮标签补充了四个失败的测试用例，供后续修复使用。",
-      "zh-TW": "在 #380 為繞過高風險操作檢查的長按鈕標籤補上四個失敗的測試案例，供後續修正使用。",
-      "ja": "#380 で、リスクのある操作のチェックをすり抜ける長いボタンラベルについて、失敗する 4 つのテストケースを追加し、修正に備えました。",
-      "ko": "#380에서 위험 동작 검사를 빠져나가는 긴 버튼 라벨에 대해 실패하는 테스트 케이스 4개를 추가해, 수정에 대비했습니다.",
-      "es": "Añadió en #380 cuatro casos de prueba que fallan para etiquetas de botón largas que eluden la comprobación de acciones de riesgo, listos para la corrección."
+      "en": "Added a test in #380 that keeps payment checks ahead of message sending, so a Send money button in Mail still asks for approval.",
+      "zh-CN": "在 #380 中新增一个测试，保证付款判断先于发送消息判断，因此 Mail 里的 “Send money” 这类按钮仍需先审批。",
+      "zh-TW": "在 #380 新增一個測試，確保付款判斷先於傳送訊息判斷，因此 Mail 裡的 “Send money” 這類按鈕仍需先審批。",
+      "ja": "#380 で、支払いの判定をメッセージ送信の判定より先に行う順序を守るテストを追加し、Mail の “Send money” のようなボタンでも承認が必要なままになります。",
+      "ko": "#380에서 결제 판단이 메시지 전송 판단보다 먼저 이루어지도록 지키는 테스트를 추가해, Mail의 “Send money” 같은 버튼도 계속 승인을 먼저 받습니다.",
+      "es": "Añadió en #380 una prueba que mantiene la comprobación de pagos antes que la de envío de mensajes, de modo que un botón “Send money” en Mail sigue pidiendo aprobación."
     }
   }
 }

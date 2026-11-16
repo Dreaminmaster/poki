@@ -222,7 +222,7 @@ iPhone App 使用你自備的模型帳號，電腦上編碼代理程式的訂閱
     <tr>
       <td align="center" valign="top" width="33%"><a href="https://github.com/whiteluw"><img src="https://avatars.githubusercontent.com/u/86720151?v=4&size=240" width="120" height="120" alt="whiteluw"/><br /><sub><b>whiteluw</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/pull/326">#326</a> 修正 iPhone 上三維小熊初始化時的閃退。</td>
       <td align="center" valign="top" width="33%"><a href="https://github.com/cs50Mu"><img src="https://avatars.githubusercontent.com/u/4456781?v=4&size=240" width="120" height="120" alt="cs50Mu"/><br /><sub><b>cs50Mu</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/issues/362">#362</a> 發現 Poki Setup 的 macOS 安裝檔只能在 Apple 晶片上執行；隨後的通用版本也能在 Intel Mac 上執行。</td>
-      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/pull/380">#380</a> 為繞過高風險操作檢查的長按鈕標籤補上四個失敗的測試案例，供後續修正使用。</td>
+      <td align="center" valign="top" width="33%"><a href="https://github.com/mgkvibez"><img src="https://avatars.githubusercontent.com/u/198796435?v=4&size=240" width="120" height="120" alt="mgkvibez"/><br /><sub><b>mgkvibez</b></sub></a><br />在 <a href="https://github.com/JosssphZhou/poki/pull/380">#380</a> 新增一個測試，確保付款判斷先於傳送訊息判斷，因此 Mail 裡的 “Send money” 這類按鈕仍需先審批。</td>
     </tr>
   </tbody>
 </table>
