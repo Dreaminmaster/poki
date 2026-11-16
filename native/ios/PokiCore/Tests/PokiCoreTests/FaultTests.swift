@@ -28,6 +28,8 @@ final class FaultTests: XCTestCase {
 
     /// A focused field that keeps what /wda/keys and the paste menu put in it.
     final class Field: @unchecked Sendable {
+        let frame: [Double]
+        init(frame: [Double] = [16, 100, 358, 44]) { self.frame = frame }
         let value = LockedBox("")
         let clipboard = LockedBox<String?>("owner's clipboard")
         /// The keyboard is up (a field has the focus), as the tree shows it.
@@ -36,7 +38,7 @@ final class FaultTests: XCTestCase {
         /// The tree as the field's app shows it: the field with its value, the keyboard when up, and
         /// the Paste menu once it was opened.
         func tree() -> JSON {
-            var children: [Node] = [Node("TextField", "Note", [16, 100, 358, 44], value: value.value)]
+            var children: [Node] = [Node("TextField", "Note", frame, value: value.value)]
             if menuShown.value { children.append(Node("MenuItem", "Paste", [150, 50, 80, 40])) }
             if keyboard.value { children.append(Node("Keyboard", nil, [0, 500, 390, 344], [Node("Button", "space", [100, 800, 190, 40])])) }
             func json(_ n: Node) -> JSON {
@@ -320,6 +322,24 @@ final class FaultTests: XCTestCase {
         XCTAssertEqual(field.value.value, "密码不是这个")
         XCTAssertEqual(field.clipboard.value, "owner's clipboard", "the owner's clipboard is restored")
         XCTAssertTrue(result.text.contains("(pasted); the field now reads \"密码不是这个\""), result.text)
+    }
+
+    func testOffscreenPasteFieldIsRejectedBeforeClearingOrChangingTheClipboard() async {
+        let (core, wda, _) = makeCore()
+        let field = Field(frame: [400, 100, 20, 40])
+        field.value.value = "old"
+        field.install(wda)
+        do {
+            _ = try await core.computer.paste("new", clear: true, until: now() + 6)
+            XCTFail("an off-screen field must be refused")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("not_hittable"))
+        }
+        XCTAssertEqual(field.value.value, "old")
+        XCTAssertEqual(field.clipboard.value, "owner's clipboard")
+        XCTAssertTrue(wda.bodies("POST /wda/keys").isEmpty)
+        XCTAssertTrue(wda.bodies("POST /wda/setPasteboard").isEmpty)
+        XCTAssertTrue(wda.bodies("POST /wda/touchAndHold").isEmpty)
     }
 
     func testAnUnreadableClipboardIsNeverOverwritten() async {
