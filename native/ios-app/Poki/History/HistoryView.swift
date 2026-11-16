@@ -116,6 +116,86 @@ struct HistoryPage: View {
 
 // MARK: Settings
 
+struct ScreenHistorySettingsView: View {
+    @ObservedObject private var capture = HistoryCapture.shared
+    @ObservedObject private var lock = HistoryLock.shared
+    @State private var size: (entries: Int, bytes: Int64) = (0, 0)
+    @State private var clearing = false
+
+    private var permissionsValue: String? {
+        if capture.listMode == .include {
+            return AppLocalization.text(LocalizedStringResource("Include Only These Apps"))
+        }
+        let count = capture.excluded.filter { !HistoryCapture.isPoki($0) }.count
+        return count > 0 ? "\(count)" : nil
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(isOn: $capture.enabled) {
+                    SettingsRow(title: "Screen History", symbol: "rectangle.stack")
+                }
+                .accessibilityIdentifier("screenHistory.enabled")
+            } footer: {
+                Text("When on, Poki can answer questions from text kept on this iPhone. Excluded apps and password fields are left out, and nothing leaves this iPhone.")
+            }
+
+            Section {
+                NavigationLink {
+                    HistoryPage().settingsPage()
+                } label: {
+                    SettingsRow(
+                        title: "View History",
+                        symbol: "clock.arrow.circlepath",
+                        value: size.entries > 0 ? "\(size.entries)" : nil
+                    )
+                }
+                .accessibilityIdentifier("screenHistory.records")
+
+                NavigationLink {
+                    if lock.needsSetup {
+                        HistoryPermissionsPage().settingsPage()
+                    } else {
+                        HistoryGate { HistoryPermissionsPage().settingsPage() }
+                    }
+                } label: {
+                    SettingsRow(
+                        title: "Excluded Apps",
+                        symbol: "eye.slash",
+                        value: permissionsValue
+                    )
+                }
+                .accessibilityIdentifier("screenHistory.excludedApps")
+            }
+
+            Section {
+                Button("Clear History", role: .destructive) {
+                    clearing = true
+                }
+                .accessibilityIdentifier("screenHistory.clear")
+            } footer: {
+                if size.entries > 0 {
+                    Text(verbatim: String(
+                        format: AppLocalization.text("Storage used: %@"),
+                        ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)
+                    ))
+                }
+            }
+        }
+        .navigationTitle(AppLocalization.text("Screen History"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: capture.changes) { size = await HistoryStore.shared.size() }
+        .confirmationDialog("Clear History", isPresented: $clearing, titleVisibility: .visible) {
+            Button("Last 10 Minutes", role: .destructive) { Task { await capture.clear(last: 600) } }
+            Button("Last Hour", role: .destructive) { Task { await capture.clear(last: 3600) } }
+            Button("Last Day", role: .destructive) { Task { await capture.clear(last: 86_400) } }
+            Button("Everything", role: .destructive) { Task { await capture.clearEverything() } }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
 /// Everything that sets Backtape up, on a page of its own: the switch, pause, access times, apps,
 /// how long tape is kept, the reminder, the lock and the record.
 struct BacktapeSettingsPage: View {
@@ -126,6 +206,7 @@ struct BacktapeSettingsPage: View {
     var body: some View {
         List {
             Section {
+                Toggle("Screen History", isOn: $capture.enabled)
                 NavigationLink { HistoryGate { HistoryPermissionsPage().settingsPage() } } label: {
                     LabeledContent("Permissions") {
                         Text(LocalizedStringKey(capture.listMode == .exclude ? "Exclude These Apps" : "Include Only These Apps"))
@@ -301,7 +382,6 @@ struct HistoryTestingSection: View {
 
     var body: some View {
         Section {
-            NavigationLink { HistoryPage().settingsPage() } label: { Text("Open Screen History") }
             LabeledContent("Status") {
                 if let ends = capture.ends, capture.isRunning {
                     Text(timerInterval: Date()...max(Date(), ends), countsDown: true).monospacedDigit()

@@ -1863,7 +1863,7 @@ final class AppModel {
     }
 
     func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil) async -> PokiCore.ToolAnswer {
-        if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments, localSession: localSession) }
+        if name == "status" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession) }
         if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps) }
         if !sessionOn { startSession() }
         if passcodeConfirmationPending {
