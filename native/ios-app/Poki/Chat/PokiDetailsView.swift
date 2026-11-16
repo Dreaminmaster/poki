@@ -59,7 +59,7 @@ struct PokiDetailsView: View {
                 Section {
                     NavigationLink(value: DetailsRoute.connection) {
                         SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue,
-                                    valueIsAction: !isSample && !model.setupComplete)
+                                    valueIsAction: !isSample && !model.setupReadyForUse)
                     }
                     .accessibilityIdentifier("details.hands")
                     NavigationLink(value: DetailsRoute.model) {
@@ -203,7 +203,7 @@ struct PokiDetailsView: View {
     /// Setup first, then whether Poki is on.
     private var connectionValue: String {
         if isSample { return AppLocalization.text(LocalizedStringResource("On")) }
-        if !model.setupComplete {
+        if !model.setupReadyForUse {
             return AppLocalization.text(LocalizedStringResource("Finish Setup"))
         }
         if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Off")) }
@@ -397,14 +397,14 @@ struct ConnectionView: View {
 
             Section {
                 ForEach(SetupStep.shown) { step in
-                    let done = model.isDone(step)
+                    let done = model.stepReadyForUse(step)
                     NavigationLink(value: step) {
                         SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : AppLocalization.text(LocalizedStringResource("Turn On")),
                                     warns: !done, accessory: done ? .done : nil)
                     }
                 }
                 Button { guiding = true } label: {
-                    SettingsRow(title: model.setupComplete ? "Set Up Again" : "Continue Setup", symbol: "checklist")
+                    SettingsRow(title: model.setupReadyForUse ? "Set Up Again" : "Continue Setup", symbol: "checklist")
                 }
                 .accessibilityIdentifier("moreSettings.setup")
                 FirstRunAgain(row: true)
@@ -418,7 +418,7 @@ struct ConnectionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
         .sheet(isPresented: $guiding) {
-            SetupGuide(start: SetupStep.shown.first { !model.isDone($0) })
+            SetupGuide(start: SetupStep.shown.first { !model.stepReadyForUse($0) })
         }
     }
 

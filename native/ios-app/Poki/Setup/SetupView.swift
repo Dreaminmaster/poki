@@ -695,7 +695,7 @@ struct SetupChecklist: View {
                     NavigationLink(value: step) { SetupStepRow(step: step) }
                 }
             } footer: {
-                Text(model.setupComplete ? "Everything Poki needs is in place." : "Poki needs every item ticked before an agent or the chat can use this iPhone. Items tick themselves when the phone can check them.")
+                Text(model.setupReadyForUse ? "Everything Poki needs is in place." : "Poki needs every item ticked before an agent or the chat can use this iPhone. Items tick themselves when the phone can check them.")
             }
             SigningSection()
             Section {
@@ -717,10 +717,12 @@ struct SetupStepRow: View {
     var step: SetupStep
 
     var body: some View {
-        let done = model.isDone(step)
+        let done = model.stepReadyForUse(step)
         LabeledContent {
-            if step == .loopback && !model.loopback.isWorking && model.hasOpenInProcessSession {
+            if step == .loopback && !model.loopback.isWorking && (model.hasOpenInProcessSession || model.canStartTasks) {
                 Text("Local automation ready").foregroundStyle(.secondary)
+            } else if step == .loopback && model.loopback.state == .checking && model.setup.loopback != .none {
+                Text("Checking…").foregroundStyle(.secondary)
             } else if done {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel(Text("Done"))
             } else {
@@ -826,7 +828,11 @@ struct SetupStepPage: View {
         Form {
             Section {
                 LabeledContent {
-                    Text(model.isDone(step) ? "Done" : "Needed").foregroundStyle(model.isDone(step) ? Color.green : Color.orange)
+                    if step == .loopback && model.loopback.state == .checking && model.setup.loopback != .none {
+                        Text("Checking…").foregroundStyle(.secondary)
+                    } else {
+                        Text(model.stepReadyForUse(step) ? "Done" : "Needed").foregroundStyle(model.stepReadyForUse(step) ? Color.green : Color.orange)
+                    }
                 } label: {
                     Label(step.pageTitle, systemImage: step.symbol)
                 }
