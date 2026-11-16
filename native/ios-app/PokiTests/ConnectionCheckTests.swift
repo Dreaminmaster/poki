@@ -190,7 +190,7 @@ final class ConnectionCheckTests: XCTestCase {
 
         try ModelKeys.save(key, for: .openrouter)
         let model = try XCTUnwrap(ModelProvider.openrouter.piModel(modelID))
-        let loop = PiLoop(provider: .openrouter, model: model, tools: []) { _ in
+        let loop = PiLoop(provider: .openrouter, model: model, sessionID: "openrouter-thinking-check", tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let turnOutcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -227,7 +227,7 @@ final class ConnectionCheckTests: XCTestCase {
         ModelKeys.selectedProvider = .openrouter
         ModelKeys.selectedModel = "vendor/plain-chat"
         let plainModel = try XCTUnwrap(ModelProvider.openrouter.piModel("vendor/plain-chat"))
-        let plainLoop = PiLoop(provider: .openrouter, model: plainModel, tools: []) { _ in
+        let plainLoop = PiLoop(provider: .openrouter, model: plainModel, sessionID: "openrouter-plain-check", tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let plainOutcome = await plainLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
