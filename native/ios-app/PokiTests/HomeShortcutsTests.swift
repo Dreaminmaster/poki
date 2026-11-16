@@ -1,3 +1,5 @@
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Poki
 
@@ -116,11 +118,91 @@ final class HomeShortcutsTests: XCTestCase {
     /// and before the App Store answers. On 0.3.1 (865) Taobao's was blank: the build's generated asset
     /// catalog was older than the Chinese pills' icons.
     func testEveryDefaultPillHasAnIconOnThePhone() {
-        for (language, count) in [(AppLanguage.simplifiedChinese, 10), (.english, 6)] {
+        for (language, count) in [(AppLanguage.simplifiedChinese, 10), (.english, 6), (.traditionalChinese, 6)] {
             let shown = HomeIdea.examples(for: language)
             XCTAssertEqual(shown.count, count, "\(language)")
             for pill in shown { XCTAssertNotNil(AppIconStore.shared.icon(pill.app), "\(language) \(pill.appName)") }
         }
+    }
+
+    func testHomeIdeaPromptsFollowSelectedLanguage() {
+        AppLocalization.shared.preference = "en"
+        let englishPills = HomeShortcuts.rank(routines: [], requests: [], examples: HomeIdea.examples, pinned: [HomeIdea.star], forgotten: [], now: now)
+        for pill in englishPills {
+            XCTAssertFalse(pill.prompt.unicodeScalars.contains { $0.properties.isIdeographic }, "English prompt should not contain CJK: \(pill.prompt)")
+            if pill != HomeIdea.star {
+                XCTAssertTrue(pill.prompt.hasPrefix(pill.appName + " "), "English prompt should begin with appName: \(pill.prompt)")
+            }
+        }
+
+        AppLocalization.shared.preference = "zh-Hant"
+        for pill in HomeIdea.examples(for: .traditionalChinese) {
+            XCTAssertTrue(pill.prompt.hasPrefix(pill.appName + " "), "Traditional Chinese prompt should begin with localized appName \(pill.appName): \(pill.prompt)")
+        }
+
+        AppLocalization.shared.preference = "zh-Hans"
+        let chinesePills = HomeIdea.examples(for: .simplifiedChinese)
+        XCTAssertEqual(chinesePills.first?.text, "发消息")
+        XCTAssertEqual(chinesePills.first?.prompt, "用微信发一条消息给")
+
+        AppLocalization.shared.preference = "en"
+    }
+
+    func testTappingHomeShortcutAfterSwitchingLanguageProducesLocalizedPrompt() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        var picked: [String] = []
+        AppLocalization.shared.preference = "zh-Hans"
+        HomeShortcutStore.shared.refresh(sessions: [], routines: [])
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(
+            rootView: HomePage(home: true, pick: { picked.append($0) }) { EmptyView() }
+                .environment(\.accessibilityEnabled, true)
+        )
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            AppLocalization.shared.preference = "en"
+            HomeShortcutStore.shared.refresh(sessions: [], routines: [])
+        }
+
+        func settle(for seconds: TimeInterval = 3, until done: () -> Bool) {
+            let end = Date().addingTimeInterval(seconds)
+            while !done(), Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        }
+        func accessibilityElement(in root: NSObject, identifier: String) -> NSObject? {
+            var pending = [root]
+            var visited = Set<ObjectIdentifier>()
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            while let item = pending.popLast() {
+                guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+                let id = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+                if id == identifier && item.accessibilityTraits.contains(.button) { return item }
+                if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+                if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+                let count = item.accessibilityElementCount()
+                if count > 0 && count < 1000 {
+                    for index in 0..<count {
+                        if let child = item.accessibilityElement(at: index) as? NSObject { pending.append(child) }
+                    }
+                }
+            }
+            return nil
+        }
+
+        AppLocalization.shared.preference = "en"
+        settle { accessibilityElement(in: window, identifier: "home.idea.com.tinyspeck.chatlyio") != nil }
+        let slack = try XCTUnwrap(accessibilityElement(in: window, identifier: "home.idea.com.tinyspeck.chatlyio"))
+        XCTAssertTrue(slack.accessibilityActivate())
+        XCTAssertEqual(picked.last, "Slack Tell the team I’m late")
+
+        AppLocalization.shared.preference = "zh-Hant"
+        settle {
+            accessibilityElement(in: window, identifier: "home.idea.com.apple.MobileSMS")?.accessibilityLabel?.hasPrefix("訊息") == true
+        }
+        let messages = try XCTUnwrap(accessibilityElement(in: window, identifier: "home.idea.com.apple.MobileSMS"))
+        XCTAssertTrue(messages.accessibilityActivate())
+        XCTAssertTrue(picked.last?.hasPrefix("訊息 ") == true, "Expected Traditional Chinese app name in prompt, got \(picked.last ?? "nil")")
     }
 
     func testAnAppIsFoundAtTheStartOfARequest() {
