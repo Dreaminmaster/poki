@@ -32,6 +32,8 @@ final class HistoryCapture: ObservableObject {
     @Published var showIndicator: Bool { didSet { save(showIndicator, "history.showIndicator") } }
     /// Up to two ideas from the recent tape may join the home page's pills (BacktapeSuggestions).
     @Published var suggests: Bool { didSet { save(suggests, "history.suggests") } }
+    /// Poki's own agent may ask Backtape about the owner (BacktapeContext). Off until the owner turns it on.
+    @Published var agentAsks: Bool { didSet { save(agentAsks, "history.agentAsks") } }
     @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
     @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
     @Published var included: [String] { didSet { save(included, "history.included") } }
@@ -75,6 +77,7 @@ final class HistoryCapture: ObservableObject {
         pausedUntil = (defaults.object(forKey: "history.pausedUntil") as? Double).map(Date.init(timeIntervalSince1970:))
         showIndicator = defaults.object(forKey: "history.showIndicator") as? Bool ?? true
         suggests = defaults.object(forKey: "history.suggests") as? Bool ?? true
+        agentAsks = defaults.bool(forKey: "history.agentAsks")
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
         // Poki's own screens are left out from the start.
         excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"]

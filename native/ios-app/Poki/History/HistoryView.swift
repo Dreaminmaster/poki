@@ -73,6 +73,8 @@ enum HistoryNames {
         case "cleared": return "History Cleared"
         case "clearedApp": return "App History Cleared"
         case "clearedAll": return "All History Cleared"
+        case "shared": return "Answer Shared With Poki's Model"
+        case "notShared": return "Answer Not Shared"
         default: return kind
         }
     }
@@ -388,6 +390,11 @@ struct BacktapeSettingsPage: View {
                 Text("Up to two ideas from your recent tape can join the suggestions on the home page. They are made on this iPhone, only when clearly useful, and leave out anything private. They show without unlocking Backtape.")
             }
             Section {
+                Toggle("Poki Can Ask Backtape", isOn: $capture.agentAsks)
+            } footer: {
+                Text("During a task, Poki can ask what you recently did. A model on this iPhone writes a short answer and decides whether you must approve it before it goes to the model Poki runs on. Your screen text never leaves this iPhone. Each answer is listed in Observing Record.")
+            }
+            Section {
                 NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Backtape Lock") }
                 NavigationLink { HistoryGate { HistoryRecordPage().settingsPage() } } label: { Text("Observing Record") }
                 LabeledContent("Storage Used") {
@@ -560,6 +567,7 @@ private struct HistoryRecordPage: View {
     private func detail(_ record: HistoryRecord) -> String {
         switch record.kind {
         case "leftOut", "clearedApp": HistoryNames.app(record.detail)
+        case "shared", "notShared": record.detail
         default: ""
         }
     }

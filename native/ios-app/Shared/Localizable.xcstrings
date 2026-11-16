@@ -35441,6 +35441,102 @@
         }
       }
     },
+    "Poki Can Ask Backtape" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 可以询问倒带"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 可以詢問倒帶"
+          }
+        }
+      }
+    },
+    "During a task, Poki can ask what you recently did. A model on this iPhone writes a short answer and decides whether you must approve it before it goes to the model Poki runs on. Your screen text never leaves this iPhone. Each answer is listed in Observing Record." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务进行时，Poki 可以询问你最近做了什么。这台 iPhone 上的模型会写出简短回答，并判断在发送给 Poki 所用的模型之前是否需要你批准。屏幕文字不会离开这台 iPhone。每条回答都会列在读取记录中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務進行時，Poki 可以詢問你最近做了什麼。這部 iPhone 上的模型會寫出簡短回答，並判斷在傳送給 Poki 所用的模型之前是否需要你批准。螢幕文字不會離開這部 iPhone。每則回答都會列在讀取記錄中。"
+          }
+        }
+      }
+    },
+    "Answer Shared With Poki's Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已与 Poki 的模型共享回答"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已與 Poki 的模型分享回答"
+          }
+        }
+      }
+    },
+    "Answer Not Shared" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未共享回答"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未分享回答"
+          }
+        }
+      }
+    },
+    "Share This From Backtape?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要共享倒带中的这段内容吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要分享倒帶中的這段內容嗎？"
+          }
+        }
+      }
+    },
+    "It may hold something private." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其中可能包含隐私内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其中可能包含隱私內容。"
+          }
+        }
+      }
+    },
     "Text files must be 100 KB or smaller." : {
       "localizations" : {
         "zh-Hans" : {
