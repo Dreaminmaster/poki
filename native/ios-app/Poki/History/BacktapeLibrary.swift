@@ -359,17 +359,25 @@ struct BacktapeGlow: View {
 @MainActor
 @Observable
 final class BacktapeNotes {
+    static let shared = BacktapeNotes()
+
     private(set) var notes: [String: BacktapeNote] = [:]
     @ObservationIgnored private var wanted: [String: BacktapeTile] = [:]
     @ObservationIgnored private var failed: Set<String> = []
     @ObservationIgnored private var worker: Task<Void, Never>?
+    @ObservationIgnored private var generation = UUID()
     @ObservationIgnored var focus: Date?
+
+    private init() {}
 
     func appeared(_ tile: BacktapeTile) {
         wanted[tile.id] = tile
         guard notes[tile.id] == nil else { return }
+        let me = generation
         Task {
-            if let kept = await HistoryStore.shared.note(start: tile.zoom.key(tile.start)) { notes[tile.id] = kept }
+            let kept = await HistoryStore.shared.note(start: tile.zoom.key(tile.start))
+            guard generation == me else { return }
+            if let kept { notes[tile.id] = kept }
             work()
         }
     }
@@ -385,6 +393,9 @@ final class BacktapeNotes {
 
     /// History changed (something was forgotten): every note is looked up again.
     func reset() {
+        generation = UUID()
+        worker?.cancel()
+        worker = nil
         notes = [:]
         failed = []
     }
@@ -398,25 +409,32 @@ final class BacktapeNotes {
 
     private func work() {
         guard worker == nil, BacktapeWriter.available, HistoryLock.shared.unlocked else { return }
+        let me = generation
         worker = Task {
-            while !Task.isCancelled, HistoryLock.shared.unlocked, let tile = next() {
+            defer { if generation == me { worker = nil } }
+            let store = HistoryStore.shared
+            let sourceGeneration = await store.summaryGeneration()
+            while !Task.isCancelled, generation == me, HistoryLock.shared.unlocked, let tile = next() {
                 let key = tile.zoom.key(tile.start)
-                if let kept = await HistoryStore.shared.note(start: key) {
+                let kept = await store.note(start: key)
+                guard !Task.isCancelled, generation == me else { return }
+                if let kept {
                     notes[tile.id] = kept
                     continue
                 }
-                // Whole reads for the short spans; for a day or a week the starts already loaded.
-                let entries = tile.zoom.rawValue <= BacktapeZoom.hours.rawValue
-                    ? await HistoryStore.shared.entries(from: tile.start, to: tile.end)
-                    : Array(tile.span.entries.reversed())
-                if let written = await BacktapeWriter.write(entries, period: tile.zoom.period) {
-                    HistoryStore.shared.keep(written, start: key)
+                // A tile may still hold text from before deletion. Reread every span from the store.
+                let entries = await store.entries(from: tile.start, to: tile.end)
+                guard !Task.isCancelled, generation == me else { return }
+                let written = await BacktapeWriter.write(entries, period: tile.zoom.period)
+                guard !Task.isCancelled, generation == me else { return }
+                if let written {
+                    let saved = await store.keep(written, start: key, generation: sourceGeneration)
+                    guard !Task.isCancelled, generation == me, saved else { return }
                     notes[tile.id] = written
                 } else {
                     failed.insert(tile.id)
                 }
             }
-            worker = nil
         }
     }
 }
@@ -637,7 +655,7 @@ struct BacktapeLibrary: View {
     var layout: BacktapeLayout
     @ObservedObject var capture = HistoryCapture.shared
     @ObservedObject var lock = HistoryLock.shared
-    @State private var notes = BacktapeNotes()
+    @State private var notes = BacktapeNotes.shared
     @State private var zoom: BacktapeZoom = .hours
     @State private var inward = true
     @State private var point: UnitPoint = .center
@@ -688,7 +706,6 @@ struct BacktapeLibrary: View {
         .sensoryFeedback(.selection, trigger: zoom)
         .sensoryFeedback(.success, trigger: copied)
         .sensoryFeedback(.impact(weight: .heavy), trigger: forgotten)
-        .onChange(of: capture.changes) { _, _ in notes.reset() }
         .alert(LocalizedStringKey(asking?.zoom.forget ?? "Forget"), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } })) {
             SecureField("PIN", text: $pin).keyboardType(.numberPad)
             Button("Forget", role: .destructive) {

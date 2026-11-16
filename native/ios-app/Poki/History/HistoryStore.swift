@@ -28,6 +28,7 @@ final class HistoryStore: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "nz.zheha.poki.history-store", qos: .utility)
     private var db: OpaquePointer?
+    private var generation = UUID()
     private let folder: URL
     private let file: URL
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -216,6 +217,7 @@ final class HistoryStore: @unchecked Sendable {
 
     func delete(from start: Date, to end: Date) async {
         await perform {
+            self.generation = UUID()
             self.run("DELETE FROM entries WHERE at >= ? AND at < ?", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)])
             self.run("DELETE FROM notes WHERE start >= ? AND start < ?", [.real(start.timeIntervalSince1970 - 600), .real(end.timeIntervalSince1970)])
             // Notes of an hour, a day or a week (kept a fraction of a second off the whole second,
@@ -227,6 +229,7 @@ final class HistoryStore: @unchecked Sendable {
     /// Reads, summaries and the observing record: nothing is left.
     func deleteEverything() async {
         await perform {
+            self.generation = UUID()
             self.run("DELETE FROM entries")
             self.run("DELETE FROM notes")
             self.run("DELETE FROM record")
@@ -236,10 +239,16 @@ final class HistoryStore: @unchecked Sendable {
 
     // MARK: Notes
 
-    /// Keeps the note written for the block that starts at `start`.
-    func keep(_ note: BacktapeNote, start: Date) {
-        queue.async {
-            self.run("INSERT OR REPLACE INTO notes (start, title, body) VALUES (?, ?, ?)", [.real(start.timeIntervalSince1970), .text(note.title), .text(note.body)])
+    func summaryGeneration() async -> UUID {
+        await fetch { self.generation }
+    }
+
+    /// Deletion and the generation check share the queue, including when a model ignores cancellation.
+    @discardableResult
+    func keep(_ note: BacktapeNote, start: Date, generation: UUID) async -> Bool {
+        await fetch {
+            guard generation == self.generation else { return false }
+            return self.run("INSERT OR REPLACE INTO notes (start, title, body) VALUES (?, ?, ?)", [.real(start.timeIntervalSince1970), .text(note.title), .text(note.body)])
         }
     }
 

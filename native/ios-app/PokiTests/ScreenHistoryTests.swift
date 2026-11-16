@@ -78,6 +78,7 @@ final class ScreenHistoryTests: XCTestCase {
         let end = start.addingTimeInterval(600)
         for clearAll in [true, false] {
             store.add(at: start, app: "com.apple.mobilenotes", title: "Notes", text: "Private shopping list")
+            let generation = await store.summaryGeneration()
             let source = await store.entries(from: start, to: end)
             XCTAssertEqual(source.map(\.text), ["Private shopping list"])
             if clearAll {
@@ -87,11 +88,12 @@ final class ScreenHistoryTests: XCTestCase {
             }
             let reads = await store.recent()
             XCTAssertTrue(reads.isEmpty)
-            store.keep(BacktapeNote(title: "Forgotten list", body: "Private shopping list"), start: start)
+            await store.keep(BacktapeNote(title: "Forgotten list", body: "Private shopping list"), start: start, generation: generation)
             let stale = await store.notes(from: .distantPast, to: .distantFuture)
             XCTAssertTrue(stale.isEmpty, "A late summary restored forgotten text")
             store.add(at: start, app: "com.apple.mobilenotes", title: "Notes", text: "New shopping list")
-            store.keep(BacktapeNote(title: "New list", body: "New shopping list"), start: start)
+            let freshGeneration = await store.summaryGeneration()
+            await store.keep(BacktapeNote(title: "New list", body: "New shopping list"), start: start, generation: freshGeneration)
             let fresh = await store.note(start: start)
             XCTAssertEqual(fresh?.title, "New list")
             await capture.clearEverything()
@@ -101,7 +103,8 @@ final class ScreenHistoryTests: XCTestCase {
     func testClearingEverythingLeavesNoReadsSummariesOrRecord() async {
         let capture = HistoryCapture()
         HistoryStore.shared.add(at: Date(), app: "com.apple.mobilenotes", title: "Notes", text: "Shopping list")
-        HistoryStore.shared.keep(BacktapeNote(title: "Shopping", body: "You wrote a list."), start: Date(timeIntervalSince1970: 1_800_000_000))
+        let generation = await HistoryStore.shared.summaryGeneration()
+        await HistoryStore.shared.keep(BacktapeNote(title: "Shopping", body: "You wrote a list."), start: Date(timeIntervalSince1970: 1_800_000_000), generation: generation)
         HistoryStore.shared.note("leftOut", "com.example.bank")
         await capture.clearEverything()
         let size = await HistoryStore.shared.size()
