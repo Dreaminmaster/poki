@@ -130,7 +130,8 @@ final class ModelSessionMetadataTests: XCTestCase {
                           contextWindow: 1_000, maxTokens: 100)
         let title = await SessionNamer.name(for: "Plan a Sydney trip", provider: .custom,
                                            model: model, sessionID: chatID)
-        XCTAssertEqual(title, "Sydney trip")
+        // The 0.4.3 fake server replies to naming calls independently of chat scripts.
+        XCTAssertEqual(title, "Test conversation")
         XCTAssertEqual(server.requestHeaders.first?["x-opencode-session"], chatID)
         XCTAssertEqual(server.requestHeaders.count, 1)
     }
