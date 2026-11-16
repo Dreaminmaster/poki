@@ -1298,10 +1298,10 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(runnerIssue?.fix, .setup)
     }
 
-    func testSwitchingNetworksWithWorkingLoopbackClearsLoopbackPrompts() async throws {
+    /// Every setup step done and a connection chosen, with the loopback not yet checked.
+    private func modelWithLoopbackChosen(launcher: FakeLauncher) throws -> (model: AppModel, restore: () -> Void) {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel", "relayAddress", "relayEnabled", "wantsOn"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
-        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
 
         let pairing = AppFiles.phonePairingFile
         if !FileManager.default.fileExists(atPath: pairing.path) {
@@ -1314,13 +1314,21 @@ final class FrontendSubtractionTests: XCTestCase {
         ModelKeys.customModel = "fake-model"
         ModelKeys.selectedProvider = .custom
 
-        let launcher = FakeLauncher()
         let model = AppModel(launcher: launcher, pairer: FakePairing(), automation: FakeAutomation())
-        defer { model.stopSession() }
         model.setup.runnerInstalled = true
         model.setup.developerMode = true
         model.setup.uiAutomation = true
         model.setup.loopback = .proxy
+        return (model, {
+            model.stopSession()
+            for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) }
+        })
+    }
+
+    func testSwitchingNetworksWithWorkingLoopbackClearsLoopbackPrompts() async throws {
+        let launcher = FakeLauncher()
+        let (model, restore) = try modelWithLoopbackChosen(launcher: launcher)
+        defer { restore() }
 
         XCTAssertEqual(model.loopback.state, .checking)
         model.setup.uiAutomation = false
@@ -1379,12 +1387,49 @@ final class FrontendSubtractionTests: XCTestCase {
                        "Connection screen must not prompt to turn on Local Connection when 10.7.0.1 answers: \(connectionLabels)")
         XCTAssertTrue(connectionLabels.contains { $0.contains("Set Up Again") },
                       "Connection screen must report setup complete when 10.7.0.1 answers: \(connectionLabels)")
+    }
 
+    /// A loopback that really is off or silent, with nothing wrong in the runner, still asks to be
+    /// turned on on every screen, also right after a check that began as a network change.
+    func testALoopbackThatIsOffOrSilentStillPromptsOnEveryScreen() async throws {
+        let (model, restore) = try modelWithLoopbackChosen(launcher: FakeLauncher())
+        defer { restore() }
+        model.startSession()
+        XCTAssertNotEqual(model.runner.state, "failed")
+        XCTAssertFalse(model.servicesSilent)
+
+        for answer in [LoopbackMonitor.State.off, .noAnswer] {
+            model.loopback.simulate(.checking)
+            model.loopback.simulate(answer)
+            XCTAssertFalse(model.canStartTasks, "\(answer)")
+            XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "the chat, \(answer)")
+            XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.loopback), "Home, \(answer)")
+            XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, \(answer)")
+            XCTAssertFalse(model.setupReadyForUse, "the Settings entry, \(answer)")
+            let connection = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
+            XCTAssertTrue(connection.contains { $0.contains("Turn On") }, "Connection, \(answer): \(connection)")
+            XCTAssertFalse(connection.contains { $0.contains("Set Up Again") }, "Connection, \(answer): \(connection)")
+        }
+    }
+
+    /// On cellular the launcher hands a task to the mounted disk image while the loopback stays silent:
+    /// that counts as ready everywhere. Only the hand-over (`local_ddi`) tells the two apart, so the
+    /// same silent loopback asks to be turned on before it.
+    func testAHandOverToTheMountedImageCountsAsReadyWhileTheLoopbackIsSilent() async throws {
+        let (model, restore) = try modelWithLoopbackChosen(launcher: FakeLauncher())
+        defer { restore() }
         model.loopback.simulate(.noAnswer)
+        XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "before the hand-over")
+        XCTAssertFalse(model.setupReadyForUse, "before the hand-over")
+
         model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
-        let cellularLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(cellularLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
-                       "Connection screen must not prompt to turn on Local Connection when local_ddi is active: \(cellularLabels)")
+        XCTAssertTrue(model.canStartTasks)
+        XCTAssertFalse(model.hasOpenInProcessSession, "the session is not open yet, so nothing else stands in for the loopback")
+        XCTAssertNil(SetupIssueHint.first(model: model))
+        XCTAssertTrue(model.setupReadyForUse)
+        let labels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
+        XCTAssertFalse(labels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "\(labels)")
+        XCTAssertTrue(labels.contains { $0.contains("Set Up Again") }, "\(labels)")
     }
 
     private func waitOnMain(_ condition: @escaping () -> Bool) async {
