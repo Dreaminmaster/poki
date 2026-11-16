@@ -55,6 +55,7 @@ pub const LOOPBACK_FIX: &str = "Turn on the loopback in your proxy app: the Poki
 /// service listens on another port (or not at all). The app finds the port in Bonjour.
 pub const PAIRING_PORT_FIX: &str = "The loopback is on. iOS moved its pairing service to another port, and Poki finds it through the local network. Keep Wi-Fi on and allow Local Network for Poki in Settings → Privacy & Security. If this stays, restart the iPhone.";
 pub const NETWORK_FIX: &str = "Poki needs the internet once after each restart of the phone to get Apple's signature for the developer disk image. Check Wi-Fi or cellular; Poki tries again by itself.";
+pub const DDI_PROXY_FIX: &str = "The connection to Apple's signing server (gs.apple.com) returned something other than Apple's reply. In your proxy or VPN app, set gs.apple.com to connect directly (DIRECT), or switch to another node, then try again.";
 pub const DDI_TIMEOUT_FIX: &str = "Mounting the developer disk image timed out. Poki needs the internet once after each restart to get Apple's signature; check Wi-Fi or cellular. Poki tries again by itself.";
 pub const DDI_REFUSED_FIX: &str = "This iOS version needs a newer developer disk image. Open Poki's setup to download the latest image, or update Poki.";
 pub const DDI_BAD_FIX: &str = "The developer disk image did not install. Poki downloads it again by itself.";

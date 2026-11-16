@@ -273,7 +273,7 @@ fn ddi_signing_boundary_keeps_signing_and_phone_socket_failures_distinct() {
 }
 
 #[tokio::test]
-async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_refused() {
+async fn ddi_signing_separates_proxy_replies_network_errors_and_status_94_refusals() {
     use idevice::{cryptexd::ddi_signing_response, tss::TSSRequest};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -332,7 +332,9 @@ async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_
                 };
                 server_hits.fetch_add(1, Ordering::SeqCst);
                 drain_http_request(&mut stream).await;
-                let _ = stream.write_all(&response).await;
+                if !response.is_empty() {
+                    let _ = stream.write_all(&response).await;
+                }
                 let _ = stream.shutdown().await;
             }
         });
@@ -342,7 +344,7 @@ async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_
         (result, hits.load(Ordering::SeqCst))
     }
 
-    let blocked_cases: Vec<(&str, Vec<Vec<u8>>, &str)> = vec![
+    let cases: Vec<(&str, Vec<Vec<u8>>, &str, &str, &str)> = vec![
         (
             "proxy_502_html",
             vec![http_response(
@@ -350,6 +352,8 @@ async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_
                 &[("Content-Type", "text/html")],
                 "<html><body>502 Bad Gateway: proxy upstream</body></html>",
             )],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
             "proxy upstream",
         ),
         (
@@ -362,6 +366,8 @@ async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_
                 ),
                 http_response("200 OK", &[], "STATUS=93&MESSAGE=An internal error occurred."),
             ],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
             "SECRET_PORTAL_TOKEN",
         ),
         (
@@ -371,31 +377,66 @@ async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_
                 &[("Content-Type", "text/html")],
                 "<html><body>Sign in to Wi-Fi</body></html>",
             )],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
             "Sign in to Wi-Fi",
+        ),
+        (
+            "non_plist_status_0_body",
+            vec![http_response(
+                "200 OK",
+                &[],
+                "STATUS=0&MESSAGE=SUCCESS&REQUEST_STRING=<html>proxy injected body</html>",
+            )],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
+            "proxy injected body",
+        ),
+        (
+            "connection_closed_before_headers",
+            vec![Vec::new()],
+            "network",
+            crate::device::NETWORK_FIX,
+            "",
         ),
         (
             "truncated_200_body",
             vec![b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\nSTATUS=0&MESSAGE=SUCCESS&REQUEST_STRING=<plist>".to_vec()],
+            "network",
+            crate::device::NETWORK_FIX,
             "<plist>",
         ),
         (
             "tss_status_93_internal_error",
             vec![http_response("200 OK", &[], "STATUS=93&MESSAGE=An internal error occurred.")],
+            "network",
+            crate::device::NETWORK_FIX,
+            "",
+        ),
+        (
+            "tss_status_94_refused",
+            vec![http_response(
+                "200 OK",
+                &[],
+                "STATUS=94&MESSAGE=This device isn't eligible for the requested build.",
+            )],
+            "ddi_refused",
+            crate::device::DDI_REFUSED_FIX,
             "",
         ),
     ];
 
     let mut actual = Vec::new();
     let mut details = Vec::new();
-    for (name, responses, forbidden_leak) in &blocked_cases {
+    for (name, responses, _, _, forbidden_leak) in &cases {
         let (result, hits) = run_signing_exchange(responses.clone()).await;
         let failure = result.expect_err(name);
-        actual.push((*name, failure.code, failure.fix == Some(crate::device::NETWORK_FIX.into()), hits));
+        actual.push((*name, failure.code, failure.fix, hits));
         details.push((*name, failure.detail, *forbidden_leak));
     }
-    let expected: Vec<(&str, Option<&str>, bool, usize)> = blocked_cases
+    let expected: Vec<(&str, Option<&str>, Option<String>, usize)> = cases
         .iter()
-        .map(|(name, _, _)| (*name, Some("network"), true, 1))
+        .map(|(name, _, code, fix, _)| (*name, Some(*code), Some((*fix).to_string()), 1))
         .collect();
     assert_eq!(actual, expected);
     for (name, detail, forbidden_leak) in details {
@@ -403,17 +444,6 @@ async fn ddi_signing_reports_blocked_http_responses_as_network_and_status_94_as_
             assert!(!detail.contains(forbidden_leak), "{name} leaked response data: {detail}");
         }
     }
-
-    let (refused, refused_hits) = run_signing_exchange(vec![http_response(
-        "200 OK",
-        &[],
-        "STATUS=94&MESSAGE=This device isn't eligible for the requested build.",
-    )])
-    .await;
-    let refused = refused.expect_err("STATUS=94 must fail");
-    assert_eq!(refused_hits, 1);
-    assert_eq!(refused.code, Some("ddi_refused"));
-    assert_eq!(refused.fix.as_deref(), Some(crate::device::DDI_REFUSED_FIX));
 
     let signed_plist = concat!(
         "STATUS=0&MESSAGE=SUCCESS&REQUEST_STRING=",
