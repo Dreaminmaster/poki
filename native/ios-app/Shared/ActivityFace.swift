@@ -140,6 +140,8 @@ struct ActivityFace: Hashable {
     var subtitle: String? = nil
     var subtitleLines = 1
     var bottom: Bottom
+    /// The card has a Don’t Ask Again row under Allow and Don’t Allow.
+    var offersStopAsking = false
     /// The latest screenshot on the right of the Lock Screen card.
     var thumbnail: Thumbnail = .none
     var compact: Compact
@@ -296,6 +298,7 @@ extension PokiState {
                     meta: .none,
                     content: question,
                     bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
+                    offersStopAsking: !approval.alwaysAsksOwner,
                     thumbnail: hasThumbnail ? .small : .none,
                     compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
             }
@@ -305,6 +308,7 @@ extension PokiState {
                 meta: .countdown(approval.expires),
                 content: question,
                 bottom: .approval(id: approval.id),
+                offersStopAsking: !approval.alwaysAsksOwner,
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))
         case .done:

@@ -119,6 +119,14 @@ struct PendingApproval: Codable, Hashable {
     var reason: String
     var expires: Date
 
+    /// A step the owner always answers, whatever the way of asking: a payment, a deletion, a tap in a
+    /// sending app, a protected app. Turning asking off does not reach it, so its card has no Don’t Ask Again.
+    var alwaysAsksOwner: Bool {
+        if reason.hasPrefix("sending a message (a tap in ") { return true }
+        return !reason.hasPrefix("sending a message") && !reason.hasPrefix("a call (") &&
+            reason != "typing into a password field" && reason != "submitting a password field"
+    }
+
     /// The approval as one short question, the same on every card, the island, the Lock Screen and
     /// the notification. It comes from the kind the rules saw in PokiCore's reason, never from the
     /// agent's words ("Allow payment?").

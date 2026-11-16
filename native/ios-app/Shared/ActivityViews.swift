@@ -58,6 +58,10 @@ enum ActivityMetrics {
     /// the bear does not grow or shrink when the state changes.
     static let circleBear: CGFloat = 22.6
     static let button: CGFloat = 38
+    /// The Don’t Ask Again row under the two answers, and the space between. iOS cuts a Live Activity
+    /// off at about 160 points, so the row sits in the card's own height.
+    static let stopAskingText: CGFloat = 22
+    static let stopAskingGap: CGFloat = 6
     static let stopCircle: CGFloat = 46
     static let stopCapsule: CGFloat = 34
     static let smallThumbnail = CGSize(width: 34, height: 72)
@@ -681,7 +685,7 @@ private struct Control: View {
                 .transition(.opacity)
             }
         case .approval(let id):
-            ApprovalButtons(approvalID: id, surface: surface)
+            ApprovalButtons(approvalID: id, surface: surface, stopAsking: face.offersStopAsking)
                 .transition(.activityRow)
         case .deciding(let text):
             Text(text)
@@ -818,12 +822,35 @@ private struct SegmentLine: View {
 struct ApprovalButtons: View {
     var approvalID: String
     var surface: ActivitySurface
+    /// Don’t Ask Again under the two answers, for a step that turning asking off reaches.
+    var stopAsking = false
     private let theme = ActivityTheme.current
 
     var body: some View {
+        VStack(spacing: ActivityMetrics.stopAskingGap) {
+            answers
+            if stopAsking { stopAskingButton }
+        }
+    }
+
+    /// Like Allow it asks for Face ID first (see StopAskingIntent), and it allows this step too.
+    private var stopAskingButton: some View {
+        let palette = theme.palette(surface)
+        return Button(intent: StopAskingIntent(approvalID: approvalID)) {
+            Text(String(activity: "Don’t ask again"))
+                .font(theme.button)
+                .foregroundStyle(palette.text.opacity(0.8))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.stopAskingText, maxHeight: ActivityMetrics.stopAskingText)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var answers: some View {
         let palette = theme.palette(surface)
         let height = ActivityMetrics.button
-        HStack(spacing: 8) {
+        return HStack(spacing: 8) {
             Button(intent: DenyActionIntent(approvalID: approvalID)) {
                 Text(String(activity: "Don’t Allow"))
                     .font(theme.button)

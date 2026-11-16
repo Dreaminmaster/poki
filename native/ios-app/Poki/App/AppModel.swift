@@ -86,6 +86,9 @@ final class AppModel {
     var asksBeforeSensitiveSteps: Bool { approvalMode != .off }
     private var approvalModeObservers: [() -> Void] = []
     func addApprovalModeObserver(_ observer: @escaping () -> Void) { approvalModeObservers.append(observer) }
+    private var stopAskingObservers: [() -> Void] = []
+    /// Called when Don’t Ask Again turned approvals off, for the chat to say so.
+    func addStopAskingObserver(_ observer: @escaping () -> Void) { stopAskingObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
         didSet {
             UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
@@ -1827,6 +1830,18 @@ final class AppModel {
         core.resolveApproval(id: approval.id, approved: approved)
     }
 
+    /// Don’t Ask Again on an approval's card: this step goes through and approvals are off from now on.
+    func stopAsking(_ approval: PendingApproval) {
+        turnApprovalsOff()
+        core.resolveApproval(id: approval.id, approved: true)
+    }
+
+    private func turnApprovalsOff() {
+        guard approvalMode != .off else { return }
+        approvalMode = .off
+        for observer in stopAskingObservers { observer() }
+    }
+
     private func listenForApprovals() {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let observer = Unmanaged.passUnretained(self).toOpaque()
@@ -1894,9 +1909,12 @@ final class AppModel {
     /// sent at once can land on it (iOS then opens Poki). So the Live Activity's decisions reach
     /// PokiCore after a short pause, the app's own buttons at once.
     func decide(_ decision: ApprovalDecision) {
+        // Don’t Ask Again is the owner's word about all later steps too, so it counts for a card whose
+        // approval has already ended.
+        if decision.stopAsking { turnApprovalsOff() }
         // A tap on an approval that already ended (answered in the app, or timed out) does nothing.
         guard approvals.contains(where: { $0.id == decision.approvalID }) else { return }
-        log.add("approval", "\(decision.approved ? "allowed" : "denied") \(decision.approvalID) on the Live Activity")
+        log.add("approval", "\(decision.approved ? "allowed" : "denied") \(decision.approvalID) on the Live Activity\(decision.stopAsking ? ", asking off" : "")")
         activity.update { state in
             guard state.approval?.id == decision.approvalID else { return }
             state.phase = .deciding

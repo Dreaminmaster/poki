@@ -63,12 +63,7 @@ enum ApprovalClassifier {
         return route
     }
 
-    static func requiresOwner(_ approval: PendingApproval) -> Bool {
-        let reason = approval.reason
-        if reason.hasPrefix("sending a message (a tap in ") { return true }
-        return !reason.hasPrefix("sending a message") && !reason.hasPrefix("a call (") &&
-            reason != "typing into a password field" && reason != "submitting a password field"
-    }
+    static func requiresOwner(_ approval: PendingApproval) -> Bool { approval.alwaysAsksOwner }
 
     static func handToOwner(_ id: String) { handed.insert(id) }
 

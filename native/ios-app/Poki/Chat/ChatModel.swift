@@ -183,6 +183,7 @@ final class ChatModel {
         app.addApprovalObserver { [weak self] id in self?.waitsForOwner(id) }
         if kind == .handoff { return }
         app.addApprovalModeObserver { [weak self] in self?.approvalsChanged() }
+        app.addStopAskingObserver { [weak self] in self?.approvalsStopped() }
         // A live voice conversation is part of this chat: what was said and done stays in its history.
         if requester == nil { app.voice.onConversationEnded = { [weak self] lines, started in self?.appendVoice(lines, started: started) } }
         if let scene = UserDefaults.standard.string(forKey: "pokiChat") { loadSample(scene); return }
@@ -221,6 +222,12 @@ final class ChatModel {
     private func approvalsChanged() {
         guard !running, !isSample, !entries.contains(where: { if case .you = $0.kind { return true }; if case .request = $0.kind { return true }; return false }) else { return }
         greet()
+    }
+
+    /// Don’t Ask Again turned approvals off: one line in the chat, with the way back.
+    private func approvalsStopped() {
+        guard !isSample else { return }
+        add(.poki(AppLocalization.text(LocalizedStringResource("Approvals are off. Turn them back on in [Settings › Approvals](poki://approvals)."))))
     }
 
     /// A live voice conversation that just ended, into this chat's history (and its saved session).

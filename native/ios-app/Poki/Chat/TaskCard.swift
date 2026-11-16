@@ -393,6 +393,8 @@ struct ApprovalAskCard: View {
     var title: String
     var expires: Date?
     var answer: (Bool) -> Void
+    /// Allows this step and turns asking off. Nil on a step turning asking off does not reach.
+    var stopAsking: (() -> Void)? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -422,6 +424,16 @@ struct ApprovalAskCard: View {
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
                 HoldToAllowButton { answer(true) }
+            }
+            if let stopAsking {
+                Button(action: stopAsking) {
+                    Text("Don’t ask again").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, -6)
+                .accessibilityHint(Text("Allows this step and turns approvals off."))
             }
         }
         .padding(18)
