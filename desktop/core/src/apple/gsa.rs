@@ -143,7 +143,6 @@ impl Client {
         root.insert("Request".into(), plist::Value::Dictionary(request));
         let mut body = Vec::new();
         plist::to_writer_xml(&mut body, &plist::Value::Dictionary(root))?;
-        tracing::trace!("GSA request: {}", String::from_utf8_lossy(&body));
         let res = self
             .http
             .post(GS_SERVICE)
@@ -533,6 +532,55 @@ fn decrypt_gcm(sk: &[u8], et: &[u8]) -> Result<plist::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authentication_request_values_never_enter_trace_events() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        use tracing::{Event, Metadata, Subscriber, field::{Field, Visit}, span::{Attributes, Id, Record}};
+
+        const CANARY: &str = "synthetic-private-request-value";
+        struct TraceCapture { events: Arc<AtomicUsize>, leaks: Arc<AtomicUsize> }
+        impl Visit for TraceCapture {
+            fn record_debug(&mut self, _: &Field, value: &dyn std::fmt::Debug) {
+                if format!("{value:?}").contains(CANARY) {
+                    self.leaks.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+        impl Subscriber for TraceCapture {
+            fn enabled(&self, _: &Metadata<'_>) -> bool { true }
+            fn new_span(&self, _: &Attributes<'_>) -> Id { Id::from_u64(1) }
+            fn record(&self, _: &Id, _: &Record<'_>) {}
+            fn record_follows_from(&self, _: &Id, _: &Id) {}
+            fn event(&self, event: &Event<'_>) {
+                self.events.fetch_add(1, Ordering::SeqCst);
+                event.record(&mut TraceCapture { events: self.events.clone(), leaks: self.leaks.clone() });
+            }
+            fn enter(&self, _: &Id) {}
+            fn exit(&self, _: &Id) {}
+        }
+        let events = Arc::new(AtomicUsize::new(0));
+        let leaks = Arc::new(AtomicUsize::new(0));
+        let capture = TraceCapture { events: events.clone(), leaks: leaks.clone() };
+        tracing::subscriber::with_default(capture, || {
+            tracing::trace!("trace capture enabled");
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(async {
+                let client = Client::new(Provider::new(super::super::anisette::Source::System)).unwrap();
+                // Invalid HTTP headers fail before any network I/O, after request serialization.
+                let headers = Anisette {
+                    map: [("User-Agent".into(), "invalid\nheader".into())].into(),
+                    made_at: std::time::Instant::now(),
+                };
+                let mut request = plist::Dictionary::new();
+                request.insert("test-value".into(), CANARY.into());
+                let error = client.gs_request(&headers, request).await.unwrap_err();
+                assert!(error.to_string().contains("builder error"));
+            });
+        });
+        assert!(events.load(Ordering::SeqCst) > 0, "TRACE must be enabled for this check");
+        assert_eq!(leaks.load(Ordering::SeqCst), 0, "authentication request value reached a trace event");
+    }
 
     #[test]
     fn spd_round_trip() {
