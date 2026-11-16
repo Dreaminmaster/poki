@@ -71,6 +71,33 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(capture.keep(read("com.example.Bank-2", ["Public page"])))
     }
 
+    func testASummaryFinishingAfterDeletionCannotRestoreForgottenText() async {
+        let capture = HistoryCapture()
+        let store = HistoryStore.shared
+        let start = Date().addingTimeInterval(-600)
+        let end = start.addingTimeInterval(600)
+        for clearAll in [true, false] {
+            store.add(at: start, app: "com.apple.mobilenotes", title: "Notes", text: "Private shopping list")
+            let source = await store.entries(from: start, to: end)
+            XCTAssertEqual(source.map(\.text), ["Private shopping list"])
+            if clearAll {
+                await capture.clearEverything()
+            } else {
+                await capture.delete(from: start, to: end)
+            }
+            let reads = await store.recent()
+            XCTAssertTrue(reads.isEmpty)
+            store.keep(BacktapeNote(title: "Forgotten list", body: "Private shopping list"), start: start)
+            let stale = await store.notes(from: .distantPast, to: .distantFuture)
+            XCTAssertTrue(stale.isEmpty, "A late summary restored forgotten text")
+            store.add(at: start, app: "com.apple.mobilenotes", title: "Notes", text: "New shopping list")
+            store.keep(BacktapeNote(title: "New list", body: "New shopping list"), start: start)
+            let fresh = await store.note(start: start)
+            XCTAssertEqual(fresh?.title, "New list")
+            await capture.clearEverything()
+        }
+    }
+
     func testClearingEverythingLeavesNoReadsSummariesOrRecord() async {
         let capture = HistoryCapture()
         HistoryStore.shared.add(at: Date(), app: "com.apple.mobilenotes", title: "Notes", text: "Shopping list")
