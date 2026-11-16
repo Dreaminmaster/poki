@@ -33,6 +33,8 @@ final class LoopbackMonitor {
     private(set) var wifiUp = false
     private(set) var cellularUp = false
     private var running = false
+    private var checkQueued = false
+    private var probeEpoch = 0
 
     init() {
         // The default path's interface types change while a proxy app's tunnel is up, so "only
@@ -42,8 +44,11 @@ final class LoopbackMonitor {
             let summary = "\(path.status): " + path.availableInterfaces.map { "\($0.name) (\($0.type))" }.joined(separator: ", ")
             Task { @MainActor in
                 guard let self else { return }
+                let pathChanged = !self.pathSummary.isEmpty && self.pathSummary != summary
                 self.pathSummary = summary
-                if self.onWiFi != wifi { self.onWiFi = wifi; self.resetPortSearch(); self.check() }
+                let wifiChanged = self.onWiFi != wifi
+                self.onWiFi = wifi
+                if wifiChanged || pathChanged { self.networkChanged() }
             }
         }
         wifiPath.pathUpdateHandler = { [weak self] path in
@@ -61,9 +66,17 @@ final class LoopbackMonitor {
     }
 
     private func interfaceChanged(_ update: (LoopbackMonitor) -> Void) {
+        let before = (wifiUp, cellularUp, cellularOnly)
         update(self)
-        let only = Self.forcedCellular || (cellularUp && !wifiUp)
-        if only != cellularOnly { cellularOnly = only; resetPortSearch(); check() }
+        cellularOnly = Self.forcedCellular || (cellularUp && !wifiUp)
+        if (wifiUp, cellularUp, cellularOnly) != before { networkChanged() }
+    }
+
+    private func networkChanged() {
+        probeEpoch &+= 1
+        resetPortSearch()
+        if !isWorking { publish(.checking, log: false) }
+        check()
     }
 
     /// `-pokiLoopback cellular`, `working` or `noanswer`: a simulator has no cellular and no 10.7.0.x, so a screenshot sets the state by hand.
@@ -91,7 +104,10 @@ final class LoopbackMonitor {
     /// Checks every `interval` seconds until `pause` (3 s in front; the app uses a slower one in the
     /// background while an agent works, so a dropped tunnel is noticed and named).
     func resume(every interval: TimeInterval = 3) {
-        if let timer, abs(timer.timeInterval - interval) < 0.5 { return }
+        if let timer, abs(timer.timeInterval - interval) < 0.5 {
+            check()
+            return
+        }
         timer?.invalidate()
         check()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in Task { @MainActor in self?.check() } }
@@ -155,8 +171,13 @@ final class LoopbackMonitor {
     }
 
     func check() {
-        guard !running else { return }
+        if running {
+            checkQueued = true
+            return
+        }
         running = true
+        checkQueued = false
+        let epoch = probeEpoch
         Task {
             let port = RemotePairingPort.current
             var result = await probe(label: "loopback", host: "10.7.0.1", port: port, timeout: 1.5)
@@ -176,30 +197,33 @@ final class LoopbackMonitor {
                 }
             }
             running = false
+            if epoch != probeEpoch || checkQueued {
+                check()
+                return
+            }
             let probed: State = result.outcome == "connected" ? .working(ms: result.milliseconds) : loopbackInterface() == nil ? .off : .noAnswer
             let next = Self.forcedCellular || Self.forced == "noanswer" ? State.noAnswer : Self.forced == "working" ? State.working(ms: 5) : probed
             // Only a change is published, so the screens are not redrawn every 3 s (a redraw while
             // the person drags a list makes scrolling stutter).
-            if !Self.same(next, state) {
-                let old = state
-                state = next; checkedAt = Date()
-                if case .working = old, !isWorking { droppedAt = Date() }
-                if isWorking { droppedAt = nil }
-                AppLog.shared.add("loopback", "developer service: \(next)")
-                onChange?(old, next)
-            }
+            publish(next, log: true)
         }
+    }
+
+    private func publish(_ next: State, log: Bool) {
+        guard !Self.same(next, state) else { return }
+        let old = state
+        state = next
+        if next != .checking { checkedAt = Date() }
+        if case .working = old, !isWorking { droppedAt = Date() }
+        if isWorking { droppedAt = nil }
+        if log { AppLog.shared.add("loopback", "developer service: \(next)") }
+        onChange?(old, next)
     }
 
     #if DEBUG
     /// Tests: set the state as a probe result would, running the change hook.
     func simulate(_ next: State) {
-        let old = state
-        guard !Self.same(next, state) else { return }
-        state = next; checkedAt = Date()
-        if case .working = old, !isWorking { droppedAt = Date() }
-        if isWorking { droppedAt = nil }
-        onChange?(old, next)
+        publish(next, log: false)
     }
     #endif
 

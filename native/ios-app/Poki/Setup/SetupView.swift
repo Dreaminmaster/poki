@@ -721,6 +721,8 @@ struct SetupStepRow: View {
         LabeledContent {
             if step == .loopback && !model.loopback.isWorking && model.hasOpenInProcessSession {
                 Text("Local automation ready").foregroundStyle(.secondary)
+            } else if step == .loopback && model.loopback.state == .checking && model.setup.loopback != .none {
+                Text("Checking…").foregroundStyle(.secondary)
             } else if done {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel(Text("Done"))
             } else {
@@ -826,7 +828,11 @@ struct SetupStepPage: View {
         Form {
             Section {
                 LabeledContent {
-                    Text(model.isDone(step) ? "Done" : "Needed").foregroundStyle(model.isDone(step) ? Color.green : Color.orange)
+                    if step == .loopback && model.loopback.state == .checking && model.setup.loopback != .none {
+                        Text("Checking…").foregroundStyle(.secondary)
+                    } else {
+                        Text(model.isDone(step) ? "Done" : "Needed").foregroundStyle(model.isDone(step) ? Color.green : Color.orange)
+                    }
                 } label: {
                     Label(step.pageTitle, systemImage: step.symbol)
                 }

@@ -143,6 +143,7 @@ final class AppModel {
     /// it (GitHub issue 69). The loopback probe only connects, so it still reads Working; the
     /// Loopback page says so. false once the phone answers again.
     private(set) var servicesSilent = false
+    private var loopbackDropped = false
     /// The runner has been launching for a while: iOS may be asking for the passcode.
     private(set) var passcodeHint = false
     /// Turning on now will probably bring up iOS's passcode screen (no automation has started since
@@ -860,9 +861,12 @@ final class AppModel {
 
     @discardableResult
     func verifyPairing(force: Bool = false) async -> Bool {
-        if Self.onSimulator { return true }
+        if Self.onSimulator {
+            if loopback.isWorking { servicesSilent = false }
+            return true
+        }
         guard let path = pairingPath, loopback.isWorking else { return true }
-        if !force, pairingTrouble == nil, let at = pairingVerifiedAt, Date().timeIntervalSince(at) < 600 { return true }
+        if !force, pairingTrouble == nil, !servicesSilent, let at = pairingVerifiedAt, Date().timeIntervalSince(at) < 600 { return true }
         if let pairingCheck { return await pairingCheck.value }
         let task = Task { @MainActor [weak self] () -> Bool in
             guard let self else { return true }
@@ -1355,11 +1359,18 @@ final class AppModel {
         if starts { launcher.restart() }
     }
 
+    private var hasStaleLoopbackFailure: Bool {
+        if runner.state == "waiting_network" {
+            return runner.code != "network" && runner.code != "ddi_timeout"
+        }
+        return runner.state == "failed" && ["loopback", "handshake", "unreachable"].contains(runner.code)
+    }
+
     /// The loopback came or went. Going: logged with the time, and the agent's status says so instead
     /// of "Checking pairing". Back: the launcher tries at once instead of waiting out its backoff
     /// (the runner dies with the tunnel, so every drop costs a restart).
     func loopbackChanged(from old: LoopbackMonitor.State, to new: LoopbackMonitor.State) {
-        let wasWorking = { if case .working = old { true } else { false } }()
+        let wasWorking = old.isWorking
         // 10.7.0.1 answers with no connection chosen in Setup: something outside Poki (a proxy app set
         // up before, or by Poki Setup) provides it. The external connection is the recorded choice, so
         // Setup's loopback step is done and Turn on does not ask to choose one (0.2.8 build 91: the step
@@ -1368,22 +1379,35 @@ final class AppModel {
             setup.loopback = .proxy
             log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
         }
+        if !loopback.isWorking, new != .checking {
+            loopbackDropped = true
+        }
         if wasWorking, !loopback.isWorking {
             retriedLocalDDIOnLoopback = false
             log.add("loopback", "dropped: 10.7.0.1 stopped answering (\(loopback.state)); the runner cannot survive this")
-        } else if !wasWorking, loopback.isWorking, old != .checking {
-            log.add("loopback", "back: 10.7.0.1 answers again" + (sessionOn && !runner.isRunning && !runnerPaused ? "; starting the runner now" : ""))
-            if sessionOn, !runner.isRunning, !runnerPaused { launcher.restart() }
-        }
-        // The loopback answers: a failed local open goes the normal way, and the pairing is checked
-        // now, before anything needs it.
-        if !wasWorking, loopback.isWorking {
+        } else if !wasWorking, loopback.isWorking {
+            let wasSilent = servicesSilent
+            servicesSilent = false
+            let recovered = old != .checking || loopbackDropped || hasStaleLoopbackFailure
+            loopbackDropped = false
+            if recovered {
+                let starts = sessionOn && !runner.isRunning && !runnerPaused
+                log.add("loopback", "back: 10.7.0.1 answers again" + (starts ? "; starting the runner now" : ""))
+                if hasStaleLoopbackFailure {
+                    if starts {
+                        runnerChanged(RunnerStatus(state: "connecting"))
+                    } else if runnerPaused {
+                        runner = RunnerStatus(state: "standby", detail: "It starts when an agent asks.")
+                    } else if !sessionOn {
+                        runner = .idle
+                    }
+                }
+                if starts { launcher.restart() }
+            }
             _ = retryLocalDDIOverLoopbackIfNeeded()
-            Task { await verifyPairing() }
+            Task { await verifyPairing(force: wasSilent) }
+            signer.maintain()
         }
-        // The signer's check at launch ran before the loopback was up and skipped the download: it
-        // looks again now that it can reach the phone.
-        if !wasWorking, loopback.isWorking { signer.maintain() }
         if sessionOn { host.update(runner: coreState(of: runner)) }
     }
 
@@ -1419,6 +1443,7 @@ final class AppModel {
         guard !runnerPaused else { return }
         switch status.state {
         case "running" where status.code == "local_ddi":
+            servicesSilent = false
             // Only the mounted image was found: nothing reached the phone, so the pairing and the
             // setup steps stay as they were until the session opens (warmInProcess).
             log.add("runner", "the loopback did not answer; using the mounted developer disk image")
@@ -2153,6 +2178,11 @@ final class AppModel {
         return isDone(step)
     }
     var setupLooksComplete: Bool { SetupStep.shown.allSatisfy(looksDone) }
+
+    func stepReadyForUse(_ step: SetupStep) -> Bool {
+        step == .loopback && canStartTasks ? true : looksDone(step)
+    }
+    var setupReadyForUse: Bool { SetupStep.shown.allSatisfy(stepReadyForUse) }
 
     /// A setup step is still to do. The loopback counts as done once a connection is chosen: whether it
     /// answers right now is checked live and is off whenever Poki is (the built-in connection), which is

@@ -393,16 +393,16 @@ struct SetupIssueHint: Equatable {
         return nil
     }
 
-    /// `looks` counts a step as Home shows it (`AppModel.looksDone`), so the loopback's first check after
-    /// launch doesn't flash a hint.
-    @MainActor static func first(model: AppModel, looks: Bool = false) -> SetupIssueHint? {
+    /// `looks` counts a step as Home shows it (`AppModel.stepReadyForUse`), so a configured loopback
+    /// check in flight or an active local session does not flash an off hint.
+    @MainActor static func first(model: AppModel, looks: Bool = true) -> SetupIssueHint? {
         if let runnerHint = runnerIssue(model: model) {
             return runnerHint
         }
         if let localHint = localSessionIssue(model: model) {
             return localHint
         }
-        let done: (SetupStep) -> Bool = looks ? model.looksDone : model.isDone
+        let done: (SetupStep) -> Bool = looks ? model.stepReadyForUse : model.isDone
         let steps = model.canStartTasks ? SetupStep.shown.filter { $0 != .loopback } : SetupStep.shown
         if !steps.allSatisfy(done) {
             for step in steps where !done(step) {
@@ -466,7 +466,7 @@ extension SetupIssueHint {
     /// The home page's line. In the last two days of signing it says Poki stops opening (main's home
     /// warning, ESP-222): after what keeps the current task from running, ahead of open setup steps.
     /// `looks` as in `first`.
-    @MainActor static func homeLine(model: AppModel, looks: Bool = false) -> SetupIssueHint? {
+    @MainActor static func homeLine(model: AppModel, looks: Bool = true) -> SetupIssueHint? {
         if let now = runnerIssue(model: model) ?? localSessionIssue(model: model) { return now }
         if let warning = ExpiryWarning(expiry: model.signer.expiry) {
             return SetupIssueHint(message: AppLocalization.text(LocalizedStringResource("Poki’s signing ends soon")) + "\n" + warning.message,
