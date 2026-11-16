@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Sign in to your Apple Account to update here. Or update with Set up Poki or Renew in Poki Setup on your Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这里登录 Apple 账户即可更新。也可以在 Mac 上的 Poki Setup 里点 Set up Poki 或 Renew 更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在這裡登入 Apple 賬戶即可更新。也可以在 Mac 上的 Poki Setup 裡點 Set up Poki 或 Renew 更新。"
+          }
+        }
+      }
+    },
     "To turn on automation, open Settings › Connection and tap Continue." : {
       "extractionState" : "manual",
       "localizations" : {

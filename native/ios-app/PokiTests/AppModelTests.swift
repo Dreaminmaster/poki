@@ -266,6 +266,29 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(ExpiryWarning(expiry: nil, now: now), "no profile, as on a simulator")
     }
 
+    /// Without an Apple Account Poki still looks up the channel's newest build when it starts (ESP-387),
+    /// so Home and Signing can say an update is out. On a simulator `-pokiLatest newer` answers for GitHub.
+    func testLooksUpTheNewestBuildWithoutAnAppleAccount() async {
+        UserDefaults.standard.set("newer", forKey: "pokiLatest")
+        defer { UserDefaults.standard.removeObject(forKey: "pokiLatest") }
+        let (model, _) = model()
+        model.startSigner()
+        let found = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in MainActor.assumeIsolated { model.signer.latest != nil } }, object: nil)
+        found.expectationDescription = "the newest build is known"
+        await fulfillment(of: [found], timeout: 10)
+        XCTAssertFalse(model.signer.signedIn)
+        XCTAssertTrue(model.signer.updateAvailable)
+    }
+
+    /// The Signing page's next step under Status (ESP-387): signed in it is one tap, without an Apple
+    /// Account the way to sign in or to Poki Setup, a signed copy is installed, and up to date it is nothing.
+    func testSigningPageOffersTheWayToTheUpdate() {
+        XCTAssertEqual(UpdateStep(updateAvailable: true, copyReady: false, signedIn: false), .signIn)
+        XCTAssertEqual(UpdateStep(updateAvailable: true, copyReady: false, signedIn: true), .download)
+        XCTAssertEqual(UpdateStep(updateAvailable: true, copyReady: true, signedIn: false), .install)
+        XCTAssertNil(UpdateStep(updateAvailable: false, copyReady: false, signedIn: true), "up to date")
+    }
+
     /// Idle stop setting round-trips and never goes below the floor the picker offers.
     func testIdleStopSetting() {
         let (model, _) = model()

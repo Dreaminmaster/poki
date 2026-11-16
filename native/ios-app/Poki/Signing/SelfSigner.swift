@@ -66,6 +66,9 @@ final class SelfSigner {
     static let refreshWithDaysLeft: Double = 3
     /// Home warns, and a notification reminds once a day, when the installed profile has this many days left.
     static let warnWithDaysLeft: Double = 2
+    /// How often Poki looks after its signing by itself while it stays up. Without an Apple Account it
+    /// only looks up the channel, and no more often than this: GitHub limits unsigned reads per hour.
+    static let checkEvery: TimeInterval = 3 * 3600
 
     private(set) var status: Status?
     private(set) var teams: [Team] = []
@@ -124,7 +127,7 @@ final class SelfSigner {
     private var timer: Timer?
     private let log = AppLog.shared
 
-    var signedIn: Bool { status?.signed_in == true }
+    var signedIn: Bool { status?.signed_in == true || Self.screenshotSignedIn }
     var needsCode: Bool { status?.needs_code == true }
     var daysLeft: Double? { expiry.map { $0.timeIntervalSinceNow / 86_400 } }
     /// The build Install would put on: an update when one is ready, else a refresh.
@@ -146,6 +149,8 @@ final class SelfSigner {
         if phone() == nil { return unreachable }
         return nil
     }
+    /// How to get the channel's newer Poki from here, or nil when there is none.
+    var updateStep: UpdateStep? { UpdateStep(updateAvailable: updateAvailable, copyReady: !updateNotReady, signedIn: signedIn) }
     var channelTitle: String { status?.channels.first { $0.id == status?.channel }?.title ?? status?.channel ?? "" }
 
     static var home: URL {
@@ -180,7 +185,7 @@ final class SelfSigner {
         }
         // Poki stays up in the background while it is on; a check every three hours is plenty for
         // a 7-day profile.
-        timer = Timer.scheduledTimer(withTimeInterval: 3 * 3600, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: Self.checkEvery, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.maintain() }
         }
     }
@@ -225,7 +230,7 @@ final class SelfSigner {
         await run(nil) { _ = try await SignerBridge.call(["op": "set_channel", "channel": id]) }
         await reload()
         latest = nil
-        maintain()
+        await checkLatest()
     }
 
     func setAnisette(_ url: String) async {
@@ -250,40 +255,67 @@ final class SelfSigner {
         ready = found
     }
 
-    /// Prepares what is due, by itself: an update when the channel has a newer Poki, a refresh when
-    /// the installed profile is close to expiring. Never installs.
+    /// At launch, back in front and every few hours: looks up the channel's newest build, so Home and
+    /// Signing can say an update is out, and prepares what is due. Without an Apple Account or the
+    /// loopback it only looks, at most once every `checkEvery`.
     func maintain() {
-        guard installFinish == .idle, signedIn, working == nil, phone() != nil else { return }
-        Task {
-            lastCheck = Date()
-            if let rel = try? await SignerBridge.decode(Release.self, ["op": "check_update"]) {
-                latest = rel
-                if updateNotReady {
-                    await prepare(kind: "update")
-                    return
-                }
-            }
-            if let days = daysLeft, days <= Self.refreshWithDaysLeft, ready["refresh"] == nil, ready["update"] == nil {
-                await prepare(kind: "refresh")
-            }
-            remindIfExpiring()
-        }
+        guard installFinish == .idle else { return }
+        // Not before start() has the signer configured (it calls this itself once it has).
+        guard status != nil else { return }
+        // A minute short of the interval, so the timer's own run is never just too early.
+        if !canPrepare, let last = lastCheck, Date().timeIntervalSince(last) < Self.checkEvery - 60 { return }
+        Task { await checkLatest() }
     }
 
-    /// Looks up Beta updates without preparing a signed copy.
+    /// Looks up the newest build on the Beta channel, then prepares what is due. Works without an
+    /// Apple Account, and the Signing page calls it when it opens. False when the lookup failed.
     @discardableResult
     func checkLatest() async -> Bool {
-        do {
-            latest = try await SignerBridge.decode(Release.self, ["op": "check_update"])
-            lastCheck = Date()
-            updateCheckError = nil
-            if updateNotReady { maintain() }
-            return true
-        } catch {
-            latest = nil
-            updateCheckError = error.localizedDescription
-            return false
+        let found = await lookUp()
+        await prepareDue()
+        return found
+    }
+
+    /// One lookup at a time: a caller that comes while one runs gets its answer.
+    private var lookup: Task<Bool, Never>?
+
+    private func lookUp() async -> Bool {
+        if let lookup { return await lookup.value }
+        let task = Task { () -> Bool in
+            do {
+                var found = Self.screenshotRelease(installedVersion: installedVersion, installedBuild: installedBuild)
+                if found == nil { found = try await SignerBridge.decode(Release.self, ["op": "check_update"]) }
+                guard let rel = found else { return false }
+                if rel != latest { log.add("signing", "newest on the channel: \(rel.version) (\(rel.build)), \(rel.channel)") }
+                latest = rel
+                lastCheck = Date()
+                updateCheckError = nil
+                return true
+            } catch {
+                latest = nil
+                updateCheckError = error.localizedDescription
+                return false
+            }
         }
+        lookup = task
+        defer { lookup = nil }
+        return await task.value
+    }
+
+    private var canPrepare: Bool { installFinish == .idle && signedIn && phone() != nil }
+
+    /// Prepares what is due, by itself: an update when the channel has a newer Poki, a refresh when
+    /// the installed profile is close to expiring. Never installs.
+    private func prepareDue() async {
+        guard canPrepare, working == nil else { return }
+        if updateNotReady {
+            await prepare(kind: "update")
+            return
+        }
+        if let days = daysLeft, days <= Self.refreshWithDaysLeft, ready["refresh"] == nil, ready["update"] == nil {
+            await prepare(kind: "refresh")
+        }
+        remindIfExpiring()
     }
 
     /// Download and Install Update, in one tap: gets the newest build and signs it, then installs it.
@@ -534,6 +566,30 @@ final class SelfSigner {
         return Date().addingTimeInterval(UserDefaults.standard.double(forKey: "pokiSigningDays") * 86_400)
         #else
         nil
+        #endif
+    }
+
+    /// `-pokiLatest newer|same`: a simulator's screenshots and tests get a channel build one past the
+    /// installed one, or the installed one, as the Beta channel's newest build instead of the network's.
+    nonisolated private static func screenshotRelease(installedVersion: String, installedBuild: String) -> Release? {
+        #if targetEnvironment(simulator)
+        let build = Int(installedBuild) ?? 0
+        switch UserDefaults.standard.string(forKey: "pokiLatest") {
+        case "newer": return Release(tag: "app-\(installedVersion)-beta.\(build + 1)", version: installedVersion, build: String(build + 1), channel: "beta", source: nil, source_notice: nil)
+        case "same": return Release(tag: "app-\(installedVersion)-beta.\(build)", version: installedVersion, build: installedBuild, channel: "beta", source: nil, source_notice: nil)
+        default: return nil
+        }
+        #else
+        nil
+        #endif
+    }
+
+    /// `-pokiSignedIn YES`: a simulator's screenshots show the Signing page as it is with an Apple Account.
+    nonisolated private static var screenshotSignedIn: Bool {
+        #if targetEnvironment(simulator)
+        UserDefaults.standard.bool(forKey: "pokiSignedIn")
+        #else
+        false
         #endif
     }
 
