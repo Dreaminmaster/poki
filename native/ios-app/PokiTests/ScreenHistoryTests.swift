@@ -52,6 +52,25 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertEqual(reads.map(\.app), ["com.apple.mobilenotes"])
     }
 
+    func testReadsWithoutABundleIDLeaveNothingInTheStore() async {
+        let capture = HistoryCapture()
+        let unknown = ["", "Notes", "no app name, pid 412", "com.example bank", "com..bank", ".com.bank", "com.bank.", "com.bank/app", "com.\u{94F6}\u{884C}"]
+        for mode in HistoryCapture.ListMode.allCases {
+            capture.listMode = mode
+            capture.included = unknown
+            for app in unknown {
+                XCTAssertFalse(capture.keep(read(app, ["Private account details"])), app)
+            }
+            XCTAssertFalse(capture.keep(["ok": true, "text": ["Private account details"]]))
+        }
+        let reads = await HistoryStore.shared.recent()
+        let record = await HistoryStore.shared.records()
+        XCTAssertTrue(reads.isEmpty)
+        XCTAssertTrue(record.isEmpty)
+        capture.listMode = .exclude
+        XCTAssertTrue(capture.keep(read("com.example.Bank-2", ["Public page"])))
+    }
+
     func testClearingEverythingLeavesNoReadsSummariesOrRecord() async {
         let capture = HistoryCapture()
         HistoryStore.shared.add(at: Date(), app: "com.apple.mobilenotes", title: "Notes", text: "Shopping list")
