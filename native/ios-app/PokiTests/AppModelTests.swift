@@ -58,13 +58,24 @@ final class FakeAutomation: InProcessAutomation, @unchecked Sendable {
     }
     /// Automation Mode off with the session kept, as iOS does it: the session stays open until the next prepare turns it on.
     func pauseAutomation() -> [String: Any] {
-        lock.withLock {
+        let (held, started) = lock.withLock { (pauseGate, onPause) }
+        started?()
+        held?.wait()
+        return lock.withLock {
             guard open else { return ["paused": false, "how": "no session"] }
             if failPause { failPause = false; return ["paused": false, "how": "none offered"] }
             paused = true
             pauseCalls += 1
             return ["paused": true, "how": "fake"]
         }
+    }
+    private var pauseGate: DispatchSemaphore?
+    private var onPause: (@Sendable () -> Void)?
+    func holdNextPause(started: @escaping @Sendable () -> Void) {
+        lock.withLock { pauseGate = DispatchSemaphore(value: 0); onPause = started }
+    }
+    func releasePause() {
+        lock.withLock { pauseGate?.signal(); pauseGate = nil; onPause = nil }
     }
     private var paused = false
     /// Sessions that were open when closed, and pauses of an open session.
@@ -489,6 +500,7 @@ final class InProcessPasscodeTests: XCTestCase {
 
     override func tearDown() async throws {
         session?.answer(nil)
+        session?.releasePause()
         guard let saved, let model else { return }
         model.stopSession()
         UserDefaults.standard.set(saved.relay, forKey: "relayAddress")
@@ -1077,6 +1089,37 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertFalse(session.isOpen)
         XCTAssertEqual(session.closes, 1)
         XCTAssertEqual(session.pauses, 0)
+    }
+
+    func testOnIOS26ClosingDuringAPauseDoesNotKeepTheSession() async {
+        for action in ["owner stop", "Live Activity stop", "turn off", "update"] {
+            useSystem(26)
+            await openSessionForATask()
+            let pausing = expectation(description: "pause started before \(action)")
+            session.holdNextPause { pausing.fulfill() }
+            model.checkIdle(now: Date().addingTimeInterval(Double(model.idleStopSeconds) + 60))
+            await fulfillment(of: [pausing], timeout: 5)
+
+            var update: Task<Void, Never>?
+            switch action {
+            case "owner stop": model.pauseByOwner()
+            case "Live Activity stop": model.pauseRunner(reason: "Stopped from the Live Activity")
+            case "turn off": model.stopSession()
+            default:
+                let updating = expectation(description: "update requested during the pause")
+                update = Task { @MainActor in
+                    updating.fulfill()
+                    await self.model.windDownForUpdate()
+                    XCTAssertFalse(self.session.isOpen, "the update must wait for a full close")
+                }
+                await fulfillment(of: [updating], timeout: 5)
+            }
+            session.releasePause()
+            await update?.value
+            await waitFor("\(action) finished closing") { self.model.lastInProcessClose != nil }
+            XCTAssertFalse(session.isOpen, "\(action) must not be lost while a pause is in progress")
+            XCTAssertEqual(model.lastInProcessClose?.closed, true, action)
+        }
     }
 
     /// The kept session is the next task's session. When it cannot read again, Poki closes it and opens a
