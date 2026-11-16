@@ -82,6 +82,18 @@ final class FakeTime {
 
 @MainActor
 final class VoiceModelTests: XCTestCase {
+    func testAConnectionWhoseSessionNeverStartsEndsAfterSixtySeconds() async {
+        let h = Harness()
+        await h.connect()
+        XCTAssertEqual(h.voice.phase, .connecting)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
+        XCTAssertFalse(h.voice.isOn, "a silent session must release the microphone")
+        XCTAssertTrue(h.link.closed)
+        XCTAssertEqual(h.microphone, [true, false])
+    }
+
     private var savedBridge: String?
     private var savedDirect: Any?
 
