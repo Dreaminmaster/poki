@@ -37,6 +37,59 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, reading, accuracy: 1, "A reply must not pull you away from what you are reading")
     }
 
+    func testSearchJumpToAnOlderMessageMovesScrollAwayFromNewest() throws {
+        let (scroll, feed) = try transcript()
+        XCTAssertLessThan(gap(scroll), 2)
+        let target = feed.entries[8].id
+        let jump = ConversationSearchJump(sessionID: "search-fixture", entryID: target)
+        feed.jump = jump
+        settle { self.gap(scroll) > 200 && feed.appliedJump == jump.requestID }
+        XCTAssertGreaterThan(gap(scroll), 200, "A matching saved message should be in view, not the newest message")
+        XCTAssertEqual(feed.appliedJump, jump.requestID, "Navigation must acknowledge the exact request")
+    }
+
+    /// Opening and dismissing a saved-message jump only changes scroll position: it must not
+    /// unmount the composer, discard unsent text, or replace the active conversation.
+    func testSearchJumpAndCancellationKeepUnsentChatDraft() throws {
+        let savedChat = UserDefaults.standard.object(forKey: "pokiChat")
+        let savedDraft = UserDefaults.standard.object(forKey: "pokiDraft")
+        UserDefaults.standard.set("demo", forKey: "pokiChat")
+        UserDefaults.standard.set("Draft that must remain unsent", forKey: "pokiDraft")
+        defer {
+            UserDefaults.standard.set(savedChat, forKey: "pokiChat")
+            UserDefaults.standard.set(savedDraft, forKey: "pokiDraft")
+        }
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let feed = Feed()
+        self.feed = feed
+        let window = try show(NavigationStack {
+            SearchChatHost(feed: feed)
+        }.environment(app).environment(chat))
+        settle { Self.find(CapsuleTextView.self, in: window) != nil }
+        let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        XCTAssertEqual(field.plainText, "Draft that must remain unsent")
+        let originalID = chat.sessionID
+        let originalEntries = chat.entries
+
+        let selected = try XCTUnwrap(chat.entries.first?.id)
+        feed.jump = ConversationSearchJump(sessionID: originalID, entryID: selected)
+        pump(0.4)
+        let afterJump = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        XCTAssertTrue(afterJump === field, "search navigation must not unmount the active composer")
+        XCTAssertEqual(afterJump.plainText, "Draft that must remain unsent")
+        XCTAssertEqual(chat.entries, originalEntries)
+        XCTAssertEqual(chat.sessionID, originalID)
+
+        feed.jump = nil
+        pump(0.3)
+        let afterCancel = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        XCTAssertTrue(afterCancel === field, "cancelling a search jump must keep the same composer")
+        XCTAssertEqual(afterCancel.plainText, "Draft that must remain unsent")
+        XCTAssertEqual(chat.entries, originalEntries)
+        XCTAssertEqual(chat.sessionID, originalID)
+    }
+
     func testResizingTheRootKeepsAnUnsentDraftInTheSameConversation() throws {
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         let chat = ChatModel(app: app)
@@ -66,6 +119,7 @@ final class ChatScrollTests: XCTestCase {
             XCTAssertEqual(Self.find(CapsuleTextView.self, in: window)?.text, draft)
             XCTAssertEqual(chat.sessionID, session)
         }
+
     }
 
     /// The owner's case, on the chat page itself with its demo conversation: a new conversation, the
@@ -156,16 +210,27 @@ final class ChatScrollTests: XCTestCase {
     }
 
     private final class Feed: ObservableObject {
+        @Published var jump: ConversationSearchJump?
+        @Published var appliedJump: UUID?
         @Published var entries: [ChatEntry] = (0..<30).flatMap { i in
             [ChatEntry(.you("Question \(i): what is on my calendar this afternoon?", delivered: true)),
              ChatEntry(.poki("Answer \(i): a design review at three and a call with the bank at five."))]
         }
     }
 
+    private struct SearchChatHost: View {
+        @ObservedObject var feed: Feed
+        var body: some View {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {},
+                     openModel: {}, searchJump: feed.jump, openThreads: {})
+        }
+    }
+
     private struct Host: View {
         @ObservedObject var feed: Feed
         var body: some View {
-            ChatTranscript(entries: feed.entries)
+            ChatTranscript(entries: feed.entries, jump: feed.jump,
+                           onSearchJumpApplied: { feed.appliedJump = $0 }) { EmptyView() }
                 .topBar { Color.clear.frame(height: 110) }
                 .bottomBar { Color.clear.frame(height: 80) }
         }
