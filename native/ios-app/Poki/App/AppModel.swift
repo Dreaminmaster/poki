@@ -489,6 +489,7 @@ final class AppModel {
     /// next open resumes it instead of making a new one, and a resume that fails is closed and opened again.
     private var sessionKept = false
     private var afterInProcessClose: [@MainActor () -> Void] = []
+    private var pendingInProcessClose: String?
     /// A close of the in-process session once iOS has answered it: what it was for, and whether a
     /// session was open. The lifecycle check waits for this, not for the state to say closing.
     struct InProcessClose { let number: Int; let why: String; let closed: Bool; let seconds: Double }
@@ -497,7 +498,10 @@ final class AppModel {
     func closeInProcess(_ why: String, keepingSession: Bool = false, then: (@MainActor () -> Void)? = nil) {
         guard automationPath == .inProcess else { return }
         if let then { afterInProcessClose.append(then) }
-        if case .closing = inProcessSession { return }
+        if case .closing = inProcessSession {
+            if !keepingSession { pendingInProcessClose = why }
+            return
+        }
         inProcessSession = .closing(reopen: false)
         inProcessEpoch += 1
         inProcessWarming = false
@@ -514,6 +518,13 @@ final class AppModel {
                 if case .closing(let requested) = self.inProcessSession { reopen = requested } else { reopen = false }
                 self.inProcessSession = .idle
                 self.sessionKept = kept
+                let pendingClose = self.pendingInProcessClose
+                self.pendingInProcessClose = nil
+                if kept, let pendingClose {
+                    self.closeInProcess(pendingClose)
+                    if reopen { self.inProcessSession = .closing(reopen: true) }
+                    return
+                }
                 if keepingSession, !kept { self.log.add("runner", "Automation Mode could not pause for \(why): closing the session instead") }
                 self.log.add("runner", kept
                     ? "Automation Mode pause for \(why): \(result["paused"] as? Bool == true ? "paused" : "unavailable")"
@@ -1173,7 +1184,7 @@ final class AppModel {
     func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
         let splitChat = byOwner && AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true ? AskPoki.chat : nil
         splitChat?.stop()
-        guard sessionOn, !runnerPaused else { return }
+        guard sessionOn, !runnerPaused || byOwner else { return }
         // Allow on the Live Activity is followed by its layout changing under the finger: a Stop
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
         // Allow, then "Stopped from the Live Activity" 0.7 s after the approval ended). A running
@@ -1184,6 +1195,10 @@ final class AppModel {
         }
         guard approvals.isEmpty || splitChat != nil else { return }
         ownerPaused = byOwner
+        if runnerPaused {
+            if automationPath == .inProcess { closeInProcess("stopped by the owner") }
+            return
+        }
         if automationPath == .inProcess {
             Task { [core] in _ = await core.finishTask(switching: false) }
             // The owner's own Stop ends the session; standing by on its own keeps it where the policy says so.
@@ -1243,7 +1258,10 @@ final class AppModel {
 
     func pauseByOwner() {
         guard sessionOn else { return }
-        if runnerPaused { ownerPaused = true } else { pauseRunner() }
+        if runnerPaused {
+            ownerPaused = true
+            if automationPath == .inProcess { closeInProcess("stopped by the owner") }
+        } else { pauseRunner() }
     }
 
     /// The runner is off and starts on the next agent request.
