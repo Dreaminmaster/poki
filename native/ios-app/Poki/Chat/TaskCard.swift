@@ -387,7 +387,7 @@ private struct TaskStepRow: View {
 
 /// A step waiting for your answer, above the message field: what is asked, where, the words or the
 /// button it is about, how long it waits, and the two answers. Allow takes a hold, so a stray tap
-/// never lets a step through.
+/// never lets a step through, and so does Don’t ask again, which allows the step too.
 /// An approval, as one question from the rules' kind ("Allow payment?"), its countdown and the answers.
 struct ApprovalAskCard: View {
     var title: String
@@ -426,14 +426,8 @@ struct ApprovalAskCard: View {
                 HoldToAllowButton { answer(true) }
             }
             if let stopAsking {
-                Button(action: stopAsking) {
-                    Text("Don’t ask again").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 32)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, -6)
-                .accessibilityHint(Text("Allows this step and turns approvals off."))
+                // Allows this step and turns every approval off, so like Allow it takes a hold.
+                HoldToAllowButton(title: "Don’t ask again", quiet: true, action: stopAsking)
             }
         }
         .padding(18)
@@ -489,8 +483,11 @@ private struct AnswerRow: Layout {
 }
 
 /// Touch and hold: the button fills from the leading edge and allows when it is full. VoiceOver and
-/// Switch Control activate it directly, as they can't hold.
+/// Switch Control activate it directly, as they can't hold. `quiet` is Don’t ask again: the same hold
+/// as plain text under the two answers, which allows this step and turns approvals off.
 struct HoldToAllowButton: View {
+    var title: LocalizedStringKey = "Hold to Allow"
+    var quiet = false
     var action: () -> Void
     @State private var filled: CGFloat = 0
     @State private var pressing = false
@@ -501,14 +498,14 @@ struct HoldToAllowButton: View {
     static let hold: Double = 0.7
 
     var body: some View {
-        Text("Hold to Allow")
-            .font(.subheadline.weight(.semibold)).foregroundStyle(Tint.onSolid)
-            .frame(maxWidth: .infinity, minHeight: 50)
+        Text(title)
+            .font(.subheadline.weight(quiet ? .medium : .semibold)).foregroundStyle(quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.onSolid))
+            .frame(maxWidth: .infinity, minHeight: quiet ? 36 : 50)
             .background {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Tint.solid
-                        Tint.onSolid.opacity(0.32).frame(width: geometry.size.width * filled)
+                        if !quiet { Tint.solid }
+                        (quiet ? Color.primary.opacity(0.14) : Tint.onSolid.opacity(0.32)).frame(width: geometry.size.width * filled)
                     }
                 }
                 .clipShape(.capsule)
@@ -526,11 +523,11 @@ struct HoldToAllowButton: View {
             .sensoryFeedback(.success, trigger: allowed)
             .sensoryFeedback(.impact(weight: .light), trigger: pressing) { _, down in down }
             .accessibilityElement()
-            .accessibilityLabel(Text("Allow"))
-            .accessibilityHint(Text("Allows this step"))
+            .accessibilityLabel(quiet ? Text(title) : Text("Allow"))
+            .accessibilityHint(quiet ? Text("Allows this step and turns approvals off.") : Text("Allows this step"))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { action() }
-            .accessibilityIdentifier("approval.allow")
+            .accessibilityIdentifier(quiet ? "approval.stopAsking" : "approval.allow")
     }
 }
 

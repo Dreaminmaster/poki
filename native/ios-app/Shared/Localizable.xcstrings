@@ -4113,6 +4113,38 @@
         }
       }
     },
+    "Allow and stop asking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许并不再询问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許並不再詢問"
+          }
+        }
+      }
+    },
+    "Lets the agent do the step that is waiting for you and turns approvals off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许智能体执行待批准的步骤，并关闭审批。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許智慧體執行待批准的步驟，並關閉審批。"
+          }
+        }
+      }
+    },
     "Don’t open Poki Runner yourself. Poki starts it when an agent needs this iPhone." : {
       "extractionState" : "manual",
       "localizations" : {
