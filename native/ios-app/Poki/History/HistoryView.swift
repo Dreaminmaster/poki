@@ -145,7 +145,7 @@ struct HistoryPage: View {
         Group {
             // The whole page opens only after Face ID, Touch ID or Poki's PIN.
             if !lock.unlocked {
-                List { HistoryUnlockSections() }
+                BacktapeLockScreen()
             } else if layout.isEmpty {
                 List {
                     if !capture.enabled {
@@ -374,6 +374,19 @@ struct BacktapeSettingsPage: View {
                     Text("2 Weeks").tag(14)
                     Text("1 Month").tag(30)
                 }
+                Picker("Keep Summaries For", selection: $capture.summaryDays) {
+                    Text("As Long as History").tag(0)
+                    Text("1 Month").tag(30)
+                    Text("3 Months").tag(90)
+                    Text("1 Year").tag(365)
+                }
+                Picker("Storage Limit", selection: $capture.storageMegabytes) {
+                    Text(verbatim: "100 MB").tag(100)
+                    Text(verbatim: "200 MB").tag(200)
+                    Text(verbatim: "500 MB").tag(500)
+                    Text(verbatim: "1 GB").tag(1024)
+                    Text(verbatim: "2 GB").tag(2048)
+                }
                 Picker("Remind Me to Draw Insights", selection: $capture.insightDays) {
                     Text("Never").tag(0)
                     Text("Every 3 Days").tag(3)
@@ -381,7 +394,7 @@ struct BacktapeSettingsPage: View {
                     Text("Every 2 Weeks").tag(14)
                 }
             } footer: {
-                Text("Older tape is erased by itself. The reminder comes before that, so you can keep what matters.")
+                Text("Whichever limit is reached first starts erasing the oldest tape in layers. Screen structure goes first, then screen text, and the summaries last. The reminder comes before that, so you can keep what matters.")
             }
             BacktapeSummarySection()
             Section {

@@ -55,7 +55,7 @@ enum BacktapeContext {
         guard question.count >= 3 else { return .unavailable("Send one clear question.") }
         let span = TimeInterval(min(168, max(1, hours)) * 3600)
         let entries = await HistoryStore.shared.entries(from: Date().addingTimeInterval(-span), to: Date())
-            .filter { capture.keeps($0.app) && BacktapeApps.service($0.app) == nil }
+            .filter { capture.keeps($0.app) && BacktapeApps.service($0.app) == nil && !$0.text.isEmpty }
         guard !entries.isEmpty else { return .nothing }
 
         // The summaries are the map: the model picks the moments that may hold the answer, and only

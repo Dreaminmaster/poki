@@ -331,6 +331,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let points: Option<Vec<(f64, f64)>> = request["direct_points"].as_array().map(|points| points.iter().filter_map(|point| Some((point[0].as_f64()?, point[1].as_f64()?))).collect());
     let mut direct: Option<ax::direct::Direct> = None;
     let include_text = request["include_text"].as_bool().unwrap_or(false);
+    let include_tree = request["include_tree"].as_bool().unwrap_or(false);
     let mut ended = "finished";
     loop {
         if RUN.load(Ordering::SeqCst) != me {
@@ -383,6 +384,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 if include_text && changed {
                     line["text"] = summary["text"].clone();
                     line["title"] = title_of(&tree);
+                }
+                // The tree itself, compact, when the capture keeps trees: only for a changed screen.
+                if include_tree && changed {
+                    line["tree"] = compact(&tree);
                 }
             }
             Err(failure) => {
@@ -565,6 +570,41 @@ pub fn summarize(tree: &Value, include_text: bool) -> Value {
     answer
 }
 
+/// The tree as the capture keeps it: one row per element in reading order,
+/// `[depth, role, label, value, x, y, width, height]`, numbers rounded to whole points. What
+/// `summarize` leaves out is left out here too: elements under an app that only the lock screen
+/// shows, keyboard keys, and the value of a password field (its row stays, without label or value).
+pub fn compact(tree: &Value) -> Value {
+    let empty = vec![];
+    let all = tree["elements"].as_array().unwrap_or(&empty);
+    let mut rows: Vec<Value> = vec![];
+    let mut hidden_below: Option<u64> = None;
+    for element in all {
+        let depth = element["depth"].as_u64().unwrap_or(0);
+        if hidden_below.is_some_and(|below| depth > below) {
+            continue;
+        }
+        hidden_below = (element["role"] == "Application" && lock_screen_only(element)).then_some(depth);
+        if hidden_below.is_some() || is_key(element) {
+            continue;
+        }
+        let secure = is_secure(element);
+        let text = |field: &str| if secure { "" } else { element[field].as_str().map(str::trim).unwrap_or("") };
+        let number = |field: &str| element["frame"][field].as_f64().map(|n| n.round() as i64).unwrap_or(0);
+        rows.push(json!([
+            depth,
+            element["role"].as_str().unwrap_or(""),
+            text("label"),
+            text("value"),
+            number("x"),
+            number("y"),
+            number("width"),
+            number("height"),
+        ]));
+    }
+    Value::Array(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -588,6 +628,18 @@ mod tests {
                 {"role": "Button", "label": "Done"},
             ],
         })
+    }
+
+    #[test]
+    fn a_compact_tree_keeps_structure_and_leaves_out_secrets_and_keys() {
+        let rows = compact(&tree());
+        let rows = rows.as_array().unwrap();
+        // Eleven elements, less the two keyboard keys.
+        assert_eq!(rows.len(), 9);
+        assert_eq!(rows[2], json!([0, "TextView", "Note", "Milk\nEggs", 0, 0, 0, 0]));
+        assert_eq!(rows[5], json!([0, "SecureTextField", "", "", 0, 0, 0, 0]));
+        assert_eq!(rows[6], json!([0, "TextField", "", "", 0, 0, 0, 0]));
+        assert!(!rows.iter().any(|row| row[3] == "hunter2" || row[3] == "1234"));
     }
 
     #[test]

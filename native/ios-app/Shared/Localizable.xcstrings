@@ -35537,6 +35537,118 @@
         }
       }
     },
+    "Keep Summaries For" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "摘要保留时间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "摘要保留時間"
+          }
+        }
+      }
+    },
+    "As Long as History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与历史相同"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "與歷史相同"
+          }
+        }
+      }
+    },
+    "3 Months" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3 个月"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3 個月"
+          }
+        }
+      }
+    },
+    "1 Year" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 年"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 年"
+          }
+        }
+      }
+    },
+    "Storage Limit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存储上限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存上限"
+          }
+        }
+      }
+    },
+    "Whichever limit is reached first starts erasing the oldest tape in layers. Screen structure goes first, then screen text, and the summaries last. The reminder comes before that, so you can keep what matters." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先达到的那个上限会开始分层清除最旧的记录。先清除屏幕结构，再清除屏幕文字，最后才是摘要。提醒会在此之前出现，方便你保留重要内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先達到的那個上限會開始分層清除最舊的記錄。先清除螢幕結構，再清除螢幕文字，最後才是摘要。提醒會在此之前出現，方便你保留重要內容。"
+          }
+        }
+      }
+    },
+    "Unlock to view what Backtape kept on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁后才能查看倒带在这台 iPhone 上保留的内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖後才能查看倒帶在這部 iPhone 上保留的內容。"
+          }
+        }
+      }
+    },
     "Text files must be 100 KB or smaller." : {
       "localizations" : {
         "zh-Hans" : {

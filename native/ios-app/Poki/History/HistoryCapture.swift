@@ -43,7 +43,16 @@ final class HistoryCapture: ObservableObject {
     @Published var endMinute: Int { didSet { save(endMinute, "history.endMinute"); settingsChanged() } }
     /// Calendar weekdays, 1 for Sunday.
     @Published var weekdays: [Int] { didSet { save(weekdays, "history.weekdays"); settingsChanged() } }
-    @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); HistoryStore.shared.prune(days: retentionDays) } }
+    @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); prune() } }
+    /// How long the hour, day and week summaries outlive the tape, in days. 0 is as long as the tape.
+    @Published var summaryDays: Int { didSet { save(summaryDays, "history.summaryDays"); prune() } }
+    /// The tape's storage limit in megabytes.
+    @Published var storageMegabytes: Int { didSet { save(storageMegabytes, "history.storageMegabytes"); prune() } }
+
+    private func prune() {
+        guard !loading else { return }
+        HistoryStore.shared.prune(days: retentionDays, summaryDays: summaryDays, megabytes: storageMegabytes)
+    }
     /// How often the owner is reminded to draw insights from the tape, in days. 0 is never.
     @Published var insightDays: Int { didSet { save(insightDays, "history.insightDays"); remind() } }
     @Published var seconds: Int { didSet { save(seconds, "history.seconds"); restart() } }
@@ -87,6 +96,8 @@ final class HistoryCapture: ObservableObject {
         endMinute = defaults.object(forKey: "history.endMinute") as? Int ?? 22 * 60
         weekdays = defaults.array(forKey: "history.weekdays") as? [Int] ?? Array(1...7)
         retentionDays = max(3, defaults.object(forKey: "history.retentionDays") as? Int ?? 14)
+        summaryDays = defaults.object(forKey: "history.summaryDays") as? Int ?? 90
+        storageMegabytes = max(50, defaults.object(forKey: "history.storageMegabytes") as? Int ?? 200)
         insightDays = defaults.object(forKey: "history.insightDays") as? Int ?? 0
         seconds = defaults.object(forKey: "history.seconds") as? Int ?? 5
         loading = false
@@ -156,14 +167,14 @@ final class HistoryCapture: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
-        HistoryStore.shared.prune(days: retentionDays)
+        prune()
         evaluate()
     }
 
     private func tick() {
         ticks += 1
         // Retention and the storage cap, once an hour.
-        if ticks % 360 == 0, enabled { HistoryStore.shared.prune(days: retentionDays) }
+        if ticks % 360 == 0, enabled { prune() }
         evaluate()
     }
 
@@ -252,7 +263,7 @@ final class HistoryCapture: ObservableObject {
         let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
         let request: [String: Any] = [
             "op": "run", "device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki", "direct_points": points,
-            "interval_ms": max(1, seconds) * 1000, "duration_s": 86_400, "include_text": true,
+            "interval_ms": max(1, seconds) * 1000, "duration_s": 86_400, "include_text": true, "include_tree": true,
         ]
         Task {
             do {
@@ -287,6 +298,7 @@ final class HistoryCapture: ObservableObject {
         var app = line["app"] as? String ?? ""
         var title = line["title"] as? String ?? ""
         var lines = read
+        var tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         // System overlays are not something the owner was doing, so they are never kept.
         if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return }
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame {
@@ -297,6 +309,7 @@ final class HistoryCapture: ObservableObject {
             app = banner.app
             title = Self.bannerTitle
             lines = [banner.text]
+            tree = nil
         }
         guard keeps(app) else {
             // The observing record names an app left out once each time it comes to the front.
@@ -308,7 +321,7 @@ final class HistoryCapture: ObservableObject {
         }
         lastLeftOut = nil
         let now = Date()
-        HistoryStore.shared.add(at: now, app: app, title: title, text: lines.joined(separator: "\n"))
+        HistoryStore.shared.add(at: now, app: app, title: title, text: lines.joined(separator: "\n"), tree: tree)
         lastKept = now
         changes += 1
     }

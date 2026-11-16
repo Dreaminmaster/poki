@@ -66,6 +66,8 @@ final class HistoryStore: @unchecked Sendable {
             sqlite3_close(handle)
             return false
         }
+        // The screen's tree beside its text (the owner, 2026-11-15). Fails once the column is there.
+        sqlite3_exec(handle, "ALTER TABLE entries ADD COLUMN tree BLOB", nil, nil, nil)
         db = handle
         return true
     }
@@ -84,6 +86,7 @@ final class HistoryStore: @unchecked Sendable {
         case text(String)
         case real(Double)
         case integer(Int64)
+        case blob(Data?)
     }
 
     @discardableResult
@@ -103,6 +106,12 @@ final class HistoryStore: @unchecked Sendable {
             case .text(let text): sqlite3_bind_text(statement, index, text, -1, Self.transient)
             case .real(let number): sqlite3_bind_double(statement, index, number)
             case .integer(let number): sqlite3_bind_int64(statement, index, number)
+            case .blob(let data):
+                if let data, !data.isEmpty {
+                    _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, index, $0.baseAddress, Int32(data.count), Self.transient) }
+                } else {
+                    sqlite3_bind_null(statement, index)
+                }
             }
         }
     }
@@ -129,9 +138,32 @@ final class HistoryStore: @unchecked Sendable {
 
     // MARK: Writing
 
-    func add(at: Date, app: String, title: String, text: String) {
+    /// `tree` is the launcher's compact tree as JSON; it is kept compressed.
+    func add(at: Date, app: String, title: String, text: String, tree: Data? = nil) {
         queue.async {
-            self.run("INSERT INTO entries (at, app, title, text) VALUES (?, ?, ?, ?)", [.real(at.timeIntervalSince1970), .text(app), .text(title), .text(text)])
+            let packed = tree.flatMap { try? ($0 as NSData).compressed(using: .zlib) as Data }
+            self.run("INSERT INTO entries (at, app, title, text, tree) VALUES (?, ?, ?, ?, ?)",
+                     [.real(at.timeIntervalSince1970), .text(app), .text(title), .text(text), .blob(packed)])
+        }
+    }
+
+    /// The compact tree of one read, as JSON rows `[depth, role, label, value, x, y, width, height]`.
+    func tree(entry id: Int64) async -> Data? {
+        await fetch {
+            let packed = self.rows("SELECT tree FROM entries WHERE id = ?", [.integer(id)]) { statement -> Data? in
+                guard let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+                return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+            }.first ?? nil
+            return packed.flatMap { try? ($0 as NSData).decompressed(using: .zlib) as Data }
+        }
+    }
+
+    /// How many reads keep their tree, and the trees' bytes as stored.
+    func trees() async -> (count: Int, bytes: Int64) {
+        await fetch {
+            self.rows("SELECT COUNT(tree), COALESCE(SUM(LENGTH(tree)), 0) FROM entries") {
+                (count: Int(sqlite3_column_int64($0, 0)), bytes: sqlite3_column_int64($0, 1))
+            }.first ?? (0, 0)
         }
     }
 
@@ -141,21 +173,45 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
-    /// Deletes entries older than `days`, the record older than 30 days, and then the oldest entries
-    /// while the file is over `megabytes`.
-    func prune(days: Int, megabytes: Int = 200) {
+    /// Forgets in layers, oldest first (the owner, 2026-11-15: a time limit and a storage limit,
+    /// whichever is reached first; trees go first and the top summaries last).
+    ///
+    /// Past `days`: a read loses its tree and its screen text and keeps only when, which app and its
+    /// title, so the library still shows the time; the 10 minute notes go, the hour, day and week
+    /// summaries stay. Past `summaryDays` (never less than `days`) everything goes. Over
+    /// `megabytes`: the oldest trees go, then the oldest screen text with its 10 minute notes, then
+    /// the oldest reads and summaries whole.
+    func prune(days: Int, summaryDays: Int = 0, megabytes: Int = 200) {
         queue.async {
             let now = Date().timeIntervalSince1970
-            self.run("DELETE FROM entries WHERE at < ?", [.real(now - Double(days) * 86_400)])
-            self.run("DELETE FROM notes WHERE start < ?", [.real(now - Double(days) * 86_400)])
+            let cut = now - Double(days) * 86_400
+            let end = now - Double(max(days, summaryDays)) * 86_400
+            self.run("UPDATE entries SET tree = NULL, text = '' WHERE at < ? AND (tree IS NOT NULL OR text != '')", [.real(cut)])
+            self.run("DELETE FROM notes WHERE start < ? AND start = CAST(start AS INTEGER)", [.real(cut)])
+            self.run("DELETE FROM entries WHERE at < ?", [.real(end)])
+            self.run("DELETE FROM notes WHERE start < ?", [.real(end)])
             self.run("DELETE FROM record WHERE at < ?", [.real(now - 30 * 86_400)])
+            let limit = Int64(megabytes) * 1_048_576
             var rounds = 0
-            while self.bytesNow() > Int64(megabytes) * 1_048_576, rounds < 20 {
-                self.run("DELETE FROM entries WHERE id IN (SELECT id FROM entries ORDER BY at LIMIT 2000)")
+            while self.bytesNow() > limit, rounds < 40 {
+                if self.any("SELECT 1 FROM entries WHERE tree IS NOT NULL LIMIT 1") {
+                    self.run("UPDATE entries SET tree = NULL WHERE id IN (SELECT id FROM entries WHERE tree IS NOT NULL ORDER BY at LIMIT 3000)")
+                } else if self.any("SELECT 1 FROM entries WHERE text != '' LIMIT 1") {
+                    self.run("UPDATE entries SET text = '' WHERE id IN (SELECT id FROM entries WHERE text != '' ORDER BY at LIMIT 3000)")
+                    self.run("DELETE FROM notes WHERE start = CAST(start AS INTEGER) AND start < COALESCE((SELECT MIN(at) FROM entries WHERE text != ''), ?)", [.real(now)])
+                } else {
+                    self.run("DELETE FROM entries WHERE id IN (SELECT id FROM entries ORDER BY at LIMIT 3000)")
+                    self.run("DELETE FROM notes WHERE start < COALESCE((SELECT MIN(at) FROM entries), ?) - 8 * 86400", [.real(now)])
+                    if !self.any("SELECT 1 FROM entries LIMIT 1") { self.run("DELETE FROM notes") }
+                }
                 self.run("VACUUM")
                 rounds += 1
             }
         }
+    }
+
+    private func any(_ sql: String) -> Bool {
+        !rows(sql) { _ in true }.isEmpty
     }
 
     func delete(entry id: Int64) async {

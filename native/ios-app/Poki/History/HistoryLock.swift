@@ -171,10 +171,133 @@ struct HistoryGate<Content: View>: View {
 /// The lock on a page of its own.
 private struct HistoryLockedPage: View {
     var body: some View {
-        List { HistoryUnlockSections() }
-            .settingsPage()
+        BacktapeLockScreen()
             .navigationTitle(AppLocalization.text("Backtape"))
             .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// What Backtape shows before it is unlocked (the owner, 2026-11-15: a screen that says an unlock is
+/// needed to view, with the Face ID prompt or a password pad). Face ID or Touch ID is asked for as the
+/// page opens and again from its button; with a PIN, the pad is on the page. Nothing of the tape is
+/// drawn behind it. An iPhone with neither yet gets the list that makes a PIN.
+struct BacktapeLockScreen: View {
+    @ObservedObject private var lock = HistoryLock.shared
+    @State private var pin = ""
+    @State private var wrong = 0
+    @State private var now = Date()
+
+    private var waiting: Bool { lock.blockedUntil.map { $0 > now } ?? false }
+
+    var body: some View {
+        if lock.needsSetup {
+            List { HistoryUnlockSections() }.settingsPage()
+        } else {
+            ScrollView {
+                VStack(spacing: 18) {
+                    Image(systemName: lock.usesBiometrics ? (lock.biometricsName == "Touch ID" ? "touchid" : "faceid") : "lock.fill")
+                        .font(.system(size: 44, weight: .regular))
+                        .foregroundStyle(Tint.blue)
+                        .padding(.top, 36)
+                        .accessibilityHidden(true)
+                    VStack(spacing: 6) {
+                        Text("Backtape Is Locked").font(.title2.weight(.semibold))
+                        Text("Unlock to view what Backtape kept on this iPhone.")
+                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+                    if lock.usesBiometrics {
+                        Button { Task { await lock.unlockWithBiometrics() } } label: {
+                            Text(verbatim: String(format: AppLocalization.text("Unlock with %@"), lock.biometricsLabel))
+                                .padding(.horizontal, 6)
+                        }
+                        .glassButton(prominent: true)
+                        .controlSize(.large)
+                    }
+                    if lock.hasPIN { pad }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 24)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .background(Color(.systemGroupedBackground))
+            .task { await lock.unlockWithBiometrics() }
+            .task(id: lock.blockedUntil) {
+                // The wait's end shows by itself.
+                while let until = lock.blockedUntil, until > Date() {
+                    try? await Task.sleep(for: .seconds(1))
+                    now = Date()
+                }
+                now = Date()
+            }
+            .sensoryFeedback(.error, trigger: wrong)
+        }
+    }
+
+    /// Poki's own PIN, 4 to 8 digits: the dots, then the keys.
+    private var pad: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
+                ForEach(0..<max(4, pin.count), id: \.self) { index in
+                    Circle().fill(index < pin.count ? Color(.label) : Color(.tertiaryLabel).opacity(0.5)).frame(width: 11, height: 11)
+                }
+            }
+            .frame(height: 20)
+            .accessibilityLabel(Text("PIN"))
+            .accessibilityValue(Text(verbatim: "\(pin.count)"))
+            Group {
+                if waiting, let until = lock.blockedUntil {
+                    Text(verbatim: String(format: AppLocalization.text("Too many wrong tries. Try again at %@."), until.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(AppLocalization.locale))))
+                } else if wrong > 0, pin.isEmpty {
+                    Text("That PIN is not right.")
+                } else {
+                    Text(verbatim: " ")
+                }
+            }
+            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 32)
+            Grid(horizontalSpacing: 22, verticalSpacing: 14) {
+                ForEach(0..<3, id: \.self) { row in
+                    GridRow {
+                        ForEach(1..<4, id: \.self) { column in key("\(row * 3 + column)") }
+                    }
+                }
+                GridRow {
+                    symbolKey("delete.left", label: "Delete") { if !pin.isEmpty { pin.removeLast() } }
+                    key("0")
+                    symbolKey("arrow.right", label: "Unlock") { enter() }
+                        .disabled(!HistoryLock.valid(pin))
+                }
+            }
+            .disabled(waiting)
+            .glassGroup(spacing: 8)
+        }
+        .padding(.top, 6)
+    }
+
+    private func key(_ digit: String) -> some View {
+        Button {
+            guard pin.count < 8 else { return }
+            pin += digit
+        } label: {
+            Text(verbatim: digit).font(.title.weight(.regular)).frame(width: 72, height: 72).contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassSurface(in: Circle(), interactive: true)
+        .sensoryFeedback(.selection, trigger: pin)
+    }
+
+    private func symbolKey(_ symbol: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.title2).frame(width: 72, height: 72).contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
+    }
+
+    private func enter() {
+        if !lock.unlock(pin: pin) { wrong += 1 }
+        pin = ""
+        now = Date()
     }
 }
 
