@@ -7,7 +7,7 @@
 //! and pymobiledevice3 do. The app downloads the image for the iOS it runs on into `ddi_dir`
 //! (BuildManifest.plist, Image.dmg, Image.dmg.trustcache, and for a cryptex its info and root hash).
 
-use crate::device::{DDI_BAD_FIX, DDI_REFUSED_FIX, DEVELOPER_MODE_FIX, Device, Failure, NETWORK_FIX, Result};
+use crate::device::{DDI_BAD_FIX, DDI_PROXY_FIX, DDI_REFUSED_FIX, DEVELOPER_MODE_FIX, Device, Failure, NETWORK_FIX, Result};
 use idevice::IdeviceError;
 use idevice::cryptexd::{Cryptex1Assets, CryptexdError, install_ddi};
 use idevice::lockdown::LockdownClient;
@@ -148,10 +148,18 @@ pub(crate) fn without_cryptexd(developer_mode: Option<bool>) -> Failure {
 pub fn classify(error: &IdeviceError) -> Failure {
     let failure = Failure::new(format!("mounting the developer disk image failed: {error}"));
     match error {
-        // Apple's signing server answered, but said no: this image is not for this iOS.
-        IdeviceError::UnexpectedResponse(text) if text.contains("TSS server responded") => failure.fix(DDI_REFUSED_FIX).code("ddi_refused"),
+        // Apple's signing server answered with STATUS=94: this image is not eligible for this iOS.
+        IdeviceError::UnexpectedResponse(text)
+            if idevice::tss::tss_error_status(text) == Some(idevice::tss::TSS_STATUS_NOT_ELIGIBLE) =>
+        {
+            failure.fix(DDI_REFUSED_FIX).code("ddi_refused")
+        }
         // The phone could not install what it was given: the files are bad.
         IdeviceError::Cryptexd(CryptexdError::RoutineFailed { .. } | CryptexdError::BadDdiBundle(_)) => failure.fix(DDI_BAD_FIX).code("ddi_bad"),
+        // Connected over HTTP, but a proxy or captive portal answered instead of Apple's TSS.
+        IdeviceError::Http(text) if idevice::tss::is_non_apple_tss_reply(text) => {
+            failure.fix(DDI_PROXY_FIX).code("ddi_proxy")
+        }
         IdeviceError::Http(_) => failure.fix(NETWORK_FIX).code("network"),
         IdeviceError::DeveloperModeNotEnabled => failure.fix(DEVELOPER_MODE_FIX).code("developer_mode"),
         // The device tunnel failed during the mount exchange. The I/O kind can
