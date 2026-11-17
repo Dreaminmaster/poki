@@ -291,8 +291,6 @@ struct SigningOptionsPage: View {
                 }
             } header: {
                 Text("Version")
-            } footer: {
-                Text("Poki checks R2 for Beta updates and uses GitHub if R2 is unavailable.")
             }
             .task(id: signer.status?.channel) {
                 checked = false
