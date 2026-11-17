@@ -25,8 +25,9 @@ struct SessionsView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .title) private var headerIcon = 32.0
     var controlSize = CompactControlMetrics()
+    var sessionStore: SessionStore = .shared
 
-    private var store: SessionStore { SessionStore.shared }
+    private var store: SessionStore { sessionStore }
     private var sampleHome: String? { UserDefaults.standard.string(forKey: "pokiHome") }
 
     var body: some View {

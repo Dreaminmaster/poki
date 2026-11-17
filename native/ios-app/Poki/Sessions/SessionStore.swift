@@ -215,6 +215,7 @@ final class SessionStore {
     static let agentIdle: TimeInterval = 10 * 60
 
     private(set) var sessions: [SavedSession] = []
+    private(set) var isInitialReady = false
     private(set) var isLoaded = false
     private let folder: URL
     private let defaults: UserDefaults
@@ -262,6 +263,7 @@ final class SessionStore {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if samples {
             sessions = Self.samples()
+            isInitialReady = true
             isLoaded = true
             return
         }
@@ -269,14 +271,22 @@ final class SessionStore {
             startBackgroundLoad()
         } else {
             let complete = load()
-            isLoaded = true
             if complete { archiveEarlier() }
+            isInitialReady = true
+            isLoaded = true
         }
     }
 
     func whenInitialReady(_ action: @escaping () -> Void) {
-        if isLoaded { action(); return }
+        if isInitialReady { action(); return }
         initialLoadWaiters.append(action)
+    }
+
+    func waitUntilInitialReady() async {
+        if isInitialReady { return }
+        await withCheckedContinuation { continuation in
+            initialLoadWaiters.append { continuation.resume() }
+        }
     }
 
     func waitUntilLoaded() async {
@@ -322,6 +332,7 @@ final class SessionStore {
             let firstChunkSize = 20
             let nextChunkSize = 50
             var offset = 0
+            var stagedForArchive: [SavedSession] = []
 
             while offset < urls.count {
                 guard let self, !Task.isCancelled else { return }
@@ -347,19 +358,31 @@ final class SessionStore {
                 }.value
 
                 if !decoded.complete { complete = false }
-                self.mergeLoadedBatch(decoded.sessions)
-                if wasFirstBatch && !needsArchiveEarlier {
-                    self.notifyInitialWaiters()
+                if needsArchiveEarlier {
+                    // Hold pre-upgrade sessions off `sessions` until all files are archived so the
+                    // list does not briefly flash hundreds of old conversations and then clear.
+                    stagedForArchive.append(contentsOf: decoded.sessions)
+                } else {
+                    self.mergeLoadedBatch(decoded.sessions)
+                    if wasFirstBatch {
+                        self.isInitialReady = true
+                        self.notifyInitialWaiters()
+                    }
                 }
                 await Task.yield()
             }
 
             guard let self, !Task.isCancelled else { return }
-            self.isLoaded = true
-            self.trim()
-            if complete && needsArchiveEarlier {
-                await self.archiveEarlierInBackground()
+            if needsArchiveEarlier {
+                if complete {
+                    await self.archiveEarlierInBackground(staged: stagedForArchive)
+                } else {
+                    self.mergeLoadedBatch(stagedForArchive)
+                }
             }
+            self.trim()
+            self.isInitialReady = true
+            self.isLoaded = true
             self.notifyFullWaiters()
         }
     }
@@ -378,10 +401,23 @@ final class SessionStore {
         }
     }
 
-    private func archiveEarlierInBackground() async {
-        guard !defaults.bool(forKey: Self.archivedEarlierKey) else { return }
+    private func archiveEarlierInBackground(staged: [SavedSession]) async {
+        guard !defaults.bool(forKey: Self.archivedEarlierKey) else {
+            mergeLoadedBatch(staged)
+            return
+        }
         let now = Date()
+        var archivedStaged: [SavedSession] = []
+        archivedStaged.reserveCapacity(staged.count)
         var snapshots: [(URL, SavedSession)] = []
+        for var session in staged {
+            guard !deletedIDs.contains(session.id), !touchedIDs.contains(session.id) else { continue }
+            if session.archived == nil {
+                session.archived = now
+                snapshots.append((file(session.id), session))
+            }
+            archivedStaged.append(session)
+        }
         for i in sessions.indices where sessions[i].archived == nil && !touchedIDs.contains(sessions[i].id) {
             sessions[i].archived = now
             snapshots.append((file(sessions[i].id), sessions[i]))
@@ -401,6 +437,7 @@ final class SessionStore {
             }
         }
         defaults.set(true, forKey: Self.archivedEarlierKey)
+        mergeLoadedBatch(archivedStaged)
     }
 
     /// The saved sessions from their files; false when a file could not be read (before the first unlock).

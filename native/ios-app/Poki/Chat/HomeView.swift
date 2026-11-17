@@ -453,6 +453,8 @@ struct HomePage<Footer: View>: View {
     var writing = false
     /// How far Poki's picture rises into the top bar as the conversation begins: the greeting rises with it.
     var rise: CGFloat = 0
+    var sessionStore: SessionStore = .shared
+    var shortcutStore: HomeShortcutStore = .shared
     var pick: (String) -> Void
     @ViewBuilder var footer: () -> Footer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -461,7 +463,6 @@ struct HomePage<Footer: View>: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
     @State private var greetedAt = Date.now
     /// The pill whose menu is open, and where it is on the screen: both rows stand still under it.
@@ -493,11 +494,11 @@ struct HomePage<Footer: View>: View {
                 content(inset: inset, height: geometry.size.height, scrolls: false)
             }
         }
-        .task(id: SessionStore.shared.sessions.count) {
-            shortcutStore.refreshInBackground(sessions: SessionStore.shared.sessions, routines: { RoutineStore.shared.routines })
+        .task(id: sessionStore.sessions.count) {
+            shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
         .onChange(of: AppLocalization.language) { _, _ in
-            shortcutStore.refreshInBackground(sessions: SessionStore.shared.sessions, routines: { RoutineStore.shared.routines })
+            shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { page = $0 }
         // The menu, over the pill (the owner: it opened under the pill, on the message field). The
