@@ -354,6 +354,12 @@ on the phone; the next first `look` of a task in that app names the saved routin
   into: "Search"}, …]}}]}` runs up to 20 steps across screens in one call, each target named by the
   text it shows (or `{label, type}`, or a point), never by a number from an earlier read. Each step
   waits for its target as a routine's does and is held by the same approval rules. Nothing is saved.
+  With no model at all: a step's `expect: "text"` must be on screen after it (read from the tree, up
+  to 3 s) or the path stops there; `optional: true` leaves a step out when its target is not on a
+  screen that holds still; the path's `dismiss: ["Not Now", "Later"]` names controls that are closed
+  when they are in the way of a step (each such tap is still held by the approval rules);
+  `read: ["label"]` answers values from the last screen. A run or path that ended on a check that
+  passed skips the pause before the final read.
 - **Intent.** Any action may carry `intent: "why"`; it is kept with the recorded step and is what a
   fix is decided from.
 - **Quick Fixes (off by default).** Where a step would stop, a run first applies what the routine
@@ -368,7 +374,10 @@ on the phone; the next first `look` of a task in that app names the saved routin
   would need approval stops the run instead. A step whose target is missing asks once the screen
   has held still for 0.7 s, in place of waiting its whole time; a screen still changing keeps the
   step's whole time. A fix that led to a finished run is saved in the routine, and the answer
-  names each fix, how long the decision took and how sure it was.
+  names each fix, how long the decision took and how sure it was. Two more uses, only with a
+  decider: a path target given as `{find: "what it is"}` is chosen from the screen (refused before
+  anything is sent when there is no decider), and a step's `check: "what should be true"` is one
+  yes or no after the step, where a clear no stops the run and an unsure answer is reported.
 - **Moving and backing up**: `export` answers the whole memory as JSON (schema
   `poki.agent-backup/1`); `import {data}` merges one in (newer wins). The app keeps a copy at
   `Documents/AgentBackup/poki-agent-backup.json`, which Poki Setup copies off and puts back; a copy put

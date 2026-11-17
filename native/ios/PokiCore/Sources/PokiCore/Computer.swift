@@ -129,13 +129,15 @@ final class Computer: @unchecked Sendable {
     var trace: [RecordedStep] = []
     /// A routine ran whole in this task (the finish line does not offer to save it again).
     var routineRanWhole = false
+    /// The last run or path ended on a check that found what it looked for on screen.
+    var runEndedOnARead = false
     /// Steps fixed on the way since PokiCore started (status says so).
     var fixesMade = 0
 
     var lastElements: [Element] { listed.map(\.element) }
     var layout: Layout { Layout(all: lastAll, screen: size ?? ScreenSize(width: 10_000, height: 10_000)) }
 
-    static let settle: [String: Double] = ["tap": 0.45, "type": 0.25, "key": 0.3, "swipe": 0.6, "drag": 0.35, "long_press": 0.4, "pinch": 0.6, "button": 0.7, "launch": 0.9, "scroll_to": 0.2, "wait": 0, "wait_until": 0]
+    static let settle: [String: Double] = ["tap": 0.45, "type": 0.25, "key": 0.3, "swipe": 0.6, "drag": 0.35, "long_press": 0.4, "pinch": 0.6, "button": 0.7, "launch": 0.9, "scroll_to": 0.2, "wait": 0, "wait_until": 0, "run_read": 0]
     static let lineLimit = 120
     static let textLimit = 160
 

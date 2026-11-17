@@ -47,7 +47,7 @@ enum FixMove {
 
 /// A fix made during a run.
 struct Fix: Equatable {
-    enum Kind: String { case renamed, cleared, scrolled, waited }
+    enum Kind: String { case renamed, cleared, scrolled, waited, chosen }
     var step: Int
     var kind: Kind
     /// For the answer and the log: "closed Button \"Not Now\"".
@@ -56,9 +56,11 @@ struct Fix: Equatable {
     var remembered: Bool
     var ms: Int?
     var confidence: Double?
+    /// In place of "remembered", when the fix came from what a path allows.
+    var via: String? = nil
 
     var line: String {
-        var how = remembered ? "remembered" : "decided"
+        var how = via ?? (remembered ? "remembered" : "decided")
         if let ms, !remembered { how += " in \(ms) ms" }
         if let confidence, !remembered { how += " at \(String(format: "%.2f", confidence))" }
         return "step \(step + 1): \(text) (\(how))"
@@ -151,6 +153,49 @@ extension Computer {
             DecisionQuestion(id: "element", instructions: Self.fixElementQuestion,
                              kind: .choice(candidates.map { ($0.id, $0.line) } + [("none", "No listed element should be tapped")])),
         ]
+    }
+
+    enum CheckResult {
+        case holds(ms: Int, p: Double)
+        case fails(ms: Int, p: Double)
+        /// Not answered, or not clearly: the run goes on and says so.
+        case open(String)
+    }
+
+    static let checkQuestion = "A step of a task on an iPhone was just done. `expected` says what should be true of the screen now. From `screen`, is it true?"
+
+    /// Whether the screen a step led to shows what the step's check says, on a screen that has held
+    /// still across two reads (or after 1.5 s). Never throws.
+    func decideCheck(_ check: String, goal: String, step: String, decider: Decider, screen: ScreenSize, until: Double) async -> CheckResult {
+        let policy = config.deciderPolicy
+        let ends = min(until - 0.5, now() + 1.5)
+        var last: String?
+        var elements: [Element] = listable(lastAll, screen)
+        while now() < ends {
+            guard let tree = try? await runner.tree(timeout: min(config.readTimeout, max(0.3, ends - now())), format: config.treeFormat) else { break }
+            lastAll = tree.elements
+            lastForeground = tree.foreground
+            elements = listable(tree.elements, screen)
+            let signature = elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+            if signature == last { break }
+            last = signature
+            await sleep(seconds: 0.15)
+        }
+        let lines = elements.filter { !$0.fromPicture && !$0.isSecure && !$0.text.isEmpty && !["Key", "Keyboard", "StatusBar", "ScrollBar"].contains($0.type) }
+            .prefix(policy.maxCandidates + 20).map { JSON.string("\($0.type) \"\($0.text.prefix(70))\"") }
+        let state: JSON = ["task": .string(goal), "app": .string(lastForeground?.describe ?? "unknown"), "step_done": .string(step), "expected": .string(check), "screen": .array(Array(lines))]
+        let began = now()
+        do {
+            let answers = try await decider.decide(state: state, questions: [DecisionQuestion(id: "holds", instructions: Self.checkQuestion, kind: .yesNo)],
+                                                   timeout: max(0.3, min(policy.timeout, until - now() - 0.3)))
+            guard let p = answers["holds"]?.confidence else { return .open("no answer") }
+            let ms = Int(((now() - began) * 1000).rounded())
+            if p >= policy.minConfidence { return .holds(ms: ms, p: p) }
+            if 1 - p >= policy.minConfidence { return .fails(ms: ms, p: p) }
+            return .open("\(decider.name) was not sure (\(String(format: "%.2f", p)))")
+        } catch {
+            return .open(error is DeadlineExceeded ? "no answer in time" : "\(error)")
+        }
     }
 
     /// One decision on a step that cannot go on as recorded. Never throws: whatever goes wrong is a stop.

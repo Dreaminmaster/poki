@@ -300,9 +300,14 @@ extension Computer {
         let spec = action[kind.rawValue] ?? .null
         switch kind {
         case .run:
-            return ("run", try await runRoutine(spec, until: until))
+            runEndedOnARead = false
+            let text = try await runRoutine(spec, until: until)
+            // A run whose end check found its texts has read the screen it ends on: no pause before the read.
+            return (runEndedOnARead ? "run_read" : "run", text)
         case .path:
-            return ("run", try await runPath(spec, until: until))
+            runEndedOnARead = false
+            let text = try await runPath(spec, until: until)
+            return (runEndedOnARead ? "run_read" : "run", text)
         case .tap:
             let p = try point(spec)
             try await tap(p, within: frame(of: spec))
