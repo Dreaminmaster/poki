@@ -23,6 +23,21 @@ public struct RoutineTarget: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double
 
+    /// A path's target: any element that reads `label`, whatever its type.
+    static let anyType = "*"
+
+    /// A target named by its text alone (a path's step): no recorded place.
+    init(type: String, label: String) {
+        self.type = type
+        self.label = label
+        identifier = nil
+        x = -1
+        y = -1
+    }
+
+    /// Whether the target was recorded at a place on the screen.
+    var hasPlace: Bool { x >= 0 && y >= 0 }
+
     init(_ e: Element) {
         type = e.type
         label = e.label.flatMap { $0.isEmpty ? nil : $0 }
@@ -32,9 +47,14 @@ public struct RoutineTarget: Codable, Equatable, Sendable {
         y = (c.y * 10).rounded() / 10
     }
 
-    public var describe: String { "\(type) \"\(label ?? identifier ?? "")\"" }
+    public var describe: String { type == Self.anyType ? "\"\(label ?? identifier ?? "")\"" : "\(type) \"\(label ?? identifier ?? "")\"" }
 
     func matches(_ e: Element) -> Bool {
+        if type == Self.anyType {
+            // By its text, as written or in another case; a container is never the thing to tap.
+            guard !e.fromPicture, !Computer.containers.contains(e.type), let label, !label.isEmpty else { return false }
+            return e.label?.caseInsensitiveCompare(label) == .orderedSame || e.identifier?.caseInsensitiveCompare(label) == .orderedSame
+        }
         guard !e.fromPicture, e.type == type else { return false }
         if let identifier, e.identifier == identifier { return label == nil || e.label == label }
         return (e.label.flatMap { $0.isEmpty ? nil : $0 }) == label && (identifier == nil || e.identifier == nil || e.identifier == identifier)
@@ -50,6 +70,14 @@ public struct RoutineStep: Codable, Equatable, Sendable {
     public var app: String?
     /// A type into a password field: the text was not kept, so a run stops here for the agent.
     public var secret: Bool?
+    /// Why the step is taken, in the agent's words ({tap: 4, intent: "open the About page"}): what a
+    /// fix is decided from when the target is not where it was.
+    public var intent: String? = nil
+    /// Other forms the target took in a run that worked (a renamed button): matched like the target.
+    public var also: [RoutineTarget]? = nil
+    /// What was in the way of this step before and was closed (a prompt's Not Now): when the target is
+    /// missing and one of these is on screen alone, it is closed again without asking anything.
+    public var clears: [RoutineTarget]? = nil
 }
 
 public struct RoutineStop: Codable, Equatable, Sendable {
@@ -76,13 +104,15 @@ public struct Routine: Codable, Equatable, Sendable {
     public var failuresInARow: Int
     public var lastStop: RoutineStop?
     public var lastMs: Int?
+    /// Steps fixed on the way in all its runs (a popup closed, a renamed target found).
+    public var fixes: Int? = nil
     public var savedBy: String
     public var created: Date
     public var updated: Date
 
     public var stale: Bool { failuresInARow >= 2 }
     public var summary: String {
-        "\(name): \(description.isEmpty ? "" : description + "; ")\(app.map { "in \($0), " } ?? "")\(steps.count) steps, \(runs) runs, \(ok) ok\(stale ? ", STALE (stopped \(failuresInARow) times in a row\(lastStop.map { " at step \($0.step): \($0.why)" } ?? ""))" : "")\(params.isEmpty ? "" : ", with: " + params.keys.sorted().map { "\($0) (recorded \"\(params[$0]!.prefix(30))\")" }.joined(separator: ", "))"
+        "\(name): \(description.isEmpty ? "" : description + "; ")\(app.map { "in \($0), " } ?? "")\(steps.count) steps, \(runs) runs, \(ok) ok\((fixes ?? 0) > 0 ? ", \(fixes ?? 0) fixed on the way" : "")\(stale ? ", STALE (stopped \(failuresInARow) times in a row\(lastStop.map { " at step \($0.step): \($0.why)" } ?? ""))" : "")\(params.isEmpty ? "" : ", with: " + params.keys.sorted().map { "\($0) (recorded \"\(params[$0]!.prefix(30))\")" }.joined(separator: ", "))"
     }
 }
 
@@ -100,6 +130,8 @@ public struct RoutineRunLog: Codable, Equatable, Sendable {
     public var ms: Int
     public var outcome: String
     public var steps: [String]
+    /// What was fixed on the way, when anything was.
+    public var fixes: [String]? = nil
 }
 
 /// The file: routines, notes and the latest runs. The backup file has the same shape plus `schema`.
@@ -416,7 +448,10 @@ extension Computer {
     /// The `do` action as a routine step: element numbers become targets. nil for what is not kept
     /// (a handoff, a run, which records its own steps).
     func recordable(_ action: JSON) -> RecordedStep? {
-        guard case .object(var o) = action, o["handoff"] == nil, o["run"] == nil else { return nil }
+        guard case .object(var o) = action, o["handoff"] == nil, o["run"] == nil, o["path"] == nil else { return nil }
+        // Why the step is taken is kept beside it, not in the action a run sends.
+        let intent = o["intent"]?.string.flatMap { $0.isEmpty ? nil : String($0.prefix(160)) }
+        o["intent"] = nil
         var target: RoutineTarget?
         var typed: String?
         var secret: Bool?
@@ -452,7 +487,7 @@ extension Computer {
         }
         if case .object(var p) = o["pinch"], let e = element(.object(p)) { p["ref"] = nil; let c = e.frame.centre; p["x"] = .number(c.x.rounded()); p["y"] = .number(c.y.rounded()); o["pinch"] = .object(p) }
         let keys = Set(listed.map(\.element.key))
-        return RecordedStep(step: RoutineStep(action: .object(o), target: target, app: lastForeground?.bundleID, secret: secret), typed: typed, keysBefore: keys)
+        return RecordedStep(step: RoutineStep(action: .object(o), target: target, app: lastForeground?.bundleID, secret: secret, intent: intent), typed: typed, keysBefore: keys)
     }
 
     /// The task's recorded steps as a routine (nil and why, when they cannot make one).
@@ -521,23 +556,124 @@ extension Computer {
         }
         var params = routine.params
         if case .object(let given) = spec["with"] { for (k, v) in given { if let t = v.text { params[k] = t } } }
+        return try await replay(routine, params: params, store: store, until: until)
+    }
+
+    /// `{path: {goal, steps: [...]}}`: steps the agent wrote ahead for screens it has not read yet, each
+    /// target named by its text. They run as a routine does, without being saved.
+    func runPath(_ spec: JSON, until: Double) async throws -> String {
+        let routine = try Self.pathRoutine(spec)
+        return try await replay(routine, params: [:], store: nil, until: until)
+    }
+
+    /// A path's steps as a routine with no name. A target is the text the element shows, or
+    /// {label, type?}; a point stays a point. Numbers are refused: they are the latest read's, and a
+    /// path is for the screens after it.
+    static func pathRoutine(_ spec: JSON) throws -> Routine {
+        func refuse(_ why: String) -> ActionFailure { ActionFailure(message: "path: \(why); nothing was sent", delivery: .notSent) }
+        guard let given = spec["steps"]?.array ?? spec.array, !given.isEmpty else { throw refuse("give steps: [{tap: \"text\"}, …]") }
+        guard given.count <= 20 else { throw refuse("at most 20 steps") }
+        func target(_ spec: JSON) throws -> RoutineTarget? {
+            if spec.array != nil { return nil }
+            if case .string(let label) = spec, Double(label) == nil, !label.isEmpty { return RoutineTarget(type: RoutineTarget.anyType, label: label) }
+            if case .object = spec, let label = spec["label"]?.string ?? spec["text"]?.string, !label.isEmpty {
+                return RoutineTarget(type: spec["type"]?.string ?? RoutineTarget.anyType, label: label)
+            }
+            if case .object = spec, spec["x"] != nil, spec["y"] != nil { return nil }
+            throw refuse("a target in a path is the element's text, {label, type?} or a point [x, y], not a number from an earlier read")
+        }
+        var steps: [RoutineStep] = []
+        for (i, step) in given.enumerated() {
+            guard case .object(var o) = step, let kind = ActionKind(step), kind != .run, kind != .path, kind != .handoff else { throw refuse("step \(i + 1) is not an action a path can hold") }
+            let intent = o["intent"]?.string
+            o["intent"] = nil
+            var found: RoutineTarget?
+            switch kind {
+            case .tap, .longPress:
+                if let t = try target(o[kind.rawValue] ?? .null) {
+                    found = t
+                    if case .object(var inner) = o[kind.rawValue] { inner["label"] = nil; inner["text"] = nil; inner["type"] = nil; inner["ref"] = "@"; o[kind.rawValue] = .object(inner) } else { o[kind.rawValue] = "@" }
+                }
+            case .type:
+                if o["ref"] != nil { throw refuse("step \(i + 1): name the field with into: \"its text\", not a number") }
+                if let into = o["into"] {
+                    guard let t = try target(into) else { throw refuse("step \(i + 1): into is the field's text") }
+                    found = t
+                    o["into"] = nil
+                    o["ref"] = "@"
+                }
+            case .scrollTo:
+                if o["scroll_to"]?["ref"] != nil || o["scroll_to"]?["in"] != nil { throw refuse("step \(i + 1): scroll_to takes the text to reach") }
+            case .drag, .pinch:
+                if Computer.refs(in: step).isEmpty == false { throw refuse("step \(i + 1) uses a number from an earlier read") }
+            default: break
+            }
+            steps.append(RoutineStep(action: .object(o), target: found, app: nil, secret: nil, intent: intent))
+        }
+        let now = Date()
+        return Routine(name: "", description: spec["goal"]?.string ?? "", app: nil, steps: steps, params: [:], expect: spec["expect"]?.array?.compactMap(\.string) ?? [], read: [],
+                       runs: 0, ok: 0, failuresInARow: 0, lastStop: nil, lastMs: nil, savedBy: "", created: now, updated: now)
+    }
+
+    /// A step in words, for the decider and the log.
+    static func words(for step: RoutineStep) -> String {
+        let kind = ActionKind(step.action)?.rawValue ?? "step"
+        var text = step.target.map { "\(kind) \($0.describe)" } ?? step.action.serialized()
+        if let intent = step.intent, !intent.isEmpty { text += " (\(intent))" }
+        return String(text.prefix(140))
+    }
+
+    /// The steps of a saved routine (`store` given) or of a path, in order. Each step waits for its
+    /// target and acts only on a single match. A step whose target is missing is fixed on the way when
+    /// that can be decided (see Repair.swift), and stops the run otherwise, with nothing sent for it.
+    func replay(_ routine: Routine, params: [String: String], store: RoutineStore?, until: Double) async throws -> String {
+        let saved = store != nil
+        let title = saved ? "run \"\(routine.name)\"" : "path"
         let started = now()
         var log: [String] = []
         var done = 0
+        var fixes: [Fix] = []
+        /// Fixes to keep in the routine: other forms a step's target took, and what was closed before it.
+        var learnedForms: [Int: RoutineTarget] = [:]
+        var learnedClears: [Int: [RoutineTarget]] = [:]
         let screen = size ?? ScreenSize(width: 10_000, height: 10_000)
+        let policy = config.deciderPolicy
+        let decider = config.decider()
+        func fixedNote() -> String {
+            fixes.isEmpty ? "" : "; fixed on the way: " + fixes.map(\.line).joined(separator: "; ")
+        }
         func finish(_ outcome: String, stop: RoutineStop?) {
             let ms = Int(((now() - started) * 1000).rounded())
+            fixesMade += fixes.count
+            guard let store else { return }
+            let madeFixes = fixes.count
+            let forms = stop == nil ? learnedForms : [:]
+            let clears = learnedClears
             store.update(routine.name) { r in
                 r.runs += 1
                 r.lastMs = ms
                 if let stop { r.failuresInARow += 1; r.lastStop = stop } else { r.ok += 1; r.failuresInARow = 0 }
+                if madeFixes > 0 { r.fixes = (r.fixes ?? 0) + madeFixes }
+                // What a fix found is kept, so the next run needs no decision: a target's other form
+                // once the whole run worked, a thing that was in the way as soon as closing it helped.
+                for (index, form) in forms where r.steps.indices.contains(index) && r.steps[index].target != form {
+                    var also = r.steps[index].also ?? []
+                    if !also.contains(form) { also.append(form) }
+                    r.steps[index].also = Array(also.suffix(3))
+                }
+                for (index, closers) in clears where r.steps.indices.contains(index) {
+                    var kept = r.steps[index].clears ?? []
+                    for c in closers where !kept.contains(where: { $0.type == c.type && $0.label == c.label && $0.identifier == c.identifier }) { kept.append(c) }
+                    r.steps[index].clears = Array(kept.suffix(4))
+                }
             }
-            store.logRun(RoutineRunLog(routine: routine.name, at: Date(), ms: ms, outcome: outcome, steps: log))
+            store.logRun(RoutineRunLog(routine: routine.name, at: Date(), ms: ms, outcome: outcome, steps: log, fixes: fixes.isEmpty ? nil : fixes.map(\.line)))
         }
         func stop(_ index: Int, _ why: String, _ delivery: Delivery = .notSent) -> ActionFailure {
             finish("stopped at step \(index + 1): \(why)", stop: RoutineStop(step: index + 1, why: why, at: Date()))
             let sent = done == 0 ? "no step was sent" : "steps 1 to \(done) were sent"
-            return ActionFailure(message: "run \"\(routine.name)\" stopped at step \(index + 1) of \(routine.steps.count): \(why); \(sent). Go on by hand from the screen below; when the task is done, routines {action: \"save\", name: \"\(routine.name)\"} saves the path that worked over this one", delivery: delivery)
+            let after = saved ? "; when the task is done, routines {action: \"save\", name: \"\(routine.name)\"} saves the path that worked over this one" : ""
+            return ActionFailure(message: "\(title) stopped at step \(index + 1) of \(routine.steps.count): \(why); \(sent)\(fixedNote()). Go on by hand from the screen below\(after)", delivery: delivery)
         }
 
         // The app the next step lands in: a launch is not read until a later step reads the screen.
@@ -566,47 +702,133 @@ extension Computer {
             if let target = step.target {
                 // Wait for the target, alone, on screen; after a step that changed nothing yet, give the
                 // screen a moment to move on so the same label on the old screen is not taken for it.
-                let stepEnds = min(until, now() + config.actionCap)
+                var stepEnds = min(until, now() + config.actionCap)
                 var found: Element?
                 var why = "\(target.describe) is not on screen"
                 var reads = 0
-                // The match and its frame in the read before: a target is tapped only once it holds still
-                // across two reads (a page sliding in moves its rows, and a tap then is lost), or after 1.5 s.
-                var candidate: String?
+                var fixesHere = 0
+                // The decider is asked at most once more after it said stop, wait or nothing useful:
+                // then the step waits out its time as it always did, so a slow page loses nothing.
+                var mayAsk = true
+                /// What the decider said when it did not fix the step, for the stop's reason.
+                var said: String?
+                let forms = [target] + (step.also ?? [])
                 let readStart = now()
-                while now() < stepEnds - 0.2 {
-                    guard let tree = try? await runner.tree(timeout: min(config.readTimeout, max(0.3, stepEnds - now() - 0.1)), format: config.treeFormat) else { break }
-                    reads += 1
-                    let elements = listable(tree.elements, screen)
-                    let signature = elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
-                    let moved = previous == nil || signature != previous || now() - readStart > 0.8
-                    lastAll = tree.elements
-                    lastForeground = tree.foreground
-                    let matches = elements.filter(target.matches)
-                    if moved, !matches.isEmpty {
-                        let layout = Layout(all: tree.elements, screen: screen)
-                        let reachable = matches.filter { layout.touchPoint($0) != nil }
-                        let near = reachable.sorted { hypot($0.frame.centre.x - target.x, $0.frame.centre.y - target.y) < hypot($1.frame.centre.x - target.x, $1.frame.centre.y - target.y) }
-                        var pick: Element?
-                        if near.count == 1 { pick = near[0] }
-                        if near.count > 1 {
-                            let d0 = hypot(near[0].frame.centre.x - target.x, near[0].frame.centre.y - target.y)
-                            let d1 = hypot(near[1].frame.centre.x - target.x, near[1].frame.centre.y - target.y)
-                            if d0 < 40, d1 > 2 * d0 + 20 { pick = near[0] }
-                            why = "\(near.count) elements match \(target.describe) and none is clearly the recorded one"
-                        } else { why = "\(target.describe) is listed but not where a tap reaches it" }
-                        if let pick {
-                            let here = "\(pick.key)@\(pick.frame.described)"
-                            if here == candidate || now() - readStart > 1.5 { found = pick; break }
-                            candidate = here
-                            why = "\(target.describe) was still moving"
-                            continue
+                attempts: while true {
+                    // The match and its frame in the read before: a target is tapped only once it holds still
+                    // across two reads (a page sliding in moves its rows, and a tap then is lost), or after 1.5 s.
+                    var candidate: String?
+                    let attemptStart = now()
+                    var stillSince = attemptStart
+                    var lastSignature: String?
+                    var elements: [Element] = []
+                    var early = false
+                    while now() < stepEnds - 0.2 {
+                        guard let tree = try? await runner.tree(timeout: min(config.readTimeout, max(0.3, stepEnds - now() - 0.1)), format: config.treeFormat) else { break }
+                        reads += 1
+                        elements = listable(tree.elements, screen)
+                        let signature = elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+                        let moved = previous == nil || signature != previous || now() - attemptStart > 0.8
+                        if signature != lastSignature { stillSince = now(); lastSignature = signature }
+                        lastAll = tree.elements
+                        lastForeground = tree.foreground
+                        var matches = elements.filter { e in forms.contains { $0.matches(e) } }
+                        // An alert takes every touch: a target behind one is not there to tap yet (the
+                        // tap would go nowhere, and the step after it would be the one to stop).
+                        if !matches.isEmpty, let alert = tree.elements.last(where: { $0.type == "Alert" && !$0.frame.isEmpty }), !matches.contains(where: { alert.contains($0) }) {
+                            matches = []
+                            why = "\(target.describe) is behind an alert\(alert.text.isEmpty ? "" : " (\"\(alert.text.prefix(60))\")")"
                         }
+                        if moved, !matches.isEmpty {
+                            let layout = Layout(all: tree.elements, screen: screen)
+                            let reachable = matches.filter { layout.touchPoint($0) != nil }
+                            let (pick, reason) = Self.pick(among: reachable, for: target)
+                            if let reason { why = reason }
+                            if let pick {
+                                let here = "\(pick.key)@\(pick.frame.described)"
+                                if here == candidate || now() - attemptStart > 1.5 { found = pick; break }
+                                candidate = here
+                                why = "\(target.describe) was still moving"
+                                continue
+                            }
+                        }
+                        candidate = nil
+                        // With a way to fix the step at hand, a screen that has held still without the
+                        // target is asked about now, not after the step's whole time.
+                        let canFix = (decider != nil && mayAsk) || !(step.clears ?? []).isEmpty
+                        if canFix, moved, fixesHere < policy.maxFixesPerStep, fixes.count < policy.maxFixesPerRun, now() - stillSince >= policy.askAfterStill { early = true; break }
+                        await sleep(seconds: 0.12)
                     }
-                    candidate = nil
-                    await sleep(seconds: 0.12)
+                    if found != nil { break attempts }
+                    guard fixesHere < policy.maxFixesPerStep, fixes.count < policy.maxFixesPerRun, until - now() > 1.5, !elements.isEmpty else { break attempts }
+                    let layout = Layout(all: lastAll, screen: screen)
+
+                    // What was in the way of this step before, alone on screen again: closed as it was then.
+                    var move: FixMove?
+                    var remembered = false
+                    var ms: Int?, confidence: Double?
+                    for closer in step.clears ?? [] {
+                        let there = elements.filter { closer.matches($0) && layout.touchPoint($0) != nil }
+                        if there.count == 1 { move = .clear(there[0]); remembered = true; break }
+                    }
+                    if move == nil {
+                        guard let decider, mayAsk else { break attempts }
+                        let want = StepWant(goal: [routine.name, routine.description].filter { !$0.isEmpty }.joined(separator: ": "), index: index, total: routine.steps.count,
+                                            action: ActionKind(action)?.rawValue ?? "tap", target: target, intent: step.intent,
+                                            done: routine.steps[..<index].map(Self.words(for:)), next: routine.steps.indices.contains(index + 1) ? Self.words(for: routine.steps[index + 1]) : nil, why: why)
+                        let decided = await decideFix(want, decider: decider, all: lastAll, screen: screen, until: until)
+                        (move, ms, confidence) = (decided.move, decided.ms, decided.confidence)
+                    }
+                    let signatureNow = elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+                    switch move! {
+                    case .target(let element):
+                        fixesHere += 1
+                        fixes.append(Fix(step: index, kind: .renamed, text: "used \(element.type) \"\(element.text.prefix(40))\" for \(target.describe)", remembered: false, ms: ms, confidence: confidence))
+                        learnedForms[index] = RoutineTarget(element)
+                        found = element
+                        break attempts
+                    case .clear(let element):
+                        // Closing it is a tap like any other: what the owner must approve stays theirs.
+                        refs[Self.runRef] = element
+                        let tap: JSON = ["tap": .number(Double(Self.runRef))]
+                        var closeScan = SensitiveScan(front: lastForeground, secureOnScreen: lastAll.contains(where: \.isSecure))
+                        if let reason = sensitive(tap, &closeScan) {
+                            refs[Self.runRef] = nil
+                            throw stop(index, "\(why); \(element.type) \"\(element.text.prefix(40))\" is in the way and closing it needs the owner's approval (\(reason))")
+                        }
+                        do { _ = try await perform(tap, until: min(until, now() + config.actionCap)) }
+                        catch let failure as ActionFailure { refs[Self.runRef] = nil; throw stop(index, "\(why); closing \(element.type) \"\(element.text.prefix(40))\" failed (\(failure.message))", failure.delivery) }
+                        catch { refs[Self.runRef] = nil; throw stop(index, "\(why); closing what was in the way failed (\(error))", .unknown) }
+                        refs[Self.runRef] = nil
+                        fixesHere += 1
+                        fixes.append(Fix(step: index, kind: .cleared, text: "closed \(element.type) \"\(element.text.prefix(40))\"", remembered: remembered, ms: ms, confidence: confidence))
+                        log.append("fix before \(index + 1): closed \(element.type) \"\(element.text.prefix(40))\"")
+                        if !remembered { learnedClears[index, default: []].append(RoutineTarget(element)) }
+                        previous = signatureNow
+                    case .scroll(let direction):
+                        do { _ = try await perform(["swipe": .string(direction)], until: min(until, now() + config.actionCap)) }
+                        catch { throw stop(index, "\(why); scrolling for it failed (\(error))", .unknown) }
+                        fixesHere += 1
+                        fixes.append(Fix(step: index, kind: .scrolled, text: "scrolled \(direction == "up" ? "down" : "up") for \(target.describe)", remembered: false, ms: ms, confidence: confidence))
+                        previous = signatureNow
+                    case .wait:
+                        // Waiting is what the step does anyway; the decider is not asked again for it.
+                        mayAsk = false
+                        if !early { break attempts }
+                        continue attempts
+                    case .stop(let reason):
+                        mayAsk = false
+                        said = reason
+                        // Asked early: the step still has its time, and a page that was only slow gets it.
+                        if !early { break attempts }
+                        continue attempts
+                    }
+                    // A fix changed the screen: the step gets its time again from here.
+                    stepEnds = min(until, now() + config.actionCap)
                 }
-                guard let element = found else { throw stop(index, why + " (\(reads) reads in \(Int(((now() - readStart) * 1000).rounded())) ms)") }
+                // A thing closed for nothing is not worth remembering.
+                if found == nil { learnedClears[index] = nil; learnedForms[index] = nil }
+                guard let element = found else { throw stop(index, why + (said.map { "; \($0)" } ?? "") + " (\(reads) reads in \(Int(((now() - readStart) * 1000).rounded())) ms)") }
                 refs[Self.runRef] = element
                 action = Self.replacingTarget(action, with: Self.runRef)
                 front = lastForeground
@@ -629,7 +851,7 @@ extension Computer {
             }
             let began = now()
             let kind: String, text: String
-            do { (kind, text) = try await perform(action, until: min(until, now() + config.actionCap)) }
+            do { (kind, text) = try await perform(action, until: min(until, now() + actionCap(action))) }
             catch let failure as ActionFailure {
                 refs[Self.runRef] = nil
                 throw stop(index, failure.message, failure.delivery)
@@ -637,13 +859,18 @@ extension Computer {
                 refs[Self.runRef] = nil
                 throw stop(index, "\(error)", .unknown)
             }
+            // The step is in this task's record too, so a task that goes on by hand saves whole. A
+            // path's target is kept as the element it found, the way a step sent by hand is.
+            var recorded = step
+            if let element = refs[Self.runRef], step.target?.type == RoutineTarget.anyType || learnedForms[index] != nil { recorded.target = RoutineTarget(element) }
             refs[Self.runRef] = nil
             if let spec = action["launch"] { front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil) }
             done = index + 1
             log.append("\(index + 1) \(text.prefix(80)) (\(Int(((now() - began) * 1000).rounded())) ms)")
-            // The step is in this task's record too, so a task that goes on by hand saves whole.
-            var recorded = step
             recorded.app = lastForeground?.bundleID ?? step.app
+            recorded.also = nil
+            recorded.clears = nil
+            // A path's typed text is what a saved routine's parameter is made of.
             trace.append(RecordedStep(step: recorded, typed: kind == "type" ? action["type"]?.string : nil, keysBefore: []))
             previous = listable(lastAll, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
             // Typing and keys change nothing a next target needs to move away from.
@@ -673,15 +900,34 @@ extension Computer {
             if !missing.isEmpty {
                 let why = "the end check did not pass: \(missing.map { "\"\($0)\"" }.joined(separator: ", ")) not on screen"
                 finish("ran, end check failed", stop: RoutineStop(step: routine.steps.count, why: why, at: Date()))
-                return "run \"\(routine.name)\": \(outcome), but \(why); look at the screen below before going on"
+                return "\(title): \(outcome), but \(why)\(fixedNote()); look at the screen below before going on"
             }
             if !routine.expect.isEmpty { outcome += ", end check passed (\(routine.expect.map { "\"\($0)\"" }.joined(separator: ", ")) on screen)" }
             if !values.isEmpty { outcome += "; read: " + values.joined(separator: "; ") }
             else if !routine.read.isEmpty { outcome += "; the values to read (\(routine.read.joined(separator: ", "))) were not found: read them from the screen below" }
         }
+        outcome += fixedNote()
         finish("ok", stop: nil)
-        routineRanWhole = true
-        return "run \"\(routine.name)\": \(outcome)"
+        if saved { routineRanWhole = true }
+        return "\(title): \(outcome)"
+    }
+
+    /// The one element a step acts on among those that match its target, or why none is taken: a
+    /// single match, or the one clearly nearest to where the target was recorded.
+    static func pick(among reachable: [Element], for target: RoutineTarget) -> (Element?, String?) {
+        guard !reachable.isEmpty else { return (nil, "\(target.describe) is listed but not where a tap reaches it") }
+        if reachable.count == 1 { return (reachable[0], nil) }
+        // A path names a target by its text alone: among several, the one that takes a tap.
+        if !target.hasPlace {
+            let controls = reachable.filter { tappable.contains($0.type) }
+            if controls.count == 1 { return (controls[0], nil) }
+            return (nil, "\(reachable.count) elements read \(target.describe) and none is clearly the one meant")
+        }
+        func distance(_ e: Element) -> Double { hypot(e.frame.centre.x - target.x, e.frame.centre.y - target.y) }
+        let near = reachable.sorted { distance($0) < distance($1) }
+        let d0 = distance(near[0]), d1 = distance(near[1])
+        if d0 < 40, d1 > 2 * d0 + 20 { return (near[0], nil) }
+        return (nil, "\(near.count) elements match \(target.describe) and none is clearly the recorded one")
     }
 
     /// The number a run gives the element it found, for the one action it sends.
@@ -763,7 +1009,7 @@ extension PokiCore {
             guard let r = store.routine(named: name) else { return fail("no routine named \"\(name)\"") }
             var lines = [r.summary]
             for (i, s) in r.steps.enumerated() {
-                lines.append("\(i + 1). \(s.action.serialized())\(s.target.map { " on \($0.describe) at [\(Int($0.x)), \(Int($0.y))]" } ?? "")\(s.app.map { " in \($0)" } ?? "")")
+                lines.append("\(i + 1). \(s.action.serialized())\(s.target.map { " on \($0.describe)\($0.hasPlace ? " at [\(Int($0.x)), \(Int($0.y))]" : "")" } ?? "")\(s.app.map { " in \($0)" } ?? "")\(s.intent.map { " (\($0))" } ?? "")\((s.clears ?? []).isEmpty ? "" : "; closes first when in the way: " + (s.clears ?? []).map(\.describe).joined(separator: ", "))\((s.also ?? []).isEmpty ? "" : "; also found as: " + (s.also ?? []).map(\.describe).joined(separator: ", "))")
             }
             if !r.expect.isEmpty { lines.append("end check: " + r.expect.map { "\"\($0)\"" }.joined(separator: ", ")) }
             if !r.read.isEmpty { lines.append("reads: " + r.read.joined(separator: ", ")) }

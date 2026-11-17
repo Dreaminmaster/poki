@@ -350,6 +350,25 @@ on the phone; the next first `look` of a task in that app names the saved routin
   more steps that no routine ran. Any MCP client can list, show, save, edit, rename, forget, export and
   import routines, and `remember`/`forget_note` the owner's notes (`PokiCore.memoryBrief(for:)` gives
   the on-device chat the same brief).
+- **A path is a routine sent once.** `do {actions: [{path: {goal, steps: [{tap: "Compose"}, {type: "…",
+  into: "Search"}, …]}}]}` runs up to 20 steps across screens in one call, each target named by the
+  text it shows (or `{label, type}`, or a point), never by a number from an earlier read. Each step
+  waits for its target as a routine's does and is held by the same approval rules. Nothing is saved.
+- **Intent.** Any action may carry `intent: "why"`; it is kept with the recorded step and is what a
+  fix is decided from.
+- **Quick Fixes (off by default).** Where a step would stop, a run first applies what the routine
+  remembers from an earlier fix (a control that closed what was in the way, another form of the
+  target), with no model. Past that, when the owner turned Quick Fixes on with their own token
+  (`CoreConfig.decider`), one request goes from the phone straight to their decision model (the
+  System One format of TypeSafe's Jev, which Cloudflare's Clef speaks too): the goal, the step
+  wanted, and the screen's elements as text, with no picture and nothing from a secure field. The
+  options are built from the screen (the target under another name, close what is in the way, scroll,
+  wait, stop), so the answer is always one of them. It is acted on only at `DeciderPolicy`'s
+  confidence 0.6 and margin 0.15, at most twice a step and five times a run; a tap it leads to that
+  would need approval stops the run instead. A step whose target is missing asks once the screen
+  has held still for 0.7 s, in place of waiting its whole time; a screen still changing keeps the
+  step's whole time. A fix that led to a finished run is saved in the routine, and the answer
+  names each fix, how long the decision took and how sure it was.
 - **Moving and backing up**: `export` answers the whole memory as JSON (schema
   `poki.agent-backup/1`); `import {data}` merges one in (newer wins). The app keeps a copy at
   `Documents/AgentBackup/poki-agent-backup.json`, which Poki Setup copies off and puts back; a copy put

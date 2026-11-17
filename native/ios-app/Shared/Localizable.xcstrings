@@ -34834,6 +34834,312 @@
           }
         }
       }
+    },
+    "Quick Fixes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速修复"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速修復"
+          }
+        }
+      }
+    },
+    "Fix Steps on the Way" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "途中修复步骤"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "途中修復步驟"
+          }
+        }
+      }
+    },
+    "When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks a fast decision model how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "流程遇到意外情况时，例如弹出的提示或改了名字的按钮，Poki 会询问一个快速决策模型该如何继续。只有答案明确时才会执行，并且绝不会点按需要你批准的内容。有效的修复会被记住，下次运行时无需再询问。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "流程遇到意外情況時，例如彈出的提示或改了名稱的按鈕，Poki 會詢問一個快速決策模型該如何繼續。只有答案明確時才會執行，並且絕不會點按需要你批准的內容。有效的修復會被記住，下次執行時無需再詢問。"
+          }
+        }
+      }
+    },
+    "Provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务商"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服務商"
+          }
+        }
+      }
+    },
+    "Cloudflare Workers AI" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudflare Workers AI"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudflare Workers AI"
+          }
+        }
+      }
+    },
+    "TypeSafe" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe"
+          }
+        }
+      }
+    },
+    "Custom Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂位址"
+          }
+        }
+      }
+    },
+    "Account ID" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账户 ID"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帳號 ID"
+          }
+        }
+      }
+    },
+    "API Token" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API 令牌"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API 權杖"
+          }
+        }
+      }
+    },
+    "Required" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "必填"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "必填"
+          }
+        }
+      }
+    },
+    "Decision Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "决策模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "決策模型"
+          }
+        }
+      }
+    },
+    "The request goes from this iPhone straight to this provider with your own token. It holds the goal of the task and the names of the elements on screen. No screenshot is sent and password fields are left out. The token stays in this iPhone’s keychain." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求使用你自己的令牌，从这台 iPhone 直接发送给该服务商。其中包含任务目标和屏幕上各元素的名称。不会发送截屏，密码栏也不包含在内。令牌保存在这台 iPhone 的钥匙串中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要求使用你自己的權杖，從這支 iPhone 直接傳送給該服務商。其中包含任務目標和螢幕上各元素的名稱。不會傳送截圖，密碼欄位也不包含在內。權杖儲存在這支 iPhone 的鑰匙圈中。"
+          }
+        }
+      }
+    },
+    "Check Connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查連線"
+          }
+        }
+      }
+    },
+    "Steps Fixed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已修复的步骤"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已修復的步驟"
+          }
+        }
+      }
+    },
+    "It answered in %lld ms." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 毫秒内作出了回答。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %lld 毫秒內作出了回答。"
+          }
+        }
+      }
+    },
+    "The check failed. %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查失败。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查失敗。%@"
+          }
+        }
+      }
+    },
+    "A routine that meets a prompt or a renamed button can fix the step and go on, in place of stopping." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "流程遇到提示或改了名字的按钮时，可以修复该步骤并继续，而不是停下来。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "流程遇到提示或改了名稱的按鈕時，可以修復該步驟並繼續，而不是停下來。"
+          }
+        }
+      }
+    },
+    "%lld steps fixed on the way" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld step fixed on the way"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld steps fixed on the way"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "途中修复了 %lld 步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "途中修復了 %lld 步"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -11,12 +11,14 @@ import Foundation
 //   {launch: "bundle" | {bundle, fresh?}}      {wait: ms}       {back: true}
 //   {handoff: {kind, text}} hands a step to the owner on the phone (no input until Done, or {handoff: false})
 //   {wait_until: "text" | {text, gone?, ms?} | {settled: true, ms?}}
+//   {path: {goal, steps: [{tap: "text", intent?}, {type: "…", into?: "text"}, …]}} steps written ahead, by text
+//   intent: "why" on any action is kept with the step a routine saves
 
 /// Every action `do` sends and a routine replays. An action is the first of these keys it holds, in
 /// this order: `perform` sends it as that and the approval check (`Computer.sensitive`) judges it as
 /// that, so a new kind of action is not sent before both say what it does.
 enum ActionKind: String, CaseIterable {
-    case run, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, pinch, button, launch, waitUntil = "wait_until", wait
+    case run, path, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, pinch, button, launch, waitUntil = "wait_until", wait
 
     init?(_ action: JSON) {
         guard let kind = Self.allCases.first(where: { action[$0.rawValue] != nil }) else { return nil }
@@ -27,7 +29,7 @@ enum ActionKind: String, CaseIterable {
     var movesScreen: Bool {
         switch self {
         case .tap, .type, .back, .key, .swipe, .scrollTo, .longPress, .drag, .pinch: true
-        case .run, .handoff, .button, .launch, .waitUntil, .wait: false
+        case .run, .path, .handoff, .button, .launch, .waitUntil, .wait: false
         }
     }
 
@@ -35,7 +37,7 @@ enum ActionKind: String, CaseIterable {
     /// routine.
     func changesScreen(_ action: JSON) -> Bool {
         switch self {
-        case .launch, .run: true
+        case .launch, .run, .path: true
         case .button: action["button"]?.text?.lowercased() == "home"
         default: movesScreen
         }
@@ -47,7 +49,7 @@ enum ActionKind: String, CaseIterable {
         switch self {
         case .tap, .back, .swipe, .scrollTo, .longPress, .drag, .pinch: true
         case .type: action["ref"] != nil
-        case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: false
+        case .run, .path, .handoff, .key, .button, .launch, .waitUntil, .wait: false
         }
     }
 }
@@ -299,6 +301,8 @@ extension Computer {
         switch kind {
         case .run:
             return ("run", try await runRoutine(spec, until: until))
+        case .path:
+            return ("run", try await runPath(spec, until: until))
         case .tap:
             let p = try point(spec)
             try await tap(p, within: frame(of: spec))

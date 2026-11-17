@@ -1,0 +1,278 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+// A decision model answers a question that has fixed answers, in one short call: state in, one of the
+// listed options out, with a probability for each. It writes no text, so it cannot name an element
+// that is not on the screen. Poki uses one where a routine or a path would otherwise stop and hand
+// the whole task back to the agent's model: a popup in the way, a button that was renamed or moved.
+//
+// The wire format is the "System One" API that TypeSafe's Jev introduced and Cloudflare's Clef
+// models accept as it is:
+//
+//   POST { model, state, questions: { id: { type: "choice", instructions, criteria: { option: what it means } } } }
+//   200  { answers: { id: { type: "choice", choice, confidence, probabilities: { option: p } } } }
+//
+// Nothing here is on unless the owner turned it on and gave their own key: the call goes from the
+// phone straight to the provider they chose. No screenshot goes with it, only the task's goal and the
+// screen's elements as text, and what a secure field holds is never in it.
+
+/// One question with fixed answers.
+public struct DecisionQuestion: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable {
+        /// One of `options`: each an id and what choosing it means.
+        case choice([(id: String, means: String)])
+        /// Yes or no, answered as the probability of yes.
+        case yesNo
+
+        public static func == (a: Kind, b: Kind) -> Bool {
+            switch (a, b) {
+            case (.yesNo, .yesNo): return true
+            case (.choice(let x), .choice(let y)): return x.map(\.id) == y.map(\.id) && x.map(\.means) == y.map(\.means)
+            default: return false
+            }
+        }
+    }
+    public var id: String
+    public var instructions: String
+    public var kind: Kind
+    public init(id: String, instructions: String, kind: Kind) {
+        self.id = id
+        self.instructions = instructions
+        self.kind = kind
+    }
+}
+
+public struct DecisionAnswer: Sendable, Equatable {
+    /// The option picked (a choice), nil for a yes or no.
+    public var choice: String?
+    /// How sure the model says it is of the pick, 0 to 1. For a yes or no, the probability of yes.
+    public var confidence: Double
+    public var probabilities: [String: Double]
+    public init(choice: String?, confidence: Double, probabilities: [String: Double] = [:]) {
+        self.choice = choice
+        self.confidence = confidence
+        self.probabilities = probabilities
+    }
+    /// The gap between the pick and the runner-up: a pick that barely leads is not a decision.
+    public var margin: Double {
+        guard let choice, let top = probabilities[choice] else { return confidence }
+        let second = probabilities.filter { $0.key != choice }.values.max() ?? 0
+        return top - second
+    }
+}
+
+public struct DeciderError: Error, CustomStringConvertible, Equatable {
+    public var description: String
+    public init(_ description: String) { self.description = description }
+}
+
+/// Something that answers decision questions. The app gives PokiCore one made from the owner's
+/// settings; tests give a scripted one.
+public protocol Decider: Sendable {
+    /// A short name for the answer and the log ("clef-flash").
+    var name: String { get }
+    /// The answers by question id. Throws when the call fails, takes longer than `timeout`, or the
+    /// answer is not one of the options asked for.
+    func decide(state: JSON, questions: [DecisionQuestion], timeout: Double) async throws -> [String: DecisionAnswer]
+}
+
+/// How far a decider is trusted. The defaults are deliberately strict: a fix that is not clearly
+/// right is not made, and the run stops for the agent as it always did.
+public struct DeciderPolicy: Sendable, Equatable {
+    /// Below this confidence nothing is done on the decider's word.
+    public var minConfidence: Double
+    /// The pick must lead the runner-up by this much.
+    public var minMargin: Double
+    /// Fixes tried for one step, and in one run.
+    public var maxFixesPerStep: Int
+    public var maxFixesPerRun: Int
+    /// The elements offered as options (the likeliest first).
+    public var maxCandidates: Int
+    /// How long one decision may take before the run goes on without it.
+    public var timeout: Double
+    /// With a decider (or a remembered fix) at hand, a step whose target is missing asks once the
+    /// screen has held still this long, rather than wait out the step's whole time.
+    public var askAfterStill: Double
+
+    public init(minConfidence: Double = 0.6, minMargin: Double = 0.15, maxFixesPerStep: Int = 2, maxFixesPerRun: Int = 5, maxCandidates: Int = 40, timeout: Double = 2.5, askAfterStill: Double = 0.7) {
+        self.minConfidence = minConfidence
+        self.minMargin = minMargin
+        self.maxFixesPerStep = maxFixesPerStep
+        self.maxFixesPerRun = maxFixesPerRun
+        self.maxCandidates = maxCandidates
+        self.timeout = timeout
+        self.askAfterStill = askAfterStill
+    }
+}
+
+/// Where the owner's decision model is: the settings the app keeps (the token in the keychain).
+public struct DeciderSettings: Sendable, Equatable, Codable {
+    public enum Provider: String, Sendable, Codable, CaseIterable {
+        /// Cloudflare Workers AI: Clef and Clef-flash. Needs the account id.
+        case cloudflare
+        /// TypeSafe AI: Jev.
+        case typesafe
+        /// Any other endpoint that speaks the same API (a self-hosted Clef): the whole address.
+        case custom
+    }
+    public var provider: Provider
+    /// The model as the provider names it ("clef-flash", "clef", "jev-latest").
+    public var model: String
+    /// Cloudflare's account id.
+    public var account: String
+    /// A custom endpoint's address.
+    public var address: String
+
+    public init(provider: Provider = .cloudflare, model: String = "", account: String = "", address: String = "") {
+        self.provider = provider
+        self.model = model
+        self.account = account
+        self.address = address
+    }
+
+    public static func defaultModel(_ provider: Provider) -> String {
+        switch provider {
+        case .cloudflare: "clef-flash"
+        case .typesafe: "jev-latest"
+        case .custom: "clef-flash"
+        }
+    }
+
+    public var modelInUse: String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultModel(provider) : trimmed
+    }
+
+    /// The address a decision is posted to; nil while the settings are incomplete. Only https, or
+    /// plain http to this device or a private network address (a model the owner runs at home).
+    public var url: URL? {
+        switch provider {
+        case .cloudflare:
+            let id = account.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty, id.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+            return URL(string: "https://api.cloudflare.com/client/v4/accounts/\(id)/ai/run/@cf/cloudflare/\(modelInUse)")
+        case .typesafe:
+            return URL(string: "https://api.typesafe.ai/v1/systemone")
+        case .custom:
+            guard let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)), let host = url.host, !host.isEmpty else { return nil }
+            if url.scheme == "https" { return url }
+            let local = host == "localhost" || host == "127.0.0.1" || host.hasSuffix(".local") || host.hasPrefix("10.") || host.hasPrefix("192.168.")
+                || host.hasPrefix("100.") || (host.hasPrefix("172.") && (16...31).contains(Int(host.split(separator: ".").dropFirst().first ?? "") ?? 0))
+            return url.scheme == "http" && local ? url : nil
+        }
+    }
+
+    /// A decider for these settings and this token; nil while they are incomplete.
+    public func decider(token: String, send: SystemOneDecider.Send? = nil) -> SystemOneDecider? {
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url, !token.isEmpty || provider == .custom else { return nil }
+        return SystemOneDecider(url: url, model: modelInUse, token: token, send: send ?? SystemOneDecider.urlSession)
+    }
+}
+
+/// The System One API over HTTPS: one POST per decision.
+public struct SystemOneDecider: Decider {
+    public typealias Send = @Sendable (URLRequest) async throws -> (status: Int, body: Data)
+
+    public let url: URL
+    public let model: String
+    let token: String
+    let send: Send
+    public var name: String { model }
+
+    public init(url: URL, model: String, token: String, send: @escaping Send = SystemOneDecider.urlSession) {
+        self.url = url
+        self.model = model
+        self.token = token
+        self.send = send
+    }
+
+    /// No cache, no cookies, nothing kept on disk.
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpShouldSetCookies = false
+        return URLSession(configuration: configuration)
+    }()
+
+    public static let urlSession: Send = { request in
+        let (data, response) = try await session.data(for: request)
+        return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
+    }
+
+    static func body(model: String, state: JSON, questions: [DecisionQuestion]) -> JSON {
+        var asked: [String: JSON] = [:]
+        for q in questions {
+            switch q.kind {
+            case .yesNo:
+                asked[q.id] = ["type": "noul", "instructions": .string(q.instructions)]
+            case .choice(let options):
+                asked[q.id] = ["type": "choice", "instructions": .string(q.instructions),
+                               "criteria": .object(Dictionary(options.map { ($0.id, JSON.string($0.means)) }, uniquingKeysWith: { a, _ in a }))]
+            }
+        }
+        return ["model": .string(model), "state": state, "questions": .object(asked)]
+    }
+
+    /// The answers of a reply. Cloudflare's REST API wraps a model's output in `result`; the others
+    /// answer it bare. An answer that is not one of the options asked for is an error, never a guess.
+    static func answers(in data: Data, to questions: [DecisionQuestion]) throws -> [String: DecisionAnswer] {
+        guard let reply = try? JSON.parse(String(decoding: data, as: UTF8.self)) else { throw DeciderError("the answer was not JSON") }
+        guard let given = (reply["answers"] ?? reply["result"]?["answers"])?.object else {
+            let said = reply["errors"]?[0]?["message"]?.string ?? reply["detail"]?.string ?? reply["error"]?.string ?? reply["error"]?["message"]?.string
+            throw DeciderError(said.map { "the provider said: \($0.prefix(160))" } ?? "the answer held no answers")
+        }
+        var out: [String: DecisionAnswer] = [:]
+        for q in questions {
+            guard let a = given[q.id] else { throw DeciderError("no answer to \"\(q.id)\"") }
+            switch q.kind {
+            case .yesNo:
+                guard let p = a["noul"]?.double, (0...1).contains(p) else { throw DeciderError("\"\(q.id)\" was not answered as a probability") }
+                out[q.id] = DecisionAnswer(choice: nil, confidence: p)
+            case .choice(let options):
+                guard let choice = a["choice"]?.string, options.contains(where: { $0.id == choice }) else {
+                    throw DeciderError("\"\(q.id)\" was answered with something that was not an option")
+                }
+                var probabilities: [String: Double] = [:]
+                for (k, v) in a["probabilities"]?.object ?? [:] { if let p = v.double { probabilities[k] = p } }
+                // Confidence when the provider gives it, else the pick's own probability.
+                guard let confidence = a["confidence"]?.double ?? probabilities[choice] else { throw DeciderError("\"\(q.id)\" came without a confidence") }
+                out[q.id] = DecisionAnswer(choice: choice, confidence: min(1, max(0, confidence)), probabilities: probabilities)
+            }
+        }
+        return out
+    }
+
+    public func decide(state: JSON, questions: [DecisionQuestion], timeout: Double) async throws -> [String: DecisionAnswer] {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: max(0.3, timeout))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = Data(Self.body(model: model, state: state, questions: questions).serialized().utf8)
+        let send = self.send, posted = request
+        let (status, data) = try await withDeadline(max(0.3, timeout), "the decision") { try await send(posted) }
+        guard (200..<300).contains(status) else {
+            // The provider's own words when it gives any; never the request, which holds the screen.
+            let reply = try? JSON.parse(String(decoding: data, as: UTF8.self))
+            let said = reply?["errors"]?[0]?["message"]?.string ?? reply?["detail"]?.string ?? reply?["error"]?.string ?? reply?["error"]?["message"]?.string ?? ""
+            throw DeciderError("the provider answered \(status)\(said.isEmpty ? "" : ": \(said.prefix(160))")")
+        }
+        return try Self.answers(in: data, to: questions)
+    }
+
+    /// One tiny decision, to tell the owner whether their settings work, and how fast.
+    public func check(timeout: Double = 6) async -> Result<Int, DeciderError> {
+        let began = now()
+        let question = DecisionQuestion(id: "ready", instructions: "Does the state say the check is running?", kind: .choice([("yes", "It says so"), ("no", "It does not")]))
+        do {
+            _ = try await decide(state: "A connection check from Poki is running.", questions: [question], timeout: timeout)
+            return .success(Int(((now() - began) * 1000).rounded()))
+        } catch let error as DeciderError {
+            return .failure(error)
+        } catch {
+            return .failure(DeciderError(error is DeadlineExceeded ? "no answer within \(Int(timeout)) s" : "\(error.localizedDescription)"))
+        }
+    }
+}

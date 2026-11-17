@@ -24,6 +24,9 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
+        // Read at each run, from Settings › Memory › Quick Fixes: nil while it is off or not set up, and
+        // a routine then stops where the screen differs, as it always did.
+        config.decider = { QuickFixes.decider }
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation

@@ -199,6 +199,8 @@ final class ApprovalTests: XCTestCase {
         let delete: [Double] = [8, 44, 60, 40]
         let samples: [ActionKind: [JSON]] = [
             .run: [["run": "checkout"]],
+            .path: [["path": ["goal": "pay", "steps": [["tap": "Pay"]]]], ["path": ["goal": "clear", "steps": [["tap": "Delete"]]]], ["path": [["tap": [195, 122]]]],
+                    ["path": ["steps": [["long_press": "Delete"], ["tap": ["label": "Pay", "type": "Button"]]]]], ["path": ["steps": [["swipe": "left"], ["tap": "Pay", "intent": "pay for the order"]]]]],
             .tap: [["tap": 1], ["tap": [195, 122]], ["tap": ["x": 40, "y": 64]]],
             .type: [["type": "x", "ref": 1], ["type": "x", "ref": 2]],
             .back: [["back": true]],

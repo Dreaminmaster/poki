@@ -129,6 +129,8 @@ final class Computer: @unchecked Sendable {
     var trace: [RecordedStep] = []
     /// A routine ran whole in this task (the finish line does not offer to save it again).
     var routineRanWhole = false
+    /// Steps fixed on the way since PokiCore started (status says so).
+    var fixesMade = 0
 
     var lastElements: [Element] { listed.map(\.element) }
     var layout: Layout { Layout(all: lastAll, screen: size ?? ScreenSize(width: 10_000, height: 10_000)) }
@@ -794,7 +796,7 @@ final class Computer: @unchecked Sendable {
     /// 8000 ms asked became 6000 under the action cap (gym, an app relaunch under the wait).
     func actionCap(_ action: JSON) -> Double {
         // A routine's steps each have their own time inside it; the run as a whole has the call's.
-        if action["run"] != nil { return max(config.actionCap, config.toolDeadline - config.readTimeout - 1) }
+        if action["run"] != nil || action["path"] != nil { return max(config.actionCap, config.toolDeadline - config.readTimeout - 1) }
         if action["launch"] != nil { return max(config.actionCap, action["launch"]?["fresh"]?.bool == true ? 14 : 9) }
         if action["scroll_to"] != nil { return max(config.actionCap, Self.scrollCap) }
         if action["type"] != nil { return max(config.actionCap, 9) }
@@ -1441,6 +1443,10 @@ final class Computer: @unchecked Sendable {
                 // A run that begins with a launch (or whose app is launched first) leaves Poki on its
                 // own: on the phone a task usually starts in Poki's own chat (gym finding 37).
                 front = Foreground(bundleID: bundle, name: nil)
+            } else if let spec = action["path"], let bundle = (spec["steps"]?.array ?? spec.array)?.first?["launch"].flatMap({ $0.string ?? $0["bundle"]?.string }),
+                      !config.isPoki(Foreground(bundleID: bundle, name: nil)) {
+                // A path that begins with a launch leaves Poki on its own, as such a run does.
+                front = Foreground(bundleID: bundle, name: nil)
             } else if config.isPoki(front) {
                 return true
             }
@@ -1544,7 +1550,7 @@ final class Computer: @unchecked Sendable {
             return [(scan.elements == nil ? button : under(button.frame.centre), false, .button)]
         case .swipe: return stroke(in: spec?["in"] ?? action["in"], spec?.string ?? spec?["direction"]?.string ?? "", spec?["distance"]?.string ?? "long")
         case .scrollTo: return stroke(in: spec?["in"], ["down": "up", "up": "down", "right": "left", "left": "right"][spec?["direction"]?.string ?? "down"] ?? "up", "scroll")
-        case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: return []
+        case .run, .path, .handoff, .key, .button, .launch, .waitUntil, .wait: return []
         }
     }
 
@@ -1589,6 +1595,15 @@ final class Computer: @unchecked Sendable {
                 return "input in \(bundle == scan.front?.bundleID ? scan.front?.describe ?? bundle : bundle) (routine \"\(name)\")"
             }
             if let routineApp { scan.front = Foreground(bundleID: routineApp, name: nil) }
+            scan.read = false; scan.typingTarget = nil
+        case .path:
+            // A path sends its own taps and keys, each held by these rules on the screen it lands on:
+            // in a guarded app, in front or launched by the path, running it is input there.
+            let launched = (spec["steps"]?.array ?? spec.array ?? []).compactMap { $0["launch"].flatMap { $0.string ?? $0["bundle"]?.string } }
+            for bundle in [scan.front?.bundleID].compactMap({ $0 }) + launched where rules.guardedApps.contains(bundle) {
+                return "input in \(bundle == scan.front?.bundleID ? scan.front?.describe ?? bundle : bundle) (a path)"
+            }
+            if let last = launched.last { scan.front = Foreground(bundleID: last, name: nil) }
             scan.read = false; scan.typingTarget = nil
         case .type:
             guard let text = spec.text else { return nil }
