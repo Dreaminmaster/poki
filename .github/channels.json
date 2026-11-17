@@ -54,6 +54,17 @@
       "source": "app-0.4.3-alpha.1670",
       "sha": "39bed8ac5d6cb2a4aca2c30345178b2e96a0511a",
       "version_bump": "0.4.3 -> 0.4.4"
+    },
+    {
+      "channel": "beta",
+      "proposed": "2026-11-17T06:04:56Z",
+      "version": "0.4.4-beta.1",
+      "tag": "app-0.4.4-beta.1",
+      "base_version": "0.4.4",
+      "build": "1683",
+      "source": "app-0.4.4-alpha.1683",
+      "sha": "b5d72f3dd156b5f7f9cbe4d6605ef10a41d5b6d3",
+      "version_bump": "0.4.4 -> 0.4.5"
     }
   ]
 }
