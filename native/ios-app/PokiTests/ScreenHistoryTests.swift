@@ -344,6 +344,33 @@ final class ScreenHistoryTests: XCTestCase {
         await assertRevokedPendingQuery(change: .changeAppScope)
     }
 
+    /// Exercise the real HistoryCapture gate: tests using a fake source alone would miss
+    /// a forgotten revision bump in the app's switch or exclusion-list wiring.
+    func testHistoryCaptureInvalidatesQueriesOnRealPrivacySettingsChanges() async {
+        let capture = HistoryCapture.shared
+        capture.enabled = true
+        XCTAssertTrue(HistoryCapture.agentQueryAllowed)
+        let initial = HistoryCapture.accessRevision
+
+        capture.listMode = capture.listMode == .exclude ? .include : .exclude
+        let afterListMode = HistoryCapture.accessRevision
+        XCTAssertNotEqual(initial, afterListMode)
+
+        capture.exclude("com.example.sensitive-history-test")
+        let afterExclusion = HistoryCapture.accessRevision
+        XCTAssertNotEqual(afterListMode, afterExclusion)
+
+        capture.enabled = false
+        XCTAssertFalse(HistoryCapture.agentQueryAllowed)
+        let afterStop = HistoryCapture.accessRevision
+        capture.enabled = true
+        XCTAssertNotEqual(afterStop, HistoryCapture.accessRevision)
+
+        let beforeDeletion = HistoryCapture.accessRevision
+        await capture.clearEverything()
+        XCTAssertNotEqual(beforeDeletion, HistoryCapture.accessRevision)
+    }
+
     private enum PendingPrivacyChange {
         case turnOff, turnOffThenOn, changeAppScope
     }
