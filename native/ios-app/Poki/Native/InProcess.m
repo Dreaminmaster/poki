@@ -791,7 +791,7 @@ static NSArray<NSData *> *PKWorkspaceAppearance(UIImage *image) {
     CGFloat width = CGImageGetWidth(raster) / 2.0, height = CGImageGetHeight(raster);
     const size_t columns = 24, rows = 20;
     CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
-    CGContextRef context = CGBitmapContextCreate(NULL, columns, rows, 8, columns, gray, kCGImageAlphaNone);
+    CGContextRef context = CGBitmapContextCreate(NULL, columns, rows, 8, columns, gray, (CGBitmapInfo)kCGImageAlphaNone);
     CGColorSpaceRelease(gray);
     if (!context) return nil;
     NSMutableArray<NSData *> *panes = [NSMutableArray arrayWithCapacity:2];
