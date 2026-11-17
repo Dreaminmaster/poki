@@ -49,13 +49,35 @@ xcodebuild -project "$REPO/bin/fixture-app/PokiMCPFixture.xcodeproj" -scheme Pok
   -derivedDataPath "$WORK/fixture" CODE_SIGNING_ALLOWED=NO -quiet build
 FIXTURE="$WORK/fixture/Build/Products/Debug-iphonesimulator/PokiMCPFixture.app"
 
+if [ -n "${POKI_CHECK_DUO:-}" ]; then
+  # The Duo's device type by its name or model, on the newest runtime that has such a simulator.
+  xcrun simctl list -j > "$WORK/simctl.json"
+  read -r RUNTIME TYPE < <(python3 - "$WORK/simctl.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+duo = [t for t in d["devicetypes"] if "Duo" in t["name"] or t.get("modelIdentifier") == "iPhone19,4" or "Duo" in t["identifier"]]
+if not duo:
+    sys.exit("no iPhone Duo device type; iPhones here: " + ", ".join(t["name"] for t in d["devicetypes"] if t.get("productFamily") == "iPhone"))
+ids = {t["identifier"] for t in duo}
+runtimes = [r for r in d["runtimes"] if r.get("platform", "iOS") == "iOS" and r["isAvailable"]]
+def version(r): return tuple(int(v) for v in r["version"].split("."))
+for r in sorted(runtimes, key=version, reverse=True):
+    listed = [t["identifier"] for t in r.get("supportedDeviceTypes", []) if t["identifier"] in ids]
+    made = [x["deviceTypeIdentifier"] for x in d["devices"].get(r["identifier"], []) if x.get("deviceTypeIdentifier") in ids]
+    if listed or made:
+        print(r["identifier"], (listed or made)[0]); break
+else:
+    sys.exit("no runtime lists %s; runtimes: %s" % (sorted(ids), [r["identifier"] for r in runtimes]))
+PY
+  )
+else
 read -r RUNTIME TYPE < <(xcrun simctl list runtimes -j | python3 -c '
 import json, sys
 r = [x for x in json.load(sys.stdin)["runtimes"] if x["platform"] == "iOS" and x["isAvailable"]][-1]
 family = "iPad" if sys.argv[1] else "iPhone"
-types = [t for t in r["supportedDeviceTypes"] if t["productFamily"] == family and (not sys.argv[2] or "Duo" in t["name"])]
-if not types: sys.exit("no %s simulator%s in %s" % (family, " named Duo" if sys.argv[2] else "", r["identifier"]))
-print(r["identifier"], types[0]["identifier"])' "${POKI_CHECK_IPAD:-}" "${POKI_CHECK_DUO:-}")
+print(r["identifier"], next(t["identifier"] for t in r["supportedDeviceTypes"] if t["productFamily"] == family))' "${POKI_CHECK_IPAD:-}")
+fi
+[ -n "${TYPE:-}" ] || { echo "::error::no simulator to run on"; exit 1; }
 echo "simulator: $TYPE on $RUNTIME"
 UDID="$(xcrun simctl create poki-inprocess-check "$TYPE" "$RUNTIME")"
 xcrun simctl boot "$UDID"
