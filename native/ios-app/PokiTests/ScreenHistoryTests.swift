@@ -371,6 +371,61 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertNotEqual(beforeDeletion, HistoryCapture.accessRevision)
     }
 
+
+    /// A fresh query after re-enabling the feature should still succeed. The revision
+    /// protects past queries; it is not a permanent denial of future reads.
+    func testFreshScreenHistoryQueryWorksAfterOwnerReenablesIt() async {
+        let access = TestHistoryAccess()
+        access.setEnabled(false)
+        access.setEnabled(true)
+        let source = ScreenHistorySource(
+            isEnabled: { access.isEnabled },
+            accessRevision: { access.revision },
+            entries: { _, _ in
+                [ScreenHistoryEntry(
+                    at: Date(),
+                    app: "Notes",
+                    bundleID: "com.apple.mobilenotes",
+                    text: "SYNTHETIC_FRESH_QUERY_ALLOWED"
+                )]
+            }
+        )
+        let core = PokiCore(config: CoreConfig(screenHistory: source), host: AppCoreHost())
+        let answer = await core.callTool("screen_history", arguments: "{}")
+
+        XCTAssertFalse(answer.isError, answer.text)
+        XCTAssertTrue(answer.text.contains("SYNTHETIC_FRESH_QUERY_ALLOWED"), answer.text)
+    }
+
+    /// A deletion invalidates reads already underway even if Screen History stays enabled.
+    func testInFlightScreenHistoryQueryIsRevokedByActualDeletion() async {
+        let capture = HistoryCapture.shared
+        capture.enabled = true
+        let delayedRead = SuspendedScreenHistoryRead()
+        let source = ScreenHistorySource(
+            isEnabled: { HistoryCapture.agentQueryAllowed },
+            accessRevision: { HistoryCapture.accessRevision },
+            entries: { _, _ in await delayedRead.read() }
+        )
+        let core = PokiCore(config: CoreConfig(screenHistory: source), host: AppCoreHost())
+        let query = Task { await core.callTool("screen_history", arguments: "{}") }
+
+        await delayedRead.waitUntilStarted()
+        await capture.clearEverything()
+        await delayedRead.finish([
+            ScreenHistoryEntry(
+                at: Date(),
+                app: "Notes",
+                bundleID: "com.apple.mobilenotes",
+                text: "SYNTHETIC_DELETED_HISTORY_CANARY"
+            )
+        ])
+        let answer = await query.value
+        XCTAssertTrue(answer.isError)
+        XCTAssertFalse(answer.text.contains("SYNTHETIC_DELETED_HISTORY_CANARY"),
+                       "A pending query must not return text after a deletion")
+    }
+
     private enum PendingPrivacyChange {
         case turnOff, turnOffThenOn, changeAppScope
     }
