@@ -329,7 +329,8 @@ final class HistoryStore: @unchecked Sendable {
     }
 
     static let agentSource = ScreenHistorySource(
-        isEnabled: { HistoryCapture.isEnabled },
+        isEnabled: { HistoryCapture.agentQueryAllowed },
+        accessRevision: { HistoryCapture.accessRevision },
         entries: { start, end in
             let raw = await HistoryStore.shared.entries(from: start, to: end)
             return await MainActor.run {
