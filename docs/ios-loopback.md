@@ -110,6 +110,13 @@ try again.":
 - Installing a prepared build.
 - Mounting the developer image for the first time after the phone restarts.
 
+How the image is mounted depends on iOS. From 26.4 it is a Cryptex1 cryptex installed through
+cryptexd. Before 26.4 (17.4 to 26.3) there is no such install, and iOS 18.7.7 closed the cryptexd
+connection ("device socket io failed (BrokenPipe)", issue 124). There Poki downloads the
+personalized image and mounts it through the image mounter, the route StikDebug and pymobiledevice3
+use. The launcher (`ddi::method_for`), the app (`DeveloperDiskImage.Kind`) and Poki Setup
+(`device::ddi::Kind`) pick by the same rule.
+
 The preserved `dev/esp-409-preserve-030` branch has a different design. It includes
 `AutomationChooser`, native services, and its own mounted-image fallback. Those features are not
 present in the current product code.

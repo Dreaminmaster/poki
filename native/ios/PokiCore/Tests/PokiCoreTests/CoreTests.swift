@@ -1188,6 +1188,53 @@ final class DDITests: XCTestCase {
         XCTAssertEqual(again, "22A1")
         try? FileManager.default.removeItem(at: dir)
     }
+
+    /// Issue 124: iOS before 26.4 has no cryptex install, so it takes the personalized image.
+    func testTheImageKindFollowsTheIOSVersion() {
+        for (major, minor) in [(17, 4), (18, 0), (18, 7), (26, 0), (26, 3)] {
+            XCTAssertEqual(DeveloperDiskImage.Kind.forSystem(major: major, minor: minor), .personalized, "\(major).\(minor)")
+        }
+        for (major, minor) in [(26, 4), (27, 0), (27, 3)] {
+            XCTAssertEqual(DeveloperDiskImage.Kind.forSystem(major: major, minor: minor), .cryptex, "\(major).\(minor)")
+        }
+        XCTAssertEqual(DeveloperDiskImage.Kind.personalized.files, ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache"])
+        XCTAssertTrue(DeveloperDiskImage.Kind.personalized.mirror.absoluteString.hasSuffix("/Xcode_iOS_DDI_Personalized"))
+        XCTAssertEqual(DeveloperDiskImage.Kind.cryptex.mirror, DeveloperDiskImage.mirror)
+    }
+
+    /// The personalized manifest names one file with different digests for different chips: the
+    /// files are good when one identity matches whole. A cryptex left in place is replaced.
+    func testThePersonalizedImageDownloadsAndReplacesACryptex() async throws {
+        #if canImport(CryptoKit)
+        let mirror = Mirror()
+        func identity(image: String, trustCache: String) -> [String: Any] {
+            let dmg: [String: Any] = ["Info": ["Path": "Image.dmg"], "Digest": Data(SHA384.hash(data: Data(image.utf8)))]
+            let cache: [String: Any] = ["Info": ["Path": "Image.dmg.trustcache"], "Digest": Data(SHA384.hash(data: Data(trustCache.utf8)))]
+            let entries: [String: Any] = ["PersonalizedDMG": dmg, "LoadableTrustCache": cache]
+            return ["Manifest": entries]
+        }
+        let cryptexEntries: [String: Any] = ["Cryptex1,GenericDmg": ["Info": ["Path": "Image.dmg"]]]
+        let cryptexOnly: [String: Any] = ["Manifest": cryptexEntries]
+        let identities: [[String: Any]] = [cryptexOnly, identity(image: "another chip", trustCache: "another chip"), identity(image: "image", trustCache: "trust")]
+        let manifest: [String: Any] = ["ProductBuildVersion": "27B52", "BuildIdentities": identities]
+        mirror.files["BuildManifest.plist"] = try PropertyListSerialization.data(fromPropertyList: manifest, format: .xml, options: 0)
+        mirror.files["Image.dmg"] = Data("image".utf8)
+        mirror.files["Image.dmg.trustcache"] = Data("trust".utf8)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ddi-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: dir.appendingPathComponent("Image.dmg.cryptex_info"))
+        let build = try await DeveloperDiskImage.ensure(in: dir, kind: .personalized, from: URL(string: "https://mirror.invalid/x")!, transport: mirror)
+        XCTAssertEqual(build, "27B52")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Image.dmg.cryptex_info").path))
+        XCTAssertEqual(try DeveloperDiskImage.verify(dir, kind: .personalized), "27B52")
+        // The same files are not a cryptex.
+        XCTAssertThrowsError(try DeveloperDiskImage.verify(dir, kind: .cryptex))
+        // A changed image matches no identity.
+        try Data("tampered".utf8).write(to: dir.appendingPathComponent("Image.dmg"))
+        XCTAssertThrowsError(try DeveloperDiskImage.verify(dir, kind: .personalized))
+        try? FileManager.default.removeItem(at: dir)
+        #endif
+    }
 }
 
 /// ESP-176: the owner asks in one app (Grok Bot, or Poki's own chat), Poki works in others, and when

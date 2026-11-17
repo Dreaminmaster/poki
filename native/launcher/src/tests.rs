@@ -425,3 +425,72 @@ fn only_the_phone_saying_so_is_called_developer_mode_off() {
     assert!(!says_developer_mode_off(&launch::ended_before_ready(Err(IdeviceError::UnexpectedResponse("test failed".into())))));
     assert!(says_developer_mode_off(&launch::ended_before_ready(Err(IdeviceError::DeveloperModeNotEnabled))));
 }
+
+/// iOS before 26.4 has no cryptex install for the developer disk image (issue 124: iOS 18.7.7
+/// closed the cryptexd connection, "device socket io failed (BrokenPipe)"). It takes the
+/// personalized image through the image mounter; the rule is StikDebug's.
+#[test]
+fn ios_before_26_4_mounts_the_personalized_image() {
+    use crate::ddi::{Method, method_for};
+    for ios in ["17.4", "18.0", "18.7.7", "26.0", "26.3.1"] {
+        assert_eq!(method_for(ios), Some(Method::Personalized), "{ios}");
+    }
+    for ios in ["26.4", "26.4.1", "27.0", "27.3"] {
+        assert_eq!(method_for(ios), Some(Method::Cryptex), "{ios}");
+    }
+    assert_eq!(method_for(""), None);
+    assert_eq!(method_for("beta"), None);
+}
+
+/// With no iOS version from the phone, the files say which image the app downloaded.
+#[test]
+fn the_files_say_which_image_when_the_phone_does_not() {
+    use crate::ddi::{Method, method_of_files};
+    let dir = std::env::temp_dir().join(format!("poki-ddi-kind-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache"] {
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+    assert_eq!(method_of_files(dir.to_str().unwrap()), Method::Personalized);
+    for name in ["Image.dmg.cryptex_info", "Image.dmg.root_hash"] {
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+    assert_eq!(method_of_files(dir.to_str().unwrap()), Method::Cryptex);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A cryptex image left in the app is refused before anything is sent to the phone. The manifest
+/// lists one file name with different digests for different chips: any identity's digest counts.
+#[test]
+fn the_personalized_image_is_checked_against_any_build_identity() {
+    use crate::ddi::personalized_image_matches;
+    use sha2::{Digest, Sha384};
+    let identity = |image: &[u8]| {
+        let mut entry = plist::Dictionary::new();
+        entry.insert("Digest".into(), plist::Value::Data(Sha384::digest(image).to_vec()));
+        let mut manifest = plist::Dictionary::new();
+        manifest.insert("PersonalizedDMG".into(), plist::Value::Dictionary(entry));
+        let mut identity = plist::Dictionary::new();
+        identity.insert("Manifest".into(), plist::Value::Dictionary(manifest));
+        plist::Value::Dictionary(identity)
+    };
+    let mut cryptex_only = plist::Dictionary::new();
+    cryptex_only.insert("Manifest".into(), plist::Value::Dictionary(plist::Dictionary::new()));
+    let mut root = plist::Dictionary::new();
+    root.insert("BuildIdentities".into(), plist::Value::Array(vec![plist::Value::Dictionary(cryptex_only), identity(b"other chip"), identity(b"this image")]));
+    let mut bytes = Vec::new();
+    plist::Value::Dictionary(root).to_writer_xml(&mut bytes).unwrap();
+    assert!(personalized_image_matches(&bytes, b"this image"));
+    assert!(!personalized_image_matches(&bytes, b"a cryptex image"));
+    assert!(!personalized_image_matches(b"not a plist", b"this image"));
+}
+
+/// The real mirror files, when a developer points at them (not in CI: it needs the download).
+#[test]
+fn the_mirror_personalized_image_matches_its_manifest() {
+    let Ok(dir) = std::env::var("POKI_TEST_PERSONALIZED_DDI") else { return };
+    let dir = std::path::Path::new(&dir);
+    let manifest = std::fs::read(dir.join("BuildManifest.plist")).unwrap();
+    let image = std::fs::read(dir.join("Image.dmg")).unwrap();
+    assert!(crate::ddi::personalized_image_matches(&manifest, &image));
+}
