@@ -19,6 +19,7 @@ final class ChatHarnessTests: XCTestCase {
 
     override func setUp() async throws {
         for key in Self.settings { saved[key] = UserDefaults.standard.object(forKey: key) }
+        await SessionStore.shared.waitUntilLoaded()
     }
 
     override func tearDown() async throws {

@@ -100,11 +100,13 @@ enum ShortcutApp {
 /// and an action; a routine or request without both is left out.
 @MainActor
 enum HomeShortcuts {
-    struct Request: Equatable { var text: String; var at: Date }
-    struct Remembered: Equatable { var text: String; var app: String?; var runs: Int; var at: Date }
+    struct Request: Equatable, Sendable { var text: String; var at: Date }
+    struct Remembered: Equatable, Sendable { var text: String; var app: String?; var runs: Int; var at: Date }
+    struct RequestGroup: Sendable { var key: String; var latest: String; var count: Int; var last: Date }
+    struct RankedRoutine: Sendable { var routine: Remembered; var key: String; var score: Double }
     /// A quick action the owner changed, kept on this iPhone: the sentence a tap puts in the message
     /// field and its app (a bundle ID; nil for none), in place of the pill whose key is `replaces`.
-    struct Edit: Codable, Equatable { var replaces: String; var sentence: String; var app: String? }
+    struct Edit: Codable, Equatable, Sendable { var replaces: String; var sentence: String; var app: String? }
 
     /// At least this many, and as many as there are default examples.
     static let shown = 6
@@ -114,6 +116,12 @@ enum HomeShortcuts {
     /// pushes none of the owner's pills off, and Forget works on it as on any pill.
     static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], pinned: [HomeShortcut] = [],
                      forgotten: Set<String>, edits: [Edit] = [], now: Date) -> [HomeShortcut] {
+        rank(rankedRoutines: rankRoutines(routines, now: now), groupedRequests: groups(requests, now: now),
+             examples: examples, pinned: pinned, forgotten: forgotten, edits: edits)
+    }
+
+    static func rank(rankedRoutines: [RankedRoutine], groupedRequests: [RequestGroup], examples: [HomeShortcut],
+                     pinned: [HomeShortcut] = [], forgotten: Set<String>, edits: [Edit] = []) -> [HomeShortcut] {
         var out: [HomeShortcut] = []
         // A request the owner already has as an edit (once they send its sentence) is not a second pill.
         func taken(_ key: String) -> Bool {
@@ -124,15 +132,12 @@ enum HomeShortcuts {
         let pins = pinned.filter { !taken($0.key) }
         out += pins
 
-        let remembered = routines.filter { !isPrivate($0.text) }
-            .map { (routine: $0, key: normalize($0.text), score: frecency(Double(max($0.runs, 1)), last: $0.at, now: now)) }
-            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.routine.at > $1.routine.at }
-        for r in remembered where !taken(r.key) {
+        for r in rankedRoutines where !taken(r.key) {
             guard let pill = routinePill(r.key, r.routine) else { continue }
             out.append(pill)
         }
 
-        for group in groups(requests, now: now) where group.count >= 2 && !taken(group.key) {
+        for group in groupedRequests where group.count >= 2 && !taken(group.key) {
             guard let pill = requestPill(group.key, group.latest) else { continue }
             out.append(pill)
         }
@@ -152,6 +157,12 @@ enum HomeShortcuts {
         pills += left.map(pill)
         while pills.count > limit, let i = pills.lastIndex(where: { !$0.edited }) { pills.remove(at: i) }
         return pills
+    }
+
+    nonisolated static func rankRoutines(_ routines: [Remembered], now: Date) -> [RankedRoutine] {
+        routines.filter { !isPrivate($0.text) }
+            .map { RankedRoutine(routine: $0, key: normalize($0.text), score: frecency(Double(max($0.runs, 1)), last: $0.at, now: now)) }
+            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.routine.at > $1.routine.at }
     }
 
     /// An edit as its pill: its app's icon and name, or Poki's icon and no name when it has no app this
@@ -178,8 +189,8 @@ enum HomeShortcuts {
 
     /// Requests that normalize to the same or a similar key, most used first: the count weighed by how
     /// recently it was last made, and shown in its latest wording.
-    static func groups(_ requests: [Request], now: Date) -> [(key: String, latest: String, count: Int, last: Date)] {
-        var groups: [(key: String, latest: String, count: Int, last: Date)] = []
+    nonisolated static func groups(_ requests: [Request], now: Date) -> [RequestGroup] {
+        var groups: [RequestGroup] = []
         for request in requests.sorted(by: { $0.at < $1.at }) where !isPrivate(request.text) {
             let key = normalize(request.text)
             guard !key.isEmpty else { continue }
@@ -187,7 +198,7 @@ enum HomeShortcuts {
             if let i = groups.firstIndex(where: { similar($0.key, key) }) {
                 groups[i].count += 1; groups[i].latest = words; groups[i].last = request.at
             } else {
-                groups.append((key, words, 1, request.at))
+                groups.append(RequestGroup(key: key, latest: words, count: 1, last: request.at))
             }
         }
         return groups.sorted { a, b in
@@ -198,7 +209,7 @@ enum HomeShortcuts {
 
     /// zoxide's frecency (src/db/dir.rs, `Dir::score`, MIT, Copyright 2020 Ajeet D'Souza): the count,
     /// times 4 within the hour, 2 within the day, 0.5 within the week, 0.25 after.
-    static func frecency(_ rank: Double, last: Date, now: Date) -> Double {
+    nonisolated static func frecency(_ rank: Double, last: Date, now: Date) -> Double {
         let age = now.timeIntervalSince(last)
         if age < 3600 { return rank * 4 }
         if age < 86_400 { return rank * 2 }
@@ -207,7 +218,7 @@ enum HomeShortcuts {
     }
 
     /// Case, punctuation and spaces, numbers, dates and times, and polite openings dropped.
-    static func normalize(_ text: String) -> String {
+    nonisolated static func normalize(_ text: String) -> String {
         var s = text.lowercased()
         for pattern in variable { s = s.replacingOccurrences(of: pattern, with: " ", options: .regularExpression) }
         s = String(s.unicodeScalars.filter { CharacterSet.letters.contains($0) }.map(Character.init))
@@ -217,7 +228,7 @@ enum HomeShortcuts {
     }
 
     /// The same request in other words: equal, or at least 80% of their pairs of letters shared (Dice).
-    static func similar(_ a: String, _ b: String) -> Bool {
+    nonisolated static func similar(_ a: String, _ b: String) -> Bool {
         if a == b { return true }
         let (x, y) = (pairs(a), pairs(b))
         guard !x.isEmpty, !y.isEmpty else { return false }
@@ -227,25 +238,25 @@ enum HomeShortcuts {
     }
 
     /// Never a pill: money, codes, passwords, contacts and message text. Better missed than shown.
-    static func isPrivate(_ text: String) -> Bool {
+    nonisolated static func isPrivate(_ text: String) -> Bool {
         let s = text.lowercased()
         return privateMarks.contains { s.range(of: $0, options: .regularExpression) != nil }
     }
 
-    private static func pairs(_ s: String) -> [String] {
+    nonisolated private static func pairs(_ s: String) -> [String] {
         let c = Array(s)
         return c.count < 2 ? c.map(String.init) : (0..<c.count - 1).map { String(c[$0...($0 + 1)]) }
     }
 
-    private static let variable = [
+    nonisolated private static let variable = [
         #"\d+([:./\-年月日号点时分]\d*)*"#,
         #"[零一二两三四五六七八九十百]+(点|号|日|月|分钟|小时)"#,
         #"(今天|明天|后天|昨天|今晚|明早|早上|上午|中午|下午|晚上|周[一二三四五六日天]|星期[一二三四五六日天])"#,
         #"\b(today|tomorrow|tonight|yesterday|morning|afternoon|evening|monday|tuesday|wednesday|thursday|friday|saturday|sunday|am|pm)\b"#,
     ]
-    private static let openings = ["please", "canyou", "couldyou", "helpme", "请帮我", "帮我", "麻烦", "请"]
-    private static let fillers = ["一下", "的", "了", "吧", "呢"]
-    private static let privateMarks = [
+    nonisolated private static let openings = ["please", "canyou", "couldyou", "helpme", "请帮我", "帮我", "麻烦", "请"]
+    nonisolated private static let fillers = ["一下", "的", "了", "吧", "呢"]
+    nonisolated private static let privateMarks = [
         #"[$¥€£₩]"#, #"\d+(\.\d+)?\s*(元|块|美元|刀|dollars?|usd|rmb|yuan|bucks)"#,
         #"(付款|支付|转账|汇款|收款|红包|金额|余额|\bpay\b|payment|transfer|venmo|paypal)"#,
         #"(验证码|校验码|动态码|\bcode\b|\botp\b|2fa|one-time|verification)"#, #"\d{4,}"#,
@@ -265,6 +276,8 @@ final class HomeShortcutStore {
     @ObservationIgnored private var basis: [String] = []
     @ObservationIgnored private var routes: [HomeShortcuts.Remembered] = []
     @ObservationIgnored private var requests: [HomeShortcuts.Request] = []
+    @ObservationIgnored private var refreshToken = 0
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private let defaults = UserDefaults.standard
     private static let forgottenKey = "home.shortcuts.forgotten"
     private static let editedKey = "home.shortcuts.edited"
@@ -278,7 +291,7 @@ final class HomeShortcutStore {
         defaults.data(forKey: Self.editedKey).flatMap { try? JSONDecoder().decode([HomeShortcuts.Edit].self, from: $0) } ?? []
     }
 
-    func refresh(sessions: [SavedSession], routines: [Routine], now: Date = Date()) {
+    private func extractInputs(from sessions: [SavedSession], routines: [Routine]) -> (requests: [HomeShortcuts.Request], routes: [HomeShortcuts.Remembered], basis: [String]) {
         let requests = sessions.compactMap { session -> HomeShortcuts.Request? in
             guard session.kind == .poki else { return nil }
             for entry in session.entries { if case .you(let text, _) = entry.kind { return .init(text: text, at: session.started) } }
@@ -287,9 +300,54 @@ final class HomeShortcutStore {
         let routes = routines.map { HomeShortcuts.Remembered(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
         let basis = [AppLocalization.language, requests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
                      routes.map { "\($0.text)\($0.runs)" }.joined(separator: ","), forgotten.sorted().joined(separator: ",")]
-        guard basis != self.basis else { return }
-        (self.basis, self.routes, self.requests) = (basis, routes, requests)
+        return (requests, routes, basis)
+    }
+
+    func refresh(sessions: [SavedSession], routines: [Routine], now: Date = Date()) {
+        refreshTask?.cancel()
+        refreshToken += 1
+        let extracted = extractInputs(from: sessions, routines: routines)
+        guard extracted.basis != self.basis else { return }
+        (self.basis, self.routes, self.requests) = (extracted.basis, extracted.routes, extracted.requests)
         rank(now: now)
+    }
+
+    func refreshInBackground(sessions: [SavedSession], routines: (() -> [Routine])? = nil, now: Date = Date()) {
+        refreshTask?.cancel()
+        refreshToken += 1
+        let token = refreshToken
+        let initialRequests = sessions.compactMap { session -> HomeShortcuts.Request? in
+            guard session.kind == .poki else { return nil }
+            for entry in session.entries { if case .you(let text, _) = entry.kind { return .init(text: text, at: session.started) } }
+            return nil
+        }
+        let language = AppLocalization.language
+        let forgottenSnapshot = forgotten
+        refreshTask = Task { [weak self] in
+            let computed = await Task.detached(priority: .utility) { () -> (routes: [HomeShortcuts.Remembered], basis: [String], rankedRoutines: [HomeShortcuts.RankedRoutine], groupedRequests: [HomeShortcuts.RequestGroup]) in
+                let loadedRoutines = routines?() ?? []
+                let routes = loadedRoutines.map { HomeShortcuts.Remembered(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
+                let basis = [language, initialRequests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
+                             routes.map { "\($0.text)\($0.runs)" }.joined(separator: ","), forgottenSnapshot.sorted().joined(separator: ",")]
+                let rankedRoutines = HomeShortcuts.rankRoutines(routes, now: now)
+                let groupedRequests = HomeShortcuts.groups(initialRequests, now: now)
+                return (routes, basis, rankedRoutines, groupedRequests)
+            }.value
+            guard let self, !Task.isCancelled, self.refreshToken == token, computed.basis != self.basis else { return }
+            (self.basis, self.routes, self.requests) = (computed.basis, computed.routes, initialRequests)
+            self.shortcuts = HomeShortcuts.rank(
+                rankedRoutines: computed.rankedRoutines,
+                groupedRequests: computed.groupedRequests,
+                examples: HomeIdea.examples,
+                pinned: [HomeIdea.star],
+                forgotten: self.forgotten,
+                edits: self.edits
+            )
+        }
+    }
+
+    func waitUntilRefreshed() async {
+        await refreshTask?.value
     }
 
     /// Long press, Forget: gone from the home page, also after a restart.

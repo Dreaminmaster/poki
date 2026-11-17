@@ -235,6 +235,8 @@ final class AppModel {
     private var handoffTimer: Timer?
     private var sessionStartTask: Task<Void, Never>?
     private(set) var sessionStarting = false
+    private var pendingPrepareForTask = false
+    private let requiresDiskImageCheck: Bool
 
     /// No task is running, so an install (which ends Poki) disturbs nothing: no agent step under way,
     /// no approval waiting, and a minute since the agent last did something.
@@ -324,11 +326,13 @@ final class AppModel {
 
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
          automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
-         systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion) {
+         systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion,
+         requiresDiskImageCheck: Bool? = nil) {
         ActivityController.endAll()
         self.activity = ActivityController()
         self.automation = automation
         self.idleSessionPolicy = .forSystem(systemVersion)
+        self.requiresDiskImageCheck = requiresDiskImageCheck ?? !Self.onSimulator
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
         if SetupVault.restorePairingIfMissing() { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
@@ -420,7 +424,11 @@ final class AppModel {
             if let text { problem = text; tunnelAttention = text }
             else if problem == tunnelAttention { problem = nil; tunnelAttention = nil }
         }
-        if !diskImage.hasFiles { Task { await diskImage.download() } }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.diskImage.ensureChecked()
+            if !self.diskImage.hasFiles { await self.diskImage.download() }
+        }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
         if UserDefaults.standard.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
@@ -548,8 +556,12 @@ final class AppModel {
     /// has the session the probe opened, so it starts no other.
     func prepareForTask() {
         guard automationPath == .inProcess, setup.loopback != .none, !probeDriven else { return }
-        if !sessionOn { startSession() }
+        if !sessionOn {
+            pendingPrepareForTask = true
+            startSession()
+        }
         guard sessionOn, runnerPaused else { return }
+        pendingPrepareForTask = false
         runnerPaused = false
         host.setPaused(false)
         launchRunner()
@@ -743,6 +755,7 @@ final class AppModel {
     private func turnOnIfWanted() {
         Task {
             await tunnel.refresh()
+            await diskImage.ensureChecked()
             if wantsOn, !sessionOn, pairingPath != nil, diskImage.hasFiles { startSession(reconnectLocal: false) }
         }
     }
@@ -990,6 +1003,7 @@ final class AppModel {
                         problem = "The phone refused the pairing (\(pairingTrouble ?? "")). Pair again in Setup."
                         return
                     }
+                    guard await ensureDiskImageForSession(), !Task.isCancelled else { return }
                     beginSession()
                 } catch is CancellationError { }
                 catch { problem = error.localizedDescription }
@@ -1004,30 +1018,57 @@ final class AppModel {
                     if let pairingTrouble { problem = "The phone refused the pairing (\(pairingTrouble)). Pair again in Setup." }
                     return
                 }
+                guard await ensureDiskImageForSession(), !Task.isCancelled else { return }
+                beginSession()
+            }
+        } else if requiresDiskImageCheck {
+            guard checkSessionStartPreconditions() != nil else { return }
+            sessionStarting = true
+            sessionStartTask = Task {
+                defer { sessionStarting = false; sessionStartTask = nil }
+                guard await ensureDiskImageForSession(), !Task.isCancelled else { return }
                 beginSession()
             }
         } else { beginSession() }
     }
 
-    private func beginSession() {
-        guard !sessionOn else { return }
+    private func checkSessionStartPreconditions() -> (pairing: String, relay: RelayAddress?)? {
+        guard !sessionOn else { return nil }
         problem = nil
         #if targetEnvironment(simulator)
         // A simulator has no pairing, disk image or launcher: the runner is WebDriverAgent started on
         // the Mac (see `launchRunner`).
         let pairing = pairingPath ?? ""
         #else
-        guard let pairing = pairingPath else { problem = "Pair this iPhone first (Setup)."; return }
+        guard let pairing = pairingPath else { problem = "Pair this iPhone first (Setup)."; return nil }
         #endif
         // The chat's own model loop needs no relay; agents on a computer do.
         let relay = activeRelay
-        guard relay != nil || ModelKeys.hasUsableKey else { problem = Self.noRelay; return }
-        if !inFront { loopback.resume(every: 6) }
-        guard Self.onSimulator || diskImage.hasFiles && diskImage.recheck() else {
+        guard relay != nil || ModelKeys.hasUsableKey else { problem = Self.noRelay; return nil }
+        return (pairing, relay)
+    }
+
+    private func ensureDiskImageForSession() async -> Bool {
+        if !requiresDiskImageCheck { return true }
+        let verified: Bool
+        if diskImage.isChecking || !diskImage.hasFiles {
+            await diskImage.ensureChecked()
+            verified = diskImage.hasFiles
+        } else {
+            verified = await diskImage.recheckInBackground()
+        }
+        guard !Task.isCancelled else { return false }
+        if !verified {
             problem = "The developer disk image is not downloaded yet (Setup > Pair). It is needed once."
             Task { await diskImage.download() }
-            return
+            return false
         }
+        return true
+    }
+
+    private func beginSession() {
+        guard let (pairing, relay) = checkSessionStartPreconditions() else { return }
+        if !inFront { loopback.resume(every: 6) }
         log.add("session", "turned on")
         background.start()
         ApprovalNotice.requestPermission()
@@ -1040,6 +1081,12 @@ final class AppModel {
         lastAgentActivity = Date()
         // Away from Poki the runner (and with it iOS's automation banner) starts only when an agent asks.
         standBy(reason: nil)
+        if pendingPrepareForTask, automationPath == .inProcess, runnerPaused, !probeDriven {
+            pendingPrepareForTask = false
+            runnerPaused = false
+            host.setPaused(false)
+            launchRunner()
+        }
         if let relay { core.start(relay: relay) }
         idleTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkIdle() } }
         openWhileInFront("turned on with Poki in front")
@@ -1107,6 +1154,7 @@ final class AppModel {
     /// The update is accepted by iOS. Keep the loopback and wantsOn for the replacement app.
     func windDownForUpdate() async {
         sessionStartTask?.cancel()
+        pendingPrepareForTask = false
         idleTimer?.invalidate(); idleTimer = nil
         sessionOn = false
         background.stop()
@@ -1130,6 +1178,7 @@ final class AppModel {
 
     func stopSession() {
         sessionStartTask?.cancel()
+        pendingPrepareForTask = false
         wantsOn = false
         if AskPoki.app === self, let chat = AskPoki.chat, chat.isRunningInSplitView { chat.stop() }
         guard sessionOn else {
@@ -1865,7 +1914,10 @@ final class AppModel {
     func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "routines" { return await core.callTool(name, arguments: arguments, localSession: localSession) }
         if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps) }
-        if !sessionOn { startSession() }
+        if !sessionOn {
+            if !sessionStarting { startSession() }
+            if let task = sessionStartTask { await task.value }
+        }
         if passcodeConfirmationPending {
             return PokiCore.ToolAnswer(text: "not_sent: \(AppLocalization.text(Self.passcodeConfirmationMessage)) Nothing was sent.", jpeg: nil, isError: true)
         }
