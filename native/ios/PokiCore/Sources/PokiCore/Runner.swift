@@ -2,6 +2,11 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// How a request to the runner ended, as far as the phone is concerned.
 public enum Delivery: String, Sendable {
@@ -75,38 +80,76 @@ public final class URLSessionTransport: HTTPTransport {
     }
 
     /// Whether `url` targets a local phone service rather than the public internet.
-    /// Loopback addresses (`127.0.0.0/8`, `localhost`, `::1`) and the phone's loopback tunnel
-    /// (`10.7.0.1`) stay direct; everything else keeps the system proxy configuration.
+    /// Loopback addresses (`127.0.0.0/8`, `localhost`, `::1`), the phone's loopback tunnel
+    /// (`10.7.0.1`), IPv6 ULA tunnels (`fc00::/7`), link-local IPv6 (`fe80::/10`, with or
+    /// without a zone ID), IPv4-mapped IPv6 addresses targeting those IPv4 ranges, and
+    /// `.local` hostnames stay direct; everything else keeps the system proxy configuration.
     static func isLocalPhoneService(_ url: URL) -> Bool {
-        guard var host = url.host?.lowercased(), !host.isEmpty else { return false }
+        #if canImport(FoundationNetworking)
+        guard let rawHost = url.host, !rawHost.isEmpty else { return false }
+        #else
+        guard let rawHost = url.host(percentEncoded: false), !rawHost.isEmpty else { return false }
+        #endif
+        var host = rawHost.lowercased()
         if host.hasPrefix("[") && host.hasSuffix("]") {
             host = String(host.dropFirst().dropLast())
         }
         while host.hasSuffix(".") {
             host.removeLast()
         }
+        guard !host.isEmpty else { return false }
+
+        if host.contains(":") {
+            return isLocalPhoneIPv6(host)
+        }
+
+        var four = in_addr()
+        if inet_pton(AF_INET, host, &four) == 1 {
+            return withUnsafeBytes(of: four.s_addr) { bytes in
+                let b = bytes.bindMemory(to: UInt8.self)
+                return isLocalPhoneIPv4(b[0], b[1], b[2], b[3])
+            }
+        }
+
         return host == "localhost"
-            || host.hasSuffix(".localhost")
-            || host == "::1"
-            || host == "0:0:0:0:0:0:0:1"
-            || host == "10.7.0.1"
-            || isIPv4Loopback(host)
+            || (host.count > ".localhost".count && host.hasSuffix(".localhost"))
+            || (host.count > ".local".count && host.hasSuffix(".local"))
     }
 
-    private static func isIPv4Loopback(_ host: String) -> Bool {
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 4, parts[0] == "127" else { return false }
-        return parts.allSatisfy { part in
-            guard let octet = UInt8(part) else { return false }
-            return String(octet) == part
+    private static func isLocalPhoneIPv6(_ rawHost: String) -> Bool {
+        var host = rawHost
+        if let zone = host.firstIndex(of: "%") {
+            let zoneID = host[host.index(after: zone)...]
+            guard !zoneID.isEmpty else { return false }
+            host = String(host[..<zone])
         }
+        var six = in6_addr()
+        guard inet_pton(AF_INET6, host, &six) == 1 else { return false }
+        return withUnsafeBytes(of: six) { bytes in
+            let b = bytes.bindMemory(to: UInt8.self)
+            // ::1 (loopback)
+            if (0..<15).allSatisfy({ b[$0] == 0 }) && b[15] == 1 { return true }
+            // fc00::/7 (unique local addresses, including fd00::/8 tunnels)
+            if b[0] & 0xfe == 0xfc { return true }
+            // fe80::/10 (link-local, including zoned addresses such as fe80::1%utun3)
+            if b[0] == 0xfe && b[1] & 0xc0 == 0x80 { return true }
+            // ::ffff:0:0/96 (IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1)
+            if (0..<10).allSatisfy({ b[$0] == 0 }) && b[10] == 0xff && b[11] == 0xff {
+                return isLocalPhoneIPv4(b[12], b[13], b[14], b[15])
+            }
+            return false
+        }
+    }
+
+    private static func isLocalPhoneIPv4(_ b0: UInt8, _ b1: UInt8, _ b2: UInt8, _ b3: UInt8) -> Bool {
+        b0 == 127 || (b0, b1, b2, b3) == (10, 7, 0, 1)
     }
 
     func session(for url: URL) -> URLSession {
         Self.isLocalPhoneService(url) ? localSession : publicSession
     }
 
-    public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+    func request(method: String, url: URL, body: Data?, timeout: Double) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         // One connection per request to the phone runner. The runner drops a kept-alive connection
@@ -120,6 +163,11 @@ public final class URLSessionTransport: HTTPTransport {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "content-type")
         }
+        return request
+    }
+
+    public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let request = self.request(method: method, url: url, body: body, timeout: timeout)
         do {
             let (data, response) = try await session(for: url).data(for: request)
             return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
