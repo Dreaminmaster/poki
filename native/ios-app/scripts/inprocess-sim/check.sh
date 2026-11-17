@@ -13,6 +13,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE=field
 if [ "${1:-}" = "--apps" ]; then MODE=apps; shift; fi
 if [ "${1:-}" = "--cycle" ]; then MODE=cycle; shift; fi
+# --shot full|letterboxed: only read the screen and take Poki's picture of it. "full" needs a picture
+# of the whole display; "letterboxed" needs the refusal a build with an SDK before iOS 27.1 gets on
+# an iPhone Duo (#419). POKI_CHECK_DUO=1 runs any mode on an iPhone Duo simulator.
+EXPECT=""
+if [ "${1:-}" = "--shot" ]; then MODE=shot; EXPECT="$2"; shift 2; fi
 REPO="$(cd "$HERE/../../../.." && pwd)"
 NATIVE="$(cd "${1:-$REPO/native/ios-app/Poki/Native}" && pwd)"
 X="$(xcode-select -p)/Platforms/iPhoneSimulator.platform/Developer"
@@ -25,9 +30,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+# POKI_CHECK_BUILD_XCODE=/Applications/Xcode_27.0.app compiles the check app with that Xcode's SDK,
+# while the simulator and the fixture stay with the selected Xcode: an app linked before the iOS
+# 27.1 SDK is letterboxed on an iPhone Duo (--shot letterboxed).
+BUILD_DEV="${POKI_CHECK_BUILD_XCODE:+$POKI_CHECK_BUILD_XCODE/Contents/Developer}"
+BUILD_DEV="${BUILD_DEV:-$(xcode-select -p)}"
+SDK="$(DEVELOPER_DIR="$BUILD_DEV" xcrun --sdk iphonesimulator --show-sdk-path)"
+echo "check app SDK: $(DEVELOPER_DIR="$BUILD_DEV" xcrun --sdk iphonesimulator --show-sdk-version)"
 APP="$WORK/InProcessCheck.app"; mkdir -p "$APP"
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios26.0-simulator -isysroot "$SDK" -fobjc-arc -fmodules \
+DEVELOPER_DIR="$BUILD_DEV" xcrun --sdk iphonesimulator clang -target arm64-apple-ios26.0-simulator -isysroot "$SDK" -fobjc-arc -fmodules \
   -Wall -Werror -Wno-deprecated-declarations -I "$NATIVE" \
   "$HERE/main.m" "$NATIVE/InProcess.m" "$NATIVE/RecoveredNative.m" -framework UIKit -o "$APP/InProcessCheck"
 cp "$HERE/Info.plist" "$APP/Info.plist"
@@ -42,7 +53,10 @@ read -r RUNTIME TYPE < <(xcrun simctl list runtimes -j | python3 -c '
 import json, sys
 r = [x for x in json.load(sys.stdin)["runtimes"] if x["platform"] == "iOS" and x["isAvailable"]][-1]
 family = "iPad" if sys.argv[1] else "iPhone"
-print(r["identifier"], next(t["identifier"] for t in r["supportedDeviceTypes"] if t["productFamily"] == family))' "${POKI_CHECK_IPAD:-}")
+types = [t for t in r["supportedDeviceTypes"] if t["productFamily"] == family and (not sys.argv[2] or "Duo" in t["name"])]
+if not types: sys.exit("no %s simulator%s in %s" % (family, " named Duo" if sys.argv[2] else "", r["identifier"]))
+print(r["identifier"], types[0]["identifier"])' "${POKI_CHECK_IPAD:-}" "${POKI_CHECK_DUO:-}")
+echo "simulator: $TYPE on $RUNTIME"
 UDID="$(xcrun simctl create poki-inprocess-check "$TYPE" "$RUNTIME")"
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" -b >/dev/null
@@ -75,6 +89,30 @@ assert s[4]["code"] == "" and s[4]["front"] != fixture, f"terminate: {s[4]}"
 assert sys.argv[2] == "0", f"the fixture still runs after terminate ({sys.argv[2]} launchd jobs)"
 PY
   echo "in-process launch, launch, activate, relaunch and terminate passed"
+  exit 0
+fi
+if [ "$MODE" = shot ]; then
+  xcrun simctl launch "$UDID" local.poki.inprocess-check -mode read -tag shot -delay 8 >/dev/null
+  sleep 3
+  xcrun simctl launch "$UDID" local.pokimcp.fixture >/dev/null
+  for _ in $(seq 90); do [ -s "$DOCS/shot.json" ] && break; sleep 1; done
+  OUT="${POKI_CHECK_OUT:-}"
+  if [ -n "$OUT" ]; then mkdir -p "$OUT"; cp "$DOCS"/shot* "$OUT/" 2>/dev/null || true; xcrun simctl io "$UDID" screenshot "$OUT/screen.png" >/dev/null 2>&1 || true; fi
+  [ -s "$DOCS/shot.json" ] || { echo "::error::the check app wrote no result in 90 s"; exit 1; }
+  python3 - "$DOCS/shot.json" "$EXPECT" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+print(json.dumps({k: r.get(k) for k in ("prepare", "front", "display", "screenshot", "source_code")}, indent=1, ensure_ascii=False))
+assert r["prepare"].get("ok"), f"no session: {r['prepare']}"
+shot = r["screenshot"]
+if sys.argv[2] == "letterboxed":
+    assert shot["bytes"] == 0 and shot["code"] == "duo_needs_ios_27_1_sdk_build", f"expected the letterbox refusal, got {shot}"
+    print("reproduced: a build with an SDK before iOS 27.1 gets no picture on the iPhone Duo")
+else:
+    assert shot["bytes"] > 0 and not shot["code"], f"no picture: {shot}"
+    assert r["front"].get("bundleId") == "local.pokimcp.fixture", f"front app: {r['front']}"
+    print(f"picture {shot['width']:.0f}x{shot['height']:.0f} of display {r['display']}")
+PY
   exit 0
 fi
 xcrun simctl launch "$UDID" local.poki.inprocess-check -mode "$MODE" -tag field -delay 8 -text "$TEXT" -times "${POKI_CHECK_TIMES:-1}" >/dev/null
