@@ -328,4 +328,122 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertEqual(giantParsed.entries.count, 1)
         XCTAssertTrue(giantParsed.entries[0].text.contains("needle-marker"))
     }
+    /// A permission decision made before an asynchronous SQLite read must not authorize
+    /// the answer after the owner turns Screen History off.
+    func testInFlightScreenHistoryQueryIsRevokedWhenTurnedOff() async {
+        await assertRevokedPendingQuery(change: .turnOff)
+    }
+
+    /// Turning Screen History back on grants new queries, never the old in-flight one.
+    func testInFlightScreenHistoryQueryCannotSurviveOffThenOn() async {
+        await assertRevokedPendingQuery(change: .turnOffThenOn)
+    }
+
+    /// Changing the included/excluded apps must also invalidate a pending answer.
+    func testInFlightScreenHistoryQueryIsRevokedOnAppPermissionChange() async {
+        await assertRevokedPendingQuery(change: .changeAppScope)
+    }
+
+    private enum PendingPrivacyChange {
+        case turnOff, turnOffThenOn, changeAppScope
+    }
+
+    private func assertRevokedPendingQuery(change: PendingPrivacyChange) async {
+        let access = TestHistoryAccess()
+        let delayedRead = SuspendedScreenHistoryRead()
+        let source = ScreenHistorySource(
+            isEnabled: { access.isEnabled },
+            accessRevision: { access.revision },
+            entries: { _, _ in await delayedRead.read() }
+        )
+        let core = PokiCore(config: CoreConfig(screenHistory: source), host: AppCoreHost())
+        let query = Task { await core.callTool("screen_history", arguments: "{}") }
+
+        await delayedRead.waitUntilStarted()
+        switch change {
+        case .turnOff:
+            access.setEnabled(false)
+        case .turnOffThenOn:
+            access.setEnabled(false)
+            access.setEnabled(true)
+        case .changeAppScope:
+            access.invalidateAppPermissions()
+        }
+        await delayedRead.finish([
+            ScreenHistoryEntry(
+                at: Date(),
+                app: "Notes",
+                bundleID: "com.apple.mobilenotes",
+                text: "SYNTHETIC_PRIVATE_HISTORY_CANARY"
+            )
+        ])
+
+        let answer = await query.value
+        XCTAssertTrue(answer.isError, "A query started with an obsolete privacy decision must fail")
+        XCTAssertFalse(answer.text.contains("SYNTHETIC_PRIVATE_HISTORY_CANARY"),
+                       "Revoked screen text must never enter a tool result")
+    }
+
+}
+
+
+/// An asynchronous source whose response is deliberately held until the test changes permissions.
+/// Actor isolation makes the timing deterministic without sleeps or real screen contents.
+private actor SuspendedScreenHistoryRead {
+    private var started = false
+    private var waitingForStart: CheckedContinuation<Void, Never>?
+    private var pendingResponse: CheckedContinuation<[ScreenHistoryEntry], Never>?
+
+    func read() async -> [ScreenHistoryEntry] {
+        started = true
+        waitingForStart?.resume()
+        waitingForStart = nil
+        return await withCheckedContinuation { continuation in
+            pendingResponse = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { continuation in
+            waitingForStart = continuation
+        }
+    }
+
+    func finish(_ entries: [ScreenHistoryEntry]) {
+        pendingResponse?.resume(returning: entries)
+        pendingResponse = nil
+    }
+}
+
+/// Mimics the switch and app-permission changes without touching the user's own settings.
+private final class TestHistoryAccess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var enabledValue = true
+    private var revisionValue: UInt64 = 1
+
+    var isEnabled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return enabledValue
+    }
+
+    var revision: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return revisionValue
+    }
+
+    func setEnabled(_ value: Bool) {
+        lock.lock()
+        enabledValue = value
+        revisionValue &+= 1
+        lock.unlock()
+    }
+
+    func invalidateAppPermissions() {
+        lock.lock()
+        revisionValue &+= 1
+        lock.unlock()
+    }
 }
