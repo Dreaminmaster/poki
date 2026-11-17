@@ -772,7 +772,14 @@ extension Computer {
                     var elements: [Element] = []
                     var early = false
                     while now() < stepEnds - 0.2 {
-                        guard let tree = try? await runner.tree(timeout: min(config.readTimeout, max(0.3, stepEnds - now() - 0.1)), format: config.treeFormat) else { break }
+                        // A read that fails (an app still launching, a runner busy with the last step) is
+                        // tried again while the step has time: one missed read is not a screen that differs.
+                        guard let tree = try? await runner.tree(timeout: min(config.readTimeout, max(0.3, stepEnds - now() - 0.1)), format: config.treeFormat) else {
+                            why = "the screen could not be read"
+                            await sleep(seconds: 0.25)
+                            continue
+                        }
+                        if why == "the screen could not be read" { why = "\(target.describe) is not on screen" }
                         reads += 1
                         elements = listable(tree.elements, screen)
                         let signature = elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
