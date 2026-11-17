@@ -627,7 +627,11 @@ private struct PairingPage: View {
         case .downloading(let step):
             LabeledContent("Downloading") { HStack { Text(verbatim: "\(step)"); ProgressView() } }
         case .missing:
-            Button("Download Developer Disk Image") { Task { await model.diskImage.download() } }
+            if model.diskImage.isChecking {
+                LabeledContent("Status") { HStack { Text("Checking…").foregroundStyle(.secondary); ProgressView() } }
+            } else {
+                Button("Download Developer Disk Image") { Task { await model.diskImage.download() } }
+            }
         case .failed(let why):
             Label(why, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             Button("Download Again") { Task { await model.diskImage.download() } }
@@ -740,6 +744,7 @@ struct SetupStepRow: View {
             return model.setup.loopback == .none ? AppLocalization.text(LocalizedStringResource("Needed")) : AppLocalization.text(LocalizedStringResource("Off"))
         case .pairing:
             if model.pairingTrouble != nil { return AppLocalization.text(LocalizedStringResource("Pair Again")) }
+            if model.diskImage.isChecking { return AppLocalization.text(LocalizedStringResource("Checking…")) }
             if model.pairingPath != nil, !model.diskImage.hasFiles { return AppLocalization.text(LocalizedStringResource("Downloading")) }
             return AppLocalization.text(LocalizedStringResource("Needed"))
         default: return AppLocalization.text(LocalizedStringResource("Needed"))
