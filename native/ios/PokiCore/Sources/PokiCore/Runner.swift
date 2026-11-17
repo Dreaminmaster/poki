@@ -46,27 +46,82 @@ public enum TransportError: Error, Sendable {
 }
 
 public final class URLSessionTransport: HTTPTransport {
-    let session: URLSession
+    let localSession: URLSession
+    let publicSession: URLSession
+
     public init() {
+        // Local phone services (loopback and the 10.7.0.1 phone tunnel) must bypass system
+        // HTTP/SOCKS proxies so a proxy app on the phone cannot intercept or stall local
+        // WebDriverAgent traffic. Public internet endpoints (such as downloading the developer
+        // disk image from GitHub) must keep the system proxy intact so users behind a proxy
+        // can reach them.
+        let local = Self.baseConfiguration()
+        local.connectionProxyDictionary = [:]
+        localSession = URLSession(configuration: local)
+
+        publicSession = URLSession(configuration: Self.baseConfiguration())
+    }
+
+    deinit {
+        localSession.finishTasksAndInvalidate()
+        publicSession.finishTasksAndInvalidate()
+    }
+
+    private static func baseConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpMaximumConnectionsPerHost = 4
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.connectionProxyDictionary = [:]
-        session = URLSession(configuration: configuration)
+        return configuration
     }
+
+    /// Whether `url` targets a local phone service rather than the public internet.
+    /// Loopback addresses (`127.0.0.0/8`, `localhost`, `::1`) and the phone's loopback tunnel
+    /// (`10.7.0.1`) stay direct; everything else keeps the system proxy configuration.
+    static func isLocalPhoneService(_ url: URL) -> Bool {
+        guard var host = url.host?.lowercased(), !host.isEmpty else { return false }
+        if host.hasPrefix("[") && host.hasSuffix("]") {
+            host = String(host.dropFirst().dropLast())
+        }
+        while host.hasSuffix(".") {
+            host.removeLast()
+        }
+        return host == "localhost"
+            || host.hasSuffix(".localhost")
+            || host == "::1"
+            || host == "0:0:0:0:0:0:0:1"
+            || host == "10.7.0.1"
+            || isIPv4Loopback(host)
+    }
+
+    private static func isIPv4Loopback(_ host: String) -> Bool {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4, parts[0] == "127" else { return false }
+        return parts.allSatisfy { part in
+            guard let octet = UInt8(part) else { return false }
+            return String(octet) == part
+        }
+    }
+
+    func session(for url: URL) -> URLSession {
+        Self.isLocalPhoneService(url) ? localSession : publicSession
+    }
+
     public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
-        // One connection per request. The runner drops a kept-alive connection when it fails to write
-        // an answer to it (a request we gave up on), and a request sent on that connection in the same
-        // moment is lost with "the network connection was lost" after no time at all.
-        request.setValue("close", forHTTPHeaderField: "Connection")
+        // One connection per request to the phone runner. The runner drops a kept-alive connection
+        // when it fails to write an answer to it (a request we gave up on), and a request sent on
+        // that connection in the same moment is lost with "the network connection was lost" after no
+        // time at all.
+        if Self.isLocalPhoneService(url) {
+            request.setValue("close", forHTTPHeaderField: "Connection")
+        }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "content-type")
         }
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session(for: url).data(for: request)
             return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
         } catch let error as URLError {
             switch error.code {

@@ -1235,6 +1235,35 @@ final class DDITests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
         #endif
     }
+
+    func testURLSessionTransportPreservesSystemProxyForDiskImageAndBypassesForPhoneServices() {
+        let transport = URLSessionTransport()
+
+        let publicURLs = [
+            DeveloperDiskImage.Kind.cryptex.mirror.appendingPathComponent("BuildManifest.plist"),
+            DeveloperDiskImage.Kind.personalized.mirror.appendingPathComponent("Image.dmg"),
+            URL(string: "https://example.com/resource")!,
+            URL(string: "https://127.example.com/resource")!,
+            URL(string: "https://localhost.example.com/resource")!,
+        ]
+        for url in publicURLs {
+            let proxy = transport.session(for: url).configuration.connectionProxyDictionary
+            XCTAssertNil(proxy, "public request \(url.absoluteString) should keep the system proxy configuration")
+        }
+
+        let localPhoneURLs = [
+            URL(string: "http://127.0.0.1:8100/status")!,
+            URL(string: "http://127.0.0.2:8100/status")!,
+            URL(string: "http://localhost:8100/status")!,
+            URL(string: "http://sub.localhost:8100/status")!,
+            URL(string: "http://[::1]:8100/status")!,
+            URL(string: "http://10.7.0.1:8100/status")!,
+        ]
+        for url in localPhoneURLs {
+            let proxy = transport.session(for: url).configuration.connectionProxyDictionary
+            XCTAssertEqual(proxy?.isEmpty, true, "local phone service \(url.absoluteString) must bypass system proxies")
+        }
+    }
 }
 
 /// ESP-176: the owner asks in one app (Grok Bot, or Poki's own chat), Poki works in others, and when
