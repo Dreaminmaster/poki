@@ -60,6 +60,9 @@ enum ConnectionCheck {
         let cancel = CancellationToken()
         var options = SimpleStreamOptions()
         options.apiKey = key.isEmpty && provider == .custom ? "none" : key
+        // A connection check runs before a conversation exists. Give this probe its own
+        // routing identifier, using PiSwift's OpenCode host and provider checks.
+        options.headers = openCodeSessionHeaders(model: model, sessionId: UUID().uuidString, headers: options.headers)
         options.maxTokens = 16
         options.maxRetries = 0
         options.timeoutMs = Int(deadline * 1000) + 5000
