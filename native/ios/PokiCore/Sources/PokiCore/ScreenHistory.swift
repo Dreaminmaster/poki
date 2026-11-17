@@ -38,7 +38,7 @@ public struct ScreenHistorySource: Sendable {
 
     public init(
         isEnabled: @escaping @Sendable () -> Bool,
-        accessRevision: @escaping @Sendable () -> UInt64 = { 0 },
+        accessRevision: @escaping @Sendable () -> UInt64,
         now: @escaping @Sendable () -> Date = { Date() },
         entries: @escaping @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry]
     ) {
