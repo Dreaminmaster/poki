@@ -1235,6 +1235,65 @@ final class DDITests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
         #endif
     }
+
+    func testURLSessionTransportPreservesSystemProxyForDiskImageAndBypassesForPhoneServices() {
+        let transport = URLSessionTransport()
+
+        let publicURLs = [
+            DeveloperDiskImage.Kind.cryptex.mirror.appendingPathComponent("BuildManifest.plist"),
+            DeveloperDiskImage.Kind.personalized.mirror.appendingPathComponent("Image.dmg"),
+            URL(string: "https://raw.githubusercontent.com/apple/swift/main/README.md")!,
+            URL(string: "https://api.openai.com/v1/responses")!,
+            URL(string: "https://example.com/resource")!,
+            URL(string: "https://127.example.com/resource")!,
+            URL(string: "https://localhost.example.com/resource")!,
+            URL(string: "https://local.example.com/resource")!,
+            URL(string: "https://fd00.example.com/resource")!,
+            URL(string: "https://fe80.example.com/resource")!,
+            URL(string: "http://[::ffff:8.8.8.8]:8100/status")!,
+            URL(string: "http://[fec0::1]:8100/status")!,
+            URL(string: "http://[2001:db8::1]:8100/status")!,
+        ]
+        for url in publicURLs {
+            let proxy = transport.session(for: url).configuration.connectionProxyDictionary
+            XCTAssertNil(proxy, "public request \(url.absoluteString) should keep the system proxy configuration")
+            let request = transport.request(method: "GET", url: url, body: nil, timeout: 10)
+            XCTAssertNil(request.value(forHTTPHeaderField: "Connection"), "public request \(url.absoluteString) should not force Connection: close")
+        }
+
+        let localPhoneURLs = [
+            // Loopback and 10.7.0.1 phone tunnel
+            URL(string: "http://127.0.0.1:8100/status")!,
+            URL(string: "http://127.0.0.2:8100/status")!,
+            URL(string: "http://localhost:8100/status")!,
+            URL(string: "http://sub.localhost:8100/status")!,
+            URL(string: "http://[::1]:8100/status")!,
+            URL(string: "http://[0000::1]:8100/status")!,
+            URL(string: "http://10.7.0.1:8100/status")!,
+            // IPv6 ULA tunnels (fc00::/7, including fd00::/8)
+            URL(string: "http://[fd00::1]:8100/status")!,
+            URL(string: "http://[fd12:3456:789a::1]:8100/status")!,
+            URL(string: "http://[fc00::1]:8100/status")!,
+            // Link-local IPv6 (fe80::/10), with and without zone ID
+            URL(string: "http://[fe80::1]:8100/status")!,
+            URL(string: "http://[febf::1]:8100/status")!,
+            URL(string: "http://[fe80::1%utun3]:8100/status")!,
+            URL(string: "http://[fe80::1%25en0]:8100/status")!,
+            // IPv4-mapped IPv6
+            URL(string: "http://[::ffff:127.0.0.1]:8100/status")!,
+            URL(string: "http://[::ffff:7f00:1]:8100/status")!,
+            URL(string: "http://[::ffff:10.7.0.1]:8100/status")!,
+            // Bonjour .local hostnames
+            URL(string: "http://iphone.local:8100/status")!,
+            URL(string: "http://my-phone.local.:8100/status")!,
+        ]
+        for url in localPhoneURLs {
+            let proxy = transport.session(for: url).configuration.connectionProxyDictionary
+            XCTAssertEqual(proxy?.isEmpty, true, "local phone service \(url.absoluteString) must bypass system proxies")
+            let request = transport.request(method: "GET", url: url, body: nil, timeout: 10)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Connection"), "close", "local phone service \(url.absoluteString) must send Connection: close")
+        }
+    }
 }
 
 /// ESP-176: the owner asks in one app (Grok Bot, or Poki's own chat), Poki works in others, and when
