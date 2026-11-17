@@ -348,6 +348,18 @@ final class ScreenHistoryTests: XCTestCase {
     /// a forgotten revision bump in the app's switch or exclusion-list wiring.
     func testHistoryCaptureInvalidatesQueriesOnRealPrivacySettingsChanges() async {
         let capture = HistoryCapture.shared
+        // The shared instance survives between XCTest methods. Restore its in-memory values,
+        // not just UserDefaults, so subsequent query tests keep their original app filters.
+        let originalEnabled = capture.enabled
+        let originalMode = capture.listMode
+        let originalExcluded = capture.excluded
+        let originalIncluded = capture.included
+        defer {
+            capture.listMode = originalMode
+            capture.excluded = originalExcluded
+            capture.included = originalIncluded
+            capture.enabled = originalEnabled
+        }
         capture.enabled = true
         XCTAssertTrue(HistoryCapture.agentQueryAllowed)
         let initial = HistoryCapture.accessRevision
@@ -400,6 +412,8 @@ final class ScreenHistoryTests: XCTestCase {
     /// A deletion invalidates reads already underway even if Screen History stays enabled.
     func testInFlightScreenHistoryQueryIsRevokedByActualDeletion() async {
         let capture = HistoryCapture.shared
+        let originalEnabled = capture.enabled
+        defer { capture.enabled = originalEnabled }
         capture.enabled = true
         let delayedRead = SuspendedScreenHistoryRead()
         let source = ScreenHistorySource(
