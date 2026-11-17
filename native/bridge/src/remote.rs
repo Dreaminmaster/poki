@@ -163,15 +163,6 @@ impl Session {
         )
     }
 
-    async fn release_input_on_deadline(&mut self) {
-        if let Some(deadline) = self.input_media_deadline() {
-            tokio::time::sleep_until(deadline).await;
-            let _ = self.release_input().await;
-        } else {
-            std::future::pending::<()>().await;
-        }
-    }
-
     async fn release_input(&mut self) -> Result<()> {
         if let Some(connection) = &mut self.connection {
             close_input(&mut connection.media).await?;
@@ -446,11 +437,20 @@ async fn with_media_deadline<T>(
     {
         let _ = session.release_input().await;
     }
+    let deadline = session.input_media_deadline();
     tokio::pin!(future);
     tokio::select! {
         biased;
         output = &mut future => output,
-        () = session.release_input_on_deadline() => future.await,
+        () = async {
+            match deadline {
+                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                None => std::future::pending::<()>().await,
+            }
+        } => {
+            let _ = session.release_input().await;
+            future.await
+        }
     }
 }
 
@@ -1406,11 +1406,252 @@ mod tests {
             assert_eq!(disconnected["disconnected"], true, "{disconnected}");
             Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
         };
-        let (result, ()) = tokio::try_join!(serve_session(session, &socket_str), client).unwrap();
+        let (result, ()) = tokio::try_join!(
+            Box::pin(serve_session(session, &socket_str)),
+            Box::pin(client)
+        )
+        .unwrap();
         assert_eq!(result["closed"], true);
         assert!(
             phones.try_recv().is_err(),
             "releasing idle input media dropped the live tunnel"
+        );
+        PHONE.with(|slot| slot.borrow_mut().take());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn client_disconnect_during_in_flight_input_releases_media_and_never_replays() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .start_paused(true)
+                    .build()
+                    .unwrap()
+                    .block_on(
+                        client_disconnect_during_in_flight_input_releases_media_and_never_replays_inner(),
+                    );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    async fn client_disconnect_during_in_flight_input_releases_media_and_never_replays_inner() {
+        use tokio::io::AsyncBufReadExt;
+        let (sender, mut phones) = mpsc::unbounded_channel();
+        PHONE.with(|slot| *slot.borrow_mut() = Some(sender));
+
+        let now = tokio::time::Instant::now();
+        let (display, display_phone) = tokio::io::duplex(1 << 16);
+        let (media_open, mut media_closed) = mpsc::unbounded_channel::<()>();
+        let mut receivers = tokio::task::JoinSet::new();
+        receivers.spawn(async move {
+            let _open = media_open;
+            std::future::pending::<()>().await;
+        });
+        let media = InputMedia {
+            client: DisplayServiceClient::from_stream(Box::new(display))
+                .await
+                .unwrap(),
+            receivers,
+            ready_at: now,
+            last_input: now,
+            last_activity: now,
+        };
+        drop(display_phone);
+        let (mut connection, mut wire) = tunnel();
+        connection.media = Some(media);
+        let touch_port = connection.rsd.services[crate::Touch::rsd_service_name().as_ref()].port;
+
+        let (first_send_tx, first_send_rx) = tokio::sync::oneshot::channel::<()>();
+        let phone_task = tokio::spawn(async move {
+            let host: Ipv6Addr = "fd00::1".parse().unwrap();
+            let phone: Ipv6Addr = "fd00::2".parse().unwrap();
+            let mut carried: HashMap<u16, Vec<u8>> = HashMap::new();
+            let mut touch_syns = 0usize;
+            let mut notified = Some(first_send_tx);
+            loop {
+                let mut header = [0u8; 40];
+                if wire.read_exact(&mut header).await.is_err() {
+                    break;
+                }
+                let mut packet = vec![0u8; u16::from_be_bytes([header[4], header[5]]) as usize];
+                if wire.read_exact(&mut packet).await.is_err() {
+                    break;
+                }
+                if header[6] != ProtocolNumber::Tcp as u8 {
+                    continue;
+                }
+                let segment = TcpPacket::parse(&packet).unwrap();
+                let (seq, flags) = match segment.flags {
+                    TcpFlags { syn: true, .. } if segment.destination_port == touch_port => {
+                        touch_syns += 1;
+                        (
+                            0,
+                            TcpFlags {
+                                syn: true,
+                                ack: true,
+                                ..Default::default()
+                            },
+                        )
+                    }
+                    TcpFlags { syn: true, .. } => (
+                        0,
+                        TcpFlags {
+                            rst: true,
+                            ack: true,
+                            ..Default::default()
+                        },
+                    ),
+                    _ if segment.payload.is_empty() => continue,
+                    _ => (
+                        1,
+                        TcpFlags {
+                            ack: true,
+                            ..Default::default()
+                        },
+                    ),
+                };
+                let ack = segment
+                    .sequence_number
+                    .wrapping_add(segment.payload.len().max(segment.flags.syn as usize) as u32);
+                let reply = TcpPacket::create(
+                    IpAddr::V6(phone),
+                    IpAddr::V6(host),
+                    segment.destination_port,
+                    segment.source_port,
+                    seq,
+                    ack,
+                    flags,
+                    u16::MAX,
+                    &[],
+                    &[],
+                );
+                let reply = Ipv6Packet::create(phone, host, ProtocolNumber::Tcp, 64, &reply);
+                if wire.write_all(&reply).await.is_err() {
+                    break;
+                }
+                let stream_bytes = carried.entry(segment.source_port).or_default();
+                stream_bytes.extend(&segment.payload);
+                if notified.is_some()
+                    && stream_bytes
+                        .windows(b"send\0".len())
+                        .any(|w| w == b"send\0")
+                {
+                    let _ = notified.take().unwrap().send(());
+                }
+            }
+            let total_send_calls: usize = carried
+                .values()
+                .map(|bytes| {
+                    bytes
+                        .windows(b"send\0".len())
+                        .filter(|w| *w == b"send\0")
+                        .count()
+                })
+                .sum();
+            (touch_syns, total_send_calls)
+        });
+
+        let session = Session {
+            transport: Transport::Local("fixture-phone".into()),
+            control: None,
+            connection: Some(connection),
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "poki-interrupted-input-{}-{}",
+            std::process::id(),
+            now.elapsed().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket_path = dir.join("session.sock");
+        let socket_str = socket_path.to_str().unwrap().to_owned();
+        let client_socket = socket_path.clone();
+
+        let client = async move {
+            while !client_socket.exists() {
+                tokio::task::yield_now().await;
+            }
+            let stream = tokio::net::UnixStream::connect(&client_socket)
+                .await
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut greeting = String::new();
+            reader.read_line(&mut greeting).await.unwrap();
+            reader
+                .get_mut()
+                .write_all(b"{\"op\":\"tap\",\"x\":100,\"y\":200,\"duration_ms\":1000}\n")
+                .await
+                .unwrap();
+            // Wait until the contact report reached the phone, then drop the client socket mid-tap.
+            first_send_rx.await.unwrap();
+            drop(reader);
+
+            assert!(
+                media_closed.recv().await.is_none(),
+                "interrupted input did not discard the media session"
+            );
+            assert!(
+                now.elapsed() < Duration::from_millis(1000),
+                "interrupted input was not cancelled immediately before hold completion: {:?}",
+                now.elapsed()
+            );
+
+            let stream = tokio::net::UnixStream::connect(&client_socket)
+                .await
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut greeting = String::new();
+            reader.read_line(&mut greeting).await.unwrap();
+            reader
+                .get_mut()
+                .write_all(b"{\"op\":\"connect\"}\n")
+                .await
+                .unwrap();
+            let mut reply = String::new();
+            reader.read_line(&mut reply).await.unwrap();
+            let connected: Value = serde_json::from_str(&reply).unwrap();
+            assert_eq!(connected["connected"], true);
+
+            let stream = tokio::net::UnixStream::connect(&client_socket)
+                .await
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut greeting = String::new();
+            reader.read_line(&mut greeting).await.unwrap();
+            reader
+                .get_mut()
+                .write_all(b"{\"op\":\"disconnect\"}\n")
+                .await
+                .unwrap();
+            let mut reply = String::new();
+            reader.read_line(&mut reply).await.unwrap();
+            let disconnected: Value = serde_json::from_str(&reply).unwrap();
+            assert_eq!(disconnected["disconnected"], true);
+            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+        };
+
+        let (result, ()) = tokio::try_join!(
+            Box::pin(serve_session(session, &socket_str)),
+            Box::pin(client)
+        )
+        .unwrap();
+        assert_eq!(result["closed"], true);
+        let (touch_syns, total_send_calls) = phone_task.await.unwrap();
+        assert_eq!(
+            touch_syns, 1,
+            "interrupted tap opened Touch service {touch_syns} times (replayed)"
+        );
+        assert_eq!(
+            total_send_calls, 1,
+            "interrupted tap was not aborted mid-hold (expected 1 HID send, got {total_send_calls})"
+        );
+        assert!(
+            phones.try_recv().is_err(),
+            "interrupted tap rebuilt the tunnel or replayed on a second connection"
         );
         PHONE.with(|slot| slot.borrow_mut().take());
         let _ = std::fs::remove_dir_all(&dir);
