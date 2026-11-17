@@ -3,6 +3,46 @@ import SwiftUI
 import UIKit
 import notify
 
+/// A process-local lease for screen text already fetched by asynchronous agent queries.
+/// Revoking a lease does not try to undo an answer already delivered to the caller.
+private final class HistoryQueryPermissionLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+    private var deletions = 0
+
+    var revision: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    var deleting: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return deletions > 0
+    }
+
+    func revoke() {
+        lock.lock()
+        value &+= 1
+        lock.unlock()
+    }
+
+    func beginDeletion() {
+        lock.lock()
+        value &+= 1
+        deletions += 1
+        lock.unlock()
+    }
+
+    func endDeletion() {
+        lock.lock()
+        deletions = max(0, deletions - 1)
+        value &+= 1
+        lock.unlock()
+    }
+}
+
 /// iPhone History's capture and its privacy controls (issue 356), as an experiment.
 ///
 /// Nothing is read until the owner asks in Testing Options: one read 10 seconds later, or a short
@@ -30,16 +70,26 @@ final class HistoryCapture: ObservableObject {
 
     nonisolated static let enabledKey = "history.enabled"
     nonisolated static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+    nonisolated private static let queryLease = HistoryQueryPermissionLease()
+    nonisolated static var accessRevision: UInt64 { queryLease.revision }
+    nonisolated static var agentQueryAllowed: Bool { isEnabled && !queryLease.deleting }
 
     @Published var enabled: Bool {
         didSet {
+            Self.queryLease.revoke()
             save(enabled, Self.enabledKey)
             if !enabled { stop() }
         }
     }
-    @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
-    @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
-    @Published var included: [String] { didSet { save(included, "history.included") } }
+    @Published var listMode: ListMode {
+        didSet { Self.queryLease.revoke(); save(listMode.rawValue, "history.listMode") }
+    }
+    @Published var excluded: [String] {
+        didSet { Self.queryLease.revoke(); save(excluded, "history.excluded") }
+    }
+    @Published var included: [String] {
+        didSet { Self.queryLease.revoke(); save(included, "history.included") }
+    }
     @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); prune() } }
     /// How long the hour, day and week summaries outlive the tape, in days. 0 is as long as the tape.
     @Published var summaryDays: Int { didSet { save(summaryDays, "history.summaryDays"); prune() } }
@@ -270,6 +320,8 @@ final class HistoryCapture: ObservableObject {
     // MARK: Deleting
 
     func clear(last seconds: TimeInterval) async {
+        Self.queryLease.beginDeletion()
+        defer { Self.queryLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.delete(from: Date().addingTimeInterval(-seconds), to: Date().addingTimeInterval(60))
         HistoryStore.shared.note("cleared", "\(Int(seconds))")
@@ -277,12 +329,16 @@ final class HistoryCapture: ObservableObject {
     }
 
     func clearEverything() async {
+        Self.queryLease.beginDeletion()
+        defer { Self.queryLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.deleteEverything()
         changes += 1
     }
 
     func delete(from start: Date, to end: Date) async {
+        Self.queryLease.beginDeletion()
+        defer { Self.queryLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.delete(from: start, to: end)
         changes += 1
