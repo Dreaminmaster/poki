@@ -129,6 +129,7 @@ final class SelfSigner {
 
     var signedIn: Bool { status?.signed_in == true || Self.screenshotSignedIn }
     var needsCode: Bool { status?.needs_code == true }
+    var needsCodeSheet = false
     var daysLeft: Double? { expiry.map { $0.timeIntervalSinceNow / 86_400 } }
     /// The build Install would put on: an update when one is ready, else a refresh.
     var next: Prepared? { ready["update"] ?? ready["refresh"] }
@@ -207,17 +208,36 @@ final class SelfSigner {
     func finishSignIn(code: String) async {
         await run("Checking the code") { _ = try await SignerBridge.call(["op": "finish_sign_in", "code": code]) }
         await reload()
+        if !needsCode { needsCodeSheet = false }
         if signedIn { await loadTeams() }
     }
 
+    func presentCodeSheet() {
+        if needsCode { needsCodeSheet = true }
+    }
+
+    func dismissCodeSheet() {
+        needsCodeSheet = false
+    }
+
     func signOut() async {
+        needsCodeSheet = false
         await run("Signing out") { _ = try await SignerBridge.call(["op": "sign_out"]) }
         teams = []
         await reload()
     }
 
     func loadTeams() async {
-        do { teams = try await SignerBridge.decode([Team].self, ["op": "teams"]) } catch { lastError = error.localizedDescription }
+        do {
+            teams = try await SignerBridge.decode([Team].self, ["op": "teams"])
+        } catch {
+            lastError = error.localizedDescription
+            if (error as? SignerError)?.code == "needs_code" {
+                await reload()
+                if needsCode { needsCodeSheet = true }
+                return
+            }
+        }
         await reload()
     }
 
@@ -442,6 +462,10 @@ final class SelfSigner {
             let code = (error as? SignerError)?.code ?? ""
             lastError = whyUnreachable() == .cellular && ["loopback", "handshake", "unreachable"].contains(code) ? LoopbackMonitor.needsWiFi : error.localizedDescription
             log.add("signing", "\(title ?? "signer"): \(error.localizedDescription)")
+            if code == "needs_code" {
+                await reload()
+                if needsCode { needsCodeSheet = true }
+            }
         }
     }
 

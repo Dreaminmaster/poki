@@ -166,6 +166,27 @@ struct SetupView: View {
                 } else if let t = model.teams.first {
                     LabeledContent("Team") { Text(t.isFree ? "\(t.name), free (7-day apps)" : t.name).foregroundStyle(.secondary) }
                 }
+                if model.account?.pendingFactor != nil {
+                    Button("Enter 6-Digit Verification Code…") { model.needsCode = true }
+                }
+            } else if let err = model.accountError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Could not read your saved Apple Account")
+                            Text("When macOS asks for keychain access, enter your Mac login password and choose “Always Allow”, then retry.")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Text(err.message)
+                                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                    } icon: {
+                        Image(systemName: "key.slash").foregroundStyle(.orange)
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Retry") { Task { await model.refreshAccount() } }
+                    }
+                }
             } else {
                 LabeledContent("Sign in with the Apple Account Poki is signed for") {
                     Button("Sign In…") { model.page = .account }
@@ -292,6 +313,7 @@ struct SetupView: View {
 
     /// Why Install is not available yet, if it is not.
     private var footer: String? {
+        if model.accountError != nil { return "Unlock your keychain and choose “Always Allow”, then tap Retry above." }
         if model.account?.signedIn != true { return "Sign in first. Your Apple Account password goes to Apple only." }
         if ipa == nil && model.latest == nil { return "No Poki release is published yet. Use ⋯ to install from the Poki IPA you downloaded (the “external” one)." }
         return nil

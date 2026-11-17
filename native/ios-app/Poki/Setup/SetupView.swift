@@ -686,6 +686,7 @@ private struct BackgroundPage: View {
 /// wrong, and a tap opens its fix. It is on the Chats page (the steps still open) and in the Poki tab.
 struct SetupChecklist: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.pokiDetailsOpen) private var detailsOpen
     @State private var guiding = false
 
     var body: some View {
@@ -708,6 +709,7 @@ struct SetupChecklist: View {
         .navigationTitle(AppLocalization.text("Setup"))
         .onAppear { model.loopback.resume() }
         .sheet(isPresented: $guiding) { SetupGuide(start: SetupStep.shown.first { !model.isDone($0) }) }
+        .background(EmptyView().sheet(isPresented: Binding(get: { model.signer.needsCodeSheet && !detailsOpen }, set: { model.signer.needsCodeSheet = $0 })) { VerificationCodeSheet() })
     }
 }
 

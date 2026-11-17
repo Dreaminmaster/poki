@@ -100,7 +100,11 @@ impl Signer {
                         self.account.session = Some(s);
                         t
                     }
-                    SignInOutcome::NeedsCode(_) => return Err(Error::NeedsPerson("Apple wants a new verification code. Open Poki Setup and sign in again.".into())),
+                    SignInOutcome::NeedsCode(pending) => {
+                        self.remember_anisette();
+                        let _ = store::save(&self.account);
+                        return Err(Error::NeedsCode(Box::new(pending)));
+                    }
                 }
             }
             Err(e) => return Err(e),

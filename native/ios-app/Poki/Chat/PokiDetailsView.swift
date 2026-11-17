@@ -191,6 +191,7 @@ struct PokiDetailsView: View {
                     .settingsPage()
             }
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+            .sheet(isPresented: Bindable(model.signer).needsCodeSheet) { VerificationCodeSheet() }
         }
     }
 
