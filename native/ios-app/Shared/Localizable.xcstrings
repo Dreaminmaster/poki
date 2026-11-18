@@ -34810,6 +34810,54 @@
         }
       }
     },
+    "Screen History Stopped Reading" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史已停止读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史已停止讀取"
+          }
+        }
+      }
+    },
+    "Poki lost its connection to this iPhone. Open Poki to turn Screen History back on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 与这台 iPhone 的连接已断开。打开 Poki 以重新开启屏幕历史。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 與這部 iPhone 的連線已中斷。打開 Poki 以重新開啟螢幕歷史。"
+          }
+        }
+      }
+    },
+    "Reading Dropped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取意外中断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取意外中斷"
+          }
+        }
+      }
+    },
     "Screen History Settings" : {
       "localizations" : {
         "zh-Hans" : {

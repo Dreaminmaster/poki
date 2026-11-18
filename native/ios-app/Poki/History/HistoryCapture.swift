@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import notify
+import UserNotifications
 
 /// iPhone History's capture and its privacy controls (issue 356), as an experiment.
 ///
@@ -72,6 +73,17 @@ final class HistoryCapture: ObservableObject {
     /// The run in progress. Ending a run moves it on, so a late answer from an older one is ignored.
     private var run = 0
     private var once = false
+    /// Set when a run's launcher call was ended to wait (an agent's task took the screen), so the
+    /// run goes on afterwards and is not taken for finished.
+    private var interrupted = false
+    /// Why the run is waiting to read again, while it does.
+    @Published private(set) var held: Status?
+    /// Since when no read has worked, in a run. nil while reads work.
+    private var failingSince: Date?
+    /// Whether this run already told the owner it stopped by accident.
+    private var notified = false
+    /// The app last read that was an app, for a web page whose own process names none.
+    private var host: String?
     private var background: UIBackgroundTaskIdentifier = .invalid
     private var lockToken: Int32 = NOTIFY_TOKEN_INVALID
     private var screenToken: Int32 = NOTIFY_TOKEN_INVALID
@@ -111,6 +123,22 @@ final class HistoryCapture: ObservableObject {
         if low.isEmpty || low.hasPrefix("com.apple.chrono") || low.contains("widgetrenderer") { return true }
         if overlays.contains(where: { $0.lowercased() == low }) { return true }
         return low.hasPrefix("com.apple.") && (low.hasSuffix("uiservice") || low.hasSuffix("viewservice"))
+    }
+
+    /// A WebKit process that draws a page for some app: one per tab, with no app's name.
+    nonisolated static func isWeb(_ app: String) -> Bool { app.lowercased().hasPrefix("com.apple.webkit") }
+
+    nonisolated static let safari = "com.apple.mobilesafari"
+
+    /// Removes what was kept before system processes were left out, and counts the reads of web
+    /// pages' own processes as Safari's.
+    func tidy() async {
+        let apps = await HistoryStore.shared.everyApp()
+        let web = apps.filter(Self.isWeb)
+        let processes = apps.filter { !Self.isWeb($0) && HistoryAppNames.isProcess($0) }
+        guard !web.isEmpty || !processes.isEmpty else { return }
+        HistoryStore.shared.tidy(processes: processes, web: web, browser: Self.safari)
+        BacktapeNotes.shared.reset()
     }
 
     /// Poki's own screens are never kept, whatever the lists say.
@@ -178,17 +206,26 @@ final class HistoryCapture: ObservableObject {
         let me = run
         once = minutes == nil
         prune()
-        HistoryStore.shared.dropNoise()
+        Task { await self.tidy() }
+        interrupted = false
+        held = nil
+        failingSince = nil
+        notified = false
+        host = nil
+        Self.withdrawNotice()
         background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
             Task { @MainActor in
                 AppLog.shared.add("history", "iOS ended the background time")
+                // Not the owner's doing, and not the run's time being up.
+                if let self, self.run == me, self.isRunning, !self.once { self.notice() }
                 self?.end(me, .stopped)
             }
         }
         let wait = once ? Self.waitSeconds : 0
         set(once ? .waiting : .reading)
-        ends = Date().addingTimeInterval(Double(wait + (minutes ?? 0) * 60))
         let duration = max(10, (minutes ?? 0) * 60)
+        let until = Date().addingTimeInterval(Double(wait + (once ? 0 : duration)))
+        ends = until
         #if !targetEnvironment(simulator)
         let screen = UIScreen.main.bounds
         let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
@@ -196,27 +233,119 @@ final class HistoryCapture: ObservableObject {
         Task {
             if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
             guard self.run == me else { return }
+            #if targetEnvironment(simulator)
             if let refused = self.refusal(model) { self.end(me, refused); return }
             self.set(.reading)
-            #if targetEnvironment(simulator)
             await self.runOnSimulator(me: me, duration: duration, model: model)
             #else
-            // A single read runs for the launcher's shortest time and ends at the first kept read.
-            let request: [String: Any] = [
-                "op": "run", "device_address": "10.7.0.1", "pairing_file": model.pairingPath ?? "", "host_name": "Poki",
-                "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": duration,
-                "include_text": true, "include_tree": true,
-            ]
-            do {
-                _ = try await HistoryBridge.call(request) { [weak self] line in
-                    Task { @MainActor [weak self] in self?.took(line, run: me, model: model) }
+            // A single read is one try, as before. A run lasts through what interrupts it (the
+            // owner, 2026-11-18): while the local connection is down or an agent's task has the
+            // screen it waits and tries again, and a launcher call that fails is started again
+            // for the time left. Only the lock, the owner and the run's own time end it.
+            var tries = 0
+            while self.run == me {
+                let left = self.once ? duration : Int(until.timeIntervalSinceNow.rounded())
+                if left < (self.once ? 1 : 5) { break }
+                if let refused = self.refusal(model) {
+                    if self.once || refused == .locked || refused == .notPaired { self.end(me, refused); return }
+                    self.hold(refused, model: model)
+                    model.loopback.check()
+                    tries += 1
+                    // 2, 4, 8, 16, then every 30 seconds: on cellular the wait can be long.
+                    try? await Task.sleep(for: .seconds(min(30, 1 << min(tries, 5))))
+                    continue
                 }
-            } catch {
-                AppLog.shared.add("history", "capture stopped: \(error.localizedDescription)")
+                self.resume()
+                let request: [String: Any] = [
+                    "op": "run", "device_address": "10.7.0.1", "pairing_file": model.pairingPath ?? "", "host_name": "Poki",
+                    "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": max(10, left),
+                    "include_text": true, "include_tree": true,
+                ]
+                do {
+                    _ = try await HistoryBridge.call(request) { [weak self] line in
+                        Task { @MainActor [weak self] in self?.took(line, run: me, model: model) }
+                    }
+                    guard self.run == me else { return }
+                    if self.interrupted { self.interrupted = false; continue }
+                    break
+                } catch {
+                    AppLog.shared.add("history", "capture stopped: \(error.localizedDescription)")
+                    guard self.run == me, !self.once else { break }
+                    self.interrupted = false
+                    self.hold(.noConnection, model: model)
+                    tries += 1
+                    try? await Task.sleep(for: .seconds(min(30, 1 << min(tries, 5))))
+                }
             }
             #endif
             self.end(me, .finished)
         }
+    }
+
+    /// The run waits: the status stays a running one, and the reason goes to the observing record.
+    private func hold(_ why: Status, model: AppModel) {
+        if held != why {
+            held = why
+            HistoryStore.shared.note(why.rawValue)
+            AppLog.shared.add("history", "run waits: \(why.rawValue)")
+        }
+        if status != .waiting { status = .waiting }
+        // An agent's task is no accident, and neither is being on cellular, where iOS refuses the
+        // local connection for as long as it lasts: nothing to turn back on.
+        if why == .noConnection, !model.loopback.cellularRefused { failing() } else { failingSince = nil }
+    }
+
+    /// Reads go on.
+    private func resume() {
+        if held != nil {
+            held = nil
+            HistoryStore.shared.note(Status.reading.rawValue)
+        }
+        if status != .reading { status = .reading }
+    }
+
+    // MARK: Dropped by accident
+
+    private static let noticeID = "nz.zheha.poki.history.dropped"
+    /// How long reads must have failed before the owner is told. A try to open the local
+    /// connection takes up to 20 seconds, so this is about three in a row.
+    private static let confirmAfter: TimeInterval = 60
+
+    private func failing() {
+        guard !once else { return }
+        let since = failingSince ?? Date()
+        failingSince = since
+        if Date().timeIntervalSince(since) >= Self.confirmAfter { notice() }
+    }
+
+    private func working() {
+        failingSince = nil
+        if notified {
+            notified = false
+            Self.withdrawNotice()
+        }
+    }
+
+    /// Tells the owner once per drop, and only while Poki is not the app in front, where the page
+    /// itself says it.
+    private func notice() {
+        guard !notified else { return }
+        notified = true
+        HistoryStore.shared.note("dropped")
+        AppLog.shared.add("history", "reading dropped by accident")
+        guard UIApplication.shared.applicationState != .active else { return }
+        let content = UNMutableNotificationContent()
+        content.title = AppLocalization.text(LocalizedStringResource("Screen History Stopped Reading"))
+        content.body = AppLocalization.text(LocalizedStringResource("Poki lost its connection to this iPhone. Open Poki to turn Screen History back on."))
+        content.interruptionLevel = .timeSensitive
+        content.userInfo = ["poki_link": "poki://chat"]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.noticeID, content: content,
+                                                                      trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
+    }
+
+    private static func withdrawNotice() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [noticeID])
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [noticeID])
     }
 
     func stop() {
@@ -230,6 +359,8 @@ final class HistoryCapture: ObservableObject {
         HistoryBridge.cancel()
         set(why)
         ends = nil
+        held = nil
+        failingSince = nil
         if background != .invalid {
             UIApplication.shared.endBackgroundTask(background)
             background = .invalid
@@ -254,20 +385,37 @@ final class HistoryCapture: ObservableObject {
     private func took(_ data: Data, run me: Int, model: AppModel) {
         guard me == run, status == .reading, !lockedOrDark,
               let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
-        if model.hasOpenInProcessSession { end(me, .task); return }
+        if model.hasOpenInProcessSession {
+            // A single read gives way. A run waits for the task to end and reads on.
+            if once { end(me, .task) } else if !interrupted { interrupted = true; HistoryBridge.cancel() }
+            return
+        }
+        // A read the launcher could not make: its tunnel is down and it is opening another.
+        if line["ok"] as? Bool == true { working() } else if !model.loopback.cellularRefused { failing() }
         if keep(line), once { end(me, .finished) }
     }
 
     /// Keeps a read of the launcher's when the app lists allow it. Returns whether it was kept.
     @discardableResult
     func keep(_ line: [String: Any]) -> Bool {
-        guard line["ok"] as? Bool == true, let read = line["text"] as? [String], !read.isEmpty else { return false }
-        let app = line["app"] as? String ?? ""
+        guard line["ok"] as? Bool == true else { return false }
+        var app = line["app"] as? String ?? ""
+        let home = app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame
+        if app.isEmpty || Self.isWeb(app) {
+            // A web page's own process. It counts as the app that shows it: the one the launcher
+            // found around the page, else the app read just before, else Safari.
+            app = (line["host"] as? String).flatMap { $0.isEmpty || Self.isWeb($0) ? nil : $0 } ?? host ?? (app.isEmpty ? "" : Self.safari)
+        } else if home {
+            host = nil
+        } else if !HistoryAppNames.isProcess(app) {
+            host = app
+        }
+        guard let read = line["text"] as? [String], !read.isEmpty else { return false }
         // The Home Screen is left out with its notification banners: a banner names the sending app
         // only by its display name, so the app lists could not leave it out. A left-out app leaves
         // no trace, not even a line in the observing record.
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame { return false }
-        if Self.isNoise(app) { return false }
+        if HistoryAppNames.isProcess(app) { return false }
         guard keeps(app) else { return false }
         let tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         let now = Date()
