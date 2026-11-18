@@ -73,9 +73,8 @@ final class ActivityController {
 
     var enabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
-    /// True where something else already says Poki is on while nothing happens (iOS 26's continued
-    /// processing task has its own Lock Screen and island UI): then there is no idle Live Activity.
-    /// It starts when work begins or Poki needs the person, and goes when the run has folded.
+    /// True when the owner turned Ready off: no idle Live Activity. It starts when work begins while
+    /// Poki is in front, and goes when the run has folded.
     var hidesWhenIdle: () -> Bool = { ActivityController.hidesReady }
     /// The owner turned off Ready in Settings › Connection: no Live Activity while nothing happens.
     nonisolated static let hidesReadyKey = "liveActivity.hidesReady"

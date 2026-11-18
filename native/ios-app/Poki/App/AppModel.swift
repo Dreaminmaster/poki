@@ -26,7 +26,6 @@ final class AppModel {
         readySetting += 1
         log.add("activity", on ? "Ready Live Activity turned on" : "Ready Live Activity turned off: shown only for work that starts while Poki is in front")
         activity.idleSettingChanged()
-        background.readySettingChanged()
     }
     /// Bumped so views reading `showsReadyActivity` update.
     private(set) var readySetting = 0

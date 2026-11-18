@@ -41,24 +41,9 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     func start() {
         guard !isOn else { return }
         isOn = true
-        // iOS 26 and later: the system's continued processing task keeps Poki up, with no audio and
-        // no location. Silent audio only when iOS refuses it or ends it early. iOS shows that task as a
-        // Live Activity of its own, so with Ready off in Settings silent audio holds Poki up instead.
-        if #available(iOS 26.0, *), !ActivityController.hidesReady {
-            let run = ContinuedRun.shared
-            continued = run
-            run.onExpired = { [weak self] in
-                guard let self, self.isOn else { return }
-                self.startAudio(); self.watchInterruptions()
-            }
-            if run.begin(subtitle: AppLocalization.text(LocalizedStringResource("Agents can reach this iPhone"))) { return }
-        }
         startAudio()
         watchInterruptions()
     }
-
-    /// The iOS 26 continued run (typed loosely so this class builds for iOS 18).
-    private var continued: AnyObject?
 
     /// Silent audio could not hold Poki up (it would be suspended): location stands in until it can.
     private(set) var audioLost = false
@@ -101,29 +86,12 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     func resumeAudio() {
         audioPaused = false
         guard isOn else { return }
-        if #available(iOS 26.0, *), (continued as? ContinuedRun)?.isRunning == true { return }
         startAudio()
-    }
-
-    /// Ready was turned on or off in Settings while Poki is on. Off ends the continued run (iOS's own
-    /// Live Activity) and silent audio takes over. On leaves the audio playing until Poki next turns
-    /// on, so Poki is never left without a keep-alive in between.
-    func readySettingChanged() {
-        guard isOn, ActivityController.hidesReady else { return }
-        if #available(iOS 26.0, *), let run = continued as? ContinuedRun, run.isRunning {
-            // Audio first, so Poki is never without a keep-alive.
-            if !audioPaused { startAudio() }
-            watchInterruptions()
-            run.onExpired = nil
-            run.end()
-            AppLog.shared.add("background", "continued run ended: Ready is off, silent audio keeps Poki running")
-        }
     }
 
     func stop() {
         guard isOn else { return }
         isOn = false
-        if #available(iOS 26.0, *) { (continued as? ContinuedRun)?.end() }
         audioLost = false
         if let interruption { NotificationCenter.default.removeObserver(interruption) }
         interruption = nil
