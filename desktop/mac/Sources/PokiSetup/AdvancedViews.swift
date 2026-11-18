@@ -239,10 +239,11 @@ struct DiagnosticsView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Save Here"
+        panel.message = "Support bundles can contain device identifiers, local paths and raw logs. Review the archive before sharing."
         guard panel.runModal() == .OK, let dir = panel.url else { return }
         do {
             let path: String = try await model.bridge.call("support_bundle", ["udid": model.selectedPhone?.id, "out_dir": dir.path])
-            message = "Saved \(path). It has no passwords or tokens."
+            message = "Saved \(path). Review the archive before sharing."
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         } catch { model.report(error) }
     }

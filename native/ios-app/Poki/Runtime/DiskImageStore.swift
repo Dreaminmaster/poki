@@ -14,6 +14,7 @@ final class DiskImageStore {
     private var checkToken = UUID()
     static let unavailableMessage: LocalizedStringResource = "The disk image is downloaded, but its developer tools are not available on this iPhone. Try turning Automation on. If it still fails, connect to a computer and prepare this iPhone again in Poki Setup."
     static let loadFailureMessage: LocalizedStringResource = "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki and turn Automation on."
+    static let downloadFailureMessage: LocalizedStringResource = "Failed to download the developer disk image. Make sure your network can reach GitHub (turn on a proxy or a global VPN), then tap Download Again. You can also write it from Poki Setup on your computer."
 
     init(verifySynchronously: Bool = false) {
         if verifySynchronously {
@@ -141,7 +142,7 @@ final class DiskImageStore {
             }.value
             state = ready ? .ready(build) : .downloaded(build)
         } catch {
-            state = .failed("\(error)")
+            state = .failed(AppLocalization.text(Self.downloadFailureMessage))
         }
     }
 }

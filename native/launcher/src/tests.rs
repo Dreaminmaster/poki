@@ -265,8 +265,196 @@ fn ddi_signing_boundary_keeps_signing_and_phone_socket_failures_distinct() {
     }
     let value = plist::Value::String("synthetic ticket".into());
     assert_eq!(ddi_signing_response(Ok(value.clone())).unwrap(), value);
-    let refused = ddi_signing_response(Err(IdeviceError::UnexpectedResponse("TSS server responded with non-success status".into()))).unwrap_err();
+    let refused = ddi_signing_response(Err(IdeviceError::UnexpectedResponse(
+        "TSS server responded with non-success status (STATUS=94&MESSAGE=This device isn't eligible for the requested build.)".into(),
+    )))
+    .unwrap_err();
     assert_eq!(crate::ddi::classify(&refused).code, Some("ddi_refused"));
+}
+
+#[tokio::test]
+async fn ddi_signing_separates_proxy_replies_network_errors_and_status_94_refusals() {
+    use idevice::{cryptexd::ddi_signing_response, tss::TSSRequest};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn http_response(status: &str, headers: &[(&str, &str)], body: &str) -> Vec<u8> {
+        let mut raw = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\n", body.len());
+        for (name, value) in headers {
+            raw.push_str(&format!("{name}: {value}\r\n"));
+        }
+        raw.push_str("\r\n");
+        raw.push_str(body);
+        raw.into_bytes()
+    }
+
+    async fn drain_http_request(stream: &mut tokio::net::TcpStream) {
+        let mut buf = Vec::new();
+        let head_end = loop {
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos;
+            }
+            let mut chunk = [0u8; 1024];
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        };
+        let content_len = String::from_utf8_lossy(&buf[..head_end])
+            .split("\r\n")
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.trim()
+                    .eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())?
+            })
+            .unwrap_or(0);
+        while buf.len() < head_end + 4 + content_len {
+            let mut chunk = [0u8; 1024];
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+    }
+
+    async fn run_signing_exchange(
+        responses: Vec<Vec<u8>>,
+    ) -> (std::result::Result<plist::Value, crate::device::Failure>, usize) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/TSS/controller?action=2", listener.local_addr().unwrap());
+        let hits = Arc::new(AtomicUsize::new(0));
+        let server_hits = hits.clone();
+        let server = tokio::spawn(async move {
+            for response in responses {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                server_hits.fetch_add(1, Ordering::SeqCst);
+                drain_http_request(&mut stream).await;
+                if !response.is_empty() {
+                    let _ = stream.write_all(&response).await;
+                }
+                let _ = stream.shutdown().await;
+            }
+        });
+        let result = ddi_signing_response(TSSRequest::new().with_url(url).send().await)
+            .map_err(|error| crate::ddi::classify(&error));
+        server.abort();
+        (result, hits.load(Ordering::SeqCst))
+    }
+
+    let cases: Vec<(&str, Vec<Vec<u8>>, &str, &str, &str)> = vec![
+        (
+            "proxy_502_html",
+            vec![http_response(
+                "502 Bad Gateway",
+                &[("Content-Type", "text/html")],
+                "<html><body>502 Bad Gateway: proxy upstream</body></html>",
+            )],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
+            "proxy upstream",
+        ),
+        (
+            "redirect_302_to_tss",
+            vec![
+                http_response(
+                    "302 Found",
+                    &[("Location", "/tss-after-redirect?token=SECRET_PORTAL_TOKEN")],
+                    "",
+                ),
+                http_response("200 OK", &[], "STATUS=93&MESSAGE=An internal error occurred."),
+            ],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
+            "SECRET_PORTAL_TOKEN",
+        ),
+        (
+            "captive_portal_200_html",
+            vec![http_response(
+                "200 OK",
+                &[("Content-Type", "text/html")],
+                "<html><body>Sign in to Wi-Fi</body></html>",
+            )],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
+            "Sign in to Wi-Fi",
+        ),
+        (
+            "non_plist_status_0_body",
+            vec![http_response(
+                "200 OK",
+                &[],
+                "STATUS=0&MESSAGE=SUCCESS&REQUEST_STRING=<html>proxy injected body</html>",
+            )],
+            "ddi_proxy",
+            crate::device::DDI_PROXY_FIX,
+            "proxy injected body",
+        ),
+        (
+            "connection_closed_before_headers",
+            vec![Vec::new()],
+            "network",
+            crate::device::NETWORK_FIX,
+            "",
+        ),
+        (
+            "truncated_200_body",
+            vec![b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\nSTATUS=0&MESSAGE=SUCCESS&REQUEST_STRING=<plist>".to_vec()],
+            "network",
+            crate::device::NETWORK_FIX,
+            "<plist>",
+        ),
+        (
+            "tss_status_93_internal_error",
+            vec![http_response("200 OK", &[], "STATUS=93&MESSAGE=An internal error occurred.")],
+            "network",
+            crate::device::NETWORK_FIX,
+            "",
+        ),
+        (
+            "tss_status_94_refused",
+            vec![http_response(
+                "200 OK",
+                &[],
+                "STATUS=94&MESSAGE=This device isn't eligible for the requested build.",
+            )],
+            "ddi_refused",
+            crate::device::DDI_REFUSED_FIX,
+            "",
+        ),
+    ];
+
+    let mut actual = Vec::new();
+    let mut details = Vec::new();
+    for (name, responses, _, _, forbidden_leak) in &cases {
+        let (result, hits) = run_signing_exchange(responses.clone()).await;
+        let failure = result.expect_err(name);
+        actual.push((*name, failure.code, failure.fix, hits));
+        details.push((*name, failure.detail, *forbidden_leak));
+    }
+    let expected: Vec<(&str, Option<&str>, Option<String>, usize)> = cases
+        .iter()
+        .map(|(name, _, code, fix, _)| (*name, Some(*code), Some((*fix).to_string()), 1))
+        .collect();
+    assert_eq!(actual, expected);
+    for (name, detail, forbidden_leak) in details {
+        if !forbidden_leak.is_empty() {
+            assert!(!detail.contains(forbidden_leak), "{name} leaked response data: {detail}");
+        }
+    }
+
+    let signed_plist = concat!(
+        "STATUS=0&MESSAGE=SUCCESS&REQUEST_STRING=",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+        "<plist version=\"1.0\"><dict><key>Cryptex1,Ticket</key><data>AAEC</data></dict></plist>",
+    );
+    let (signed, signed_hits) = run_signing_exchange(vec![http_response("200 OK", &[], signed_plist)]).await;
+    assert_eq!(signed_hits, 1);
+    let dict = signed.expect("STATUS=0 ticket must succeed").into_dictionary().unwrap();
+    assert_eq!(dict.get("Cryptex1,Ticket").and_then(plist::Value::as_data), Some(&[0, 1, 2][..]));
 }
 
 /// GitHub issue 69: the loopback takes the connection, then the phone's remote pairing service never

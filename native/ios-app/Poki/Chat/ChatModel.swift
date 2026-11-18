@@ -739,7 +739,8 @@ final class ChatModel {
 
     private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool) -> PiLoop {
         let changedWorkspace = loop.map { $0.inSplitView != inSplitView } ?? false
-        if let loop, loop.provider == provider, loop.model.id == model.id, !changedWorkspace { return loop }
+        if let loop, loop.provider == provider, loop.model.id == model.id,
+           loop.model.baseUrl == model.baseUrl, !changedWorkspace { return loop }
         // A different workspace starts without old screen evidence.
         let next = PiLoop(provider: provider, model: model, tools: inSplitView ? Harness.splitViewTools : Harness.tools,
                           inSplitView: inSplitView, carrying: changedWorkspace ? [] : loop?.messages ?? []) { [weak self] call in

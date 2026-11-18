@@ -154,7 +154,7 @@ enum Cmd {
         #[arg(long)]
         filter: Option<String>,
     },
-    /// A support bundle with secrets taken out.
+    /// Save a support bundle. Review identifiers, paths and raw logs before sharing.
     Support {
         #[arg(long)]
         udid: Option<String>,

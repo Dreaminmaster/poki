@@ -67,6 +67,12 @@ Use Xcode 27.1 or later to build and test on iPhone Duo. The iOS 27.1 SDK lets t
 edges of the unfolded display. In Split View, Poki sizes its chat and conversations drawer to the
 space assigned by the system. The iOS deployment target remains unchanged.
 
+A build made with an earlier SDK is letterboxed on both of the Duo's displays. Poki's own screen is
+then the letterbox while the picture it takes is the whole panel, so every screen read is refused
+(`duo_needs_ios_27_1_sdk_build`, before that `screenshot_does_not_match_active_display`, #419). The
+release IPA is therefore built on GitHub's `xcode-27` runner, and `.github/actions/build-ipa` stops
+when the iOS SDK is older than 27.1.
+
 `native/ios-app/scripts/app-tests.sh SIMULATOR_UDID` builds `PokiTests` and runs it inside Poki on a booted simulator (the in-process transport's clipboard and session answers).
 
 ### Notification permission before UI and Live Activity tests

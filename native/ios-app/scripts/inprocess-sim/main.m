@@ -19,6 +19,23 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
     NSString *before = [PKInProcess.shared sourceXML:NULL code:&code];
     if (code) out[@"source_code"] = code;
     Write([tag stringByAppendingString:@".xml"], before ?: @"");
+    const char *model = getenv("SIMULATOR_MODEL_IDENTIFIER");
+    if ([mode isEqualToString:@"read"] || (model && strcmp(model, "iPhone19,4") == 0)) {
+        // The picture Poki would hand to the agent after this read, and what this app's own
+        // UIScreen says (an app linked before the iOS 27.1 SDK is letterboxed on an iPhone Duo).
+        NSString *shotCode = nil;
+        NSData *shot = [PKInProcess.shared screenshot:&shotCode];
+        UIImage *picture = shot ? [UIImage imageWithData:shot] : nil;
+        PKDisplayGeometry geometry = PKInProcess.shared.displayGeometry;
+        out[@"screenshot"] = @{@"bytes": @(shot.length), @"code": shotCode ?: @"",
+                               @"width": @(picture.size.width * picture.scale), @"height": @(picture.size.height * picture.scale)};
+        out[@"display"] = @{@"bounds": NSStringFromCGRect(geometry.bounds), @"native": NSStringFromCGSize(geometry.nativeSize),
+                            @"routes": @(geometry.routesDisplay), @"sdk": @(__IPHONE_OS_VERSION_MAX_ALLOWED)};
+        if (shot) {
+            NSURL *dir = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+            [shot writeToURL:[dir URLByAppendingPathComponent:[tag stringByAppendingString:@"-shot.jpg"]] atomically:YES];
+        }
+    }
     if ([mode isEqualToString:@"cycle"]) {
         // Progress is written after each step, so a crash or a hang says how far it got.
         void (^progress)(NSString *) = ^(NSString *step) { out[@"progress"] = step; Write([tag stringByAppendingString:@"-progress.json"], out); };

@@ -86,6 +86,30 @@ final class ActivityController {
 
     var isRunning: Bool { activity != nil }
 
+    /// The sensor housing's smallest safe-area inset, in points of the screen's native size. iOS has no
+    /// call that says whether the phone has a Dynamic Island, so this reads the window's top inset (59
+    /// to 68 on the island phones) against the notch phones' (47 to 50). A phone this cannot read
+    /// counts as having none, which keeps the banner.
+    private static let dynamicIslandMinInset: CGFloat = 51
+
+    private static func hasDynamicIsland() -> Bool {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return false }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            let zoom = scene.screen.scale > 0 ? max(1, scene.screen.nativeScale / scene.screen.scale) : 1
+            let visible = scene.windows.filter { !$0.isHidden }
+            if let window = visible.first(where: \.isKeyWindow) ?? visible.first {
+                let insets = window.safeAreaInsets
+                let sensorInset = max(insets.top, max(insets.left, insets.right)) * zoom
+                if sensorInset > 0 { return sensorInset >= dynamicIslandMinInset }
+            }
+            if let statusHeight = scene.statusBarManager?.statusBarFrame.height, statusHeight > 0 {
+                return statusHeight * zoom >= dynamicIslandMinInset
+            }
+        }
+        return false
+    }
+
     /// Ends every Live Activity of Poki's: at launch, the ones a crashed or closed earlier run left
     /// behind (only this process updates its activity, so one it did not start is out of date); when
     /// Poki closes, its own, since nothing would update it after that. Detached, because Poki holds
@@ -356,15 +380,17 @@ final class ActivityController {
     }
 
     /// The chat's task ended: the run is finished now, not after the quiet wait. `alert` false when
-    /// the chat tells the owner itself (its reply notification).
-    func finishNow(alert: Bool) {
+    /// the chat tells the owner itself (its reply notification). True when the finish pop-up went to a
+    /// Dynamic Island, so no banner is needed on top of it.
+    @discardableResult
+    func finishNow(alert: Bool) -> Bool {
         finishTimer?.cancel()
         guard state.phase == .working, state.approval == nil, state.handoff == nil else {
             if Self.runPhases.contains(state.phase) { AppLog.shared.add("activity", "the run was not marked finished: the activity shows \(state.phase.rawValue)") }
-            return
+            return false
         }
         inStep = false
-        finish(alert: alert)
+        return finish(alert: alert)
     }
 
     private func finishRun(ifCount count: Int) {
@@ -372,7 +398,9 @@ final class ActivityController {
         finish(alert: true)
     }
 
-    private func finish(alert: Bool) {
+    /// True when the finish pop-up went to a Dynamic Island, which already tells the owner the run is over.
+    @discardableResult
+    private func finish(alert: Bool) -> Bool {
         state.phase = .done
         planFinished = true
         logRun("finished")
@@ -382,8 +410,10 @@ final class ActivityController {
         state.headline = "Finished"
         setEvent(.finished, "Run finished")
         let summary = state.runSummary ?? state.doneTitle
-        send(alert: alert ? ordinary(StatusWord.done.text, summary) : nil, critical: true)
+        let popUp = alert ? ordinary(StatusWord.done.text, summary) : nil
+        send(alert: popUp, critical: true)
         armFold()
+        return popUp != nil && isRunning && Self.hasDynamicIsland()
     }
 
     /// What a run's updates did, once iOS has had time to take the last one.
