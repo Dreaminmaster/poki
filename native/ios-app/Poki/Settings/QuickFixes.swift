@@ -164,7 +164,7 @@ enum OnDeviceDecisions {
                 let session = LanguageModelSession(instructions: instructions)
                 return try await session.respond(to: prompt).content
             } catch {
-                AppLog.shared.add("decisions", "Apple Intelligence gave no decision: \(error.localizedDescription)")
+                await AppLog.shared.add("decisions", "Apple Intelligence gave no decision: \(error.localizedDescription)")
                 return nil
             }
         }
