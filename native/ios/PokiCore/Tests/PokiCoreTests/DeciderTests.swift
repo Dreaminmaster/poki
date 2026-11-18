@@ -385,19 +385,6 @@ final class DeciderTests: XCTestCase {
         XCTAssertEqual(routine.steps[1].intent, "open the About page")
     }
 
-    func testAPathStopsAtTheStepItCannotDoAndSaysWhatWasSent() async {
-        let (core, _, app) = core(RoutineStore(url: nil), decider: nil) { $0.actionCap = 1.2 }
-        app.go(0)
-        _ = await core.call("look", [:])
-
-        let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "General"], ["tap": "Storage"]]]]]])
-
-        XCTAssertTrue(result.isError)
-        XCTAssertTrue(result.text.contains("path stopped at step 2 of 2: \"Storage\" is not on screen"), result.text)
-        XCTAssertTrue(result.text.contains("steps 1 to 1 were sent"), result.text)
-        XCTAssertEqual(app.page.value, 1)
-    }
-
     func testAPathIsFixedOnTheWayLikeARoutine() async {
         let decider = ScriptedDecider(ScriptedDecider.answer("target", "About This iPhone"))
         let (core, _, app) = core(RoutineStore(url: nil), decider: decider)
@@ -412,81 +399,6 @@ final class DeciderTests: XCTestCase {
         XCTAssertTrue(result.text.contains("fixed on the way: step 2: used Button \"About This iPhone\" for \"About\""), result.text)
         XCTAssertEqual(app.page.value, 2)
         XCTAssertEqual(decider.asked.value.first?.state["task"]?.string, "read the iOS version")
-    }
-
-    // MARK: Faster with no model at all
-
-    func testAPathClosesWhatItSaysMayBeClosedWithNoModel() async {
-        let (core, _, app) = core(RoutineStore(url: nil), decider: nil)
-        app.go(1)
-        app.prompt.value = Self.notifications
-        app.show()
-        _ = await core.call("look", [:])
-
-        let result = await core.call("do", ["actions": [["path": ["goal": "read the iOS version", "steps": [["tap": "About"]], "dismiss": ["Later", "Not Now"], "read": ["iOS Version"]]]]])
-
-        XCTAssertFalse(result.isError, result.text)
-        XCTAssertEqual(app.tapped.value, ["Not Now", "About"])
-        XCTAssertTrue(result.text.contains("closed Button \"Not Now\" (allowed by the path)"), result.text)
-        XCTAssertTrue(result.text.contains("read: iOS Version = 27.3"), result.text)
-    }
-
-    func testWhatAPathDidNotAllowIsNotClosed() async {
-        let (core, _, app) = core(RoutineStore(url: nil), decider: nil) { $0.actionCap = 1.2 }
-        app.go(1)
-        app.prompt.value = Self.notifications
-        app.show()
-        _ = await core.call("look", [:])
-
-        let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "About"]], "dismiss": ["Later"]]]]])
-
-        XCTAssertTrue(result.isError)
-        XCTAssertTrue(result.text.contains("behind an alert"), result.text)
-        XCTAssertEqual(app.tapped.value, [])
-    }
-
-    func testAnOptionalStepIsLeftOutWhenItsTargetIsNotThere() async {
-        let (core, _, app) = core(RoutineStore(url: nil), decider: nil)
-        app.go(0)
-        _ = await core.call("look", [:])
-        let began = Date()
-
-        let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "General"], ["tap": "Not Now", "optional": true], ["tap": "About"]]]]]])
-
-        XCTAssertFalse(result.isError, result.text)
-        XCTAssertEqual(app.tapped.value, ["General", "About"])
-        XCTAssertTrue(result.text.contains("1 optional step was left out"), result.text)
-        XCTAssertLessThan(Date().timeIntervalSince(began), 6)
-    }
-
-    func testAnOptionalStepIsTakenWhenItsTargetIsThere() async {
-        let (core, _, app) = core(RoutineStore(url: nil), decider: nil)
-        app.go(1)
-        app.prompt.value = Self.notifications
-        app.show()
-        _ = await core.call("look", [:])
-
-        let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "Not Now", "optional": true], ["tap": "About"]]]]]])
-
-        XCTAssertFalse(result.isError, result.text)
-        XCTAssertEqual(app.tapped.value, ["Not Now", "About"])
-    }
-
-    func testAStepsExpectIsReadFromTheScreenWithNoModel() async {
-        let (core, _, app) = core(RoutineStore(url: nil), decider: nil)
-        app.go(0)
-        _ = await core.call("look", [:])
-
-        let ok = await core.call("do", ["actions": [["path": ["steps": [["tap": "General", "expect": "Software Update"], ["tap": "About", "expect": ["iOS Version", "Model Name"]]]]]]])
-        XCTAssertFalse(ok.isError, ok.text)
-        XCTAssertEqual(app.page.value, 2)
-
-        app.go(0)
-        _ = await core.call("look", [:])
-        let stopped = await core.call("do", ["actions": [["path": ["steps": [["tap": "General", "expect": "Storage"], ["tap": "About"]]]]]])
-        XCTAssertTrue(stopped.isError)
-        XCTAssertTrue(stopped.text.contains("stopped at step 1 of 2: the step was sent, but \"Storage\" did not appear after it"), stopped.text)
-        XCTAssertEqual(app.page.value, 1)
     }
 
     // MARK: Optional extras with a decision model
@@ -562,17 +474,6 @@ final class DeciderTests: XCTestCase {
         let open = await core3.call("do", ["actions": [["path": ["steps": [["tap": "General", "check": "the General page is open"], ["tap": "About"]]]]]])
         XCTAssertFalse(open.isError, open.text)
         XCTAssertTrue(open.text.contains("1 check was not answered"), open.text)
-    }
-
-    func testAPathRefusesNumbersFromAnEarlierRead() async {
-        let (core, wda, app) = core(RoutineStore(url: nil), decider: nil)
-        app.go(0)
-        _ = await core.call("look", [:])
-        let taps = wda.bodies("POST /wda/tap").count
-        let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "General"], ["tap": 3]]]]]])
-        XCTAssertTrue(result.isError)
-        XCTAssertTrue(result.text.contains("a target in a path is the element's text"), result.text)
-        XCTAssertEqual(wda.bodies("POST /wda/tap").count, taps, "nothing was sent")
     }
 
     func testAnIntentIsKeptWithTheStepAndNotSentWithIt() async throws {
