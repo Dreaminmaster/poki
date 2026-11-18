@@ -664,6 +664,24 @@ final class DeciderTests: XCTestCase {
         XCTAssertThrowsError(try SystemOneDecider.openAIAnswers(in: denied, to: questions)) { XCTAssertTrue("\($0)".contains("Incorrect API key"), "\($0)") }
     }
 
+    /// A sign-in in place of a key: the token is asked for at each call, and none is an error.
+    func testATokenSourceGivesTheTokenAtEachCall() async throws {
+        let sent = LockedBox<URLRequest?>(nil), token = LockedBox<String?>("plan-1")
+        let settings = DeciderSettings(provider: .openai, model: "gpt-6-luna")
+        let decider = try XCTUnwrap(settings.decider(token: "", tokenSource: { token.value }, send: { request in
+            sent.value = request
+            return (403, Data(#"{"error":{"message":"This endpoint is not available for ChatGPT plan usage."}}"#.utf8))
+        }))
+        let check = await decider.check(timeout: 1)
+        XCTAssertEqual(sent.value?.value(forHTTPHeaderField: "Authorization"), "Bearer plan-1")
+        XCTAssertEqual(check, .failure(DeciderError("the provider answered 403: This endpoint is not available for ChatGPT plan usage.")))
+        token.value = nil
+        sent.value = nil
+        let signedOut = await decider.check(timeout: 1)
+        XCTAssertEqual(signedOut, .failure(DeciderError("the sign-in gave no token; sign in again")))
+        XCTAssertNil(sent.value, "nothing is sent without a token")
+    }
+
     func testAnAnswerThatIsNotAnOptionIsAnErrorNotAGuess() {
         let questions = [DecisionQuestion(id: "move", instructions: "", kind: .choice([("stop", "Stop"), ("wait", "Wait")]))]
         let bare = Data(#"{"answers":{"move":{"type":"choice","choice":"tap","confidence":0.9,"probabilities":{}}}}"#.utf8)

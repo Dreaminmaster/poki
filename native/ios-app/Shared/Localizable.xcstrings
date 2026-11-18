@@ -35731,6 +35731,38 @@
           }
         }
       }
+    },
+    "Uses Your ChatGPT Sign In" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 ChatGPT 登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 ChatGPT 登入"
+          }
+        }
+      }
+    },
+    "Trial. OpenAI may not allow Decisions on a ChatGPT plan. Check Connection shows its answer." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "试用。OpenAI 可能不允许在 ChatGPT 套餐上使用 Decisions。“检查连接”会显示它的回应。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "試用。OpenAI 可能不允許在 ChatGPT 方案上使用 Decisions。「檢查連線」會顯示它的回應。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

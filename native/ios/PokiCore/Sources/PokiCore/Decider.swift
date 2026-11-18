@@ -183,11 +183,13 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
         }
     }
 
-    /// A decider for these settings and this token; nil while they are incomplete.
-    public func decider(token: String, send: SystemOneDecider.Send? = nil) -> SystemOneDecider? {
+    /// A decider for these settings and this token; nil while they are incomplete. With a
+    /// `tokenSource` the token is asked for at each call (a sign-in whose token is refreshed), and
+    /// none need be given here.
+    public func decider(token: String, tokenSource: SystemOneDecider.TokenSource? = nil, send: SystemOneDecider.Send? = nil) -> SystemOneDecider? {
         let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url, !token.isEmpty || provider == .custom else { return nil }
-        return SystemOneDecider(url: url, model: modelInUse, token: token, format: provider == .openai ? .openai : .systemOne, send: send ?? SystemOneDecider.urlSession)
+        guard let url, !token.isEmpty || provider == .custom || tokenSource != nil else { return nil }
+        return SystemOneDecider(url: url, model: modelInUse, token: token, format: provider == .openai ? .openai : .systemOne, tokenSource: tokenSource, send: send ?? SystemOneDecider.urlSession)
     }
 }
 
@@ -195,6 +197,8 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
 /// the format of OpenAI's Decisions API.
 public struct SystemOneDecider: Decider {
     public typealias Send = @Sendable (URLRequest) async throws -> (status: Int, body: Data)
+    /// A token read at each call; nil when there is none to give (signed out).
+    public typealias TokenSource = @Sendable () async -> String?
 
     /// The two request and answer formats. They ask the same things: a choice among options with a
     /// confidence, or the probability that something is true.
@@ -209,14 +213,16 @@ public struct SystemOneDecider: Decider {
     public let model: String
     public let format: Format
     let token: String
+    let tokenSource: TokenSource?
     let send: Send
     public var name: String { model }
 
-    public init(url: URL, model: String, token: String, format: Format = .systemOne, send: @escaping Send = SystemOneDecider.urlSession) {
+    public init(url: URL, model: String, token: String, format: Format = .systemOne, tokenSource: TokenSource? = nil, send: @escaping Send = SystemOneDecider.urlSession) {
         self.url = url
         self.model = model
         self.token = token
         self.format = format
+        self.tokenSource = tokenSource
         self.send = send
     }
 
@@ -337,6 +343,11 @@ public struct SystemOneDecider: Decider {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: max(0.3, timeout))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var token = token
+        if let tokenSource {
+            guard let fresh = await tokenSource(), !fresh.isEmpty else { throw DeciderError("the sign-in gave no token; sign in again") }
+            token = fresh
+        }
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let body = format == .openai ? Self.openAIBody(model: model, state: state, questions: questions) : Self.body(model: model, state: state, questions: questions)
         request.httpBody = Data(body.serialized().utf8)

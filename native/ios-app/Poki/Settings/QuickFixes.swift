@@ -34,7 +34,22 @@ enum QuickFixes {
     static var decider: Decider? {
         let settings = settings
         guard settings.hasModel else { return nil }
-        return settings.decider(token: tokenInUse(settings, typed: token))
+        return decider(settings, typed: token)
+    }
+
+    /// The decider for these settings, with or without a model picked. OpenAI with no key at all goes
+    /// on the ChatGPT sign-in when there is one, as a trial: OpenAI's documents name the Responses API
+    /// for plan usage and say nothing of Decisions, so its answer to this call is what tells.
+    static func decider(_ settings: DeciderSettings, typed: String) -> SystemOneDecider? {
+        let token = tokenInUse(settings, typed: typed)
+        if token.isEmpty, usesChatGPT(settings, typed: typed) {
+            return settings.decider(token: "", tokenSource: { await ModelCredential.apiKey(for: .chatgpt) })
+        }
+        return settings.decider(token: token)
+    }
+
+    static func usesChatGPT(_ settings: DeciderSettings, typed: String) -> Bool {
+        settings.provider == .openai && tokenInUse(settings, typed: typed).isEmpty && ChatGPTAccount.signedIn
     }
 
     /// The token a call carries: the one entered here, else for OpenAI the API key already saved on
@@ -49,7 +64,7 @@ enum QuickFixes {
     static var modelInUse: String? { decider == nil ? nil : settings.modelInUse }
 
     /// Whether a provider has been added, with or without a model picked.
-    static var hasProvider: Bool { settings.decider(token: tokenInUse(settings, typed: token)) != nil }
+    static var hasProvider: Bool { decider(settings, typed: token) != nil }
 
     static func remove() {
         token = ""
@@ -144,6 +159,10 @@ struct QuickFixesView: View {
                 } label: {
                     Text("API Token")
                 }
+                if QuickFixes.usesChatGPT(settings, typed: token) {
+                    Text("Trial. OpenAI may not allow Decisions on a ChatGPT plan. Check Connection shows its answer.")
+                        .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                }
             } header: {
                 SettingsHeader("Provider")
             } footer: {
@@ -221,12 +240,13 @@ struct QuickFixesView: View {
         }
     }
 
-    private var hasProvider: Bool { settings.decider(token: QuickFixes.tokenInUse(settings, typed: token)) != nil }
+    private var hasProvider: Bool { QuickFixes.decider(settings, typed: token) != nil }
 
     /// OpenAI can go on the API key already saved on the Models page.
     private var tokenPrompt: LocalizedStringKey {
         if settings.provider == .custom { return "Optional" }
         if settings.provider == .openai, ModelKeys.hasKey(.openai) { return "Uses Your OpenAI Key" }
+        if settings.provider == .openai, ChatGPTAccount.signedIn { return "Uses Your ChatGPT Sign In" }
         return "Required"
     }
 
@@ -244,7 +264,7 @@ struct QuickFixesView: View {
     }
 
     private func check() {
-        guard let decider = settings.decider(token: QuickFixes.tokenInUse(settings, typed: token)) else { return }
+        guard let decider = QuickFixes.decider(settings, typed: token) else { return }
         checking = true
         result = nil
         Task {
