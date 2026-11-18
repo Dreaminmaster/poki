@@ -238,6 +238,14 @@ extension PokiBrowser: WKNavigationDelegate, WKUIDelegate {
         finishLoads()
     }
 
+    /// A page cannot send the browser to this iPhone or its local network (a link, a redirect or a
+    /// frame), whoever is driving. `web_open` refuses such an address itself, with words for the model.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        guard let target = navigationAction.request.url, BrowserAddress.refusal(target) != nil else { return .allow }
+        AppLog.shared.add("browser", "refused a navigation to a local address")
+        return .cancel
+    }
+
     /// Links that open a new window open here instead: the panel has one page.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {

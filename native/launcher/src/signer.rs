@@ -41,6 +41,7 @@ pub struct Failure {
 impl From<core::Error> for Failure {
     fn from(e: core::Error) -> Self {
         let code = match &e {
+            core::Error::NeedsCode(_) => "needs_code",
             core::Error::NeedsPerson(_) => "needs_person",
             core::Error::Apple { .. } => "apple",
             _ => e.kind(),
@@ -181,8 +182,15 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "teams" => {
             let mut state = STATE.lock().await;
             let s = signer(&mut state).await?;
-            let teams = s.teams().await?;
-            Ok(Value::Array(teams.into_iter().map(|t| json!({"team_id": t.team_id, "name": t.name, "kind": t.kind, "is_free": t.is_free})).collect()))
+            match s.teams().await {
+                Ok(teams) => Ok(Value::Array(teams.into_iter().map(|t| json!({"team_id": t.team_id, "name": t.name, "kind": t.kind, "is_free": t.is_free})).collect())),
+                Err(core::Error::NeedsCode(pending)) => {
+                    let msg = core::Error::NeedsCode(pending.clone()).to_string();
+                    state.pending = Some(*pending);
+                    Err(fail(msg, "needs_code"))
+                }
+                Err(e) => Err(e.into()),
+            }
         }
         "choose_team" => {
             let mut state = STATE.lock().await;
@@ -295,12 +303,28 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
     if !s.signed_in() {
         return Err(fail("Sign in with your Apple Account in Setup first.", "needs_person"));
     }
-    let team = s.team().await?;
+    let team = match s.team().await {
+        Ok(team) => team,
+        Err(core::Error::NeedsCode(pending)) => {
+            let msg = core::Error::NeedsCode(pending.clone()).to_string();
+            state.pending = Some(*pending);
+            return Err(fail(msg, "needs_code"));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let out = out_dir.join("Poki-signed.ipa");
     // Unpacking, signing and packing run synchronously inside; block_in_place moves the runtime's
     // other work (the runner's launcher) to another thread meanwhile instead of stalling it.
     let handle = tokio::runtime::Handle::current();
-    let built = tokio::task::block_in_place(|| handle.block_on(setup::sign_for_team(s, &team, Some((&udid, &name)), &ipa, signing_zip.as_deref(), &out, reporter)))?;
+    let built = match tokio::task::block_in_place(|| handle.block_on(setup::sign_for_team(s, &team, Some((&udid, &name)), &ipa, signing_zip.as_deref(), &out, reporter))) {
+        Ok(built) => built,
+        Err(core::Error::NeedsCode(pending)) => {
+            let msg = core::Error::NeedsCode(pending.clone()).to_string();
+            state.pending = Some(*pending);
+            return Err(fail(msg, "needs_code"));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let _ = std::fs::remove_file(out_dir.join("installed.ipa"));
     let mut profiles = vec![];
     for (i, p) in built.profiles.iter().enumerate() {

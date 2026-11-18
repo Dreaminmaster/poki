@@ -7,19 +7,44 @@ struct AccountView: View {
     @State private var keep = true
     @State private var working = false
     @State private var error: String?
-    @State private var code = ""
     @State private var confirmSignOut = false
 
     var body: some View {
         Form {
             if let a = model.account, a.signedIn {
                 signedIn(a)
+            } else if let err = model.accountError {
+                keychainError(err)
             } else {
                 signInForm
             }
         }
         .pokiPage()
-        .sheet(isPresented: $model.needsCode) { codeSheet }
+    }
+
+    @ViewBuilder private func keychainError(_ err: CoreError) -> some View {
+        HeroSection {
+            PageHero(symbol: "key.slash", title: "Keychain Access Needed", subtitle: "Poki Setup could not read your saved Apple Account from the macOS keychain. Your session was not signed out.")
+        }
+        Section {
+            Text("When macOS asks to access your keychain, enter your Mac login password and choose “Always Allow”, then click Retry.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text(err.message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        Section {
+            HStack {
+                Spacer()
+                if working { ProgressView().controlSize(.small) }
+                Button("Retry") { Task { await retryAccount() } }
+                    .pokiProminentButton()
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(working)
+            }
+        }
     }
 
     @ViewBuilder private func signedIn(_ a: AccountState) -> some View {
@@ -93,44 +118,6 @@ struct AccountView: View {
         }
     }
 
-    private var codeSheet: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "lock.shield").font(.system(size: 40)).foregroundStyle(Color.pokiBlue)
-            Text("Two-Factor Authentication").font(.title2.weight(.semibold))
-            Text(model.codeVia == "sms" ? "Enter the code Apple sent to your phone number." : "Enter the verification code shown on your other Apple devices.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            TextField("6-digit code", text: $code)
-                .font(.system(size: 24, weight: .medium, design: .monospaced))
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 200)
-                .onSubmit { Task { await verify() } }
-                .onChange(of: code) { _, new in
-                    let digits = new.filter(\.isNumber)
-                    if digits != new { code = digits }
-                    if digits.count == 6 { Task { await verify() } }
-                }
-            if let error { Text(error).foregroundStyle(.red).font(.callout) }
-            HStack {
-                Button("Cancel") {
-                    model.needsCode = false
-                    code = ""
-                }
-                .keyboardShortcut(.cancelAction)
-                Spacer()
-                if working { ProgressView().controlSize(.small) }
-                Button("Verify") { Task { await verify() } }
-                    .pokiProminentButton()
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(code.count != 6 || working)
-            }
-        }
-        .padding(24)
-        .frame(width: 380)
-    }
-
     private func signIn() async {
         guard !working else { return }
         working = true
@@ -138,24 +125,16 @@ struct AccountView: View {
         defer { working = false }
         do {
             try await model.signIn(appleID: appleID.trimmingCharacters(in: .whitespaces), password: password, keep: keep)
-            if !model.needsCode { password = "" }
+            password = ""
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func verify() async {
-        guard !working, code.count == 6 else { return }
+    private func retryAccount() async {
+        guard !working else { return }
         working = true
-        error = nil
         defer { working = false }
-        do {
-            try await model.finishSignIn(code: code)
-            code = ""
-            password = ""
-        } catch {
-            self.error = error.localizedDescription
-            code = ""
-        }
+        await model.refreshAccount()
     }
 }

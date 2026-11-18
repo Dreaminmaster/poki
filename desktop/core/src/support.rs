@@ -1,5 +1,6 @@
 //! A support bundle: this app's logs, the phones it knows, the app and OS versions, and the
-//! phone's Poki logs when it is connected. Apple IDs are masked, tokens and secrets left out.
+//! phone's Poki logs when it is connected. Review the archive before sharing. It can contain
+//! device identifiers, local paths, relay addresses, and raw logs.
 use crate::{Result, paths};
 use std::io::Write;
 

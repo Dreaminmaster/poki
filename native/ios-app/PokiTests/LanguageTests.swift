@@ -189,4 +189,34 @@ final class LanguageTests: XCTestCase {
         chat.languageChanged()
         XCTAssertEqual(chat.entries, completed)
     }
+
+    func testDiskImageDownloadFailureMessageFollowsTheSelectedLanguage() async throws {
+        let directory = AppFiles.ddiDirectory
+        let support = AppFiles.support
+        let manager = FileManager.default
+        let backup = directory.appendingPathExtension("language-test-backup")
+        let existed = manager.fileExists(atPath: directory.path)
+        if existed { try manager.moveItem(at: directory, to: backup) }
+        try? manager.removeItem(at: support.appendingPathComponent("ddi.partial"))
+        let originalPermissions = (try? manager.attributesOfItem(atPath: support.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0o755
+        defer {
+            try? manager.setAttributes([.posixPermissions: originalPermissions], ofItemAtPath: support.path)
+            try? manager.removeItem(at: directory)
+            if existed { try? manager.moveItem(at: backup, to: directory) }
+        }
+        // Deny creating `ddi.partial` under Application Support/Poki so `download()` fails offline.
+        try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: support.path)
+
+        let expected: [(String, String)] = [
+            ("zh-Hans", "下载开发者磁盘映像失败。请确认网络能访问 GitHub（开启代理或全局 VPN），然后点重新下载；也可以用电脑上的 Poki Setup 写入。"),
+            ("en", "Failed to download the developer disk image. Make sure your network can reach GitHub (turn on a proxy or a global VPN), then tap Download Again. You can also write it from Poki Setup on your computer."),
+            ("zh-Hant", "下載開發者磁碟映像失敗。請確認網路能存取 GitHub（開啟代理或全域 VPN），然後點一下重新下載；也可以用電腦上的 Poki Setup 寫入。"),
+        ]
+        for (language, text) in expected {
+            AppLocalization.shared.preference = language
+            let store = DiskImageStore(verifySynchronously: true)
+            await store.download()
+            XCTAssertEqual(store.state, .failed(text), language)
+        }
+    }
 }

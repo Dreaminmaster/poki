@@ -154,7 +154,7 @@ enum Cmd {
         #[arg(long)]
         filter: Option<String>,
     },
-    /// A support bundle with secrets taken out.
+    /// Save a support bundle. Review identifiers, paths and raw logs before sharing.
     Support {
         #[arg(long)]
         udid: Option<String>,
@@ -249,7 +249,9 @@ fn classify(e: &anyhow::Error) -> (&'static str, i32) {
         return ("needs_code", EXIT_NEEDS_CODE);
     }
     match e.downcast_ref::<poki_setup_core::Error>() {
+        Some(poki_setup_core::Error::NeedsCode(_)) => ("needs_code", EXIT_NEEDS_CODE),
         Some(poki_setup_core::Error::NeedsPerson(_)) => ("needs_person", EXIT_PERSON),
+        Some(poki_setup_core::Error::Keychain(_)) => ("keychain", EXIT_PERSON),
         Some(poki_setup_core::Error::CertificateLimit(_)) => ("certificate_limit", EXIT_PERSON),
         Some(poki_setup_core::Error::Apple { .. }) => ("apple", EXIT_FAILED),
         Some(poki_setup_core::Error::Device(_)) => ("device", EXIT_FAILED),

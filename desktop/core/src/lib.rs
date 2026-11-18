@@ -12,7 +12,7 @@
 //! - [`keeper`]: the phones this computer set up, their expiry, what is due.
 //! - [`mcp`]: connector links, client snippets, and a `tools/list` check.
 //! - [`relay`]: deploys `deploy/cf-relay` to the person's own Cloudflare account.
-//! - [`support`]: a support bundle with the secrets taken out.
+//! - [`support`]: a diagnostic archive for private review before sharing.
 //!
 //! Licences: this crate is AGPL-3.0-only like the rest of Poki. The GSA login follows Apple's
 //! protocol as implemented in SideStore's icloud-auth (MPL-2.0) and Dadoum's Sideloader

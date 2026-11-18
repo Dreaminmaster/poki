@@ -260,6 +260,14 @@ impl Client {
                     }
                 }
             },
+            // Apple marks the account as needing attention (most often two-factor authentication is
+            // not turned on, or new terms wait). The session is complete, so go on as Sideloader and
+            // AltSign do; only a session without the app-token keys cannot be used.
+            Step::Repair if !session.sk.is_empty() && !session.c.is_empty() => {
+                tracing::warn!("Apple asked to repair the account (au repair); continuing with the session");
+                Ok(Outcome::SignedIn(session))
+            }
+            Step::Repair => Err(Error::NeedsPerson("Apple wants something on this Apple Account fixed before it can be used here. Sign in at account.apple.com, turn on two-factor authentication and accept any new terms, then sign in again.".into())),
             Step::Unsupported(other) => Err(Error::msg(format!("Apple asked for a verification step this app does not support ({other})."))),
         }
     }
@@ -457,12 +465,15 @@ enum Step<'a> {
     CodeAlreadySent,
     /// `trustedDeviceSecondaryAuth` or `secondaryAuth`: ask for one code.
     AskForCode,
+    /// `repair`: Apple wants the account fixed (often two-factor authentication turned on).
+    Repair,
     Unsupported(&'a str),
 }
 
 fn next_step(hsc: i64, au: Option<&str>) -> Step<'_> {
     match au {
         Some("trustedDeviceSecondaryAuth") | Some("secondaryAuth") => Step::AskForCode,
+        Some("repair") => Step::Repair,
         Some(other) => Step::Unsupported(other),
         None if hsc == 409 => Step::CodeAlreadySent,
         None => Step::SignedIn,
@@ -655,7 +666,8 @@ mod step_tests {
         assert_eq!(next_step(0, None), Step::SignedIn);
         assert_eq!(next_step(409, Some("trustedDeviceSecondaryAuth")), Step::AskForCode);
         assert_eq!(next_step(409, Some("secondaryAuth")), Step::AskForCode);
-        assert_eq!(next_step(409, Some("repair")), Step::Unsupported("repair"));
+        assert_eq!(next_step(409, Some("repair")), Step::Repair);
+        assert_eq!(next_step(409, Some("somethingNew")), Step::Unsupported("somethingNew"));
     }
 
     fn answer(d: plist::Dictionary) -> Vec<u8> {

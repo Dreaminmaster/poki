@@ -39,7 +39,15 @@ async fn with_signer<T>(state: &Shared, f: impl AsyncFnOnce(&mut setup::Signer) 
     if guard.is_none() {
         *guard = Some(setup::Signer::open()?);
     }
-    Ok(f(guard.as_mut().unwrap()).await?)
+    match f(guard.as_mut().unwrap()).await {
+        Ok(v) => Ok(v),
+        Err(poki_setup_core::Error::NeedsCode(pending)) => {
+            let msg = poki_setup_core::Error::NeedsCode(pending.clone()).to_string();
+            *state.pending.lock().await = Some(*pending);
+            Err(Failure { kind: "needs_code", message: msg })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[derive(Serialize)]

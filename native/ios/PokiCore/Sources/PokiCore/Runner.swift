@@ -2,6 +2,11 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// How a request to the runner ended, as far as the phone is concerned.
 public enum Delivery: String, Sendable {
@@ -46,27 +51,125 @@ public enum TransportError: Error, Sendable {
 }
 
 public final class URLSessionTransport: HTTPTransport {
-    let session: URLSession
+    let localSession: URLSession
+    let publicSession: URLSession
+
     public init() {
+        // Local phone services (loopback and the 10.7.0.1 phone tunnel) must bypass system
+        // HTTP/SOCKS proxies so a proxy app on the phone cannot intercept or stall local
+        // WebDriverAgent traffic. Public internet endpoints (such as downloading the developer
+        // disk image from GitHub) must keep the system proxy intact so users behind a proxy
+        // can reach them.
+        let local = Self.baseConfiguration()
+        local.connectionProxyDictionary = [:]
+        localSession = URLSession(configuration: local)
+
+        publicSession = URLSession(configuration: Self.baseConfiguration())
+    }
+
+    deinit {
+        localSession.finishTasksAndInvalidate()
+        publicSession.finishTasksAndInvalidate()
+    }
+
+    private static func baseConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpMaximumConnectionsPerHost = 4
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.connectionProxyDictionary = [:]
-        session = URLSession(configuration: configuration)
+        return configuration
     }
-    public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+
+    /// Whether `url` targets a local phone service rather than the public internet.
+    /// Loopback addresses (`127.0.0.0/8`, `localhost`, `::1`), the phone's loopback tunnel
+    /// (`10.7.0.1`), IPv6 ULA tunnels (`fc00::/7`), link-local IPv6 (`fe80::/10`, with or
+    /// without a zone ID), IPv4-mapped IPv6 addresses targeting those IPv4 ranges, and
+    /// `.local` hostnames stay direct; everything else keeps the system proxy configuration.
+    static func isLocalPhoneService(_ url: URL) -> Bool {
+        #if canImport(FoundationNetworking)
+        guard let rawHost = url.host, !rawHost.isEmpty else { return false }
+        #else
+        guard let rawHost = url.host(percentEncoded: false), !rawHost.isEmpty else { return false }
+        #endif
+        var host = rawHost.lowercased()
+        if host.hasPrefix("[") && host.hasSuffix("]") {
+            host = String(host.dropFirst().dropLast())
+        }
+        while host.hasSuffix(".") {
+            host.removeLast()
+        }
+        guard !host.isEmpty else { return false }
+
+        if host.contains(":") {
+            return isLocalPhoneIPv6(host)
+        }
+
+        var four = in_addr()
+        if inet_pton(AF_INET, host, &four) == 1 {
+            return withUnsafeBytes(of: four.s_addr) { bytes in
+                let b = bytes.bindMemory(to: UInt8.self)
+                return isLocalPhoneIPv4(b[0], b[1], b[2], b[3])
+            }
+        }
+
+        return host == "localhost"
+            || (host.count > ".localhost".count && host.hasSuffix(".localhost"))
+            || (host.count > ".local".count && host.hasSuffix(".local"))
+    }
+
+    private static func isLocalPhoneIPv6(_ rawHost: String) -> Bool {
+        var host = rawHost
+        if let zone = host.firstIndex(of: "%") {
+            let zoneID = host[host.index(after: zone)...]
+            guard !zoneID.isEmpty else { return false }
+            host = String(host[..<zone])
+        }
+        var six = in6_addr()
+        guard inet_pton(AF_INET6, host, &six) == 1 else { return false }
+        return withUnsafeBytes(of: six) { bytes in
+            let b = bytes.bindMemory(to: UInt8.self)
+            // ::1 (loopback)
+            if (0..<15).allSatisfy({ b[$0] == 0 }) && b[15] == 1 { return true }
+            // fc00::/7 (unique local addresses, including fd00::/8 tunnels)
+            if b[0] & 0xfe == 0xfc { return true }
+            // fe80::/10 (link-local, including zoned addresses such as fe80::1%utun3)
+            if b[0] == 0xfe && b[1] & 0xc0 == 0x80 { return true }
+            // ::ffff:0:0/96 (IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1)
+            if (0..<10).allSatisfy({ b[$0] == 0 }) && b[10] == 0xff && b[11] == 0xff {
+                return isLocalPhoneIPv4(b[12], b[13], b[14], b[15])
+            }
+            return false
+        }
+    }
+
+    private static func isLocalPhoneIPv4(_ b0: UInt8, _ b1: UInt8, _ b2: UInt8, _ b3: UInt8) -> Bool {
+        b0 == 127 || (b0, b1, b2, b3) == (10, 7, 0, 1)
+    }
+
+    func session(for url: URL) -> URLSession {
+        Self.isLocalPhoneService(url) ? localSession : publicSession
+    }
+
+    func request(method: String, url: URL, body: Data?, timeout: Double) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
-        // One connection per request. The runner drops a kept-alive connection when it fails to write
-        // an answer to it (a request we gave up on), and a request sent on that connection in the same
-        // moment is lost with "the network connection was lost" after no time at all.
-        request.setValue("close", forHTTPHeaderField: "Connection")
+        // One connection per request to the phone runner. The runner drops a kept-alive connection
+        // when it fails to write an answer to it (a request we gave up on), and a request sent on
+        // that connection in the same moment is lost with "the network connection was lost" after no
+        // time at all.
+        if Self.isLocalPhoneService(url) {
+            request.setValue("close", forHTTPHeaderField: "Connection")
+        }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "content-type")
         }
+        return request
+    }
+
+    public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let request = self.request(method: method, url: url, body: body, timeout: timeout)
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session(for: url).data(for: request)
             return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
         } catch let error as URLError {
             switch error.code {
