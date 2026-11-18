@@ -75,7 +75,7 @@ final class PiLoop {
                 // the last request boundary too; never add a tool the live context lacks.
                 let revision = HistoryCapture.agentQueryRevision
                 let allowed = revision != nil && getCurrentTools(transcript.messages).contains { $0.name == "screen_history" }
-                var messages = transcript.messages.map { message -> Message in
+                var messages = transcript.messages.map { message -> PiSwiftAI.Message in
                     guard case .toolResult(let result) = message else { return message }
                     return .toolResult(grants.validated(result, revision: revision))
                 }

@@ -30,6 +30,7 @@ public struct ScreenHistoryEntry: Sendable, Equatable {
 
 public struct ScreenHistorySource: Sendable {
     public var isEnabled: @Sendable () -> Bool
+    public var unavailableMessage: @Sendable () -> String
     /// Changes whenever the owner revokes or re-grants access, changes the app allowlist,
     /// or deletes history. A Boolean alone cannot detect an off -> on transition.
     public var accessRevision: @Sendable () -> UInt64
@@ -39,10 +40,12 @@ public struct ScreenHistorySource: Sendable {
     public init(
         isEnabled: @escaping @Sendable () -> Bool,
         accessRevision: @escaping @Sendable () -> UInt64,
+        unavailableMessage: @escaping @Sendable () -> String = { "Screen History is not turned on." },
         now: @escaping @Sendable () -> Date = { Date() },
         entries: @escaping @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry]
     ) {
         self.isEnabled = isEnabled
+        self.unavailableMessage = unavailableMessage
         self.accessRevision = accessRevision
         self.now = now
         self.entries = entries
@@ -443,7 +446,7 @@ extension PokiCore {
         // would let an off -> on transition incorrectly authorize an older request.
         let revision = source.accessRevision()
         guard source.isEnabled(), source.accessRevision() == revision else {
-            return ToolResult(text: Self.screenHistoryOffMessage, jpeg: nil, isError: true)
+            return ToolResult(text: source.unavailableMessage(), jpeg: nil, isError: true)
         }
         func accessStillValid() -> Bool {
             !Task.isCancelled && source.isEnabled() && source.accessRevision() == revision

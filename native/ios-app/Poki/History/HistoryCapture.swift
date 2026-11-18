@@ -95,8 +95,10 @@ final class HistoryCapture: ObservableObject {
         return queryLease.grant
     }
     nonisolated static var agentQueryAllowed: Bool { agentQueryRevision != nil }
-
-    nonisolated static func revokeAgentQueries() { queryLease.revoke() }
+    nonisolated static var agentQueryUnavailableMessage: String {
+        guard isEnabled else { return PokiCore.screenHistoryOffMessage }
+        return "Screen History is locked or temporarily unavailable. Unlock it in Poki before querying."
+    }
 
     /// HistoryLock owns authentication; publish its decision to the synchronous agent gate.
     nonisolated static func setAgentHistoryUnlocked(_ unlocked: Bool) {

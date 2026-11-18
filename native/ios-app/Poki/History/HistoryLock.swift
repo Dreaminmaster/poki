@@ -109,7 +109,8 @@ final class HistoryLock: ObservableObject {
         var salt = Data(count: 16)
         guard salt.withUnsafeMutableBytes({ SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }) == errSecSuccess else { return false }
         let value = salt + Self.digest(pin, salt: salt)
-        HistoryCapture.revokeAgentQueries()
+        // Suspend new grants during the Keychain mutation, as well as revoking old ones.
+        HistoryCapture.setAgentHistoryUnlocked(false)
         let match: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service, kSecAttrAccount as String: Self.account]
         SecItemDelete(match as CFDictionary)
         var add = match
@@ -142,7 +143,8 @@ final class HistoryLock: ObservableObject {
     @discardableResult
     func removePIN() -> Bool {
         guard unlocked, usesBiometrics else { return false }
-        HistoryCapture.revokeAgentQueries()
+        HistoryCapture.setAgentHistoryUnlocked(false)
+        defer { HistoryCapture.setAgentHistoryUnlocked(unlocked) }
         let match: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service, kSecAttrAccount as String: Self.account]
         SecItemDelete(match as CFDictionary)
         hasPIN = false
@@ -153,7 +155,8 @@ final class HistoryLock: ObservableObject {
     @discardableResult
     func setBiometrics(_ on: Bool) -> Bool {
         guard unlocked, on || hasPIN else { return false }
-        HistoryCapture.revokeAgentQueries()
+        HistoryCapture.setAgentHistoryUnlocked(false)
+        defer { HistoryCapture.setAgentHistoryUnlocked(unlocked) }
         biometricsOn = on
         UserDefaults.standard.set(on, forKey: "history.lock.biometrics")
         return true
