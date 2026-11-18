@@ -20,6 +20,34 @@ final class HomeShortcutsTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private func ago(_ hours: Double) -> Date { now.addingTimeInterval(-hours * 3600) }
 
+    func testRefreshUsesEditedRequestTextWithUnchangedSessionDates() async {
+        let original = "Open Notes and record the hiking distance"
+        let edited = "Open Calendar and record the hiking distance"
+        func sessions(_ text: String) -> [SavedSession] {
+            (1...2).map { index in
+                SavedSession(id: "edited-request-\(index)", kind: .poki, title: "Hiking",
+                             started: ago(Double(index)), updated: now, live: false, outcome: .done,
+                             entries: [ChatEntry(.you(text, delivered: true))], calls: [])
+            }
+        }
+
+        for background in [false, true] {
+            let store = HomeShortcutStore()
+            store.refresh(sessions: sessions(original), routines: [], now: now)
+            XCTAssertEqual(store.shortcuts.first { $0.prompt == original }?.app, "com.apple.mobilenotes")
+
+            if background {
+                store.refreshInBackground(sessions: sessions(edited), now: now)
+                await store.waitUntilRefreshed()
+            } else {
+                store.refresh(sessions: sessions(edited), routines: [], now: now)
+            }
+
+            XCTAssertEqual(store.shortcuts.first { $0.prompt == edited }?.app, "com.apple.mobilecal")
+            XCTAssertFalse(store.shortcuts.contains { $0.prompt == original })
+        }
+    }
+
     private var history: [HomeShortcuts.Request] {
         [.init(text: "打开设置看看电池", at: ago(72)),
          .init(text: "打开设置，看看电池。", at: ago(48)),

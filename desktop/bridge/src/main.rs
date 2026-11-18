@@ -104,6 +104,9 @@ async fn with_signer<T>(state: &Shared, f: impl AsyncFnOnce(&mut setup::Signer) 
     if guard.is_none() {
         *guard = Some(setup::Signer::open()?);
     }
+    if guard.as_mut().unwrap().sync_account() {
+        *state.pending.lock().await = None;
+    }
     match f(guard.as_mut().unwrap()).await {
         Ok(v) => Ok(v),
         Err(Error::NeedsCode(pending)) => {
@@ -113,6 +116,22 @@ async fn with_signer<T>(state: &Shared, f: impl AsyncFnOnce(&mut setup::Signer) 
         }
         Err(e) => Err(e.into()),
     }
+}
+
+/// Tells the app whenever any client (this one, the CLI, a second app) saved the account, so an
+/// open Account page shows a stored sign-in-again state without waiting for its next request.
+fn watch_account(out: Out) -> tokio::task::JoinHandle<()> {
+    let mut seen = poki_setup_core::apple::store::revision();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let now = poki_setup_core::apple::store::revision();
+            if now != seen {
+                seen = now;
+                out.send(json!({ "event": "account_changed" }));
+            }
+        }
+    })
 }
 
 #[tokio::main]
@@ -133,6 +152,7 @@ async fn main() {
         }
     });
     out.send(json!({ "event": "ready", "data": { "version": poki_setup_core::full_version() } }));
+    let _watch = watch_account(out.clone());
     let state = Arc::new(Shared::default());
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -233,16 +253,21 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
             ok(true)
         }
         "account" => {
-            let pending = state.pending.lock().await.as_ref().map(|p| p.via);
             with_signer(state, async |s| {
+                let mem_pending = state.pending.lock().await.clone();
+                let active_pending = mem_pending.or_else(|| s.pending().cloned());
                 Ok(json!({
                     "signed_in": s.signed_in(),
+                    "needs_reauth": s.needs_reauth(),
                     "apple_id": s.account.apple_id(),
                     "name": s.account.display_name(),
                     "team_id": s.account.team_id,
                     "password_kept": s.account.password.is_some(),
                     "anisette": s.account.anisette.clone().unwrap_or_else(Source::default_for_platform),
-                    "pending_factor": pending,
+                    "pending_factor": active_pending.as_ref().map(|p| p.via),
+                    "resend_available_at": active_pending.as_ref().map(|p| p.resend_available_at()),
+                    "rate_limited": s.is_rate_limited(),
+                    "rate_limited_until": s.rate_limited_until(),
                 }))
             })
             .await
@@ -258,16 +283,41 @@ async fn dispatch(state: &Shared, out: &Out, cmd: &str, a: &Value) -> R {
         }
         "finish_sign_in" => {
             let code: String = arg(a, "code")?;
-            let pending = state.pending.lock().await.take().ok_or_else(|| Error::msg("Start the sign-in again."))?;
-            let keep = pending.clone();
-            match with_signer(state, async |s| s.finish_sign_in(pending, &code).await).await {
+            let mut updated_pending = None;
+            let res = with_signer(state, async |s| {
+                let mem_pending = state.pending.lock().await.take();
+                let pending = mem_pending.or_else(|| s.pending().cloned()).ok_or_else(|| Error::msg("Start the sign-in again."))?;
+                let r = s.finish_sign_in(pending, &code).await;
+                if r.is_err() {
+                    updated_pending = s.pending().cloned();
+                }
+                r
+            })
+            .await;
+            match res {
                 Ok(()) => ok(true),
                 Err(f) => {
-                    // A wrong code: keep the pending sign-in so the person can type it again.
-                    *state.pending.lock().await = Some(keep);
+                    *state.pending.lock().await = updated_pending;
                     Err(f)
                 }
             }
+        }
+        "cancel_sign_in" => {
+            *state.pending.lock().await = None;
+            with_signer(state, async |s| s.cancel_sign_in()).await?;
+            ok(true)
+        }
+        "resend_code" => {
+            let mut updated_pending = None;
+            let res = with_signer(state, async |s| {
+                let r = s.resend_code().await;
+                updated_pending = s.pending().cloned();
+                r
+            })
+            .await;
+            *state.pending.lock().await = updated_pending;
+            let pending = res?;
+            ok(json!({ "resend_available_at": pending.resend_available_at() }))
         }
         "sign_out" => {
             *state.pending.lock().await = None;
@@ -557,7 +607,70 @@ impl std::io::Write for FileOrSink {
 
 #[cfg(test)]
 mod tests {
-    use super::handoff_path;
+    use super::{Out, Shared, dispatch, handoff_path, watch_account};
+    use serde_json::json;
+
+    static HOME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn the_open_app_hears_when_another_client_saves_the_account() {
+        let _home = HOME_LOCK.lock().await;
+        let dir = std::env::temp_dir().join(format!("poki-bridge-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // SAFETY: tests that touch the environment hold HOME_LOCK.
+        unsafe {
+            std::env::set_var("POKI_SETUP_HOME", &dir);
+            std::env::set_var("POKI_SETUP_FILE_SECRETS", "1");
+        }
+        poki_setup_core::apple::store::save(&Default::default()).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let watch = watch_account(Out(tx));
+
+        let mut stored = poki_setup_core::apple::store::load().unwrap();
+        stored.needs_reauth = true;
+        poki_setup_core::apple::store::save(&stored).unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.expect("account_changed within 5 s").unwrap();
+        assert_eq!(event, json!({ "event": "account_changed" }).to_string());
+        watch.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn an_open_bridge_shows_sign_in_again_once_another_client_saved_it() {
+        let _home = HOME_LOCK.lock().await;
+        let dir = std::env::temp_dir().join(format!("poki-bridge-reauth-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // SAFETY: tests that touch the environment hold HOME_LOCK.
+        unsafe {
+            std::env::set_var("POKI_SETUP_HOME", &dir);
+            std::env::set_var("POKI_SETUP_FILE_SECRETS", "1");
+        }
+        let account = json!({
+            "session": {"apple_id": "person@example.com", "adsid": "000123-abc", "gs_idms_token": "tok", "first_name": "Test", "last_name": "Person", "sk": "Bw==", "c": "Yw=="},
+            "xcode_token": null,
+            "password": "synthetic-saved-password",
+            "team_id": "TEAM123",
+            "anisette": {"kind": "remote", "url": "http://127.0.0.1:9"}
+        });
+        let state_dir = poki_setup_core::paths::state_dir().unwrap();
+        std::fs::write(state_dir.join("account.json"), account.to_string()).unwrap();
+
+        let state = Shared::default();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let out = Out(tx);
+        let before = dispatch(&state, &out, "account", &json!({})).await.unwrap_or_else(|f| panic!("{}", f.message));
+        assert_eq!(before["signed_in"], true);
+
+        // The CLI, in another process, verified a code Apple took without opening the session.
+        let mut stored = poki_setup_core::apple::store::load().unwrap();
+        stored.needs_reauth = true;
+        poki_setup_core::apple::store::save(&stored).unwrap();
+
+        let after = dispatch(&state, &out, "account", &json!({})).await.unwrap_or_else(|f| panic!("{}", f.message));
+        assert_eq!(after["signed_in"], false, "the open app must stop showing the account as signed in");
+        assert_eq!(after["needs_reauth"], true, "the open app must ask for a fresh sign-in");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_container_commands_reach_only_the_two_hand_off_files() {

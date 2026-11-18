@@ -91,6 +91,11 @@ struct AccountView: View {
         HeroSection {
             PageHero(symbol: "person.crop.circle", title: "Sign in with your Apple Account", subtitle: "Poki Setup uses it the way Xcode does: to sign Poki for your iPhone. A free Apple Account works. Your password goes to Apple only.")
         }
+        if model.account?.needsReauth == true {
+            Section {
+                Label("Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            }
+        }
         Section {
             TextField("Email or Phone Number", text: $appleID, prompt: Text("name@example.com"))
                 .textContentType(.username)

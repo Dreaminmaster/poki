@@ -20,7 +20,8 @@ final class AutomationStartupTests: XCTestCase {
         let chat = ChatModel(app: model)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
-        let host = UIHostingController(rootView: RootView().environment(model).environment(chat))
+        let host = UIHostingController(rootView: RootView().environment(model).environment(chat)
+            .environment(\.locale, AppLocalization.locale))
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer { window.isHidden = true; model.stopSession() }
@@ -65,7 +66,8 @@ final class AutomationStartupTests: XCTestCase {
             covered.forEach { $0.accessibilityElementsHidden = true }
             let window = UIWindow(windowScene: scene)
             window.frame = scene.screen.bounds
-            let host = UIHostingController(rootView: NavigationStack { ConnectionView() }.environment(model).environment(chat))
+            let host = UIHostingController(rootView: NavigationStack { ConnectionView() }.environment(model).environment(chat)
+                .environment(\.locale, AppLocalization.locale))
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer {

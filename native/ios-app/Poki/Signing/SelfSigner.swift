@@ -20,7 +20,11 @@ final class SelfSigner {
 
     struct Status: Decodable, Equatable {
         var signed_in: Bool
+        var needs_reauth: Bool?
         var needs_code: Bool
+        var rate_limited: Bool?
+        var rate_limited_until: Int64?
+        var resend_available_at: Int64?
         var apple_id: String?
         var name: String?
         var team_id: String?
@@ -129,7 +133,31 @@ final class SelfSigner {
 
     var signedIn: Bool { status?.signed_in == true || Self.screenshotSignedIn }
     var needsCode: Bool { status?.needs_code == true }
+    /// Apple took a code but never opened the session: nothing signs in until the person does.
+    var needsReauth: Bool { status?.needs_reauth == true }
+    static let reauthMessage = "Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session."
+    var rateLimited: Bool { rateLimitRemainingSeconds() > 0 }
     var needsCodeSheet = false
+    static let resendCooldown: TimeInterval = 60
+    private var localResendAvailableAt: Date?
+    private static let prepareRetryBackoff: TimeInterval = 15 * 60
+    private var lastPrepareFailure: Date?
+    private var teamsTask: Task<Void, Never>?
+    typealias Transport = ([String: Any], (@Sendable ([String: Any]) -> Void)?) async throws -> Data
+    var transport: Transport
+
+    init(transport: @escaping Transport = SignerBridge.call) {
+        self.transport = transport
+    }
+
+    @discardableResult
+    private func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
+        try await transport(request, progress)
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
+        try SignerBridge.unwrap(type, from: try await transport(request, progress))
+    }
     var daysLeft: Double? { expiry.map { $0.timeIntervalSinceNow / 86_400 } }
     /// The build Install would put on: an update when one is ready, else a refresh.
     var next: Prepared? { ready["update"] ?? ready["refresh"] }
@@ -171,8 +199,8 @@ final class SelfSigner {
         SignerBridge.installVault()
         Task {
             do {
-                _ = try await SignerBridge.call(["op": "configure", "home": Self.home.path, "device_name": UIDevice.current.name])
-                if let imported = try? await SignerBridge.decode([String: AnyDecodable].self, ["op": "import_identity", "path": Self.handedIdentity.path]),
+                _ = try await call(["op": "configure", "home": Self.home.path, "device_name": UIDevice.current.name])
+                if let imported = try? await decode([String: AnyDecodable].self, ["op": "import_identity", "path": Self.handedIdentity.path]),
                    imported["imported"]?.value as? Bool == true {
                     log.add("signing", "took Poki Setup's signing key into the Keychain")
                 }
@@ -192,24 +220,26 @@ final class SelfSigner {
     }
 
     func reload() async {
-        do { status = try await SignerBridge.decode(Status.self, ["op": "status"]) } catch { lastError = error.localizedDescription }
+        do { status = try await decode(Status.self, ["op": "status"]) } catch { lastError = error.localizedDescription }
     }
 
     // MARK: Account
 
     func signIn(appleID: String, password: String, keepPassword: Bool) async {
+        lastPrepareFailure = nil
         await run("Signing in") {
-            _ = try await SignerBridge.call(["op": "sign_in", "apple_id": appleID, "password": password, "keep_password": keepPassword])
+            _ = try await self.call(["op": "sign_in", "apple_id": appleID, "password": password, "keep_password": keepPassword])
         }
         await reload()
-        if signedIn { await loadTeams() }
+        if signedIn, !needsCode, !rateLimited { await loadTeams() }
     }
 
     func finishSignIn(code: String) async {
-        await run("Checking the code") { _ = try await SignerBridge.call(["op": "finish_sign_in", "code": code]) }
+        lastPrepareFailure = nil
+        await run("Checking the code") { _ = try await self.call(["op": "finish_sign_in", "code": code]) }
         await reload()
         if !needsCode { needsCodeSheet = false }
-        if signedIn { await loadTeams() }
+        if signedIn, !needsCode, !rateLimited { await loadTeams() }
     }
 
     func presentCodeSheet() {
@@ -220,41 +250,107 @@ final class SelfSigner {
         needsCodeSheet = false
     }
 
+    func resendCooldownSeconds(at now: Date = .now) -> Int {
+        var until = status?.resend_available_at.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        if let localResendAvailableAt, until == nil || localResendAvailableAt > until! {
+            until = localResendAvailableAt
+        }
+        guard let until else { return 0 }
+        return max(0, Int(ceil(until.timeIntervalSince(now))))
+    }
+
+    func rateLimitRemainingSeconds(at now: Date = .now) -> Int {
+        if let until = status?.rate_limited_until {
+            return max(0, Int(ceil(TimeInterval(until) - now.timeIntervalSince1970)))
+        }
+        return status?.rate_limited == true ? 3600 : 0
+    }
+
+    func canResendCode(at now: Date = .now) -> Bool {
+        needsCode && working == nil && rateLimitRemainingSeconds(at: now) == 0 && resendCooldownSeconds(at: now) == 0
+    }
+
+    func resendButtonTitle(at now: Date = .now) -> String {
+        let rateWait = rateLimitRemainingSeconds(at: now)
+        if rateWait >= 60 {
+            let minutes = (rateWait + 59) / 60
+            return AppLocalization.text(LocalizedStringResource("Resend Verification Code (wait \(minutes) min)"))
+        }
+        if rateWait > 0 {
+            return AppLocalization.text(LocalizedStringResource("Resend Verification Code (wait \(rateWait) s)"))
+        }
+        let cooldown = resendCooldownSeconds(at: now)
+        if cooldown > 0 {
+            return AppLocalization.text(LocalizedStringResource("Resend Verification Code (\(cooldown) s)"))
+        }
+        return AppLocalization.text(LocalizedStringResource("Resend Verification Code"))
+    }
+
+    static func localizedErrorText(_ error: String) -> String {
+        AppLocalization.bundle.localizedString(forKey: error, value: error, table: nil)
+    }
+
+    func resendCode(now: Date = .now) async {
+        guard needsCode, working == nil, rateLimitRemainingSeconds(at: now) == 0, resendCooldownSeconds(at: now) == 0 else { return }
+        localResendAvailableAt = now.addingTimeInterval(Self.resendCooldown)
+        await run("Sending a new code") { _ = try await self.call(["op": "resend_code"]) }
+        await reload()
+    }
+
+    func cancelSignIn() async {
+        needsCodeSheet = false
+        localResendAvailableAt = nil
+        await run("Cancelling sign-in") { _ = try await self.call(["op": "cancel_sign_in"]) }
+        lastError = nil
+        await reload()
+    }
+
     func signOut() async {
         needsCodeSheet = false
-        await run("Signing out") { _ = try await SignerBridge.call(["op": "sign_out"]) }
+        localResendAvailableAt = nil
+        await run("Signing out") { _ = try await self.call(["op": "sign_out"]) }
         teams = []
         await reload()
     }
 
     func loadTeams() async {
-        do {
-            teams = try await SignerBridge.decode([Team].self, ["op": "teams"])
-        } catch {
-            lastError = error.localizedDescription
-            if (error as? SignerError)?.code == "needs_code" {
-                await reload()
-                if needsCode { needsCodeSheet = true }
-                return
-            }
+        if let teamsTask {
+            await teamsTask.value
+            return
         }
-        await reload()
+        guard !needsCode, !rateLimited, !needsReauth else { return }
+        let task = Task { @MainActor in
+            do {
+                teams = try await decode([Team].self, ["op": "teams"])
+            } catch {
+                lastError = error.localizedDescription
+                if (error as? SignerError)?.code == "needs_code" {
+                    await reload()
+                    if needsCode { needsCodeSheet = true }
+                    return
+                }
+            }
+            await reload()
+        }
+        teamsTask = task
+        defer { teamsTask = nil }
+        await task.value
     }
 
     func choose(team: Team) async {
-        await run("Choosing the team") { _ = try await SignerBridge.call(["op": "choose_team", "team_id": team.team_id]) }
+        await run("Choosing the team") { _ = try await self.call(["op": "choose_team", "team_id": team.team_id]) }
         await reload()
     }
 
     func setChannel(_ id: String) async {
-        await run(nil) { _ = try await SignerBridge.call(["op": "set_channel", "channel": id]) }
+        await run(nil) { _ = try await self.call(["op": "set_channel", "channel": id]) }
         await reload()
         latest = nil
         await checkLatest()
     }
 
     func setAnisette(_ url: String) async {
-        await run(nil) { _ = try await SignerBridge.call(["op": "set_anisette", "url": url]) }
+        await run(nil) { _ = try await self.call(["op": "set_anisette", "url": url]) }
         await reload()
     }
 
@@ -275,15 +371,28 @@ final class SelfSigner {
         ready = found
     }
 
+    static func shouldAllowAutoPrepare(canPrepare: Bool, needsCode: Bool, rateLimited: Bool, working: String?, lastFailure: Date?, now: Date = .now) -> Bool {
+        guard canPrepare, !needsCode, !rateLimited, working == nil else { return false }
+        if let lastFailure, now.timeIntervalSince(lastFailure) < prepareRetryBackoff { return false }
+        return true
+    }
+
+    static func isMaintainThrottled(lastCheck: Date?, now: Date = .now) -> Bool {
+        guard let lastCheck else { return false }
+        return now.timeIntervalSince(lastCheck) < checkEvery - 60
+    }
+
     /// At launch, back in front and every few hours: looks up the channel's newest build, so Home and
-    /// Signing can say an update is out, and prepares what is due. Without an Apple Account or the
-    /// loopback it only looks, at most once every `checkEvery`.
+    /// Signing can say an update is out, and prepares what is due. Throttled across foreground and
+    /// loopback transitions, and paused while a 2FA code or rate-limit cooldown is active.
     func maintain() {
         guard installFinish == .idle else { return }
         // Not before start() has the signer configured (it calls this itself once it has).
-        guard status != nil else { return }
-        // A minute short of the interval, so the timer's own run is never just too early.
-        if !canPrepare, let last = lastCheck, Date().timeIntervalSince(last) < Self.checkEvery - 60 { return }
+        guard status != nil, !needsCode, !rateLimited else { return }
+        if Self.isMaintainThrottled(lastCheck: lastCheck) {
+            if canPrepare { Task { await prepareDue() } }
+            return
+        }
         Task { await checkLatest() }
     }
 
@@ -304,7 +413,7 @@ final class SelfSigner {
         let task = Task { () -> Bool in
             do {
                 var found = Self.screenshotRelease(installedVersion: installedVersion, installedBuild: installedBuild)
-                if found == nil { found = try await SignerBridge.decode(Release.self, ["op": "check_update"]) }
+                if found == nil { found = try await self.decode(Release.self, ["op": "check_update"]) }
                 guard let rel = found else { return false }
                 if rel != latest { log.add("signing", "newest on the channel: \(rel.version) (\(rel.build)), \(rel.channel)") }
                 latest = rel
@@ -327,13 +436,13 @@ final class SelfSigner {
     /// Prepares what is due, by itself: an update when the channel has a newer Poki, a refresh when
     /// the installed profile is close to expiring. Never installs.
     private func prepareDue() async {
-        guard canPrepare, working == nil else { return }
+        guard Self.shouldAllowAutoPrepare(canPrepare: canPrepare, needsCode: needsCode, rateLimited: rateLimited, working: working, lastFailure: lastPrepareFailure) else { return }
         if updateNotReady {
-            await prepare(kind: "update")
+            await prepare(kind: "update", automatic: true)
             return
         }
         if let days = daysLeft, days <= Self.refreshWithDaysLeft, ready["refresh"] == nil, ready["update"] == nil {
-            await prepare(kind: "refresh")
+            await prepare(kind: "refresh", automatic: true)
         }
         remindIfExpiring()
     }
@@ -358,23 +467,28 @@ final class SelfSigner {
         }
     }
 
-    func prepare(kind: String) async {
+    func prepare(kind: String, automatic: Bool = false) async {
         guard var request = phone() else {
             lastError = unreachable
             return
         }
         request["op"] = "prepare"
         request["kind"] = kind
+        request["automatic"] = automatic
         request["app_path"] = Bundle.main.bundlePath
         request["device_name"] = UIDevice.current.name
         await run(kind == "update" ? "Preparing the update" : "Preparing a refresh") {
-            let p = try await SignerBridge.decode(Prepared.self, request) { [weak self] progress in
+            let p = try await self.decode(Prepared.self, request) { [weak self] progress in
                 Task { @MainActor in self?.show(progress) }
             }
+            self.lastPrepareFailure = nil
             self.ready[kind] = p
             self.log.add("signing", "prepared \(kind): \(p.version) (\(p.build)), profile until \(p.expires)")
             self.notify(title: kind == "update" ? AppLocalization.text(LocalizedStringResource("Poki Update Ready")) : AppLocalization.text(LocalizedStringResource("Poki Refresh Ready")),
                         body: AppLocalization.text(LocalizedStringResource("Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task.")))
+        }
+        if lastError != nil, automatic || needsCode || rateLimited {
+            lastPrepareFailure = Date()
         }
     }
 
@@ -418,7 +532,7 @@ final class SelfSigner {
             }
         }
         await run("Installing") {
-            _ = try await SignerBridge.call(request) { [weak self] progress in
+            _ = try await self.call(request) { [weak self] progress in
                 Task { @MainActor in self?.show(progress) }
             }
         }
@@ -698,6 +812,8 @@ enum SignerBridge {
                         }
                         box.continuation = nil
                         unmanaged.release()
+                    } else if object["event"] as? String == "log", let line = object["line"] as? String {
+                        Task { @MainActor in AppLog.shared.add("signing", line) }
                     } else if let p = object["progress"] as? [String: Any] {
                         box.progress?(p)
                     }
@@ -713,8 +829,11 @@ enum SignerBridge {
 
     private struct Wrapped<T: Decodable>: Decodable { let v: T }
 
+    static func unwrap<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try JSONDecoder().decode(Wrapped<T>.self, from: data).v
+    }
+
     static func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
-        let data = try await call(request, progress: progress)
-        return try JSONDecoder().decode(Wrapped<T>.self, from: data).v
+        try unwrap(type, from: try await call(request, progress: progress))
     }
 }

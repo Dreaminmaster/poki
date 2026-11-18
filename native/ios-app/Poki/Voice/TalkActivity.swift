@@ -46,16 +46,31 @@ final class TalkActivity {
         }
     }
 
-    private func show(_ talk: PokiState.Voice?) {
+    private func show(_ talk: PokiState.Voice?, fromIntent: Bool = false) {
         guard talk != shown else { return }
         let started = shown == nil
         shown = talk
         activity.update { $0.voice = talk }
-        // Started from a tap in Poki, the one time iOS lets a Live Activity start.
-        if started, talk != nil { activity.start(deviceName: deviceName()) }
+        // Started from a tap in Poki, or from Talk Here's intent: the times iOS lets a Live Activity start.
+        if started, talk != nil { activity.start(deviceName: deviceName(), fromIntent: fromIntent) }
         // Only a Live Activity that shows nothing else goes with the talk: an approval, a hand-off, a
         // problem, pairing or setup stays.
         if talk == nil, !keepsActivity(), activity.state.phase == .idle { activity.end() }
+    }
+
+    /// Talk Here (TalkHereIntent), with Poki in the background: the Live Activity starts first, while
+    /// the intent runs, and the microphone only once it is up, because iOS ends an app that records in
+    /// the background without one. false: the Live Activity did not start, and nothing else did.
+    func startHere() async -> Bool {
+        show(.listening, fromIntent: true)
+        guard activity.isRunning else {
+            show(nil)
+            return false
+        }
+        await voice.start()
+        // Not connected: the talk's phase says why, and the Live Activity goes (`follow` sees no talk).
+        show(Self.state(of: voice))
+        return true
     }
 
     fileprivate func endFromLiveActivity() {

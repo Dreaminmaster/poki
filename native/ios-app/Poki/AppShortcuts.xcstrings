@@ -64,6 +64,38 @@
           }
         }
       }
+    },
+    "Talk to ${applicationName} here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这里和${applicationName}说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在這裡和${applicationName}說話"
+          }
+        }
+      }
+    },
+    "Talk to ${applicationName} without leaving this app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不离开这个 App 和${applicationName}说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不離開這個 App 和${applicationName}說話"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

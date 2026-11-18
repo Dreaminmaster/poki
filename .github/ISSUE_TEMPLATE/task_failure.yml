@@ -1,30 +1,30 @@
-name: Phone task did not finish
+name: Task failure
 description: Poki ran but could not complete a real task in a specific app (blocked screen, wrong target, would not stop).
-labels: [task-failure]
+labels: ["type:task-failure"]
 body:
   - type: markdown
     attributes:
       value: |
-        Use this when the tools work but a task in a particular app fails. Crashes and tool errors go in a bug report.
-        Remove account names, messages, payment details, and other private screen contents. Agents filing for a user: read [AGENTS.md](https://github.com/JosssphZhou/poki/blob/main/AGENTS.md#file-an-issue).
+        Use this when the tools work but a task in a particular app fails. Crashes and tool errors go in a **Bug report**.
+        Agents filing for a user: read [AGENTS.md](https://github.com/JosssphZhou/poki/blob/main/AGENTS.md#file-an-issue).
   - type: textarea
     id: task
     attributes:
-      label: Task
-      description: The task as you gave it, and the app it runs in.
+      label: Requested task
+      description: The task you provided and the target app.
     validations:
       required: true
   - type: textarea
     id: where
     attributes:
-      label: Where it stopped
-      description: The screen it got stuck on, and what Poki did or reported there.
+      label: Point of failure
+      description: The screen where Poki got stuck, and what it did or reported there.
     validations:
       required: true
   - type: dropdown
     id: client
     attributes:
-      label: Driven by
+      label: Client or integration
       options:
         - Poki Agent (terminal)
         - Poki Agent over iMessage or Telegram
@@ -35,14 +35,23 @@ body:
   - type: input
     id: versions
     attributes:
-      label: Versions
-      description: Poki version and commit or app build, the model, the connection, iPhone model, and iOS.
-      placeholder: 0.1.1 f4fd51e, gpt-6.1, USB, iPhone 15 Pro, iOS 27.3
+      label: Poki version and model
+      description: The Poki version and commit (or app build), along with the model used.
+      placeholder: 0.1.1 f4fd51e, gpt-6.1
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: iPhone model and iOS version
+      placeholder: iPhone 15 Pro, iOS 27.3
     validations:
       required: true
   - type: textarea
     id: trace
     attributes:
-      label: Trace
-      description: Tool calls and results, or the run summary. Remove private text.
+      label: Run trace
+      description: Tool calls and results, or a summary of the run. Redact personal information such as account names, messages, and payment details first.
       render: text
+    validations:
+      required: true
