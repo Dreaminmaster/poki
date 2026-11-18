@@ -147,10 +147,10 @@ struct ActivityFace: Hashable {
     var compact: Compact
     /// The screen a tap opens.
     var link: URL = ActivityLink.chat
-    /// While the agent may be acting (a run, an approval, a hand-off), a tap on the expanded island
-    /// that misses its controls does nothing instead of opening Poki (`TapShield`): the expanded
-    /// island lies over the top of the app being worked in, so the agent's taps there, and the owner's
-    /// near misses of Allow and Don't Allow, brought Poki to the front in the middle of the task.
+    /// While the agent may be acting (a run, an approval, a hand-off) or a talk is on, a tap on the
+    /// expanded island that misses its controls does nothing instead of opening Poki (`TapShield`): the
+    /// expanded island lies over the top of the app being worked in, so the agent's taps there, and the
+    /// owner's near misses of Allow and Don't Allow, brought Poki to the front in the middle of the task.
     var shieldsTaps = false
     /// The app has not updated the activity for longer than it should have: what it shows may be old.
     var stale = false
@@ -254,7 +254,7 @@ extension PokiState {
         // keeps them to itself.
         face.endsTalk = voice != nil && (phase == .idle || phase == .working) && !stale
         face.talkGlow = voice != nil && !stale
-        face.shieldsTaps = !stale && [.working, .approval, .deciding, .handoff].contains(phase)
+        face.shieldsTaps = !stale && ([.working, .approval, .deciding, .handoff].contains(phase) || voice != nil)
         // A fresh event ("Started", "Allowed") shows beside the app's name for a few seconds. An app
         // switch is the app's name itself, already there; so is a word the face already says (Done
         // over a finished run, Paired over Paired), which said twice read as a fault (ESP-954).

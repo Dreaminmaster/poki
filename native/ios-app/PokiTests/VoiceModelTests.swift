@@ -490,6 +490,7 @@ extension VoiceModelTests {
         XCTAssertEqual(activity.state.face.content, StatusWord.listening.text)
         XCTAssertTrue(activity.state.face.endsTalk)
         XCTAssertTrue(activity.state.face.talkGlow, "the island's brand band shows while a talk is on")
+        XCTAssertTrue(activity.state.face.shieldsTaps, "a tap on the expanded island during a talk keeps the owner in their app")
 
         h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
                     ["type": "conversation.item.input_audio_transcription.completed", "transcript": "What iOS version is this?"],
