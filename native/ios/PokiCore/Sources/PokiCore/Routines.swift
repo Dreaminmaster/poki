@@ -830,7 +830,8 @@ extension Computer {
                         if there.count == 1 { move = .clear(there[0]); remembered = true; via = i < (step.clears ?? []).count ? nil : "allowed by the path"; break }
                     }
                     if move == nil {
-                        guard let decider, mayAsk else { break attempts }
+                        // No one to ask. Looked at early: the step still has its time, and a page that was only slow gets it.
+                        guard let decider, mayAsk else { if early { continue attempts }; break attempts }
                         let want = StepWant(goal: [routine.name, routine.description].filter { !$0.isEmpty }.joined(separator: ": "), index: index, total: routine.steps.count,
                                             action: ActionKind(action)?.rawValue ?? "tap", target: target, intent: step.intent,
                                             done: routine.steps[..<index].map(Self.words(for:)), next: routine.steps.indices.contains(index + 1) ? Self.words(for: routine.steps[index + 1]) : nil, why: why)
