@@ -173,7 +173,7 @@ enum OnDeviceDecisions {
     /// since gives no answer, which is an error and never a guess.
     static var downloaded: PromptDecider? {
         guard BacktapeModel.supported else { return nil }
-        return PromptDecider(name: "downloaded model", maxState: 5000) { prompt, instructions in
+        return PromptDecider(name: "downloaded model", maxState: 5000, patience: 15) { prompt, instructions in
             await BacktapeModel.shared.respond(to: prompt, instructions: instructions, maxTokens: 160, temperature: 0)
         }
     }
