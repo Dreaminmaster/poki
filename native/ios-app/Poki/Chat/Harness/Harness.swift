@@ -84,16 +84,34 @@ enum Harness {
 
     /// Poki's own browser's tools (ESP-145) sit beside the phone's.
     static var tools: [ToolSpec] {
-        catalogTools(includeScreenHistory: HistoryCapture.agentQueryAllowed) + WebTools.specs + [reportPlan, finishTask]
+        toolSpecs(inSplitView: false, includeScreenHistory: HistoryCapture.agentQueryAllowed)
     }
 
     static var splitViewTools: [ToolSpec] {
-        [
+        toolSpecs(inSplitView: true, includeScreenHistory: HistoryCapture.agentQueryAllowed)
+    }
+
+    /// A Pi loop holds executable implementations, even for tools currently withheld.
+    /// The current permission determines which ones are declared for each request.
+    static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
+        if !inSplitView {
+            return catalogTools(includeScreenHistory: includeScreenHistory) + WebTools.specs + [reportPlan, finishTask]
+        }
+        return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: HistoryCapture.agentQueryAllowed).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+        ] + catalogTools(includeScreenHistory: includeScreenHistory).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+    }
+
+    /// Keep the cached task prompt consistent with the current tool catalog.
+    nonisolated static func historyInstructions(_ text: String, allowed: Bool) -> String {
+        let instruction = PokiCore.screenHistoryInstructions
+        if allowed {
+            return text.contains(instruction) ? text : text + "\n\n" + instruction
+        }
+        return text.replacingOccurrences(of: instruction, with: "")
     }
 
     /// PokiCore's catalog: look, do and status.

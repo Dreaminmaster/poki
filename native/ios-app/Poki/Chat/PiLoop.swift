@@ -23,6 +23,7 @@ final class PiLoop {
     let model: Model
     let inSplitView: Bool
     private let agent: Agent
+    private let allTools: [AgentTool]
     private let gate = StopGate()
     private let stall = StallWatch()
 
@@ -36,6 +37,7 @@ final class PiLoop {
         self.inSplitView = inSplitView
         let gate = self.gate
         let stall = self.stall
+        let grants = HistoryDeliveryGrants()
         let agentTools = tools.map { spec in
             AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
                 if gate.stopped { return Self.result(PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true)) }
@@ -44,10 +46,14 @@ final class PiLoop {
                 let arguments = (try? encoder.encode(params)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                 // pi runs its loop in tasks of its own, so stop() reaches the call under way only through
                 // `signal`: cancelling the call stops a `do` before its next action.
+                let revision = spec.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
+                if spec.name == "screen_history" { grants.record(id, revision: revision) }
                 let call = Task { @MainActor in await perform(ToolCall(id: id, name: spec.name, arguments: arguments)) }
                 let forget = signal?.onCancel { call.cancel() }
                 defer { forget?() }
-                let answer = await call.value
+                let rawAnswer = await call.value
+                let answer = spec.name == "screen_history"
+                    ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: revision) : rawAnswer
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
                 if answer.waitingForOwner {
@@ -58,11 +64,60 @@ final class PiLoop {
                 return Self.result(answer)
             }
         }
-        // agent/pi-session.mjs: low thinking, one tool call at a time.
+        allTools = agentTools
+        // agent/pi-session.mjs: low thinking, one tool call at a time. Pi copies the
+        // tool list at prompt start; prepareRequest updates its *live* context each turn.
         agent = Agent(AgentOptions(
-            initialState: AgentState(model: model, thinkingLevel: .low, tools: agentTools, messages: messages),
+            initialState: AgentState(model: model, thinkingLevel: .low,
+                                     tools: Self.availableTools(agentTools, allowed: HistoryCapture.agentQueryAllowed), messages: messages),
+            streamFn: { model, transcript, options in
+                // API credentials may have suspended after prepareRequest. Recheck at
+                // the last request boundary too; never add a tool the live context lacks.
+                let revision = HistoryCapture.agentQueryRevision
+                let allowed = revision != nil && getCurrentTools(transcript.messages).contains { $0.name == "screen_history" }
+                var messages = transcript.messages.map { message -> Message in
+                    guard case .toolResult(let result) = message else { return message }
+                    return .toolResult(grants.validated(result, revision: revision))
+                }
+                if let index = messages.indices.first, case .system(var system) = messages[index],
+                   case .text(let text) = system.content {
+                    system.content = .text(Harness.historyInstructions(text, allowed: allowed))
+                    messages[index] = .system(system)
+                }
+                if !allowed, getCurrentTools(messages).contains(where: { $0.name == "screen_history" }) {
+                    messages.append(.system(SystemMessage(content: .text(""), toolsRemoved: [ToolReference(name: "screen_history")])))
+                }
+                return try streamSimple(model: model, context: Context(messages: messages), options: options)
+            },
             getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
-            toolExecution: .sequential
+            toolExecution: .sequential,
+            prepareToolResultMessage: { result in
+                grants.validated(result, revision: HistoryCapture.agentQueryRevision)
+            },
+            prepareRequest: { request, _ in
+                let revision = HistoryCapture.agentQueryRevision
+                let tools = Self.availableTools(agentTools, allowed: revision != nil)
+                var context = request.context
+                context.tools = tools
+                context.messages = context.messages.map { message in
+                    guard case .toolResult(let result) = message else { return message }
+                    return .toolResult(grants.validated(result, revision: revision))
+                }
+                if let index = context.messages.indices.first, case .system(var system) = context.messages[index],
+                   case .text(let text) = system.content {
+                    system.content = .text(Harness.historyInstructions(text, allowed: revision != nil))
+                    context.messages[index] = .system(system)
+                }
+                let changes = getToolStateChanges(getCurrentTools(context.messages), tools.map(\.aiTool))
+                if !changes.toolsAdded.isEmpty || !changes.toolsRemoved.isEmpty {
+                    context.messages.append(.system(SystemMessage(
+                        content: .text(""),
+                        toolsAdded: changes.toolsAdded.isEmpty ? nil : changes.toolsAdded,
+                        toolsRemoved: changes.toolsRemoved.isEmpty ? nil : changes.toolsRemoved
+                    )))
+                }
+                return AgentRequestUpdate(context: context)
+            }
         ))
     }
 
@@ -73,6 +128,7 @@ final class PiLoop {
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
+        agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed)
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -134,6 +190,10 @@ final class PiLoop {
         agent.messages = messages
     }
 
+    nonisolated static func availableTools(_ tools: [AgentTool], allowed: Bool) -> [AgentTool] {
+        tools.filter { $0.name != "screen_history" || allowed }
+    }
+
     private nonisolated static func result(_ answer: PokiCore.ToolAnswer) -> AgentToolResult {
         var content: [ContentBlock] = [.text(TextContent(text: answer.text))]
         if let jpeg = answer.jpeg { content.append(.image(ImageContent(data: jpeg.base64EncodedString(), mimeType: "image/jpeg"))) }
@@ -155,6 +215,30 @@ final class PiLoop {
             return rest.isEmpty ? said : said + " (" + rest + ")"
         }
         return AppLocalization.text(LocalizedStringResource("\(provider.name), \(message.isEmpty ? AppLocalization.text("the request failed.") : message)"))
+    }
+}
+
+/// Associates an actual history result with the grant under which it was requested.
+/// Missing grants (including results carried from another loop) are never trusted.
+final class HistoryDeliveryGrants: @unchecked Sendable {
+    private let lock = NSLock()
+    private var revisions: [String: UInt64] = [:]
+
+    func record(_ id: String, revision: UInt64?) {
+        lock.withLock { revisions[id] = revision }
+    }
+
+    func validated(_ result: ToolResultMessage, revision: UInt64?) -> ToolResultMessage {
+        guard result.toolName == "screen_history", !result.isError else { return result }
+        let granted = lock.withLock { revisions[result.toolCallId] }
+        guard let revision, granted == revision else {
+            var safe = result
+            safe.content = [.text(TextContent(text: PokiCore.screenHistoryRevokedMessage))]
+            safe.details = nil
+            safe.isError = true
+            return safe
+        }
+        return result
     }
 }
 

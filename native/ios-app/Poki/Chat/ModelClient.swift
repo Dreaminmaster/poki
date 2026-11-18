@@ -66,6 +66,7 @@ final class AnthropicClient: ModelClient {
     let key: String
     let model: String
     private var history: [[String: Any]] = []
+    private var historyGrants: [String: UInt64] = [:]
 
     static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     static let version = "2026-10-21"
@@ -77,6 +78,9 @@ final class AnthropicClient: ModelClient {
     func say(_ text: String) { addUser(["type": "text", "text": text], plain: text) }
 
     func answer(_ call: ToolCall, _ result: PokiCore.ToolAnswer) {
+        if call.name == "screen_history", !result.isError {
+            historyGrants[call.id] = HistoryCapture.agentQueryRevision
+        }
         var parts: [[String: Any]] = [["type": "text", "text": result.text]]
         if let jpeg = result.jpeg {
             parts.append(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": jpeg.base64EncodedString()]])
@@ -104,6 +108,23 @@ final class AnthropicClient: ModelClient {
     }
 
     func next(instructions: String, tools: [ToolSpec]) async throws -> ModelTurn {
+        // Do not replay a previously recorded history result under a different grant.
+        let revision = HistoryCapture.agentQueryRevision
+        history = history.map { entry in
+            guard var blocks = entry["content"] as? [[String: Any]] else { return entry }
+            blocks = blocks.map { block in
+                guard block["type"] as? String == "tool_result",
+                      let id = block["tool_use_id"] as? String,
+                      let original = historyGrants[id], original != revision else { return block }
+                var safe = block
+                safe["content"] = [["type": "text", "text": PokiCore.screenHistoryRevokedMessage]]
+                safe["is_error"] = true
+                return safe
+            }
+            var safe = entry
+            safe["content"] = blocks
+            return safe
+        }
         var body: [String: Any] = [
             "model": model,
             "max_tokens": 16000,
