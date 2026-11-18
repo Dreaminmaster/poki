@@ -123,11 +123,8 @@ enum QuickFixes {
     static var options: [Option] {
         var out = [Option(choice: .none, name: AppLocalization.text("Off"))]
         if OnDeviceDecisions.appleAvailable { out.append(Option(choice: .apple, name: AppLocalization.text("Apple Intelligence"))) }
-<<<<<<< HEAD
         if let name = OnDeviceDecisions.downloadedName { out.append(Option(choice: .downloaded, name: name)) }
-=======
         if choice == .account, let account = accountOption { out.append(account) }
->>>>>>> dev/quick-fixes
         let settings = settings
         if providerDecider != nil {
             var models = DeciderSettings.models(settings.provider)
@@ -258,6 +255,8 @@ struct DecisionModelRows: View {
             .onAppear(perform: refresh)
             // The downloaded model joins the menu when its download ends, and leaves it when removed.
             .onChange(of: BacktapeModel.shared.state) { _, _ in refresh() }
+            // An account's own page picked or dropped its model as the decision model.
+            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
     }
 
     /// Back from the providers' page, or a download ended: the models, and the pick, may have changed.
@@ -305,7 +304,6 @@ struct DownloadedModelSection: View {
             } footer: {
                 Text(footer)
             }
-<<<<<<< HEAD
         }
     }
 
@@ -318,13 +316,6 @@ struct DownloadedModelSection: View {
         default:
             "Download a small model to run on this iPhone, with or without Apple Intelligence. It can be the decision model, and it writes Screen History’s notes where the iPhone has no Apple Intelligence. Only one model is kept, and picking another removes the one before. Nothing is sent anywhere."
         }
-=======
-            // An account's own page picked or dropped its model as the decision model.
-            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in
-                options = QuickFixes.options
-                picked = QuickFixes.picked
-            }
->>>>>>> dev/quick-fixes
     }
 }
 
