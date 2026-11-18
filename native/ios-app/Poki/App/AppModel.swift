@@ -1784,6 +1784,7 @@ final class AppModel {
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
     func finishTask(then: (@MainActor () -> Void)? = nil) {
+        chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
         lastShot = nil
@@ -1827,14 +1828,20 @@ final class AppModel {
 
     // MARK: The chat's task
 
+    /// The chat no longer says when its run ends (stopped, or ended without a word): the Live
+    /// Activity's quiet wait finishes the run, as it does an outside agent's.
+    func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
+
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
+    /// The chat says when the task ends (chatTaskEnded), so until then a pause between steps, while the
+    /// model thinks, never reads as the end of the run (ESP-954).
     func chatTaskBegan(splitViewSession: String? = nil) {
         log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         chatTaskActive = automationPath == .inProcess
         if chatTaskActive { lastAgentActivity = Date() }
         lastShot = nil
         activitySplitViewSession = splitViewSession
-        activity.setChatOwnsCompletion(splitViewSession != nil)
+        activity.setChatOwnsCompletion(true)
         // The owner sees at once that Poki took the task: the Live Activity (started here, while
         // Poki is in front) and iOS's background line say so before the model's first answer.
         if sessionOn {
@@ -1871,7 +1878,7 @@ final class AppModel {
     }
 
     /// End the task, return to Poki and finish its Live Activity.
-    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false) {
+    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false, result: String? = nil, task: String? = nil) {
         lastShot = nil
         guard acted else {
             if !inSplitView { finishTask() }
@@ -1886,7 +1893,7 @@ final class AppModel {
             return
         }
         // On a Dynamic Island the activity's own pop-up says the task is over: no banner on top of it.
-        let islandTold = activity.finishNow(alert: true)
+        let islandTold = activity.finishNow(alert: true, result: result, task: task)
         if !inSplitView {
             finishTask { [weak self] in
                 guard !islandTold else { return }

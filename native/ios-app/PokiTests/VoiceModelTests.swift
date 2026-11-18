@@ -449,6 +449,38 @@ extension VoiceModelTests {
         return (activity, TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false }))
     }
 
+    /// ESP-954: a talk's run of steps finishes when the talk's turn is over, not by the quiet wait while
+    /// Poki is still on the request. Between two steps it thinks and speaks, often longer than that
+    /// wait, and the island said Done in the middle of a task that went on.
+    func testATalksRunFinishesWhenItsTurnIsOverNotWhilePokiStillWorks() async throws {
+        let h = Harness(phoneTool: { _, _ in ("WeChat is open", false) })
+        let (activity, watcher) = following(h)
+        activity.finishAfter = .milliseconds(20)
+        await h.talk()
+        h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
+                    ["type": "conversation.item.input_audio_transcription.completed", "transcript": "Tell Mom I'm late"],
+                    ["type": "response.created", "response": ["id": "r1"]],
+                    ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]])
+        await h.time.settle()
+        // The step on the phone, as AppModel reports it to the Live Activity.
+        activity.update { $0.phase = .working; $0.headline = "Open WeChat" }
+        activity.record(step: "Open WeChat", ok: true)
+        h.link.play(["type": "response.done", "response": ["id": "r1"]], ["type": "response.created", "response": ["id": "r2"]],
+                    ["type": "output_audio_buffer.started"])
+        try await Task.sleep(for: .milliseconds(150))
+        await h.time.settle()
+        XCTAssertEqual(activity.state.phase, .working, "Poki is still answering: the run goes on")
+
+        h.link.play(["type": "response.output_audio_transcript.done", "transcript": "I told Mom you're late."],
+                    ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
+        await h.time.settle()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(activity.state.phase, .done)
+        XCTAssertEqual(activity.state.face.content, "I told Mom you're late.")
+        withExtendedLifetime(watcher) {}
+        activity.end()
+    }
+
     func testTheLiveActivitySaysWhatTheTalkIsDoing() async {
         let h = Harness()
         let (activity, watcher) = following(h)

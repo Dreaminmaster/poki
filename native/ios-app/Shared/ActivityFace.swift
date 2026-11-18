@@ -192,21 +192,19 @@ extension PokiState {
     /// Poki is on, the Live Activity steps aside then.
     var isQuiet: Bool { phase == .idle && voice == nil }
 
-    /// Where and how long a finished run took: "Done in Messages, took 1:24". Never a count of steps,
-    /// which an agent changes as it goes.
-    var runSummary: String? {
-        let place = AppName.display(app)
-        let time = since.flatMap { since in endedAt.map { Duration.seconds(max(0, $0.timeIntervalSince(since))).formatted(.time(pattern: .minuteSecond)) } }
-        switch (place, time) {
-        case let (place?, time?): return String(activity: "Finished in \(place), took \(time)")
-        case let (nil, time?): return String(activity: "Took \(time)")
-        case let (place?, nil): return String(activity: "Finished in \(place)")
-        default: return nil
-        }
+    /// How long a finished run took: "Took 1:24". Never a count of steps, which an agent changes as
+    /// it goes.
+    var runTime: String? {
+        guard let since, let endedAt else { return nil }
+        return String(activity: "Took \(Duration.seconds(max(0, endedAt.timeIntervalSince(since))).formatted(.time(pattern: .minuteSecond)))")
     }
 
-    /// What a finished run did: the plan's title, else Poki's own line.
-    var doneTitle: String { plan?.title?.nonBlank ?? StatusWord.done.text }
+    /// What a finished run came to, the line under Done (ESP-954): finish_task's summary, else the
+    /// task's name (the plan's title, else the task as the owner asked it), else the app it finished
+    /// in. nil when none of these is known; the face then says Done alone, never twice.
+    var doneLine: String? {
+        result?.nonBlank ?? plan?.title?.nonBlank ?? task?.nonBlank ?? AppName.display(app)
+    }
 
     /// The plan's step under way, from 1.
     private var planNumber: Int? {
@@ -258,10 +256,14 @@ extension PokiState {
         face.talkGlow = voice != nil && !stale
         face.shieldsTaps = !stale && [.working, .approval, .deciding, .handoff].contains(phase)
         // A fresh event ("Started", "Allowed") shows beside the app's name for a few seconds. An app
-        // switch is the app's name itself, already there.
+        // switch is the app's name itself, already there; so is a word the face already says (Done
+        // over a finished run, Paired over Paired), which said twice read as a fault (ESP-954).
         if let event, !phase.holdsApproval, event.kind != .app {
-            face.event = ActivityWords.local(event.text)
-            face.eventTone = event.tone
+            let word = ActivityWords.local(event.text)
+            if word != face.content, word != face.kicker {
+                face.event = word
+                face.eventTone = event.tone
+            }
         }
         if stale, phase == .working || phase == .handoff {
             // The app stopped updating (closed, or iOS suspended it): say so, and drop the action,
@@ -318,12 +320,15 @@ extension PokiState {
                 thumbnail: hasThumbnail ? .small : .none,
                 compact: .asking(String(activity: "Allow?"), approval.expires))
         case .done:
+            // Done once: over what the run came to where that is known, else as the title.
+            let line = doneLine
             return ActivityFace(
                 symbol: "checkmark.circle.fill",
                 bear: .done, size: .low,
+                kicker: line == nil ? nil : StatusWord.done.text,
                 meta: .symbol("checkmark", .accent), lockMeta: ActivityFace.Meta.none,
-                content: doneTitle,
-                subtitle: runSummary,
+                content: line ?? StatusWord.done.text,
+                subtitle: runTime,
                 bottom: .none,
                 thumbnail: hasThumbnail ? .large : .none,
                 compact: .symbol("checkmark", .accent))

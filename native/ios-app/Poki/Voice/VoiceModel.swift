@@ -595,6 +595,11 @@ final class VoiceModel {
 
     /// Something is still to be said or done: an answer is expected, being given or about to be asked for,
     /// the person is speaking, or a step is running.
+    /// Poki is still on the person's request: it thinks, runs a step, owes an answer or is saying it,
+    /// or the person is still speaking. The Live Activity finishes a talk's run of steps when this turns
+    /// false, not by a guess at a pause (ESP-954).
+    var midTurn: Bool { isOn && (answerDue || phase == .thinking) }
+
     private var answerDue: Bool {
         awaitingAnswer || activeResponse != nil || wantsResponse
             || phase == .hearing || phase == .speaking || calls.contains { $0.state == .running }
