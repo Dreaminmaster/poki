@@ -644,3 +644,31 @@ extension VoiceModelTests {
         }
     }
 }
+
+/// Talk Here, from the Action Button over another app: Poki stays in the background, where iOS lets
+/// only the intent start a Live Activity, and the talk needs that Live Activity before the microphone.
+extension VoiceModelTests {
+    func testTalkHereStartsTheTalkAndItsLiveActivityWithPokiInTheBackground() async {
+        let h = Harness()
+        let activity = ActivityController()
+        // Poki is not in front: every other start of the Live Activity waits for the foreground.
+        activity.canStart = { false }
+        let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        defer { activity.end() }
+
+        let started = await talk.startHere()
+        XCTAssertTrue(activity.isRunning, "the Live Activity starts from the background, inside the intent: \(activity.lastError ?? "")")
+        guard started else { return XCTFail("Talk Here did not start") }
+        h.link.play(["type": "session.created"])
+        await h.time.settle()
+
+        XCTAssertEqual(activity.state.voice, .listening)
+        XCTAssertTrue(activity.state.face.endsTalk)
+        XCTAssertTrue(h.voice.isOn)
+        XCTAssertEqual(h.microphone, [true])
+
+        h.voice.stop()
+        await h.time.settle()
+        XCTAssertFalse(activity.isRunning, "the Live Activity goes with the talk")
+    }
+}
