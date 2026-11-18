@@ -34810,49 +34810,82 @@
         }
       }
     },
+<<<<<<< HEAD
     "Senses" : {
+=======
+    "Screen History Stopped Reading" : {
+>>>>>>> dev/screen-history-senses
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "感知"
+=======
+            "value" : "屏幕历史已停止读取"
+>>>>>>> dev/screen-history-senses
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "感知"
+=======
+            "value" : "螢幕歷史已停止讀取"
+>>>>>>> dev/screen-history-senses
           }
         }
       }
     },
+<<<<<<< HEAD
     "Security" : {
+=======
+    "Poki lost its connection to this iPhone. Open Poki to turn Screen History back on." : {
+>>>>>>> dev/screen-history-senses
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "安全"
+=======
+            "value" : "Poki 与这台 iPhone 的连接已断开。打开 Poki 以重新开启屏幕历史。"
+>>>>>>> dev/screen-history-senses
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "安全性"
+=======
+            "value" : "Poki 與這部 iPhone 的連線已中斷。打開 Poki 以重新開啟螢幕歷史。"
+>>>>>>> dev/screen-history-senses
           }
         }
       }
     },
+<<<<<<< HEAD
     "How Poki Works" : {
+=======
+    "Reading Dropped" : {
+>>>>>>> dev/screen-history-senses
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "Poki 如何工作"
+=======
+            "value" : "读取意外中断"
+>>>>>>> dev/screen-history-senses
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "Poki 如何運作"
           }
         }
@@ -34918,6 +34951,9 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "活動記錄列出 Poki 執行的每一步和每次審批。讀取記錄列出螢幕歷史何時在讀取、何時停止以及何時略過了某個 App。"
+=======
+            "value" : "讀取意外中斷"
+>>>>>>> dev/screen-history-senses
           }
         }
       }

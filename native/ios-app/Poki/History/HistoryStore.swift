@@ -215,11 +215,19 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
-    /// Removes reads kept before `HistoryCapture.isNoise` left them out.
-    func dropNoise() {
+    /// Every app id that has a read, for `HistoryCapture.tidy`.
+    func everyApp() async -> [String] {
+        await fetch { self.rows("SELECT DISTINCT app FROM entries") { Self.string($0, 0) } }
+    }
+
+    /// Removes the reads of `processes`, kept before they were left out, and gives the reads of a
+    /// web page's own process to `browser`, kept before a page was counted as its app.
+    func tidy(processes: [String], web: [String], browser: String) {
+        guard !processes.isEmpty || !web.isEmpty else { return }
         queue.async {
-            let apps = self.rows("SELECT DISTINCT app FROM entries") { Self.string($0, 0) }.filter(HistoryCapture.isNoise)
-            for app in apps { self.run("DELETE FROM entries WHERE app = ?", [.text(app)]) }
+            self.generation = UUID()
+            for app in processes { self.run("DELETE FROM entries WHERE app = ?", [.text(app)]) }
+            for app in web { self.run("UPDATE entries SET app = ? WHERE app = ?", [.text(browser), .text(app)]) }
         }
     }
 

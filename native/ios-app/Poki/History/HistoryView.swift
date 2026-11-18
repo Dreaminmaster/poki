@@ -41,7 +41,7 @@ struct HistorySpan: Identifiable, Hashable {
 
 @MainActor
 enum HistoryNames {
-    static func app(_ id: String) -> String { AppIconStore.name(id) ?? id }
+    static func app(_ id: String) -> String { HistoryAppNames.name(id) }
 
     static func status(_ status: HistoryCapture.Status) -> String {
         switch status {
@@ -62,6 +62,7 @@ enum HistoryNames {
         switch kind {
         case "leftOut": return "Left Out an App"
         case "cleared": return "History Cleared"
+        case "dropped": return "Reading Dropped"
         default: return kind
         }
     }
@@ -117,6 +118,7 @@ struct HistoryPage: View {
 
     /// The owner's reads while Screen History is on, and what Poki did either way, newest first.
     private func load() async {
+        await capture.tidy()
         let kept = capture.enabled ? await HistoryStore.shared.recent() : []
         let steps = BacktapeActivity.entries()
         let entries = steps.isEmpty ? kept : (kept + steps).sorted { $0.at > $1.at }
@@ -291,13 +293,13 @@ private struct HistoryPermissionsPage: View {
             all.append(app)
         }
         let open = all.filter { app in
-            !HistoryCapture.isPoki(app) && !HistoryCapture.isNoise(app) && !chosen.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
+            !HistoryCapture.isPoki(app) && !HistoryAppNames.isProcess(app) && !HistoryCapture.isWeb(app) && !chosen.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
         }
         let wanted = search.trimmingCharacters(in: .whitespaces)
         // Unsearched, only what Poki can show properly: an app it knows or has an icon for. Anything
         // else is still found by searching its name or bundle ID.
         guard !wanted.isEmpty else {
-            return open.filter { KnownApps.byID[$0.lowercased()] != nil || AppIconStore.shared.icon($0) != nil }
+            return open.filter { KnownApps.byID[$0.lowercased()] != nil || AppIconStore.shared.icon($0) != nil || HistoryAppNames.isNamed($0) }
         }
         return open.filter { $0.localizedCaseInsensitiveContains(wanted) || HistoryNames.app($0).localizedCaseInsensitiveContains(wanted) }
     }
@@ -327,7 +329,7 @@ private struct HistoryPermissionsPage: View {
                 ForEach(chosen, id: \.self) { app in
                     HStack(spacing: 12) {
                         AppIconView(app: app, size: 28)
-                        Text(verbatim: HistoryNames.app(app))
+                        HistoryAppName(app: app)
                     }
                     .swipeActions { Button("Remove", role: .destructive) { remove(app) } }
                 }
@@ -340,7 +342,7 @@ private struct HistoryPermissionsPage: View {
                     Button { add(app) } label: {
                         HStack(spacing: 12) {
                             AppIconView(app: app, size: 28)
-                            Text(verbatim: HistoryNames.app(app)).foregroundStyle(Color(.label))
+                            HistoryAppName(app: app).foregroundStyle(Color(.label))
                             Spacer()
                             Image(systemName: "plus.circle").foregroundStyle(.tint)
                         }
@@ -400,7 +402,10 @@ struct HistoryTestingSection: View {
     var body: some View {
         Section {
             LabeledContent("Status") {
-                if let ends = capture.ends, capture.isRunning {
+                if let held = capture.held, capture.isRunning {
+                    // A run that waits says why: no local connection, or an agent's task.
+                    Text(LocalizedStringKey(HistoryNames.status(held)))
+                } else if let ends = capture.ends, capture.isRunning {
                     Text(timerInterval: Date()...max(Date(), ends), countsDown: true).monospacedDigit()
                 } else {
                     Text(LocalizedStringKey(HistoryNames.status(capture.status)))

@@ -13,7 +13,9 @@ enum BacktapeActivity {
         var found: [HistoryEntry] = []
         for (index, entry) in log.entries.enumerated().reversed() where entry.kind == nil && entry.at >= start && entry.at < end {
             let label = ActivityWords.label(entry.text)
-            found.append(HistoryEntry(id: -Int64(index) - 1, at: entry.at, app: entry.app ?? "", title: label, text: label, by: entry.caller ?? ""))
+            // A step taken on a sheet of iOS's own names no app.
+            let app = entry.app.flatMap { HistoryAppNames.isProcess($0) ? nil : $0 } ?? ""
+            found.append(HistoryEntry(id: -Int64(index) - 1, at: entry.at, app: app, title: label, text: label, by: entry.caller ?? ""))
         }
         return found
     }
