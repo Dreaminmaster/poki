@@ -36044,22 +36044,6 @@
         }
       }
     },
-    "A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot. To use a model of one of your accounts, open the account above and choose Decisions." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。这部 iPhone 上的模型不会向外发送任何内容。服务商的模型会收到任务目标和屏幕上各元素的名称，不含截屏。要使用你某个账户的模型，请打开上方的账户并选择“决策”。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。只有答案明確時才會操作，且絕不會點按需要你批准的內容。這部 iPhone 上的模型不會向外傳送任何內容。服務商的模型會收到任務目標和螢幕上各元素的名稱，不含截圖。若要使用你某個帳號的模型，請打開上方的帳號並選擇「決策」。"
-          }
-        }
-      }
-    },
     "Apple Intelligence" : {
       "localizations" : {
         "zh-Hans" : {
@@ -36124,38 +36108,6 @@
         }
       }
     },
-    "Downloaded Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下载的模型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已下載的模型"
-          }
-        }
-      }
-    },
-    "This model is on this iPhone and runs here. Pick it as the decision model above. Screen History uses it for its notes where the iPhone has no Apple Intelligence. Nothing is sent anywhere." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此模型已在这部 iPhone 上并在本机运行。可在上方将它选为决策模型。在没有 Apple 智能的 iPhone 上，屏幕历史会用它撰写摘要。不会向任何地方发送内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此模型已在這部 iPhone 上並在本機執行。可在上方將它選為決策模型。在沒有 Apple Intelligence 的 iPhone 上，螢幕歷史會用它撰寫摘要。不會向任何地方傳送內容。"
-          }
-        }
-      }
-    },
     "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped." : {
       "localizations" : {
         "zh-Hans" : {
@@ -36168,22 +36120,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載未完成。請在 Wi-Fi 下重試，將從中斷處繼續。"
-          }
-        }
-      }
-    },
-    "Download a small model to run on this iPhone, with or without Apple Intelligence. It can be the decision model, and it writes Screen History’s notes where the iPhone has no Apple Intelligence. Only one model is kept, and picking another removes the one before. Nothing is sent anywhere." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载一个小模型在这部 iPhone 上运行，无论是否有 Apple 智能。它可以作为决策模型，并在没有 Apple 智能的 iPhone 上撰写屏幕历史的摘要。只保留一个模型，选择另一个会移除之前的。不会向任何地方发送内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載一個小模型在這部 iPhone 上執行，無論是否有 Apple Intelligence。它可以作為決策模型，並在沒有 Apple Intelligence 的 iPhone 上撰寫螢幕歷史的摘要。只保留一個模型，選擇另一個會移除之前的。不會向任何地方傳送內容。"
           }
         }
       }
@@ -36216,6 +36152,166 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "小而快的模型效果最好。它在跳出提示或按鈕改名時幫助流程繼續進行，只有答案明確時才會操作，且絕不會點按需要你批准的內容。它會收到任務目標和螢幕上各元素的名稱，不含截圖。同一時間只使用一個決策模型。"
+          }
+        }
+      }
+    },
+    "Local Models" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機模型"
+          }
+        }
+      }
+    },
+    "Use This Model For" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将此模型用于"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將此模型用於"
+          }
+        }
+      }
+    },
+    "Models on this iPhone. What they are asked never leaves the phone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这部 iPhone 上的模型。向它们提出的内容不会离开手机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這部 iPhone 上的模型。向它們提出的內容不會離開手機。"
+          }
+        }
+      }
+    },
+    "As the decision model it helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作为决策模型，它在弹出提示或按钮改名时帮助流程继续进行。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。同一时间只使用一个决策模型。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作為決策模型，它在跳出提示或按鈕改名時幫助流程繼續進行。只有答案明確時才會操作，且絕不會點按需要你批准的內容。同一時間只使用一個決策模型。"
+          }
+        }
+      }
+    },
+    "The decision model is a small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Pick it under an account or a local model above, where it reads Decisions. Services made for decisions alone, such as Cloudflare Workers AI and TypeSafe, are added here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "决策模型是一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。请在上方的账户或本地模型中标有“决策”的位置选择。专为决策提供的服务，例如 Cloudflare Workers AI 和 TypeSafe，在这里添加。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "決策模型是一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。請在上方的帳號或本機模型中標有「決策」的位置選擇。專為決策提供的服務，例如 Cloudflare Workers AI 和 TypeSafe，在這裡加入。"
+          }
+        }
+      }
+    },
+    "Not Downloaded" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未下載"
+          }
+        }
+      }
+    },
+    "Downloaded" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下載"
+          }
+        }
+      }
+    },
+    "Size" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
+          }
+        }
+      }
+    },
+    "This model is on this iPhone and runs here. Screen History uses it for its notes where the iPhone has no Apple Intelligence." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模型已在这部 iPhone 上并在本机运行。在没有 Apple 智能的 iPhone 上，屏幕历史用它来撰写记录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模型已在這部 iPhone 上並在本機執行。在沒有 Apple Intelligence 的 iPhone 上，螢幕歷史用它來撰寫記錄。"
+          }
+        }
+      }
+    },
+    "Only one downloaded model is kept, and downloading this one removes the one before. Screen History uses it for its notes where the iPhone has no Apple Intelligence." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只保留一个已下载的模型，下载此模型会移除之前的那个。在没有 Apple 智能的 iPhone 上，屏幕历史用它来撰写记录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只保留一個已下載的模型，下載此模型會移除之前的那個。在沒有 Apple Intelligence 的 iPhone 上，螢幕歷史用它來撰寫記錄。"
           }
         }
       }
