@@ -72,7 +72,11 @@ enum QuickFixes {
             if let raw = UserDefaults.standard.string(forKey: choiceKey), let kept = Choice(raw: raw) { return kept }
             return settings.hasModel && providerDecider != nil ? .provider : .none
         }
-        set { UserDefaults.standard.set(newValue.raw, forKey: choiceKey) }
+        set {
+            UserDefaults.standard.set(newValue.raw, forKey: choiceKey)
+            // The Models page and the pages under it show the pick: they redraw on this.
+            ModelKeys.saved += 1
+        }
     }
 
     private static let accountProviderKey = "quickFixes.account.provider"
@@ -101,7 +105,6 @@ enum QuickFixes {
         } else if accountModel(provider) != nil {
             choice = .none
         }
-        ModelKeys.saved += 1
     }
 
     /// One row of the Decision Model menu.
@@ -212,35 +215,6 @@ enum OnDeviceDecisions {
         }
         #endif
         return nil
-    }
-}
-
-/// Settings › Models: the Decision Model menu, and the way to the providers' page. `picked` is the
-/// page's, so the In Use card above shows the same pick.
-struct DecisionModelRows: View {
-    @Binding var picked: QuickFixes.Option
-    @State private var options = QuickFixes.options
-
-    var body: some View {
-        Picker(selection: $picked) {
-            ForEach(options) { Text(verbatim: $0.name).tag($0) }
-        } label: {
-            SettingsLabel("Decision Model", systemImage: "bolt")
-        }
-        .accessibilityIdentifier("models.decisionModel")
-        .onChange(of: picked) { _, new in QuickFixes.pick(new) }
-        NavigationLink { QuickFixesView() } label: { SettingsLabel("Decision Model Providers", systemImage: "cloud") }
-            .accessibilityIdentifier("models.fastDecisions")
-            .onAppear {
-                // Back from the providers' page: its models, and its pick, may have changed.
-                options = QuickFixes.options
-                picked = QuickFixes.picked
-            }
-            // An account's own page picked or dropped its model as the decision model.
-            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in
-                options = QuickFixes.options
-                picked = QuickFixes.picked
-            }
     }
 }
 

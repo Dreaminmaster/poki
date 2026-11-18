@@ -48,13 +48,19 @@ struct ModelSettingsView: View {
             }
             }
 
-            // The decision model: picked here beside the others, in use from the moment it is picked.
+            // The models on this iPhone, listed like the accounts.
+            LocalModelsSection(version: version)
+
+            // Services made for decisions alone, which are no model account.
             Section {
-                DecisionModelRows(picked: $decision)
-            } header: {
-                Text("Decision").textCase(nil)
+                NavigationLink { QuickFixesView() } label: {
+                    LabeledContent {
+                        Text(verbatim: decision.choice == .provider ? decision.name : AppLocalization.text("Off"))
+                    } label: { SettingsLabel("Decision Model Providers", systemImage: "cloud") }
+                }
+                .accessibilityIdentifier("models.fastDecisions")
             } footer: {
-                Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot. To use a model of one of your accounts, open the account above and choose Decisions.")
+                Text("The decision model is a small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Pick it under an account or a local model above, where it reads Decisions. Services made for decisions alone, such as Cloudflare Workers AI and TypeSafe, are added here.")
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -64,7 +70,11 @@ struct ModelSettingsView: View {
         .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Models"))
         .navigationBarTitleDisplayMode(.inline)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in
+            version = ModelKeys.saved
+            decision = QuickFixes.picked
+        }
+        .onAppear { decision = QuickFixes.picked }
         .sheet(isPresented: $adding) { AddAccount() }
         .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
         .navigationDestination(isPresented: $showingLiveVoice) { LiveVoiceFeature() }
