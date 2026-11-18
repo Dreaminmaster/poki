@@ -114,6 +114,8 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
         case cloudflare
         /// TypeSafe AI: Jev.
         case typesafe
+        /// OpenAI's Decisions API (POST /v1/decisions), which has its own request and answer format.
+        case openai
         /// Any other endpoint that speaks the same API (a self-hosted Clef): the whole address.
         case custom
     }
@@ -136,6 +138,7 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
         switch provider {
         case .cloudflare: "clef-flash"
         case .typesafe: "jev-latest"
+        case .openai: "gpt-6-luna"
         case .custom: "clef-flash"
         }
     }
@@ -146,6 +149,7 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
         switch provider {
         case .cloudflare: ["clef-flash", "clef"]
         case .typesafe: ["jev-latest"]
+        case .openai: ["gpt-6-luna"]
         case .custom: []
         }
     }
@@ -168,6 +172,8 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
             return URL(string: "https://api.cloudflare.com/client/v4/accounts/\(id)/ai/run/@cf/cloudflare/\(modelInUse)")
         case .typesafe:
             return URL(string: "https://api.typesafe.ai/v1/systemone")
+        case .openai:
+            return URL(string: "https://api.openai.com/v1/decisions")
         case .custom:
             guard let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)), let host = url.host, !host.isEmpty else { return nil }
             if url.scheme == "https" { return url }
@@ -181,25 +187,94 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
     public func decider(token: String, send: SystemOneDecider.Send? = nil) -> SystemOneDecider? {
         let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url, !token.isEmpty || provider == .custom else { return nil }
-        return SystemOneDecider(url: url, model: modelInUse, token: token, send: send ?? SystemOneDecider.urlSession)
+        return SystemOneDecider(url: url, model: modelInUse, token: token, format: provider == .openai ? .openai : .systemOne, send: send ?? SystemOneDecider.urlSession)
     }
 }
 
-/// The System One API over HTTPS: one POST per decision.
+/// A decision model over HTTPS: one POST per decision, in the System One format (Jev, Clef) or in
+/// the format of OpenAI's Decisions API.
 public struct SystemOneDecider: Decider {
     public typealias Send = @Sendable (URLRequest) async throws -> (status: Int, body: Data)
 
+    /// The two request and answer formats. They ask the same things: a choice among options with a
+    /// confidence, or the probability that something is true.
+    public enum Format: Sendable {
+        /// `{model, state, questions: {id: {type: "choice"|"noul", instructions, criteria}}}`.
+        case systemOne
+        /// `{model, input, questions: [{type: "choice"|"predicate", name, instructions, choices}]}`.
+        case openai
+    }
+
     public let url: URL
     public let model: String
+    public let format: Format
     let token: String
     let send: Send
     public var name: String { model }
 
-    public init(url: URL, model: String, token: String, send: @escaping Send = SystemOneDecider.urlSession) {
+    public init(url: URL, model: String, token: String, format: Format = .systemOne, send: @escaping Send = SystemOneDecider.urlSession) {
         self.url = url
         self.model = model
         self.token = token
+        self.format = format
         self.send = send
+    }
+
+    /// The same questions for OpenAI's Decisions API. The state goes as text when it is text, else
+    /// as one `input_json` part of a user message (which takes an object or an array).
+    static func openAIBody(model: String, state: JSON, questions: [DecisionQuestion]) -> JSON {
+        let input: JSON
+        if case .string = state {
+            input = state
+        } else {
+            let data: JSON
+            switch state {
+            case .object, .array: data = state
+            default: data = ["state": state]
+            }
+            input = [["role": "user", "content": [["type": "input_json", "data": data]]]]
+        }
+        let asked: [JSON] = questions.map { q in
+            switch q.kind {
+            case .yesNo:
+                return ["type": "predicate", "name": .string(q.id), "instructions": .string(q.instructions)]
+            case .choice(let options):
+                return ["type": "choice", "name": .string(q.id), "instructions": .string(q.instructions),
+                        "choices": .array(options.map { ["value": .string($0.id), "description": .string($0.means)] })]
+            }
+        }
+        return ["model": .string(model), "input": input, "questions": .array(asked)]
+    }
+
+    /// The answers of an OpenAI Decisions reply: an array, each named after its question. A refusal,
+    /// or an answer that is not one of the options, is an error, never a guess.
+    static func openAIAnswers(in data: Data, to questions: [DecisionQuestion]) throws -> [String: DecisionAnswer] {
+        guard let reply = try? JSON.parse(String(decoding: data, as: UTF8.self)) else { throw DeciderError("the answer was not JSON") }
+        guard let given = reply["answers"]?.array else {
+            let said = reply["error"]?["message"]?.string ?? reply["error"]?.string
+            throw DeciderError(said.map { "the provider said: \($0.prefix(160))" } ?? "the answer held no answers")
+        }
+        var out: [String: DecisionAnswer] = [:]
+        for q in questions {
+            guard let a = given.first(where: { $0["name"]?.string == q.id }) else { throw DeciderError("no answer to \"\(q.id)\"") }
+            if a["type"]?.string == "refusal" { throw DeciderError("the model refused to answer \"\(q.id)\"") }
+            switch q.kind {
+            case .yesNo:
+                guard let p = a["probability"]?.double, (0...1).contains(p) else { throw DeciderError("\"\(q.id)\" was not answered as a probability") }
+                out[q.id] = DecisionAnswer(choice: nil, confidence: p)
+            case .choice(let options):
+                guard let choice = a["choice"]?.string, options.contains(where: { $0.id == choice }) else {
+                    throw DeciderError("\"\(q.id)\" was answered with something that was not an option")
+                }
+                var probabilities: [String: Double] = [:]
+                for entry in a["probabilities"]?.array ?? [] {
+                    if let value = entry["value"]?.string, let p = entry["probability"]?.double { probabilities[value] = p }
+                }
+                guard let confidence = a["confidence"]?.double ?? probabilities[choice] else { throw DeciderError("\"\(q.id)\" came without a confidence") }
+                out[q.id] = DecisionAnswer(choice: choice, confidence: min(1, max(0, confidence)), probabilities: probabilities)
+            }
+        }
+        return out
     }
 
     /// No cache, no cookies, nothing kept on disk.
@@ -263,7 +338,8 @@ public struct SystemOneDecider: Decider {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        request.httpBody = Data(Self.body(model: model, state: state, questions: questions).serialized().utf8)
+        let body = format == .openai ? Self.openAIBody(model: model, state: state, questions: questions) : Self.body(model: model, state: state, questions: questions)
+        request.httpBody = Data(body.serialized().utf8)
         let send = self.send, posted = request
         let (status, data) = try await withDeadline(max(0.3, timeout), "the decision") { try await send(posted) }
         guard (200..<300).contains(status) else {
@@ -272,7 +348,7 @@ public struct SystemOneDecider: Decider {
             let said = reply?["errors"]?[0]?["message"]?.string ?? reply?["detail"]?.string ?? reply?["error"]?.string ?? reply?["error"]?["message"]?.string ?? ""
             throw DeciderError("the provider answered \(status)\(said.isEmpty ? "" : ": \(said.prefix(160))")")
         }
-        return try Self.answers(in: data, to: questions)
+        return try format == .openai ? Self.openAIAnswers(in: data, to: questions) : Self.answers(in: data, to: questions)
     }
 
     /// One tiny decision, to tell the owner whether their settings work, and how fast.

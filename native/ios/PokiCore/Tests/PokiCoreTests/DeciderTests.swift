@@ -624,6 +624,46 @@ final class DeciderTests: XCTestCase {
         XCTAssertEqual(answers["ok"]?.confidence, 0.98)
     }
 
+    /// OpenAI's Decisions API, as its guide gives it: questions in an array with choices of value and
+    /// description, answers in an array named after their questions.
+    func testOpenAIDecisionsHasItsOwnRequestAndAnswerShape() async throws {
+        let sent = LockedBox<URLRequest?>(nil)
+        let settings = DeciderSettings(provider: .openai, model: "gpt-6-luna")
+        XCTAssertNil(settings.decider(token: ""), "OpenAI needs a key")
+        let decider = try XCTUnwrap(settings.decider(token: "sk-test", send: { request in
+            sent.value = request
+            return (200, Data(#"{"answers":[{"type":"predicate","name":"ok","probability":0.92},{"type":"choice","name":"move","choice":"stop","probabilities":[{"value":"stop","probability":0.95},{"value":"wait","probability":0.05}],"confidence":0.93}]}"#.utf8))
+        }))
+        let questions = [DecisionQuestion(id: "move", instructions: "How to go on?", kind: .choice([("stop", "Stop"), ("wait", "Wait")])),
+                         DecisionQuestion(id: "ok", instructions: "Is it fine?", kind: .yesNo)]
+
+        let answers = try await decider.decide(state: ["task": "x"], questions: questions, timeout: 2)
+
+        let request = try XCTUnwrap(sent.value)
+        XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/decisions")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer sk-test")
+        let body = try JSON.parse(try XCTUnwrap(request.httpBody))
+        XCTAssertEqual(body["model"]?.string, "gpt-6-luna")
+        XCTAssertNil(body["state"])
+        XCTAssertEqual(body["input"]?[0]?["role"]?.string, "user")
+        XCTAssertEqual(body["input"]?[0]?["content"]?[0]?["type"]?.string, "input_json")
+        XCTAssertEqual(body["input"]?[0]?["content"]?[0]?["data"]?["task"]?.string, "x")
+        XCTAssertEqual(body["questions"]?[0]?["type"]?.string, "choice")
+        XCTAssertEqual(body["questions"]?[0]?["name"]?.string, "move")
+        XCTAssertEqual(body["questions"]?[0]?["choices"]?[1]?["value"]?.string, "wait")
+        XCTAssertEqual(body["questions"]?[0]?["choices"]?[1]?["description"]?.string, "Wait")
+        XCTAssertEqual(body["questions"]?[1]?["type"]?.string, "predicate")
+        XCTAssertEqual(answers["move"], DecisionAnswer(choice: "stop", confidence: 0.93, probabilities: ["stop": 0.95, "wait": 0.05]))
+        XCTAssertEqual(answers["ok"]?.confidence, 0.92)
+
+        // Text goes as text; a refusal or a key error is an error, never a guess.
+        XCTAssertEqual(SystemOneDecider.openAIBody(model: "gpt-6-luna", state: "A check.", questions: questions)["input"]?.string, "A check.")
+        let refusal = Data(#"{"answers":[{"type":"refusal","name":"move"}]}"#.utf8)
+        XCTAssertThrowsError(try SystemOneDecider.openAIAnswers(in: refusal, to: [questions[0]])) { XCTAssertTrue("\($0)".contains("refused"), "\($0)") }
+        let denied = Data(#"{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}"#.utf8)
+        XCTAssertThrowsError(try SystemOneDecider.openAIAnswers(in: denied, to: questions)) { XCTAssertTrue("\($0)".contains("Incorrect API key"), "\($0)") }
+    }
+
     func testAnAnswerThatIsNotAnOptionIsAnErrorNotAGuess() {
         let questions = [DecisionQuestion(id: "move", instructions: "", kind: .choice([("stop", "Stop"), ("wait", "Wait")]))]
         let bare = Data(#"{"answers":{"move":{"type":"choice","choice":"tap","confidence":0.9,"probabilities":{}}}}"#.utf8)

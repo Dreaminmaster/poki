@@ -35715,6 +35715,22 @@
           }
         }
       }
+    },
+    "Uses Your OpenAI Key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 OpenAI 密钥"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 OpenAI 金鑰"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

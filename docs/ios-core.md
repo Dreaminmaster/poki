@@ -367,7 +367,8 @@ on the phone; the next first `look` of a task in that app names the saved routin
   target), with no model. Past that, when the owner has added a decision model provider and picked a model
   (Settings › Models › Fast Decisions; there is no other switch, and `CoreConfig.decider` is nil
   until then), one request goes from the phone straight to their decision model (the
-  System One format of TypeSafe's Jev, which Cloudflare's Clef speaks too): the goal, the step
+  System One format of TypeSafe's Jev, which Cloudflare's Clef speaks too, or OpenAI's Decisions
+  API, `POST /v1/decisions`, in its own format): the goal, the step
   wanted, and the screen's elements as text, with no picture and nothing from a secure field. The
   options are built from the screen (the target under another name, close what is in the way, scroll,
   wait, stop), so the answer is always one of them. It is acted on only at `DeciderPolicy`'s

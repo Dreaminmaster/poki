@@ -1,8 +1,8 @@
 import PokiCore
 import SwiftUI
 
-/// Fast decisions: the owner's own decision model (Cloudflare's Clef, TypeSafe's Jev, or one they
-/// host), which a routine or a path asks how to go on where it would otherwise stop: a prompt in the
+/// Fast decisions: the owner's own decision model (Cloudflare's Clef, TypeSafe's Jev, OpenAI's
+/// Decisions API, or one they host), which a routine or a path asks how to go on where it would otherwise stop: a prompt in the
 /// way, a button renamed or moved. There is no switch: it is in use from the moment a provider is
 /// added and a model is picked on Settings › Models › Fast Decisions, and out of use when the model
 /// is set back to None or the provider is removed. The call goes from this iPhone straight to that
@@ -34,14 +34,22 @@ enum QuickFixes {
     static var decider: Decider? {
         let settings = settings
         guard settings.hasModel else { return nil }
-        return settings.decider(token: token)
+        return settings.decider(token: tokenInUse(settings, typed: token))
+    }
+
+    /// The token a call carries: the one entered here, else for OpenAI the API key already saved on
+    /// Settings › Models, which is the same key. A ChatGPT sign-in is not an API key and is not used.
+    static func tokenInUse(_ settings: DeciderSettings, typed: String) -> String {
+        let typed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty, settings.provider == .openai { return ModelKeys.key(.openai) ?? "" }
+        return typed
     }
 
     /// The model in use, for the Models page; nil while fast decisions are off.
     static var modelInUse: String? { decider == nil ? nil : settings.modelInUse }
 
     /// Whether a provider has been added, with or without a model picked.
-    static var hasProvider: Bool { settings.decider(token: token) != nil }
+    static var hasProvider: Bool { settings.decider(token: tokenInUse(settings, typed: token)) != nil }
 
     static func remove() {
         token = ""
@@ -91,6 +99,7 @@ extension DeciderSettings.Provider {
         switch self {
         case .cloudflare: "Cloudflare Workers AI"
         case .typesafe: "TypeSafe"
+        case .openai: "OpenAI"
         case .custom: "Custom Address"
         }
     }
@@ -124,11 +133,11 @@ struct QuickFixesView: View {
                     field("Account ID", text: $settings.account, prompt: "0123456789abcdef", identifier: "quickFixes.account")
                 case .custom:
                     field("Address", text: $settings.address, prompt: "https://example.com/v1/systemone", identifier: "quickFixes.address", url: true)
-                case .typesafe:
+                case .typesafe, .openai:
                     EmptyView()
                 }
                 LabeledContent {
-                    SecureField(text: $token, prompt: Text(settings.provider == .custom ? "Optional" : "Required")) { Text("API Token") }
+                    SecureField(text: $token, prompt: Text(tokenPrompt)) { Text("API Token") }
                         .multilineTextAlignment(.trailing)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("quickFixes.token")
@@ -212,7 +221,14 @@ struct QuickFixesView: View {
         }
     }
 
-    private var hasProvider: Bool { settings.decider(token: token) != nil }
+    private var hasProvider: Bool { settings.decider(token: QuickFixes.tokenInUse(settings, typed: token)) != nil }
+
+    /// OpenAI can go on the API key already saved on the Models page.
+    private var tokenPrompt: LocalizedStringKey {
+        if settings.provider == .custom { return "Optional" }
+        if settings.provider == .openai, ModelKeys.hasKey(.openai) { return "Uses Your OpenAI Key" }
+        return "Required"
+    }
 
     private func field(_ title: LocalizedStringKey, text: Binding<String>, prompt: String, identifier: String, url: Bool = false) -> some View {
         LabeledContent {
@@ -228,7 +244,7 @@ struct QuickFixesView: View {
     }
 
     private func check() {
-        guard let decider = settings.decider(token: token) else { return }
+        guard let decider = settings.decider(token: QuickFixes.tokenInUse(settings, typed: token)) else { return }
         checking = true
         result = nil
         Task {
