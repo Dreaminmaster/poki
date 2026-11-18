@@ -60,6 +60,8 @@ final class HistoryCapture: ObservableObject {
     /// Bumped when a read is kept or history is deleted, so an open panel reloads.
     @Published private(set) var changes = 0
     @Published private(set) var lastKept: Date?
+    /// When the launcher last made a read, kept or not: the sign that the connection is open.
+    private(set) var lastReadAt: Date?
 
     var isRunning: Bool { status == .waiting || status == .reading }
 
@@ -416,7 +418,7 @@ final class HistoryCapture: ObservableObject {
             return
         }
         // A read the launcher could not make: its tunnel is down and it is opening another.
-        if line["ok"] as? Bool == true { working() } else if !model.loopback.cellularRefused { failing() }
+        if line["ok"] as? Bool == true { lastReadAt = Date(); working() } else if !model.loopback.cellularRefused { failing() }
         if keep(line), once { end(me, .finished) }
     }
 

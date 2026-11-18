@@ -140,6 +140,8 @@ struct TestingOptionsView: View {
             // Screen History, an experiment that reads only when started here (issue 356). Last, so
             // the sections above keep their place.
             HistoryTestingSection()
+            // Whether a connection opened with no cellular stays open on cellular (issue 484).
+            CellularTrickSection()
         }
         .navigationTitle(AppLocalization.text("Testing Options"))
         .navigationBarTitleDisplayMode(.inline)

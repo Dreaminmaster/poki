@@ -76,6 +76,36 @@ final class HistoryCollector {
         AppLog.shared.add("history", "collector: stopped by the owner until Poki is opened again")
     }
 
+    /// Opens the connection again now, without waiting out a run's next try, and says whether it
+    /// worked (`ReconnectPokiIntent`, and the cellular test in Testing Options). With Screen History
+    /// on, the run in progress is ended and a new one started, and the answer is its first read. With
+    /// it off, the answer is whether the local connection answers a new connection.
+    func reconnect(_ model: AppModel, within seconds: TimeInterval = 25) async -> Bool {
+        if self.model == nil { self.model = model }
+        let asked = Date()
+        let capture = HistoryCapture.shared
+        guard capture.enabled else {
+            model.loopback.check()
+            while Date().timeIntervalSince(asked) < 6 {
+                try? await Task.sleep(for: .milliseconds(300))
+                if let checked = model.loopback.checkedAt, checked > asked { break }
+            }
+            return model.loopback.isWorking
+        }
+        ownerStopped = false
+        capture.stop()
+        startedAt = .distantPast
+        // A background start cannot take the keeper, but the run itself starts wherever Poki runs.
+        evaluate("a reconnect was asked for")
+        model.loopback.check()
+        while Date().timeIntervalSince(asked) < seconds {
+            try? await Task.sleep(for: .milliseconds(500))
+            if let read = capture.lastReadAt, read > asked { return true }
+            if !capture.isRunning { evaluate("a reconnect was asked for") }
+        }
+        return false
+    }
+
     /// Starts a run when one should be reading and none is.
     func evaluate(_ reason: String) {
         guard let model else { return }
