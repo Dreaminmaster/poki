@@ -682,6 +682,37 @@ final class DeciderTests: XCTestCase {
         XCTAssertNil(sent.value, "nothing is sent without a token")
     }
 
+    /// A model on the phone answers in words: the JSON in them is read as strictly as a decision
+    /// model's answer.
+    func testAModelOnThePhoneAnswersThroughAPromptAndIsReadStrictly() async throws {
+        let asked = LockedBox<(String, String)?>(nil), reply = LockedBox<String?>("Here it is:\n```json\n{\"move\": {\"choice\": \"wait\", \"confidence\": 0.8}, \"ok\": {\"yes\": 0.9}}\n```")
+        let decider = PromptDecider(name: "Apple Intelligence", maxState: 40) { prompt, instructions in
+            asked.value = (prompt, instructions)
+            return reply.value
+        }
+        let questions = [DecisionQuestion(id: "move", instructions: "How to go on?", kind: .choice([("stop", "Stop"), ("wait", "Wait")])),
+                         DecisionQuestion(id: "ok", instructions: "Is it fine?", kind: .yesNo)]
+
+        let answers = try await decider.decide(state: ["task": .string(String(repeating: "x", count: 200))], questions: questions, timeout: 2)
+
+        XCTAssertEqual(answers["move"], DecisionAnswer(choice: "wait", confidence: 0.8))
+        XCTAssertEqual(answers["move"]!.margin, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(answers["ok"]?.confidence, 0.9)
+        let prompt = try XCTUnwrap(asked.value).0
+        XCTAssertTrue(prompt.contains("option \"wait\": Wait"), prompt)
+        XCTAssertTrue(prompt.contains("\"ok\" (yes or no): Is it fine?"), prompt)
+        XCTAssertTrue(prompt.contains("(cut)") && !prompt.contains(String(repeating: "x", count: 60)), "the state is cut to the model's window")
+
+        for (words, why) in [("I think you should wait.", "not JSON"), (#"{"move":{"choice":"tap","confidence":0.9},"ok":{"yes":1}}"#, "not an option"),
+                             (#"{"move":{"choice":"wait"},"ok":{"yes":1}}"#, "without a confidence"), (#"{"move":{"choice":"wait","confidence":0.9}}"#, "no answer to")] {
+            reply.value = words
+            do { _ = try await decider.decide(state: "s", questions: questions, timeout: 2); XCTFail(words) } catch { XCTAssertTrue("\(error)".contains(why), "\(error)") }
+        }
+        reply.value = nil
+        let none = await decider.check(timeout: 1)
+        XCTAssertEqual(none, .failure(DeciderError("the model on this iPhone gave no answer")))
+    }
+
     func testAnAnswerThatIsNotAnOptionIsAnErrorNotAGuess() {
         let questions = [DecisionQuestion(id: "move", instructions: "", kind: .choice([("stop", "Stop"), ("wait", "Wait")]))]
         let bare = Data(#"{"answers":{"move":{"type":"choice","choice":"tap","confidence":0.9,"probabilities":{}}}}"#.utf8)

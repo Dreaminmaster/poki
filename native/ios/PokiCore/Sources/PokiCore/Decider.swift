@@ -376,3 +376,95 @@ public struct SystemOneDecider: Decider {
         }
     }
 }
+
+/// A decider over any model that answers text with text: a small model on the phone (Apple
+/// Intelligence, a downloaded one). The questions go as one prompt and the answer comes back as one
+/// JSON object, checked as strictly as a decision model's: an answer that is not an option, or that
+/// comes without a confidence, is an error and never a guess. The confidence is the model's own word
+/// for it, not a measured probability, so the same policy gates it and nothing more is read into it.
+public struct PromptDecider: Decider {
+    /// The model: the prompt and its standing instructions in, its words out; nil when it has none.
+    public typealias Ask = @Sendable (_ prompt: String, _ instructions: String) async -> String?
+
+    public let name: String
+    /// A small model's window is small: the state is cut to this many characters.
+    public let maxState: Int
+    let ask: Ask
+
+    public init(name: String, maxState: Int = 6000, ask: @escaping Ask) {
+        self.name = name
+        self.maxState = maxState
+        self.ask = ask
+    }
+
+    public static let instructions = """
+    You decide the next step of a task on a phone from what is on its screen. Answer with one JSON \
+    object and nothing else, with one entry for each question id. For a question with options: \
+    {"choice": "<the id of one option>", "confidence": <0 to 1>}. For a yes or no question: \
+    {"yes": <the probability of yes, 0 to 1>}. Pick only from the options given. Give a low \
+    confidence when the screen does not clearly show the answer.
+    """
+
+    static func prompt(state: JSON, questions: [DecisionQuestion], maxState: Int) -> String {
+        var text: String
+        if case .string(let plain) = state { text = plain } else { text = state.serialized() }
+        if text.count > maxState { text = String(text.prefix(maxState)) + " … (cut)" }
+        var out = "State:\n\(text)\n\nQuestions:\n"
+        for q in questions {
+            switch q.kind {
+            case .yesNo:
+                out += "- \"\(q.id)\" (yes or no): \(q.instructions)\n"
+            case .choice(let options):
+                out += "- \"\(q.id)\": \(q.instructions)\n"
+                for option in options { out += "    option \"\(option.id)\": \(option.means)\n" }
+            }
+        }
+        return out + "\nAnswer with the JSON object only."
+    }
+
+    /// The answers in a model's words: the first JSON object in them (a small model may wrap it in
+    /// a code fence or a sentence).
+    static func answers(in words: String, to questions: [DecisionQuestion]) throws -> [String: DecisionAnswer] {
+        guard let open = words.firstIndex(of: "{"), let close = words.lastIndex(of: "}"), open < close,
+              let reply = try? JSON.parse(String(words[open...close])), reply.object != nil else {
+            throw DeciderError("the answer was not JSON")
+        }
+        var out: [String: DecisionAnswer] = [:]
+        for q in questions {
+            guard let a = reply[q.id] else { throw DeciderError("no answer to \"\(q.id)\"") }
+            switch q.kind {
+            case .yesNo:
+                guard let p = a["yes"]?.double, (0...1).contains(p) else { throw DeciderError("\"\(q.id)\" was not answered as a probability") }
+                out[q.id] = DecisionAnswer(choice: nil, confidence: p)
+            case .choice(let options):
+                guard let choice = a["choice"]?.string, options.contains(where: { $0.id == choice }) else {
+                    throw DeciderError("\"\(q.id)\" was answered with something that was not an option")
+                }
+                guard let confidence = a["confidence"]?.double, (0...1).contains(confidence) else { throw DeciderError("\"\(q.id)\" came without a confidence") }
+                out[q.id] = DecisionAnswer(choice: choice, confidence: confidence)
+            }
+        }
+        return out
+    }
+
+    public func decide(state: JSON, questions: [DecisionQuestion], timeout: Double) async throws -> [String: DecisionAnswer] {
+        let prompt = Self.prompt(state: state, questions: questions, maxState: maxState), ask = self.ask
+        let words = try await withDeadline(max(0.3, timeout), "the decision") { await ask(prompt, Self.instructions) }
+        guard let words, !words.isEmpty else { throw DeciderError("the model on this iPhone gave no answer") }
+        return try Self.answers(in: words, to: questions)
+    }
+
+    /// One tiny decision, to tell the owner whether the model answers, and how fast.
+    public func check(timeout: Double = 20) async -> Result<Int, DeciderError> {
+        let began = now()
+        let question = DecisionQuestion(id: "ready", instructions: "Does the state say the check is running?", kind: .choice([("yes", "It says so"), ("no", "It does not")]))
+        do {
+            _ = try await decide(state: "A connection check from Poki is running.", questions: [question], timeout: timeout)
+            return .success(Int(((now() - began) * 1000).rounded()))
+        } catch let error as DeciderError {
+            return .failure(error)
+        } catch {
+            return .failure(DeciderError(error is DeadlineExceeded ? "no answer within \(Int(timeout)) s" : "\(error.localizedDescription)"))
+        }
+    }
+}

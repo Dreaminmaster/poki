@@ -1,13 +1,16 @@
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 import PokiCore
 import SwiftUI
 
-/// Fast decisions: the owner's own decision model (Cloudflare's Clef, TypeSafe's Jev, OpenAI's
-/// Decisions API, or one they host), which a routine or a path asks how to go on where it would otherwise stop: a prompt in the
-/// way, a button renamed or moved. There is no switch: it is in use from the moment a provider is
-/// added and a model is picked on Settings › Models › Fast Decisions, and out of use when the model
-/// is set back to None or the provider is removed. The call goes from this iPhone straight to that
-/// provider, never through Poki's relay, and holds the task's goal and the screen's elements as text:
-/// no screenshot, and nothing a password field holds.
+/// The decision model: a small, fast model which a routine or a path asks how to go on where it would
+/// otherwise stop (a prompt in the way, a button renamed or moved). It is a model on this iPhone
+/// (Apple Intelligence), or the owner's own provider (Cloudflare's Clef, TypeSafe's Jev, OpenAI's
+/// Decisions API, or one they host). There is no switch: it is picked on Settings › Models beside the
+/// other models and in use from then, until the pick is set back to Off. A provider's call goes from
+/// this iPhone straight to that provider, never through Poki's relay, and holds the task's goal and
+/// the screen's elements as text: no screenshot, and nothing a password field holds.
 ///
 /// The settings are in the app's defaults; the token is in the keychain and is never printed or logged.
 enum QuickFixes {
@@ -30,30 +33,101 @@ enum QuickFixes {
         }
     }
 
-    /// The decider PokiCore asks, read at each run: nil until a provider is added and a model picked.
-    static var decider: Decider? {
-        let settings = settings
-        guard settings.hasModel else { return nil }
-        return decider(settings, typed: token)
-    }
+    /// Which model decides. A model on this iPhone needs no provider; a provider's model is the one
+    /// picked on its page (`settings.model`).
+    enum Choice: Hashable {
+        case none
+        /// Apple's own model, where Apple Intelligence is on the iPhone.
+        case apple
+        /// The provider's model named in the settings.
+        case provider
 
-    /// The decider for these settings, with or without a model picked. OpenAI with no key at all goes
-    /// on the ChatGPT sign-in when there is one, as a trial: OpenAI's documents name the Responses API
-    /// for plan usage and say nothing of Decisions, so its answer to this call is what tells.
-    static func decider(_ settings: DeciderSettings, typed: String) -> SystemOneDecider? {
-        let token = tokenInUse(settings, typed: typed)
-        if token.isEmpty, usesChatGPT(settings, typed: typed) {
-            return settings.decider(token: "", tokenSource: { await ModelCredential.apiKey(for: .chatgpt) })
+        var raw: String {
+            switch self {
+            case .none: "none"
+            case .apple: "apple"
+            case .provider: "provider"
+            }
         }
-        return settings.decider(token: token)
+
+        init?(raw: String) {
+            switch raw {
+            case "none": self = .none
+            case "apple": self = .apple
+            case "provider": self = .provider
+            default: return nil
+            }
+        }
     }
 
-    static func usesChatGPT(_ settings: DeciderSettings, typed: String) -> Bool {
-        settings.provider == .openai && tokenInUse(settings, typed: typed).isEmpty && ChatGPTAccount.signedIn
+    private static let choiceKey = "quickFixes.choice"
+
+    /// The pick. Before one was ever made, a provider with a model picked counts as picked.
+    static var choice: Choice {
+        get {
+            if let raw = UserDefaults.standard.string(forKey: choiceKey), let kept = Choice(raw: raw) { return kept }
+            return settings.hasModel && providerDecider != nil ? .provider : .none
+        }
+        set { UserDefaults.standard.set(newValue.raw, forKey: choiceKey) }
     }
+
+    /// One row of the Decision Model menu.
+    struct Option: Hashable, Identifiable {
+        var choice: Choice
+        /// The provider's model this row stands for; empty for the others.
+        var model = ""
+        var name: String
+        var id: String { choice.raw + ":" + model }
+    }
+
+    /// What can be picked now: off, the model on this iPhone where there is one, and the models of
+    /// the provider that has been added.
+    static var options: [Option] {
+        var out = [Option(choice: .none, name: AppLocalization.text("Off"))]
+        if OnDeviceDecisions.appleAvailable { out.append(Option(choice: .apple, name: AppLocalization.text("Apple Intelligence"))) }
+        let settings = settings
+        if providerDecider != nil {
+            var models = DeciderSettings.models(settings.provider)
+            if settings.hasModel, !models.contains(settings.modelInUse) { models.append(settings.modelInUse) }
+            out += models.map { Option(choice: .provider, model: $0, name: $0) }
+        }
+        return out
+    }
+
+    /// The row that is picked now.
+    static var picked: Option {
+        let all = options
+        switch choice {
+        case .none: return all[0]
+        case .apple: return all.first { $0.choice == .apple } ?? all[0]
+        case .provider: return all.first { $0.choice == .provider && $0.model == settings.modelInUse && settings.hasModel } ?? all[0]
+        }
+    }
+
+    static func pick(_ option: Option) {
+        if option.choice == .provider {
+            var changed = settings
+            changed.model = option.model
+            settings = changed
+        }
+        choice = option.choice
+    }
+
+    /// The decider PokiCore asks, read at each run: nil while the pick is Off or cannot run.
+    static var decider: Decider? {
+        switch choice {
+        case .none: return nil
+        case .apple: return OnDeviceDecisions.apple
+        case .provider: return settings.hasModel ? providerDecider : nil
+        }
+    }
+
+    /// The provider's decider, with or without a model picked; nil while its settings are incomplete.
+    static var providerDecider: SystemOneDecider? { settings.decider(token: tokenInUse(settings, typed: token)) }
 
     /// The token a call carries: the one entered here, else for OpenAI the API key already saved on
-    /// Settings › Models, which is the same key. A ChatGPT sign-in is not an API key and is not used.
+    /// Settings › Models, which is the same key. A ChatGPT sign-in is not used: OpenAI answers 401 to
+    /// its token on the Decisions API (tried on the owner's phone, 2026-11-18).
     static func tokenInUse(_ settings: DeciderSettings, typed: String) -> String {
         let typed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         if typed.isEmpty, settings.provider == .openai { return ModelKeys.key(.openai) ?? "" }
@@ -61,14 +135,41 @@ enum QuickFixes {
     }
 
     /// The model in use, for the Models page; nil while fast decisions are off.
-    static var modelInUse: String? { decider == nil ? nil : settings.modelInUse }
+    static var modelInUse: String? { decider == nil ? nil : picked.name }
 
     /// Whether a provider has been added, with or without a model picked.
-    static var hasProvider: Bool { decider(settings, typed: token) != nil }
+    static var hasProvider: Bool { providerDecider != nil }
 
     static func remove() {
         token = ""
         settings = DeciderSettings()
+        if choice == .provider { choice = .none }
+    }
+}
+
+/// The models on this iPhone that can decide: nothing of the task or the screen leaves the phone.
+enum OnDeviceDecisions {
+    /// Apple's own model, where Apple Intelligence is on the iPhone.
+    static var appleAvailable: Bool { BacktapeWriter.apple }
+
+    static var apple: PromptDecider? {
+        guard appleAvailable else { return nil }
+        return PromptDecider(name: "Apple Intelligence", maxState: 5000) { prompt, instructions in await askApple(prompt, instructions: instructions) }
+    }
+
+    private static func askApple(_ prompt: String, instructions: String) async -> String? {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            do {
+                let session = LanguageModelSession(instructions: instructions)
+                return try await session.respond(to: prompt).content
+            } catch {
+                AppLog.shared.add("decisions", "Apple Intelligence gave no decision: \(error.localizedDescription)")
+                return nil
+            }
+        }
+        #endif
+        return nil
     }
 }
 
@@ -96,16 +197,27 @@ struct SpeedTestingSection: View {
     }
 }
 
-/// The row on Settings › Models: the model in use, read again each time the page comes back.
-struct FastDecisionsRow: View {
-    @State private var value = ""
+/// Settings › Models: the Decision Model menu, and the way to the providers' page. `picked` is the
+/// page's, so the In Use card above shows the same pick.
+struct DecisionModelRows: View {
+    @Binding var picked: QuickFixes.Option
+    @State private var options = QuickFixes.options
+
     var body: some View {
-        NavigationLink { QuickFixesView() } label: {
-            LabeledContent {
-                Text(verbatim: value)
-            } label: { SettingsLabel("Fast Decisions", systemImage: "bolt") }
+        Picker(selection: $picked) {
+            ForEach(options) { Text(verbatim: $0.name).tag($0) }
+        } label: {
+            SettingsLabel("Decision Model", systemImage: "bolt")
         }
-        .onAppear { value = QuickFixes.modelInUse ?? AppLocalization.text(QuickFixes.hasProvider ? "No Model" : "Not Set Up") }
+        .accessibilityIdentifier("models.decisionModel")
+        .onChange(of: picked) { _, new in QuickFixes.pick(new) }
+        NavigationLink { QuickFixesView() } label: { SettingsLabel("Decision Model Providers", systemImage: "cloud") }
+            .accessibilityIdentifier("models.fastDecisions")
+            .onAppear {
+                // Back from the providers' page: its models, and its pick, may have changed.
+                options = QuickFixes.options
+                picked = QuickFixes.picked
+            }
     }
 }
 
@@ -159,10 +271,6 @@ struct QuickFixesView: View {
                 } label: {
                     Text("API Token")
                 }
-                if QuickFixes.usesChatGPT(settings, typed: token) {
-                    Text("Trial. OpenAI may not allow Decisions on a ChatGPT plan. Check Connection shows its answer.")
-                        .font(.footnote).foregroundStyle(Color(.secondaryLabel))
-                }
             } header: {
                 SettingsHeader("Provider")
             } footer: {
@@ -185,7 +293,7 @@ struct QuickFixesView: View {
             } header: {
                 SettingsHeader("Fast Decision Model")
             } footer: {
-                Text("Poki uses this model from the moment you pick it. When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks it how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing. Choose None to stop using it.")
+                Text("Poki uses this model from the moment you pick it, here or on the Models page. Choose None to stop using it.")
             }
 
             Section {
@@ -214,7 +322,7 @@ struct QuickFixesView: View {
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Fast Decisions"))
+        .navigationTitle(AppLocalization.text("Decision Model Providers"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fixed = RoutineStore.shared.routines.reduce(0) { $0 + ($1.fixes ?? 0) } }
         .onChange(of: settings) { old, new in
@@ -225,6 +333,9 @@ struct QuickFixesView: View {
                 settings = new
             }
             QuickFixes.settings = new
+            // Picking a model here picks it as the decision model; None gives the pick up.
+            if new.hasModel, old.model != new.model || old.provider != new.provider { QuickFixes.choice = .provider }
+            if !new.hasModel, QuickFixes.choice == .provider { QuickFixes.choice = .none }
             result = nil
         }
         .onChange(of: token) { _, new in
@@ -240,13 +351,13 @@ struct QuickFixesView: View {
         }
     }
 
-    private var hasProvider: Bool { QuickFixes.decider(settings, typed: token) != nil }
+    private var hasProvider: Bool { providerDecider != nil }
+    private var providerDecider: SystemOneDecider? { settings.decider(token: QuickFixes.tokenInUse(settings, typed: token)) }
 
     /// OpenAI can go on the API key already saved on the Models page.
     private var tokenPrompt: LocalizedStringKey {
         if settings.provider == .custom { return "Optional" }
         if settings.provider == .openai, ModelKeys.hasKey(.openai) { return "Uses Your OpenAI Key" }
-        if settings.provider == .openai, ChatGPTAccount.signedIn { return "Uses Your ChatGPT Sign In" }
         return "Required"
     }
 
@@ -264,7 +375,7 @@ struct QuickFixesView: View {
     }
 
     private func check() {
-        guard let decider = QuickFixes.decider(settings, typed: token) else { return }
+        guard let decider = providerDecider else { return }
         checking = true
         result = nil
         Task {

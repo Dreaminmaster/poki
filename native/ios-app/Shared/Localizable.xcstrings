@@ -35524,22 +35524,6 @@
         }
       }
     },
-    "Fast Decisions" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快速决策"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快速決策"
-          }
-        }
-      }
-    },
     "Fast Decision Model" : {
       "localizations" : {
         "zh-Hans" : {
@@ -35552,38 +35536,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "快速決策模型"
-          }
-        }
-      }
-    },
-    "No Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未选模型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未選模型"
-          }
-        }
-      }
-    },
-    "Not Set Up" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未设置"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未設定"
           }
         }
       }
@@ -35684,38 +35636,6 @@
         }
       }
     },
-    "Poki uses this model from the moment you pick it. When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks it how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing. Choose None to stop using it." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选好模型后 Poki 即开始使用。流程遇到意外情况时，例如弹出提示或按钮改了名称，Poki 会询问它如何继续。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。有效的修复会被记住，下次运行无需再问。选择“无”即可停用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選好模型後 Poki 即開始使用。流程遇到意外情況時，例如跳出提示或按鈕改了名稱，Poki 會詢問它如何繼續。只有答案明確時才會操作，且絕不會點按需要你批准的內容。有效的修復會被記住，下次執行無需再問。選擇「無」即可停用。"
-          }
-        }
-      }
-    },
-    "A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Optional. Poki uses it once you add a provider and pick a model." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。可选。添加服务商并选好模型后，Poki 即会使用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。可選。加入服務商並選好模型後，Poki 即會使用。"
-          }
-        }
-      }
-    },
     "Uses Your OpenAI Key" : {
       "localizations" : {
         "zh-Hans" : {
@@ -35732,34 +35652,98 @@
         }
       }
     },
-    "Uses Your ChatGPT Sign In" : {
+    "Decision" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用你的 ChatGPT 登录"
+            "value" : "决策"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用你的 ChatGPT 登入"
+            "value" : "決策"
           }
         }
       }
     },
-    "Trial. OpenAI may not allow Decisions on a ChatGPT plan. Check Connection shows its answer." : {
+    "Decision Model" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "试用。OpenAI 可能不允许在 ChatGPT 套餐上使用 Decisions。“检查连接”会显示它的回应。"
+            "value" : "决策模型"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "試用。OpenAI 可能不允許在 ChatGPT 方案上使用 Decisions。「檢查連線」會顯示它的回應。"
+            "value" : "決策模型"
+          }
+        }
+      }
+    },
+    "Decision Model Providers" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "决策模型服务商"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "決策模型服務商"
+          }
+        }
+      }
+    },
+    "Poki uses this model from the moment you pick it, here or on the Models page. Choose None to stop using it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这里或“模型”页面选好模型后，Poki 即开始使用。选择“无”即可停用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在這裡或「模型」頁面選好模型後，Poki 即開始使用。選擇「無」即可停用。"
+          }
+        }
+      }
+    },
+    "A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。这部 iPhone 上的模型不会向外发送任何内容。服务商的模型会收到任务目标和屏幕上各元素的名称，不含截屏。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。只有答案明確時才會操作，且絕不會點按需要你批准的內容。這部 iPhone 上的模型不會向外傳送任何內容。服務商的模型會收到任務目標和螢幕上各元素的名稱，不含截圖。"
+          }
+        }
+      }
+    },
+    "Apple Intelligence" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 智能"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence"
           }
         }
       }

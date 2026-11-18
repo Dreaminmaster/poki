@@ -21,12 +21,13 @@ struct ModelSettingsView: View {
     @State private var enteringVoiceKey = false
     @State private var showingLiveVoice = false
     @State private var openedForVoice = false
+    @State private var decision = QuickFixes.picked
 
     var body: some View {
         List {
             // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
             Section {
-                InUseCard(add: { adding = true })
+                InUseCard(decision: decision.choice == .none ? AppLocalization.text("Off") : decision.name, add: { adding = true })
             } header: {
                 Text("In Use").textCase(nil)
             } footer: {
@@ -47,12 +48,13 @@ struct ModelSettingsView: View {
             }
             }
 
-            // The decision model, in use from the moment a provider is added and a model picked.
+            // The decision model: picked here beside the others, in use from the moment it is picked.
             Section {
-                FastDecisionsRow()
-                .accessibilityIdentifier("models.fastDecisions")
+                DecisionModelRows(picked: $decision)
+            } header: {
+                Text("Decision").textCase(nil)
             } footer: {
-                Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Optional. Poki uses it once you add a provider and pick a model.")
+                Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot.")
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -79,6 +81,8 @@ struct ModelSettingsView: View {
 /// card, its one place.
 private struct InUseCard: View {
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// The decision model's name, or Off.
+    var decision: String
     var add: () -> Void
 
     var body: some View {
@@ -110,7 +114,7 @@ private struct InUseCard: View {
     @ViewBuilder private func uses(has: Bool, provider: ModelProvider, singleLine: Bool) -> some View {
         chip("Text Chat", has ? provider.name : AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
         chip("Live Voice", VoiceDirect.apiKey != nil ? AppLocalization.text(LocalizedStringResource("OpenAI")) : AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
-        chip("Dictation", AppLocalization.text(LocalizedStringResource("On This iPhone")), singleLine: singleLine)
+        chip("Decision", decision, singleLine: singleLine)
     }
 
     private func chip(_ title: LocalizedStringKey, _ value: String, singleLine: Bool) -> some View {

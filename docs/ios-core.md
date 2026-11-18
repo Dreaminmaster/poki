@@ -365,8 +365,9 @@ on the phone; the next first `look` of a task in that app names the saved routin
 - **Fixes on the way, and fast decisions.** Where a step would stop, a run first applies what the routine
   remembers from an earlier fix (a control that closed what was in the way, another form of the
   target), with no model. Past that, when the owner has added a decision model provider and picked a model
-  (Settings › Models › Fast Decisions; there is no other switch, and `CoreConfig.decider` is nil
-  until then), one request goes from the phone straight to their decision model (the
+  (Settings › Models, Decision Model; there is no other switch, and `CoreConfig.decider` is nil
+  until then), or picked a model on the phone (Apple Intelligence, through `PromptDecider`, which
+  asks in one prompt, reads the JSON in the answer as strictly, and sends nothing out), one request goes from the phone straight to their decision model (the
   System One format of TypeSafe's Jev, which Cloudflare's Clef speaks too, or OpenAI's Decisions
   API, `POST /v1/decisions`, in its own format): the goal, the step
   wanted, and the screen's elements as text, with no picture and nothing from a secure field. The
