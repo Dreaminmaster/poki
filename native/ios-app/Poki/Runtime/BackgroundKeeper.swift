@@ -60,7 +60,19 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         if lost { startLocation() } else if !pairingHold { stopLocation() }
     }
 
+    private var recovered: NSObjectProtocol?
+
     private func watchInterruptions() {
+        // The silent engine restarts itself after a route change or a media reset; location stands
+        // in when it could not, and goes again when it could.
+        if recovered == nil {
+            recovered = NotificationCenter.default.addObserver(forName: KeepAlive.changed, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isOn, !self.audioPaused else { return }
+                    self.setAudioLost(!self.audio.isOn)
+                }
+            }
+        }
         guard interruption == nil else { return }
         interruption = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
@@ -95,6 +107,8 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         audioLost = false
         if let interruption { NotificationCenter.default.removeObserver(interruption) }
         interruption = nil
+        if let recovered { NotificationCenter.default.removeObserver(recovered) }
+        recovered = nil
         if !pairingHold { stopLocation() }
         audio.stop()
     }
