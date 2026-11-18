@@ -40,7 +40,7 @@ final class ContinuedRun {
     private(set) var isRunning = false
 
     /// Asks iOS for the task; must be called while Poki is in front. False when iOS refuses.
-    func begin(subtitle: String) -> Bool {
+    func begin(title: String? = nil, subtitle: String) -> Bool {
         guard !isRunning else { return true }
         guard let wildcard = Self.permitted else {
             AppLog.shared.add("background", "continued run: no BGTaskSchedulerPermittedIdentifiers in this build"); return false
@@ -48,7 +48,7 @@ final class ContinuedRun {
         register()
         guard registered.contains(wildcard) else { return false }
         let id = String(wildcard.dropLast()) + UUID().uuidString.prefix(8).lowercased()
-        let request = BGContinuedProcessingTaskRequest(identifier: id, title: AppLocalization.text(LocalizedStringResource("Poki is on")), subtitle: subtitle)
+        let request = BGContinuedProcessingTaskRequest(identifier: id, title: title ?? AppLocalization.text(LocalizedStringResource("Poki is on")), subtitle: subtitle)
         request.strategy = .fail
         do {
             try BGTaskScheduler.shared.submit(request)

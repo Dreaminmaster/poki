@@ -798,7 +798,7 @@ final class AppModel {
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
-        sessionOn ? loopback.resume(every: 6) : loopback.pause()
+        sessionOn || HistoryCapture.isEnabled ? loopback.resume(every: 6) : loopback.pause()
         if pairingUnderWay { log.add("pairing", "Poki in the background while pairing; keep-alive \(pairingKeepAlive.isOn ? "playing" : "off")") }
     }
     private var inFront = true
@@ -1187,17 +1187,20 @@ final class AppModel {
         pendingPrepareForTask = false
         wantsOn = false
         if AskPoki.app === self, let chat = AskPoki.chat, chat.isRunningInSplitView { chat.stop() }
+        // Screen History reads over the local connection whether or not Poki is on: while it is on,
+        // the connection and its checks stay.
+        let historyReads = HistoryCapture.isEnabled
         guard sessionOn else {
-            if setup.loopback == .builtIn { tunnel.disconnect() }
+            if setup.loopback == .builtIn, !historyReads { tunnel.disconnect() }
             return
         }
-        if !inFront { loopback.pause() }
+        if !inFront, !historyReads { loopback.pause() }
         log.add("session", automationPath == .inProcess ? "turned off: closing the in-process session" : "turned off: ending the runner")
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }
         core.stop()
         launcher.stop()
-        if setup.loopback == .builtIn { tunnel.disconnect() }
+        if setup.loopback == .builtIn, !historyReads { tunnel.disconnect() }
         if automationPath == .runner {
             if !Self.onSimulator { Task { await RunnerProbe.shutdown() } }
             confirmRunnerEnded()

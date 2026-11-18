@@ -425,7 +425,7 @@ struct HistoryTestingSection: View {
         } header: {
             Text("Screen History")
         } footer: {
-            Text("An experiment. While Screen History and Poki are both on, Poki reads the text of the app in front and keeps it on this iPhone. Reading waits while the iPhone is locked or an agent works, then goes on by itself. Stop holds it until you open Poki again. Password fields are left out, and nothing is sent anywhere.")
+            Text("An experiment. While Screen History is on, Poki reads the text of the app in front and keeps it on this iPhone. Reading waits while the iPhone is locked or an agent works, then goes on by itself. Stop holds it until you open Poki again. Password fields are left out, and nothing is sent anywhere.")
         }
     }
 }

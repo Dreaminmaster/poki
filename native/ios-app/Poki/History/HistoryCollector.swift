@@ -10,15 +10,21 @@ import UIKit
 /// task) is `HistoryCapture`'s own; the collector only makes sure a run exists.
 ///
 /// Reading another app means Poki is in the background, so something has to keep Poki running.
-/// Poki being on already does (`BackgroundKeeper`: the continued run, silent audio or location), and
-/// the collector adds nothing of its own: with Poki off, nothing is read. `staysUp` is the one place
-/// that decides it, so another way of staying up can replace it without touching the rest.
+/// `BackgroundKeeper` does (the continued run, silent audio or location), and Screen History holds
+/// it by itself while it is on, whether or not Poki is on (the owner, 2026-11-18: collection is
+/// persistent whenever Screen History is on). `hold` and `staysUp` are the two places that decide
+/// it, so another way of staying up can replace the keeper without touching the rest.
 @MainActor
 final class HistoryCollector {
     static let shared = HistoryCollector()
 
     /// Whether Poki keeps running in the background now, so a run can outlive iOS's background time.
-    var staysUp: @MainActor (AppModel) -> Bool = { $0.sessionOn && $0.background.isOn }
+    var staysUp: @MainActor (AppModel) -> Bool = { $0.background.isOn }
+    /// Takes or gives back what keeps Poki running. Taking only works while Poki is in front,
+    /// where iOS lets a background mode start.
+    var hold: @MainActor (AppModel, Bool) -> Void = { model, on in
+        if on { model.background.holdForHistory() } else { model.background.releaseHistory() }
+    }
 
     private weak var model: AppModel?
     private var watching: Set<AnyCancellable> = []
@@ -74,12 +80,19 @@ final class HistoryCollector {
     func evaluate(_ reason: String) {
         guard let model else { return }
         let capture = HistoryCapture.shared
+        // Held for as long as the switch is on, a hand-stopped run included: the owner's Stop ends
+        // reading, and the next time Poki is opened reading goes on without another start.
+        if !capture.enabled {
+            hold(model, false)
+        } else if UIApplication.shared.applicationState == .active {
+            hold(model, true)
+        }
         guard !capture.isRunning else { idle = ""; return }
         let why: String? =
             !capture.enabled ? "Screen History is off"
             : ownerStopped ? "the owner stopped it"
             : capture.screenOff ? "the iPhone is locked"
-            : !staysUp(model) ? "Poki is off, so nothing keeps it running in the background"
+            : !staysUp(model) ? "nothing keeps Poki running in the background until it is opened once"
             : Date().timeIntervalSince(startedAt) < Self.pause ? "a run started a moment ago"
             : nil
         if let why {

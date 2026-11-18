@@ -37,8 +37,39 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         if authorization == .notDetermined { manager.requestWhenInUseAuthorization() } else { manager.requestAlwaysAuthorization() }
     }
 
-    /// Called while Poki is in front (iOS only starts background location from the foreground).
+    /// Who wants Poki kept running: the session (Poki is on) and Screen History, each on its own.
+    /// The keeper runs while either does, and stops when neither does.
+    private var sessionHold = false
+    private(set) var historyHold = false
+
+    /// Poki turned on. Called while Poki is in front (iOS only starts background location from the foreground).
     func start() {
+        sessionHold = true
+        begin()
+    }
+
+    /// Poki turned off. The keeper stays while Screen History holds it.
+    func stop() {
+        sessionHold = false
+        if !historyHold { finish() }
+    }
+
+    /// Screen History is on: Poki is kept running for it, whether or not Poki itself is on. Called
+    /// while Poki is in front, as `start` is.
+    func holdForHistory() {
+        guard !historyHold else { return }
+        historyHold = true
+        AppLog.shared.add("background", "Screen History keeps Poki running")
+        begin()
+    }
+
+    func releaseHistory() {
+        guard historyHold else { return }
+        historyHold = false
+        if !sessionHold { finish() }
+    }
+
+    private func begin() {
         guard !isOn else { return }
         isOn = true
         // iOS 26 and later: the system's continued processing task keeps Poki up, with no audio and
@@ -50,7 +81,12 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
                 guard let self, self.isOn else { return }
                 self.startAudio(); self.watchInterruptions()
             }
-            if run.begin(subtitle: AppLocalization.text(LocalizedStringResource("Agents can reach this iPhone"))) { return }
+            // Started for Screen History alone, the system's card says so and not that Poki is on.
+            let began = sessionHold
+                ? run.begin(subtitle: AppLocalization.text(LocalizedStringResource("Agents can reach this iPhone")))
+                : run.begin(title: AppLocalization.text(LocalizedStringResource("Screen History is on")),
+                            subtitle: AppLocalization.text(LocalizedStringResource("Poki reads the app in front")))
+            if began { return }
         }
         startAudio()
         watchInterruptions()
@@ -104,7 +140,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         startAudio()
     }
 
-    func stop() {
+    private func finish() {
         guard isOn else { return }
         isOn = false
         if #available(iOS 26.0, *) { (continued as? ContinuedRun)?.end() }
