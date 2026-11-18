@@ -152,7 +152,7 @@ async fn main() {
         }
     });
     out.send(json!({ "event": "ready", "data": { "version": poki_setup_core::full_version() } }));
-    let _watch = watch_account(out.clone());
+    let watch = watch_account(out.clone());
     let state = Arc::new(Shared::default());
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -181,6 +181,10 @@ async fn main() {
             out.send(reply);
         });
     }
+    // The watcher never ends by itself and holds a sender, so the writer would wait for it forever
+    // and the helper would outlive the app. Requests still running finish and are written out.
+    watch.abort();
+    let _ = watch.await;
     drop(out);
     let _ = writer.await;
 }
