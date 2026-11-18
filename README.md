@@ -181,6 +181,8 @@ This lists directions, not dates. Released features are documented in [CHANGELOG
 
 ## Core contributors
 
+People listed here are core contributors. See [Contributor levels](CONTRIBUTING.md#contributor-levels).
+
 <!-- CORE-CONTRIBUTORS:START -->
 <table>
   <tbody>
