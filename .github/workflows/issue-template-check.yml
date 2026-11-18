@@ -2,8 +2,9 @@ name: Issue template check
 
 # Issue events only: this never runs on pushes or pull requests.
 # "opened" fires only for issues created after this file is on the default branch,
-# so existing issues are never touched. "edited" acts only on issues this check
-# already labeled needs-template, to take the label off once they match a form.
+# so existing issues are never touched. It adds the area: label that matches the
+# "Affected area in Poki" answer. "edited" acts only on issues this check already
+# labeled state:needs-info, to take the label off once they match a form.
 on:
   issues:
     types: [opened, edited]
@@ -20,7 +21,7 @@ jobs:
   check:
     if: >-
       github.event.action == 'opened' ||
-      contains(github.event.issue.labels.*.name, 'needs-template')
+      contains(github.event.issue.labels.*.name, 'state:needs-info')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

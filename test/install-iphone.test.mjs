@@ -263,7 +263,7 @@ test('the issue draft is only printed: it never runs gh, and it says the person 
   const template = await readFile(join(root, '.github/ISSUE_TEMPLATE/install-failure.yml'), 'utf8');
   const labels = [...template.matchAll(/^\s+label: (.+)$/gm)].map(m => m[1]);
   assert.deepEqual([...draft.matchAll(/^### (.+)$/gm)].map(m => m[1]), labels, 'the draft follows the install-failure template field by field');
-  assert.match(draft, /### Step it stopped at\n\nPair \(Trust This Computer\)\n/, 'the step is one of the template options');
+  assert.match(draft, /### Failed installation step\n\nPair \(Trust This Computer\)\n/, 'the step is one of the template options');
 });
 
 test('the agent guide documents every error code the installer can print', async () => {
