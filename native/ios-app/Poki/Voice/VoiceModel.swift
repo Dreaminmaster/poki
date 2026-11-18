@@ -49,9 +49,9 @@ struct VoiceBridge: Equatable {
         }
     }
 
-    /// The phone's language goes along: the one the session speaks before the person has spoken.
+    /// Poki's interface language goes along: the one the session speaks from its first sentence.
     func token() async throws -> Token {
-        let url = base.appending(path: "token").appending(queryItems: [URLQueryItem(name: "language", value: Locale.preferredLanguages.first ?? "en")])
+        let url = base.appending(path: "token").appending(queryItems: [URLQueryItem(name: "language", value: AppLocalization.language)])
         let (data, response) = try await URLSession.shared.data(from: url)
         try Self.check(response, data)
         return try JSONDecoder().decode(Token.self, from: data)
@@ -154,6 +154,10 @@ enum VoiceError: LocalizedError {
     }
 }
 
+/// What look, do or open_app answered on this phone: the text the model reads, whether it failed, and
+/// the screenshot behind it.
+typealias PhoneAnswer = (text: String, failed: Bool, screen: Data?)
+
 /// One function call the model asked for. Keyed by the model's call_id, it runs at most once, whatever
 /// happens to the connection: a call outlives the session that asked for it, and a new session is told
 /// how it ended instead of asking for it again.
@@ -166,6 +170,8 @@ struct VoiceCall: Identifiable, Equatable {
     let session: Int
     var state = State.running
     var output = ""
+    /// The screen when the call finished (look, do, open_app): the model sees it next to the output.
+    var screen: Data?
     /// The model has the result (as a function_call_output, or in a reconnect note).
     var delivered = false
     let started = Date()
@@ -297,6 +303,8 @@ final class VoiceModel {
     static let stall: Duration = .seconds(60)
     static let backgroundStall: Duration = .seconds(30)
     private var localTools: Set<String> = []
+    /// The conversation item holding the screenshot the model sees now.
+    private var screenItem: String?
     private let log = AppLog.shared
     /// Poki's approval for a tap (PokiCore's rules and approval card): text, app bundle id, app name.
     private let clearTap: @MainActor (String, String?, String?) async -> TapClearance
@@ -304,8 +312,8 @@ final class VoiceModel {
     /// How long a tap waits for the owner's OK on the phone: about as long as the card says it lasts.
     static let approvalWait: Double = 115
 
-    /// look and do, run by PokiCore on this phone (the relay's tools): name, JSON arguments → text, failed.
-    private let phoneTool: @MainActor (String, String) async -> (String, Bool)
+    /// look, do and open_app, run by PokiCore on this phone (the relay's tools): name, JSON arguments.
+    private let phoneTool: @MainActor (String, String) async -> PhoneAnswer
 
     /// true while a conversation with the microphone is on: Poki's silent keep-alive audio steps aside
     /// (its .playback session cannot record), and the voice-chat session keeps Poki running instead.
@@ -316,7 +324,7 @@ final class VoiceModel {
     private let time: VoiceClock
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
-         phoneTool: @escaping @MainActor (String, String) async -> (String, Bool),
+         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer,
          holdMicrophone: @escaping @MainActor (Bool) -> Void = { _ in },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
          time: VoiceClock = VoiceClock()) {
@@ -585,6 +593,7 @@ final class VoiceModel {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [log] in log.add("voice", "1 s after the end: \(VoiceLink.audioSession())") }
         }
         link = nil
+        screenItem = nil
         holdingMicrophone = false
         ready = false
         activeResponse = nil
@@ -858,10 +867,12 @@ final class VoiceModel {
         Task {
             var state = VoiceCall.State.done
             var output: String
+            var screen: Data?
             if local, Self.phoneTools.contains(call.name) {
-                let (text, failed) = await phoneTool(call.name, call.arguments)
-                output = text.count > 6000 ? String(text.prefix(6000)) + "…" : text
-                if failed { state = .failed }
+                let answer = await phoneTool(call.name, call.arguments)
+                output = answer.text.count > 6000 ? String(answer.text.prefix(6000)) + "…" : answer.text
+                screen = answer.screen
+                if answer.failed { state = .failed }
             } else if local {
                 output = Self.localTool(call.name)
             } else if let bridge {
@@ -893,14 +904,15 @@ final class VoiceModel {
                 output = "error: no voice bridge"
                 state = .failed
             }
-            finish(call.id, state: state, output: output)
+            finish(call.id, state: state, output: output, screen: screen)
         }
     }
 
-    private func finish(_ id: String, state: VoiceCall.State, output: String) {
+    private func finish(_ id: String, state: VoiceCall.State, output: String, screen: Data? = nil) {
         guard let index = calls.firstIndex(where: { $0.id == id }) else { return }
         calls[index].state = state
         calls[index].output = output
+        calls[index].screen = screen
         calls[index].finished = Date()
         clock.toolDone = Date()
         log.add("voice", "tool \(calls[index].name) \(state == .done ? "done" : "failed")")
@@ -916,11 +928,27 @@ final class VoiceModel {
             ? link.send(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": call.id, "output": call.output]])
             : link.send(Self.note("While the connection was down, \(call.name) \(call.arguments) finished. It already ran; do not run it again. Tell the user in one sentence how it ended. Result: \(call.output)"))
         guard sent else { return }
+        if call.session == session, let screen = call.screen { show(screen, on: link) }
+        calls[index].screen = nil
         calls[index].delivered = true
         lastActivity = time.now()
         clock.delivered = Date()
         wantsResponse = true
         flush()
+    }
+
+    /// A function_call_output carries text only, so the screenshot behind it follows as an image in a
+    /// user message. Only the latest stays: the one before is deleted, as it no longer shows the screen.
+    private func show(_ jpeg: Data, on link: VoiceConnection) {
+        guard let image = VoiceScreen.dataURL(jpeg) else {
+            log.add("voice", "screenshot of \(jpeg.count) bytes does not fit a data channel message; the model reads the elements only")
+            return
+        }
+        if let old = screenItem { link.send(["type": "conversation.item.delete", "item_id": old, "event_id": "delete-\(old)"]) }
+        let id = "screen-\(UUID().uuidString.prefix(8).lowercased())"
+        let item: [String: Any] = ["id": id, "type": "message", "role": "user", "content": [["type": "input_image", "image_url": image]]]
+        screenItem = link.send(["type": "conversation.item.create", "event_id": "add-\(id)", "item": item]) ? id : nil
+        if screenItem == nil { log.add("voice", "screenshot not sent (\(image.count) characters)") }
     }
 
     /// A new session after a drop: say what already ran, so the model reports it instead of asking again.
@@ -1026,7 +1054,7 @@ final class VoiceModel {
     }
 
     /// PokiCore's tools, answered on this phone through the runner.
-    static let phoneTools: Set<String> = ["look", "do"]
+    static let phoneTools: Set<String> = ["look", "do", "open_app"]
 
     /// Tools the phone answers itself. They change nothing.
     static func localTool(_ name: String) -> String {

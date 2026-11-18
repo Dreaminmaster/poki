@@ -351,8 +351,15 @@ final class AppModel {
                                #if DEBUG && targetEnvironment(simulator)
                                if TalkRehearsal.asked { return await TalkRehearsal.step() }
                                #endif
-                               let result = await core.tool(name, arguments: arguments)
-                               return (result.text, result.isError)
+                               let tool = { (name: String, arguments: String) async -> PhoneAnswer in
+                                   let result = await core.tool(name, arguments: arguments)
+                                   return (result.text, result.isError, result.jpeg)
+                               }
+                               guard name == "open_app" else { return await tool(name, arguments) }
+                               return await VoiceApps.open(arguments, tool: tool, openLink: { url in
+                                   guard UIApplication.shared.applicationState == .active else { return false }
+                                   return await UIApplication.shared.open(url)
+                               })
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
                            connection: VoiceModel.connection)
