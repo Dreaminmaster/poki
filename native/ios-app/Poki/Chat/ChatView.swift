@@ -115,7 +115,8 @@ struct ChatView: View {
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
-                           shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
+                           shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise,
+                           cardActions: cardActions) {
                 if !home, let hint = currentSetupHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
                 }
@@ -191,6 +192,12 @@ struct ChatView: View {
             if was, !now, endedWell { DoneLinger.shared.celebrate() }
         }
         .onChange(of: MessageFieldAsk.shared.pending, initial: true) { if MessageFieldAsk.shared.take() { writing = true } }
+    }
+
+    /// A result card's taps: select an item, or send a button's sentence as your message.
+    private var cardActions: ResultCardActions {
+        let chat = chat
+        return ResultCardActions(busy: busy, choose: { chat.choose($1, on: $0) }, say: { chat.send($0) })
     }
 
     /// How far your first words rise: from the message field to their place under the top bar.
@@ -587,6 +594,8 @@ struct ChatTranscript<Footer: View>: View {
     /// How far your first words rise out of the message field when they open the conversation
     /// (the chat only); nil where a first message just appears.
     var rise: CGFloat? = nil
+    /// What a result card can do here; nil where the conversation is only shown.
+    var cardActions: ResultCardActions? = nil
     @ViewBuilder var footer: () -> Footer
 
     /// Your first message is all there is: its bubble rises from the message field, and Poki's dots
@@ -761,6 +770,10 @@ struct ChatTranscript<Footer: View>: View {
             BrowserCard(id: entry.id, visit: visit)
                 .padding(.top, 6)
                 .transition(PlanMotion.stepTransition)
+        case .card(let card):
+            ResultCardView(entry: entry.id, card: card, chosen: entry.chosen, actions: cardActions)
+                .padding(.vertical, 6)
+                .transition(PlanMotion.stepTransition)
         }
     }
 
@@ -785,7 +798,7 @@ struct ChatTranscript<Footer: View>: View {
     private func isLast(_ i: Int, poki: Bool) -> Bool {
         !entries[(i + 1)...].contains { entry in
             switch entry.kind {
-            case .poki, .plan: poki
+            case .poki, .plan, .card: poki
             case .you, .request: !poki
             default: false
             }

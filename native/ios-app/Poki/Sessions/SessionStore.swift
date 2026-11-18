@@ -65,6 +65,7 @@ struct SavedSession: Codable, Identifiable, Equatable {
             case .plan(let steps): return "Plan: " + steps.map { "\($0.state.rawValue): \($0.text)" }.joined(separator: "; ")
             case .step(let text, let ok): return "Step (\(ok.map { $0 ? "succeeded" : "failed" } ?? "unconfirmed")): \(text)"
             case .note(.problem(let text)): return "Problem: \(text)"
+            case .card(let card): return card.context(chosen: entry.chosen)
             default: return nil
             }
         }.map { String($0.prefix(4000)) }
