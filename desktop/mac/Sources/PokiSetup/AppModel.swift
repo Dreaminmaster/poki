@@ -37,6 +37,8 @@ final class AppModel: ObservableObject {
     @Published var account: AccountState?
     @Published var accountError: CoreError?
     @Published var teams: [Team] = []
+    /// Why the team list could not be loaded, shown in place of the spinner.
+    @Published var teamsError: String?
     @Published var phones: [PhoneRow] = []
     @Published var phonesError: CoreError?
     @Published var selectedUDID: String?
@@ -182,6 +184,8 @@ final class AppModel: ObservableObject {
 
     // MARK: Refresh
 
+    static let rateLimitedTeams = "Apple has had too many sign-in attempts or codes for this Apple Account. Wait about an hour, then sign in again."
+
     func refreshAccount() async {
         if demo { return }
         do {
@@ -192,12 +196,21 @@ final class AppModel: ObservableObject {
                 codeVia = state.pendingFactor
                 needsCode = true
             }
-            if state.signedIn, state.pendingFactor == nil, !state.isRateLimited(), teams.isEmpty {
-                do {
-                    teams = try await bridge.call("teams")
-                } catch let e as CoreError where e.kind == "needs_code" {
-                    await promptForCode()
-                } catch {}
+            if state.signedIn, state.pendingFactor == nil, teams.isEmpty {
+                if state.isRateLimited() {
+                    teamsError = Self.rateLimitedTeams
+                } else {
+                    do {
+                        teams = try await bridge.call("teams")
+                        teamsError = nil
+                    } catch let e as CoreError where e.kind == "needs_code" {
+                        await promptForCode()
+                    } catch {
+                        teamsError = error.localizedDescription
+                    }
+                }
+            } else if !state.signedIn {
+                teamsError = nil
             }
         } catch let e as CoreError {
             accountError = e
@@ -215,6 +228,7 @@ final class AppModel: ObservableObject {
             needsCode = false
             codeVia = nil
             teams = []
+            teamsError = nil
         }
     }
 
@@ -420,6 +434,7 @@ final class AppModel: ObservableObject {
         } else {
             needsCode = false
             teams = []
+            teamsError = nil
             await refreshAccount()
         }
     }
@@ -428,6 +443,7 @@ final class AppModel: ObservableObject {
         try await bridge.run("finish_sign_in", ["code": code])
         needsCode = false
         teams = []
+        teamsError = nil
         await refreshAccount()
     }
 
@@ -435,6 +451,7 @@ final class AppModel: ObservableObject {
         do {
             try await bridge.run("sign_out")
             teams = []
+            teamsError = nil
             needsCode = false
             await refreshAccount()
         } catch { report(error) }
