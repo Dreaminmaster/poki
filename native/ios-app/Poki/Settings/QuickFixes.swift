@@ -41,12 +41,15 @@ enum QuickFixes {
         case apple
         /// The provider's model named in the settings.
         case provider
+        /// A model of one of the owner's model accounts (`accountPick`).
+        case account
 
         var raw: String {
             switch self {
             case .none: "none"
             case .apple: "apple"
             case .provider: "provider"
+            case .account: "account"
             }
         }
 
@@ -55,6 +58,7 @@ enum QuickFixes {
             case "none": self = .none
             case "apple": self = .apple
             case "provider": self = .provider
+            case "account": self = .account
             default: return nil
             }
         }
@@ -71,6 +75,35 @@ enum QuickFixes {
         set { UserDefaults.standard.set(newValue.raw, forKey: choiceKey) }
     }
 
+    private static let accountProviderKey = "quickFixes.account.provider"
+    private static let accountModelKey = "quickFixes.account.model"
+
+    /// The account and its model that decide while the pick is an account's (set on the account's
+    /// own page, Settings › Models › the account › Decisions).
+    static var accountPick: (provider: ModelProvider, model: String)? {
+        guard let raw = UserDefaults.standard.string(forKey: accountProviderKey), let provider = ModelProvider(rawValue: raw),
+              let model = UserDefaults.standard.string(forKey: accountModelKey), !model.isEmpty else { return nil }
+        return (provider, model)
+    }
+
+    /// The model of `provider` that is the decision model now, if one of its models is.
+    static func accountModel(_ provider: ModelProvider) -> String? {
+        guard choice == .account, let pick = accountPick, pick.provider == provider else { return nil }
+        return pick.model
+    }
+
+    /// Picks an account's model as the decision model; nil turns it off when this account's was.
+    static func pickAccount(_ provider: ModelProvider, model: String?) {
+        if let model {
+            UserDefaults.standard.set(provider.rawValue, forKey: accountProviderKey)
+            UserDefaults.standard.set(model, forKey: accountModelKey)
+            choice = .account
+        } else if accountModel(provider) != nil {
+            choice = .none
+        }
+        ModelKeys.saved += 1
+    }
+
     /// One row of the Decision Model menu.
     struct Option: Hashable, Identifiable {
         var choice: Choice
@@ -85,6 +118,7 @@ enum QuickFixes {
     static var options: [Option] {
         var out = [Option(choice: .none, name: AppLocalization.text("Off"))]
         if OnDeviceDecisions.appleAvailable { out.append(Option(choice: .apple, name: AppLocalization.text("Apple Intelligence"))) }
+        if choice == .account, let account = accountOption { out.append(account) }
         let settings = settings
         if providerDecider != nil {
             var models = DeciderSettings.models(settings.provider)
@@ -101,7 +135,14 @@ enum QuickFixes {
         case .none: return all[0]
         case .apple: return all.first { $0.choice == .apple } ?? all[0]
         case .provider: return all.first { $0.choice == .provider && $0.model == settings.modelInUse && settings.hasModel } ?? all[0]
+        case .account: return all.first { $0.choice == .account } ?? all[0]
         }
+    }
+
+    /// The account's model as a row of the menu, while it is the pick and its account is still there.
+    private static var accountOption: Option? {
+        guard let pick = accountPick, ModelAccounts.isSetUp(pick.provider) else { return nil }
+        return Option(choice: .account, model: pick.model, name: AccountDecisions.name(pick.provider, pick.model))
     }
 
     static func pick(_ option: Option) {
@@ -119,6 +160,7 @@ enum QuickFixes {
         case .none: return nil
         case .apple: return OnDeviceDecisions.apple
         case .provider: return settings.hasModel ? providerDecider : nil
+        case .account: return accountPick.flatMap { AccountDecisions.decider($0.provider, model: $0.model) }
         }
     }
 
@@ -191,6 +233,11 @@ struct DecisionModelRows: View {
             .accessibilityIdentifier("models.fastDecisions")
             .onAppear {
                 // Back from the providers' page: its models, and its pick, may have changed.
+                options = QuickFixes.options
+                picked = QuickFixes.picked
+            }
+            // An account's own page picked or dropped its model as the decision model.
+            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in
                 options = QuickFixes.options
                 picked = QuickFixes.picked
             }

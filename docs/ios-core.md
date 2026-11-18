@@ -366,7 +366,7 @@ on the phone; the next first `look` of a task in that app names the saved routin
   remembers from an earlier fix (a control that closed what was in the way, another form of the
   target), with no model. Past that, when the owner has added a decision model provider and picked a model
   (Settings › Models, Decision Model; there is no other switch, and `CoreConfig.decider` is nil
-  until then), or picked a model on the phone (Apple Intelligence, through `PromptDecider`, which
+  until then), or picked a model of one of their model accounts on that account's page (Settings › Models › the account › Decisions: any account the chat runs on, asked through `PromptDecider`, and for an OpenAI API key also Luna on the Decisions API), or picked a model on the phone (Apple Intelligence, through `PromptDecider`, which
   asks in one prompt, reads the JSON in the answer as strictly, and sends nothing out), one request goes from the phone straight to their decision model (the
   System One format of TypeSafe's Jev, which Cloudflare's Clef speaks too, or OpenAI's Decisions
   API, `POST /v1/decisions`, in its own format): the goal, the step

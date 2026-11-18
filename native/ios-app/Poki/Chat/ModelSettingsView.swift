@@ -54,7 +54,7 @@ struct ModelSettingsView: View {
             } header: {
                 Text("Decision").textCase(nil)
             } footer: {
-                Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot.")
+                Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot. To use a model of one of your accounts, open the account above and choose Decisions.")
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -209,6 +209,13 @@ private struct AccountDetail: View {
                     } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
                 }
                 .disabled(!ModelAccounts.canTalkLive(provider))
+                NavigationLink { DecisionFeature(provider: provider) } label: {
+                    LabeledContent {
+                        Text(verbatim: QuickFixes.accountModel(provider).map { AccountDecisions.name(provider, $0) } ?? AppLocalization.text(AccountDecisions.canDecide(provider) ? "Off" : "Not Supported"))
+                    } label: { SettingsLabel("Decisions", systemImage: "bolt") }
+                }
+                .disabled(!AccountDecisions.canDecide(provider))
+                .accessibilityIdentifier("account.decisions")
             } header: {
                 Text("Use This Account For")
             } footer: {
