@@ -696,6 +696,8 @@ final class DeciderTests: XCTestCase {
         let answers = try await decider.decide(state: ["task": .string(String(repeating: "x", count: 200))], questions: questions, timeout: 2)
 
         XCTAssertEqual(answers["move"], DecisionAnswer(choice: "wait", confidence: 0.8))
+        XCTAssertEqual(decider.patience, 8, "a model on the phone gets longer than the policy's 2.5 s")
+        XCTAssertNil(ScriptedDecider { _, _ in [:] }.patience)
         XCTAssertEqual(answers["move"]!.margin, 0.8, accuracy: 0.0001)
         XCTAssertEqual(answers["ok"]?.confidence, 0.9)
         let prompt = try XCTUnwrap(asked.value).0

@@ -76,6 +76,13 @@ public protocol Decider: Sendable {
     /// The answers by question id. Throws when the call fails, takes longer than `timeout`, or the
     /// answer is not one of the options asked for.
     func decide(state: JSON, questions: [DecisionQuestion], timeout: Double) async throws -> [String: DecisionAnswer]
+    /// How long this decider may take over one decision, where that is not the policy's time: a
+    /// model on the phone is slower than a decision model's API. nil keeps the policy's.
+    var patience: Double? { get }
+}
+
+public extension Decider {
+    var patience: Double? { nil }
 }
 
 /// How far a decider is trusted. The defaults are deliberately strict: a fix that is not clearly
@@ -389,11 +396,15 @@ public struct PromptDecider: Decider {
     public let name: String
     /// A small model's window is small: the state is cut to this many characters.
     public let maxState: Int
+    /// A model on the phone reads the whole prompt before its first word: it gets seconds, not the
+    /// policy's 2.5.
+    public let patience: Double?
     let ask: Ask
 
-    public init(name: String, maxState: Int = 6000, ask: @escaping Ask) {
+    public init(name: String, maxState: Int = 6000, patience: Double = 8, ask: @escaping Ask) {
         self.name = name
         self.maxState = maxState
+        self.patience = patience
         self.ask = ask
     }
 

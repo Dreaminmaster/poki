@@ -187,7 +187,7 @@ extension Computer {
         let began = now()
         do {
             let answers = try await decider.decide(state: state, questions: [DecisionQuestion(id: "holds", instructions: Self.checkQuestion, kind: .yesNo)],
-                                                   timeout: max(0.3, min(policy.timeout, until - now() - 0.3)))
+                                                   timeout: max(0.3, min(decider.patience ?? policy.timeout, until - now() - 0.3)))
             guard let p = answers["holds"]?.confidence else { return .open("no answer") }
             let ms = Int(((now() - began) * 1000).rounded())
             if p >= policy.minConfidence { return .holds(ms: ms, p: p) }
@@ -207,7 +207,7 @@ extension Computer {
         let answers: [String: DecisionAnswer]
         do {
             answers = try await decider.decide(state: fixState(want, candidates: candidates, all: all, screen: screen), questions: fixQuestions(candidates),
-                                               timeout: max(0.3, min(policy.timeout, until - now() - 0.5)))
+                                               timeout: max(0.3, min(decider.patience ?? policy.timeout, until - now() - 0.5)))
         } catch {
             return (.stop("\(decider.name) gave no decision (\(error is DeadlineExceeded ? "no answer in time" : "\(error)"))"), took(), 0)
         }
