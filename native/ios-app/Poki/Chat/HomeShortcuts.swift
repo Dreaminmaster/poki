@@ -273,9 +273,13 @@ enum HomeShortcuts {
 final class HomeShortcutStore {
     static let shared = HomeShortcutStore()
     private(set) var shortcuts: [HomeShortcut] = []
-    @ObservationIgnored private var basis: [String] = []
-    @ObservationIgnored private var routes: [HomeShortcuts.Remembered] = []
-    @ObservationIgnored private var requests: [HomeShortcuts.Request] = []
+    private struct Inputs: Equatable, Sendable {
+        var language: String
+        var requests: [HomeShortcuts.Request]
+        var routines: [HomeShortcuts.Remembered]
+    }
+
+    @ObservationIgnored private var inputs: Inputs?
     @ObservationIgnored private var refreshToken = 0
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private let defaults = UserDefaults.standard
@@ -291,24 +295,25 @@ final class HomeShortcutStore {
         defaults.data(forKey: Self.editedKey).flatMap { try? JSONDecoder().decode([HomeShortcuts.Edit].self, from: $0) } ?? []
     }
 
-    private func extractInputs(from sessions: [SavedSession], routines: [Routine]) -> (requests: [HomeShortcuts.Request], routes: [HomeShortcuts.Remembered], basis: [String]) {
-        let requests = sessions.compactMap { session -> HomeShortcuts.Request? in
+    private static func requests(in sessions: [SavedSession]) -> [HomeShortcuts.Request] {
+        sessions.compactMap { session in
             guard session.kind == .poki else { return nil }
             for entry in session.entries { if case .you(let text, _) = entry.kind { return .init(text: text, at: session.started) } }
             return nil
         }
-        let routes = routines.map { HomeShortcuts.Remembered(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
-        let basis = [AppLocalization.language, requests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
-                     routes.map { "\($0.text)\($0.runs)" }.joined(separator: ","), forgotten.sorted().joined(separator: ",")]
-        return (requests, routes, basis)
+    }
+
+    private nonisolated static func remembered(_ routines: [Routine]) -> [HomeShortcuts.Remembered] {
+        routines.map { .init(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
     }
 
     func refresh(sessions: [SavedSession], routines: [Routine], now: Date = Date()) {
         refreshTask?.cancel()
         refreshToken += 1
-        let extracted = extractInputs(from: sessions, routines: routines)
-        guard extracted.basis != self.basis else { return }
-        (self.basis, self.routes, self.requests) = (extracted.basis, extracted.routes, extracted.requests)
+        let updated = Inputs(language: AppLocalization.language, requests: Self.requests(in: sessions),
+                             routines: Self.remembered(routines))
+        guard updated != inputs else { return }
+        inputs = updated
         rank(now: now)
     }
 
@@ -316,28 +321,19 @@ final class HomeShortcutStore {
         refreshTask?.cancel()
         refreshToken += 1
         let token = refreshToken
-        let initialRequests = sessions.compactMap { session -> HomeShortcuts.Request? in
-            guard session.kind == .poki else { return nil }
-            for entry in session.entries { if case .you(let text, _) = entry.kind { return .init(text: text, at: session.started) } }
-            return nil
-        }
+        let requests = Self.requests(in: sessions)
         let language = AppLocalization.language
-        let forgottenSnapshot = forgotten
         refreshTask = Task { [weak self] in
-            let computed = await Task.detached(priority: .utility) { () -> (routes: [HomeShortcuts.Remembered], basis: [String], rankedRoutines: [HomeShortcuts.RankedRoutine], groupedRequests: [HomeShortcuts.RequestGroup]) in
-                let loadedRoutines = routines?() ?? []
-                let routes = loadedRoutines.map { HomeShortcuts.Remembered(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
-                let basis = [language, initialRequests.map { "\($0.at.timeIntervalSince1970)" }.joined(separator: ","),
-                             routes.map { "\($0.text)\($0.runs)" }.joined(separator: ","), forgottenSnapshot.sorted().joined(separator: ",")]
-                let rankedRoutines = HomeShortcuts.rankRoutines(routes, now: now)
-                let groupedRequests = HomeShortcuts.groups(initialRequests, now: now)
-                return (routes, basis, rankedRoutines, groupedRequests)
+            let computed = await Task.detached(priority: .utility) {
+                let updated = Inputs(language: language, requests: requests, routines: Self.remembered(routines?() ?? []))
+                return (updated, HomeShortcuts.rankRoutines(updated.routines, now: now), HomeShortcuts.groups(requests, now: now))
             }.value
-            guard let self, !Task.isCancelled, self.refreshToken == token, computed.basis != self.basis else { return }
-            (self.basis, self.routes, self.requests) = (computed.basis, computed.routes, initialRequests)
+            let (updated, rankedRoutines, groupedRequests) = computed
+            guard let self, !Task.isCancelled, self.refreshToken == token, updated != self.inputs else { return }
+            self.inputs = updated
             self.shortcuts = HomeShortcuts.rank(
-                rankedRoutines: computed.rankedRoutines,
-                groupedRequests: computed.groupedRequests,
+                rankedRoutines: rankedRoutines,
+                groupedRequests: groupedRequests,
                 examples: HomeIdea.examples,
                 pinned: [HomeIdea.star],
                 forgotten: self.forgotten,
@@ -354,7 +350,6 @@ final class HomeShortcutStore {
     func forget(_ shortcut: HomeShortcut) {
         defaults.set(Array(forgotten.union([shortcut.key])).sorted(), forKey: Self.forgottenKey)
         keep(edits.filter { $0.replaces != shortcut.key })
-        basis = []
         rank(now: Date())
     }
 
@@ -371,7 +366,7 @@ final class HomeShortcutStore {
     }
 
     private func rank(now: Date) {
-        shortcuts = HomeShortcuts.rank(routines: routes, requests: requests, examples: HomeIdea.examples, pinned: [HomeIdea.star],
+        shortcuts = HomeShortcuts.rank(routines: inputs?.routines ?? [], requests: inputs?.requests ?? [], examples: HomeIdea.examples, pinned: [HomeIdea.star],
                                        forgotten: forgotten, edits: edits, now: now)
     }
 }

@@ -4,10 +4,12 @@ import UserNotifications
 enum ApprovalNotice {
     static let allow = "approval.allow"
     static let deny = "approval.deny"
+    static let stopAsking = "approval.stop"
 }
 struct ApprovalDecision {
     let approvalID: String
     let approved: Bool
+    let stopAsking: Bool
 }
 enum ApprovalIntentBridge {
     @MainActor static func submit(_ decision: ApprovalDecision) {

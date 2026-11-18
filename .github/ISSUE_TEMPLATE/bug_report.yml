@@ -1,44 +1,58 @@
-name: Bug report (Poki MCP or Poki Agent on a computer)
-description: Poki MCP, Poki Agent, or a messaging channel does not work as documented.
-labels: [bug]
+name: Bug report
+description: Something in Poki does not work as documented (iPhone app, Poki Setup, Poki MCP, or Poki Agent).
+labels: ["type:bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Remove passcodes, tokens, pairing records, and private screen contents. To report a vulnerability, use [private reporting](https://github.com/JosssphZhou/poki/security/advisories/new).
-        Search [existing issues](https://github.com/JosssphZhou/poki/issues?q=is%3Aissue) first. Agents filing for a user: read [AGENTS.md](https://github.com/JosssphZhou/poki/blob/main/AGENTS.md#file-an-issue).
-        For the Poki iPhone app or Poki Setup, use the **iPhone app bug** form instead.
+        Search [existing issues](https://github.com/JosssphZhou/poki/issues?q=is%3Aissue) first. To report a vulnerability, use [private reporting](https://github.com/JosssphZhou/poki/security/advisories/new).
+        If installing Poki failed, use the **Install failure** form. If the tools work but a task in an app fails, use **Task failure**.
+        Agents filing for a user: read [AGENTS.md](https://github.com/JosssphZhou/poki/blob/main/AGENTS.md#file-an-issue).
   - type: textarea
-    id: what
+    id: problem
     attributes:
-      label: What happened
-      description: What you expected, and what you saw instead.
+      label: Problem description
+      description: Expected behavior versus actual behavior, including the exact error text.
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
       label: Steps to reproduce
-      description: The task or tool call, and the response you got. Say if you reproduced it more than once.
+      description: The task or tool call and the response returned. Note whether you reproduced it more than once.
     validations:
       required: true
   - type: dropdown
-    id: component
+    id: area
     attributes:
-      label: Component
+      label: Affected area in Poki
       options:
+        - Poki iPhone app
         - Poki MCP
-        - Poki Agent
-        - iMessage or Telegram channel
-        - Setup or update (bin/setup, poki update)
-        - Native helper (poki-native)
-        - Relay or remote MCP (deploy/)
+        - Poki Agent, iMessage, or Telegram
+        - Installation or Poki Setup
+        - Other or not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Poki version
+      description: The app version from Settings (with build and channel), or the version and commit from `poki_mcp_status`.
+      placeholder: Poki 0.2.8 (501) Alpha, or 0.1.1 f4fd51e
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: iPhone model and iOS version
+      placeholder: iPhone 17 Pro, iOS 27.3
     validations:
       required: true
   - type: dropdown
     id: connection
     attributes:
-      label: Connection
+      label: Connection method
       options:
         - Physical iPhone over USB
         - Physical iPhone over LAN (RemotePairing)
@@ -47,22 +61,14 @@ body:
         - Not device-related
     validations:
       required: true
-  - type: input
-    id: versions
-    attributes:
-      label: Versions
-      description: Poki version and commit (from poki_mcp_status), macOS or Linux, Xcode, iPhone model, and iOS.
-      placeholder: 0.1.1 f4fd51e, macOS 27.2, Xcode 27.2, iPhone 17 Pro, iOS 27.3
-    validations:
-      required: true
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: The daemon log lines or error output around the failure. Remove tokens and private text.
+      description: Log lines around the failure (in the app, go to Settings > Diagnostics > Copy Log). Redact personal information such as tokens, account names, and message text first.
       render: text
   - type: textarea
-    id: cause
+    id: media
     attributes:
-      label: Suspected cause or fix
-      description: Optional. File and line, or what you already tried.
+      label: Screenshots or screen recording
+      description: Drag files here. Redact personal information before uploading.

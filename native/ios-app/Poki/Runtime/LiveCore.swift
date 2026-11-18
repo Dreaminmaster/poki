@@ -31,6 +31,7 @@ final class LiveCore: CoreSession {
         config.resolveApp = { KnownApps.find($0)?.id }
         config.appNames = { SpeedOptions.appNames }
         config.quickRead = { SpeedOptions.quickRead }
+        config.screenHistory = HistoryStore.agentSource
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation

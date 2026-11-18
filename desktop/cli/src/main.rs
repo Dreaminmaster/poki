@@ -292,8 +292,6 @@ fn finish(json: bool, value: serde_json::Value, text: impl AsRef<str>) -> Result
     Ok(())
 }
 
-const PENDING: &str = "pending-sign-in";
-
 fn read_password(from_stdin: bool) -> Result<String> {
     if let Ok(p) = std::env::var("POKI_SETUP_PASSWORD") {
         if !p.is_empty() {
@@ -313,8 +311,69 @@ fn read_password(from_stdin: bool) -> Result<String> {
     Ok(rpassword::prompt_password("Apple ID password: ")?)
 }
 
+fn cli_env_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
+    match rust_log.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(v) => tracing_subscriber::EnvFilter::new(v),
+        None => tracing_subscriber::EnvFilter::new(format!(
+            "error,{}=info",
+            poki_setup_core::apple::gsa::CODE_REQUEST_LOG_TARGET
+        )),
+    }
+}
+
+struct FileOrSink(Option<std::fs::File>);
+
+impl std::io::Write for FileOrSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &mut self.0 {
+            Some(f) => f.write(buf),
+            None => Ok(buf.len()),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match &mut self.0 {
+            Some(f) => f.flush(),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Asks for the code until Apple takes it, and stops when Apple is rate-limiting or the sign-in has
+/// to start again. `ask` prompts the person; `finish` checks one code and hands back the
+/// verification step the signer kept.
+async fn enter_codes(
+    mut current: poki_setup_core::apple::gsa::Pending,
+    mut ask: impl FnMut() -> Result<String>,
+    mut finish: impl AsyncFnMut(poki_setup_core::apple::gsa::Pending, String) -> (poki_setup_core::Result<()>, Option<poki_setup_core::apple::gsa::Pending>),
+) -> Result<()> {
+    loop {
+        let code = ask()?;
+        let (res, saved) = finish(current.clone(), code).await;
+        match res {
+            Ok(()) => return Ok(()),
+            Err(e) if poki_setup_core::apple::gsa::is_rate_limit(&e) || poki_setup_core::apple::gsa::is_incomplete_session(&e) => return Err(e.into()),
+            Err(e) => {
+                current = saved.unwrap_or(current);
+                if current.failed_attempts >= 2 {
+                    return Err(e.into());
+                }
+                eprintln!("{e}");
+            }
+        }
+    }
+}
+
 async fn run() -> Result<()> {
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).with_writer(std::io::stderr).init();
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+    let file = poki_setup_core::paths::log_dir()
+        .ok()
+        .and_then(|d| std::fs::OpenOptions::new().create(true).append(true).open(d.join("poki-setup.log")).ok());
+    let writer = std::io::stderr.and(std::sync::Mutex::new(FileOrSink(file)));
+    tracing_subscriber::fmt()
+        .with_env_filter(cli_env_filter(std::env::var(tracing_subscriber::EnvFilter::DEFAULT_ENV).ok().as_deref()))
+        .with_ansi(false)
+        .with_writer(writer)
+        .init();
     let cli = Cli::parse();
     let reporter = if cli.json { json_reporter() } else { Reporter::stderr() };
     match cli.cmd {
@@ -389,10 +448,12 @@ async fn run() -> Result<()> {
         Cmd::Login { apple_id, password_stdin, code, keep_password, anisette } => {
             let mut signer = setup::Signer::open()?;
             if let Some(code) = code {
-                let saved = poki_setup_core::apple::store::secret_get(PENDING).ok_or_else(|| anyhow!("No sign-in is waiting for a code. Run `poki-setup login <email>` first."))?;
-                let pending: poki_setup_core::apple::gsa::Pending = serde_json::from_str(&saved)?;
+                let mut pending = signer.pending().cloned().or_else(poki_setup_core::apple::store::load_pending).ok_or_else(|| anyhow!("No sign-in is waiting for a code. Run `poki-setup login <email>` first."))?;
+                if keep_password {
+                    signer.set_pending_keep_password(true);
+                    pending.keep_password = true;
+                }
                 signer.finish_sign_in(pending, &code).await?;
-                let _ = poki_setup_core::apple::store::secret_delete(PENDING);
             } else {
                 let apple_id = apple_id.ok_or_else(|| anyhow!("Give the Apple Account email: poki-setup login you@example.com"))?;
                 if let Some(a) = anisette {
@@ -406,11 +467,17 @@ async fn run() -> Result<()> {
                     };
                     use std::io::IsTerminal;
                     if cli.json || password_stdin || !std::io::stdin().is_terminal() {
-                        poki_setup_core::apple::store::secret_set(PENDING, &serde_json::to_string(&pending)?)?;
                         return Err(NeedsCode(format!("Apple sent a six-digit code to {via}. Ask the person for it, then run: poki-setup login --code <code>")).into());
                     }
-                    let code = rpassword::prompt_password(format!("Apple sent a code to {via}. Code: "))?;
-                    signer.finish_sign_in(pending, &code).await?;
+                    enter_codes(
+                        pending,
+                        || Ok(rpassword::prompt_password(format!("Apple sent a code to {via}. Code: "))?),
+                        async |p, code| {
+                            let r = signer.finish_sign_in(p, &code).await;
+                            (r, signer.pending().cloned())
+                        },
+                    )
+                    .await?;
                 }
             }
             let team = signer.team().await?;
@@ -641,5 +708,162 @@ async fn run() -> Result<()> {
             println!("Channel: {}", release::channel().title());
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cli_env_filter, enter_codes};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[derive(Clone, Default)]
+    struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+
+    struct BufGuard(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for BufGuard {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedBuf {
+        type Writer = BufGuard;
+        fn make_writer(&'a self) -> Self::Writer {
+            BufGuard(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn default_cli_filter_outputs_2fa_code_request_without_rust_log() {
+        let dir = std::env::temp_dir().join(format!("poki-cli-log-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        unsafe {
+            std::env::set_var("POKI_SETUP_HOME", &dir);
+            std::env::set_var("POKI_SETUP_FILE_SECRETS", "1");
+        }
+
+        let out = SharedBuf::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(cli_env_filter(None))
+            .with_ansi(false)
+            .with_writer(out.clone())
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!("ordinary info noise that should stay quiet by default");
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let url = format!("http://{}", listener.local_addr().unwrap());
+                tokio::spawn(async move {
+                    while let Ok((mut stream, _)) = listener.accept().await {
+                        let mut buf = [0u8; 2048];
+                        let n = stream.read(&mut buf).await.unwrap_or(0);
+                        let req = String::from_utf8_lossy(&buf[..n]);
+                        let body = if req.starts_with("GET /v3/client_info") {
+                            r#"{"client_info":"<Mac15,7>","user_agent":"akd/1.0"}"#
+                        } else {
+                            "{\"result\":\"Headers\",\"X-Apple-I-MD-M\":\"mid-1\",\"X-Apple-I-MD\":\"otp\\nbreak\",\"X-Apple-I-MD-RINFO\":\"17106176\"}"
+                        };
+                        let reply = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        let _ = stream.write_all(reply.as_bytes()).await;
+                    }
+                });
+
+                use sha2::{Digest, Sha256};
+                let mut hash = [0u8; 6];
+                hash.copy_from_slice(&Sha256::digest(url.as_bytes())[..6]);
+                let tag: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+                let ani_dir = poki_setup_core::paths::anisette_dir().unwrap();
+                let client_info = poki_setup_core::apple::anisette::CLIENT_INFO_OVERRIDE.map(|(c, _)| c.to_string());
+                let state = poki_setup_core::apple::anisette::remote::State {
+                    keychain_identifier: vec![2u8; 16],
+                    adi_pb: Some(b"provisioned-adi".to_vec()),
+                    client_info,
+                };
+                std::fs::write(ani_dir.join(format!("state-{tag}.json")), serde_json::to_vec(&state).unwrap()).unwrap();
+
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                let pending: poki_setup_core::apple::gsa::Pending = serde_json::from_value(serde_json::json!({
+                    "apple_id": "person@example.com",
+                    "password": "synthetic-secret-password",
+                    "keep_password": false,
+                    "session": {
+                        "apple_id": "person@example.com",
+                        "adsid": "000123-abc",
+                        "gs_idms_token": "idms-tok-1",
+                        "first_name": "Test",
+                        "last_name": "Person",
+                        "sk": "Bw==",
+                        "c": "Yw=="
+                    },
+                    "via": "trusted_device",
+                    "phone_id": 0,
+                    "anisette": { "kind": "remote", "url": url },
+                    "created_at": now - 120,
+                    "last_sent_at": now - 120
+                }))
+                .unwrap();
+                poki_setup_core::apple::store::save_pending(&pending).unwrap();
+
+                let mut signer = poki_setup_core::setup::Signer::open().unwrap();
+                let _ = signer.resend_code().await;
+            });
+        });
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let rendered = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            rendered.contains("2fa-code-request path=ask_trusted_device caller=resend_code"),
+            "CLI must print 2fa-code-request by default without RUST_LOG, got: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("ordinary info noise"),
+            "CLI default filter must keep non-counting INFO logs quiet, got: {rendered:?}"
+        );
+        assert!(!rendered.contains("person@example.com") && !rendered.contains("synthetic-secret-password"));
+    }
+
+    #[tokio::test]
+    async fn code_prompt_stops_once_apple_needs_a_fresh_sign_in() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let pending: poki_setup_core::apple::gsa::Pending = serde_json::from_value(serde_json::json!({
+            "apple_id": "person@example.com",
+            "password": "synthetic-saved-password",
+            "keep_password": true,
+            "session": {"apple_id": "person@example.com", "adsid": "000123-abc", "gs_idms_token": "tok", "first_name": "Test", "last_name": "Person", "sk": "", "c": ""},
+            "via": "trusted_device",
+            "phone_id": 0,
+            "created_at": now - 10,
+            "last_sent_at": now - 10
+        }))
+        .unwrap();
+        let mut prompts = 0;
+        let res = enter_codes(
+            pending,
+            || {
+                prompts += 1;
+                if prompts > 3 {
+                    anyhow::bail!("asked for a code {prompts} times");
+                }
+                Ok("654321".into())
+            },
+            // What the signer answers when Apple takes the code but opens no session.
+            async |_, _| (Err(poki_setup_core::apple::gsa::incomplete_session()), None),
+        )
+        .await;
+        assert_eq!(prompts, 1, "the person must not be asked for another code once the sign-in has to start again");
+        assert!(res.unwrap_err().to_string().contains("Sign in again"));
     }
 }

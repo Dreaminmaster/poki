@@ -6,7 +6,15 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const MARKER = '<!-- poki-issue-template-check -->';
-export const LABEL = 'needs-template';
+export const LABEL = 'state:needs-info';
+export const AREA_HEADING = 'Affected area in Poki';
+// Dropdown answer -> area label. Answers not listed here (Other or not sure) get no area label.
+export const AREA_LABELS = new Map([
+  ['Poki iPhone app', 'area:ios-app'],
+  ['Poki MCP', 'area:mcp'],
+  ['Poki Agent, iMessage, or Telegram', 'area:agent'],
+  ['Installation or Poki Setup', 'area:install'],
+]);
 const TEMPLATE_DIR = '.github/ISSUE_TEMPLATE';
 const EXEMPT = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
@@ -56,6 +64,12 @@ export function matchForm(body, forms) {
   return forms.find((f) => f.required.every((label) => answered(have.get(norm(label))))) || null;
 }
 
+export function areaLabel(body) {
+  const answer = (sections(body).get(norm(AREA_HEADING)) || '').trim();
+  for (const [option, label] of AREA_LABELS) if (norm(option) === norm(answer)) return label;
+  return null;
+}
+
 export function commentBody(forms, repo) {
   const base = `https://github.com/${repo}`;
   const list = forms.map((f) => `- [${f.name}](${base}/issues/new?template=${f.file}): ${f.required.map((r) => `\`### ${r}\``).join(', ')}`).join('\n');
@@ -86,20 +100,28 @@ async function main() {
   const repo = process.env.GITHUB_REPOSITORY;
   const path = `/repos/${repo}/issues/${issue.number}`;
   if (issue.pull_request || issue.user?.type === 'Bot') return console.log('skip: pull request or bot');
-  if (EXEMPT.has(issue.author_association)) return console.log(`skip: author is ${issue.author_association}`);
-  const flagged = (issue.labels || []).some((l) => l.name === LABEL);
+  const have = new Set((issue.labels || []).map((l) => l.name));
+  const flagged = have.has(LABEL);
   const forms = loadForms();
   const form = matchForm(issue.body, forms);
   console.log(`#${issue.number} ${action}: ${form ? `matches ${form.file}` : 'matches no form'}`);
+
+  // A dropdown cannot set a label by itself, so the area label follows the answer here.
+  const area = form && areaLabel(issue.body);
+  if (area && !have.has(area) && (action === 'opened' || flagged)) {
+    await api(`${path}/labels`, { method: 'POST', body: JSON.stringify({ labels: [area] }) });
+  }
+  if (EXEMPT.has(issue.author_association)) return console.log(`skip: author is ${issue.author_association}`);
 
   if (action === 'opened' && !form) {
     await api(`${path}/labels`, { method: 'POST', body: JSON.stringify({ labels: [LABEL] }) });
     await api(`${path}/comments`, { method: 'POST', body: JSON.stringify({ body: commentBody(forms, repo) }) });
   } else if (action === 'edited' && flagged && form) {
-    await api(`${path}/labels/${LABEL}`, { method: 'DELETE' });
     const comments = await api(`${path}/comments?per_page=100`);
     const mine = (comments || []).find((c) => c.user?.type === 'Bot' && c.body?.startsWith(MARKER));
-    if (mine) await api(`/repos/${repo}/issues/comments/${mine.id}`, { method: 'PATCH', body: JSON.stringify({ body: `${MARKER}\nThanks, this issue now matches the **${form.name}** form. 已符合模板，谢谢。` }) });
+    if (!mine) return console.log(`skip: ${LABEL} was not set by this check`);
+    await api(`${path}/labels/${encodeURIComponent(LABEL)}`, { method: 'DELETE' });
+    await api(`/repos/${repo}/issues/comments/${mine.id}`, { method: 'PATCH', body: JSON.stringify({ body: `${MARKER}\nThanks, this issue now matches the **${form.name}** form. 已符合模板，谢谢。` }) });
   }
 }
 
