@@ -1,18 +1,676 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Sign in to your Apple Account to update here. Or update with Set up Poki or Renew in Poki Setup on your Mac." : {
+    "Release Channel" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在这里登录 Apple 账户即可更新。也可以在 Mac 上的 Poki Setup 里点 Set up Poki 或 Renew 更新。"
+            "value" : "更新通道"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在這裡登入 Apple 賬戶即可更新。也可以在 Mac 上的 Poki Setup 裡點 Set up Poki 或 Renew 更新。"
+            "value" : "更新通道"
+          }
+        }
+      }
+    },
+    "Poki receives updates from the selected release channel." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 将从所选更新通道获取更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 將從所選更新通道取得更新。"
+          }
+        }
+      }
+    },
+    "Default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設"
+          }
+        }
+      }
+    },
+    "Custom" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂"
+          }
+        }
+      }
+    },
+    "Server Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器位址"
+          }
+        }
+      }
+    },
+    "Prepare Renewal Now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即准备续期"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即準備續期"
+          }
+        }
+      }
+    },
+    "Install Renewal" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装续期"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝續期"
+          }
+        }
+      }
+    },
+    "Renewal Ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "续期已就绪"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "續期已就緒"
+          }
+        }
+      }
+    },
+    "Poki Renewal Ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 续期已就绪"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 續期已就緒"
+          }
+        }
+      }
+    },
+    "Preparing a renewal" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备续期"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在準備續期"
+          }
+        }
+      }
+    },
+    "Poki’s renewal is ready. Go to Settings > Signing & Updates and tap Install before %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 续期已就绪。请在 %@ 前前往“设置”>“安装签名与更新”并轻点“安装”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 續期已就緒。請在 %@ 前前往「設定」>「安裝簽名與更新」並點一下「安裝」。"
+          }
+        }
+      }
+    },
+    "Go to Settings > Signing & Updates to renew Poki before %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在 %@ 前前往“设置”>“安装签名与更新”为 Poki 续期。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在 %@ 前前往「設定」>「安裝簽名與更新」為 Poki 續期。"
+          }
+        }
+      }
+    },
+    "You can use a free Apple Account. Signing lasts 7 days, and Poki automatically prepares a renewal before it expires. Your Apple Account and password are sent only to Apple." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用免费 Apple 账户即可。安装签名每次有效期为 7 天，Poki 会在到期前自动准备续期。你的 Apple 账户和密码只会发送给 Apple。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用免費 Apple 帳號即可。安裝簽名每次有效期限為 7 天，Poki 會在到期前自動準備續期。你的 Apple 帳號和密碼只會傳送給 Apple。"
+          }
+        }
+      }
+    },
+    "Poki automatically prepares a renewal %lld days before signing expires, or prepares an update when one is available. Nothing is installed until you tap Install." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会在安装签名到期前 %lld 天自动准备续期，或在有可用更新时提前准备。轻点“安装”后才会开始安装。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會在安裝簽名到期前 %lld 天自動準備續期，或在有可用更新時提前準備。點一下「安裝」後才會開始安裝。"
+          }
+        }
+      }
+    },
+    "Go to Settings > Signing & Updates to install it when Poki isn’t running a task." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在 Poki 未运行任务时，前往“设置”>“安装签名与更新”进行安装。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在 Poki 未執行任務時，前往「設定」>「安裝簽名與更新」進行安裝。"
+          }
+        }
+      }
+    },
+    "Sign in again. The verification step has expired." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verification expired. Sign in again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证已过期，请重新登录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證已過期，請重新登入。"
+          }
+        }
+      }
+    },
+    "Sign in with your Apple Account in Setup first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in to your Apple Account first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先登录 Apple 账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先登入 Apple 帳號。"
+          }
+        }
+      }
+    },
+    "Sign in with your Apple ID first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in to your Apple Account first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先登录 Apple 账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先登入 Apple 帳號。"
+          }
+        }
+      }
+    },
+    "The iPhone stopped answering while installing. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your iPhone stopped responding during installation. Try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装过程中 iPhone 无响应，请重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝過程中 iPhone 沒有回應，請再試一次。"
+          }
+        }
+      }
+    },
+    "Latest Version" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最新版本"
+          }
+        }
+      }
+    },
+    "Unable to Check" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法檢查"
+          }
+        }
+      }
+    },
+    "Unknown" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知"
+          }
+        }
+      }
+    },
+    "Not Signed In" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未登入"
+          }
+        }
+      }
+    },
+    "Sign-In Server" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录服务器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登入伺服器"
+          }
+        }
+      }
+    },
+    "Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 中登录 Apple 账户时，需要通过登录服务器验证此 iPhone。该服务器不会获取你的 Apple 账户和密码。仅在持续无法登录时才需更改。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 中登入 Apple 帳號時，需要透過登入伺服器驗證此 iPhone。該伺服器不會取得你的 Apple 帳號和密碼。僅在持續無法登入時才需變更。"
+          }
+        }
+      }
+    },
+    "The anisette server address starts with https://." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server address must start with https://."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器地址必须以 https:// 开头。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器位址必須以 https:// 開頭。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t connect to the sign-in server. Check your internet connection and try again, or change the server in Advanced." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法连接登录服务器。请检查网络连接后重试，或在“高级”中更换服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法連接登入伺服器。請檢查網路連線後再試一次，或在「高階」中更換伺服器。"
+          }
+        }
+      }
+    },
+    "Sign in to your Apple Account so Poki can download updates automatically, or update Poki using Poki Setup on your Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录 Apple 账户后，Poki 可自动下载更新。请在下方“Apple 账户”中登录，或使用 Mac 上的 Poki Setup 更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登入 Apple 帳號後，Poki 可自動下載更新。請在下方「Apple 帳號」中登入，或使用 Mac 上的 Poki Setup 更新。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t check for updates. Check your internet connection and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法检查更新。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法檢查更新。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t download the update. Check your internet connection and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法下载更新。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法下載更新。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
+    "The primary download server is unavailable. Poki is using a backup server for this update." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主下载服务器暂不可用，Poki 正在使用备用服务器下载此次更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主下載伺服器暫時無法使用，Poki 正在使用備用伺服器下載此次更新。"
+          }
+        }
+      }
+    },
+    "6-Digit Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "6 位验证码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "6 位數驗證碼"
+          }
+        }
+      }
+    },
+    "Two-Factor Authentication" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "双重认证"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "雙重認證"
+          }
+        }
+      }
+    },
+    "Enter the 6-digit verification code sent to your trusted devices or phone number." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入发送到受信任设备或电话号码的 6 位验证码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入傳送到受信任裝置或電話號碼的 6 位數驗證碼。"
+          }
+        }
+      }
+    },
+    "Enter Verification Code…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入验证码…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入驗證碼…"
+          }
+        }
+      }
+    },
+    "Asking Apple for a signing certificate for this computer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requesting a signing certificate from Apple"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在向 Apple 请求签名证书"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在向 Apple 要求簽名憑證"
+          }
+        }
+      }
+    },
+    "Unpacking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在解包"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在解壓縮"
+          }
+        }
+      }
+    },
+    "%@ (Free)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（免费）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@（免費）"
+          }
+        }
+      }
+    },
+    "Apple sent a verification code. Enter the 6-digit code to continue." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verification code required. Enter the 6-digit code from Apple to continue."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要验证码。请输入 Apple 发送的 6 位验证码以继续。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要驗證碼。請輸入 Apple 傳送的 6 位數驗證碼以繼續。"
           }
         }
       }
@@ -7070,22 +7728,6 @@
         }
       }
     },
-    "Newest on This Channel" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此通道最新版本"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此通道最新版本"
-          }
-        }
-      }
-    },
     "No Answer" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7378,22 +8020,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "額度或權限不足，請檢查帳號餘額和金鑰權限。"
-          }
-        }
-      }
-    },
-    "Not Found" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未找到"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未找到"
           }
         }
       }
@@ -8589,34 +9215,18 @@
         }
       }
     },
-    "Optional" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可选"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可選"
-          }
-        }
-      }
-    },
     "Optional. To renew Poki without a Mac, sign in to your Apple Account here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可选。在此登录 Apple 账户，无需连接 Mac 即可续签 Poki。"
+            "value" : "可选。在此登录 Apple 账户，无需连接 Mac 即可续期 Poki。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可選。在此登入 Apple 帳號，無需連線 Mac 即可續簽 Poki。"
+            "value" : "可選。在此登入 Apple 帳號，無需連線 Mac 即可續期 Poki。"
           }
         },
         "en" : {
@@ -8996,13 +9606,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先在“配置”中配对此 iPhone。"
+            "value" : "请先在“使用准备”中配对此 iPhone。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先在「設定精靈」中配對此 iPhone。"
+            "value" : "請先在「使用準備」中配對此 iPhone。"
           }
         },
         "en" : {
@@ -9370,29 +9980,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这台 iPhone 连上 Mac 时，Poki Setup 会为 Poki 续签。"
+            "value" : "这台 iPhone 连上 Mac 时，Poki Setup 会为 Poki 续期。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "這臺 iPhone 連上 Mac 時，Poki Setup 會為 Poki 續簽。"
-          }
-        }
-      }
-    },
-    "Poki Version" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 版本"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 版本"
+            "value" : "這臺 iPhone 連上 Mac 時，Poki Setup 會為 Poki 續期。"
           }
         }
       }
@@ -9830,28 +10424,6 @@
         }
       }
     },
-    "Poki looks on GitHub for the newest build on the chosen channel." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会在 GitHub 上检查所选更新通道的最新版本。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會在 GitHub 上檢查所選更新通道的最新版本。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki checks GitHub for the latest build on the selected release channel."
-          }
-        }
-      }
-    },
     "Poki needs a model account before it can reply." : {
       "localizations" : {
         "zh-Hans" : {
@@ -9940,13 +10512,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请将此 iPhone 连上 Mac 并让智能体续签。Poki 将在 %@ 后无法打开。"
+            "value" : "请将此 iPhone 连上 Mac 并让智能体续期。Poki 将在 %@ 后无法打开。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請將此 iPhone 連上 Mac 並讓智慧體續簽。Poki 將在 %@ 後無法開啟。"
+            "value" : "請將此 iPhone 連上 Mac 並讓智慧體續期。Poki 將在 %@ 後無法開啟。"
           }
         },
         "en" : {
@@ -10087,13 +10659,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 的签名快到期了"
+            "value" : "Poki 的安装签名快到期了"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 的簽名快到期了"
+            "value" : "Poki 的安裝簽名快到期了"
           }
         }
       }
@@ -10948,7 +11520,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "签名（可选）"
+            "value" : "安装签名（可选）"
           }
         },
         "en" : {
@@ -10960,7 +11532,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "簽名（可選）"
+            "value" : "安裝簽名（可選）"
           }
         }
       }
@@ -11796,17 +12368,18 @@
       }
     },
     "Signing" : {
+      "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "签名"
+            "value" : "正在签名"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "簽名"
+            "value" : "正在簽名"
           }
         }
       }
@@ -11816,29 +12389,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "签名与更新"
+            "value" : "安装签名与更新"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "簽署與更新"
-          }
-        }
-      }
-    },
-    "Signing Options" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "签名选项"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "簽名選項"
+            "value" : "安裝簽名與更新"
           }
         }
       }
@@ -14103,13 +14660,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "蜂窝网络下，此 iPhone 在 10.7.0.1 没有应答。开发者磁盘映像仍已装载时，新任务无需回环也能开始；续签、更新和装载映像需要 Wi-Fi。"
+            "value" : "蜂窝网络下，此 iPhone 在 10.7.0.1 没有应答。开发者磁盘映像仍已装载时，新任务无需回环也能开始；续期、更新和装载映像需要 Wi-Fi。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "行動網路下，此 iPhone 在 10.7.0.1 沒有應答。開發者磁碟映像仍已裝載時，新任務無需迴環也能開始；續簽、更新和裝載映像需要 Wi-Fi。"
+            "value" : "行動網路下，此 iPhone 在 10.7.0.1 沒有應答。開發者磁碟映像仍已裝載時，新任務無需迴環也能開始；續期、更新和裝載映像需要 Wi-Fi。"
           }
         }
       }
@@ -15131,22 +15688,6 @@
         }
       }
     },
-    "Updates" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新"
-          }
-        }
-      }
-    },
     "Updates, notifications, diagnostics" : {
       "localizations" : {
         "zh-Hans" : {
@@ -15611,7 +16152,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "当前由你的 Mac 为 Poki 续签。仅在希望此 iPhone 自行续签时在此登录。"
+            "value" : "当前由你的 Mac 为 Poki 续期。仅在希望此 iPhone 自行续期时在此登录。"
           }
         },
         "en" : {
@@ -15623,7 +16164,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "目前由你的 Mac 為 Poki 續簽。僅在希望此 iPhone 自行續簽時在此登入。"
+            "value" : "目前由你的 Mac 為 Poki 續期。僅在希望此 iPhone 自行續期時在此登入。"
           }
         }
       }
@@ -15799,28 +16340,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "http://your-mac.local:47830/voice/…"
-          }
-        }
-      }
-    },
-    "https://new.ani.sidestore.io" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "https://new.ani.sidestore.io"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "https://new.ani.sidestore.io"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "https://new.ani.sidestore.io"
           }
         }
       }
@@ -17354,28 +17873,6 @@
         }
       }
     },
-    "To download updates by itself, Poki needs your Apple Account. Sign in under Signing Options. Or update Poki from Poki Setup on your Mac." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在“签名选项”中登录 Apple 账户即可自动下载更新，也可通过 Mac 上的 Poki Setup 更新。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在「簽名選項」中登入 Apple 帳號即可自動下載更新，也可透過 Mac 上的 Poki Setup 更新。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in to your Apple Account under Signing Options so Poki can download updates automatically, or update via Poki Setup on your Mac."
-          }
-        }
-      }
-    },
     "Poki can't reach this iPhone. Turn on the loopback, then try again." : {
       "localizations" : {
         "zh-Hans" : {
@@ -17410,44 +17907,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 更新已就緒"
-          }
-        }
-      }
-    },
-    "Poki Refresh Ready" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 续签已就绪"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 續簽已就緒"
-          }
-        }
-      }
-    },
-    "Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 未执行任务时，打开“设置 > 连接 > 签名与更新”，安装已准备好的版本。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 未執行任務時，開啟「設定 > 連線 > 簽署與更新」，安裝已準備好的版本。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task."
           }
         }
       }
@@ -17670,50 +18129,6 @@
         }
       }
     },
-    "A refreshed Poki is ready. Open Setup and tap Install before %@." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请在 %@ 前打开“配置”并轻点“安装”。续签版本已就绪。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請在 %@ 前開啟「設定精靈」並輕點「安裝」。續簽版本已就緒。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Setup and tap Install before %@. A renewed Poki build is ready."
-          }
-        }
-      }
-    },
-    "Open Setup to refresh Poki before %@." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请在 %@ 前打开“配置”为 Poki 续签。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請在 %@ 前開啟「設定精靈」為 Poki 續簽。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Setup to renew Poki before %@."
-          }
-        }
-      }
-    },
     "Open Setup ›" : {
       "localizations" : {
         "zh-Hans" : {
@@ -17817,13 +18232,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@（免费，7 天签名）"
+            "value" : "%@（免费，7 天安装签名）"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@（免費，7 天簽名）"
+            "value" : "%@（免費，7 天安裝簽名）"
           }
         }
       }
@@ -17924,56 +18339,18 @@
         }
       }
     },
-    "A free Apple Account works. Poki signs itself for 7 days at a time and gets ready to sign again before then. Your Apple ID and password go only to Apple. The anisette server Poki asks for its device headers never sees them." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "免费 Apple 账户即可使用。Poki 每次签名有效期 7 天，到期前会自动准备续签。Apple ID 和密码仅发送给 Apple，anisette 服务器无法读取。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "免費 Apple 帳號即可使用。Poki 每次簽名有效期 7 天，到期前會自動準備續簽。Apple ID 和密碼僅傳送給 Apple，anisette 伺服器無法讀取。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A free Apple Account works. Poki signs itself for 7 days at a time and prepares the next renewal automatically. Your Apple ID and password go only to Apple; the anisette server never sees them."
-          }
-        }
-      }
-    },
-    "No Profile" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无描述文件"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無描述檔案"
-          }
-        }
-      }
-    },
     "Signed Until" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "签名有效期至"
+            "value" : "安装签名有效期至"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "簽名有效期至"
+            "value" : "安裝簽名有效期至"
           }
         }
       }
@@ -18026,104 +18403,6 @@
         }
       }
     },
-    "Poki gets the next build ready by itself, %@ days before it expires or when your channel has an update. It installs only when you tap Install." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会在到期前 %@ 天或所选更新通道有新版本时自动准备安装包，仅在你轻点“安装”后才会安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會在到期前 %@ 天或所選更新通道有新版本時自動準備安裝包，僅在你輕點「安裝」後才會安裝。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki prepares the next build automatically %@ days before expiration or when your release channel has an update. It installs only when you tap Install."
-          }
-        }
-      }
-    },
-    "Release Channel" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新通道"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新通道"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Release Channel"
-          }
-        }
-      }
-    },
-    "Poki downloads and signs updates from this channel ahead of time, the same way Poki Setup does. Stable gets full releases only. Beta, Alpha and Pre-alpha get earlier builds." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会从此通道及更稳定的通道准备更新。如果均无可用版本，会使用下一个有版本的较不稳定通道。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會從此通道及更穩定的通道準備更新。如果均無可用版本，會使用下一個有版本的較不穩定通道。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel."
-          }
-        }
-      }
-    },
-    "Use Default Server" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用默认服务器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用預設伺服器"
-          }
-        }
-      }
-    },
-    "Anisette Server" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anisette 服务器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anisette 伺服器"
-          }
-        }
-      }
-    },
     "Anthropic did not accept the key. Check it in Settings › Models." : {
       "localizations" : {
         "zh-Hans" : {
@@ -18142,22 +18421,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請前往「設定 › 模型」檢查金鑰。Anthropic 拒絕了該金鑰。"
-          }
-        }
-      }
-    },
-    "Apple’s sign-in needs device headers that only Apple hardware makes. Poki gets them from this anisette server. It never sees your Apple ID or password." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple 的登录需要只有 Apple 硬件才能生成的设备标头。Poki 从此 anisette 服务器获取这些标头。服务器不会看到你的 Apple ID 或密码。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apple 的登入需要只有 Apple 硬體才能生成的裝置標頭。Poki 從此 anisette 伺服器獲取這些標頭。伺服器不會看到你的 Apple ID 或密碼。"
           }
         }
       }
@@ -26394,13 +26657,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "签名到期时 Poki 会重新登录，届时会向你询问密码。"
+            "value" : "安装签名到期时 Poki 会重新登录，届时会向你询问密码。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "簽名到期時 Poki 會重新登入，屆時會向你詢問密碼。"
+            "value" : "安裝簽名到期時 Poki 會重新登入，屆時會向你詢問密碼。"
           }
         }
       }
@@ -27603,38 +27866,6 @@
         }
       }
     },
-    "Install Refresh" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "安装续签"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "安裝續簽"
-          }
-        }
-      }
-    },
-    "Prepare Refresh Now" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "立即准备续签"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "立即準備續簽"
-          }
-        }
-      }
-    },
     "Update Ready" : {
       "localizations" : {
         "zh-Hans" : {
@@ -27673,22 +27904,6 @@
         }
       }
     },
-    "Refresh Ready" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "续签已就绪"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "續簽已就緒"
-          }
-        }
-      }
-    },
     "Until %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -27717,22 +27932,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在準備更新"
-          }
-        }
-      }
-    },
-    "Preparing a refresh" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在准备续签"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在準備續簽"
           }
         }
       }
@@ -27861,22 +28060,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正式版"
-          }
-        }
-      }
-    },
-    "Beta" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Beta 版"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Beta 版"
           }
         }
       }
@@ -29408,13 +29591,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请将此 iPhone 连上 Mac 并让智能体续签。Poki 将在 %lld 后无法打开。"
+            "value" : "请将此 iPhone 连上 Mac 并让智能体续期。Poki 将在 %lld 后无法打开。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請將此 iPhone 連上 Mac 並讓智慧體續簽。Poki 將在 %lld 後無法開啟。"
+            "value" : "請將此 iPhone 連上 Mac 並讓智慧體續期。Poki 將在 %lld 後無法開啟。"
           }
         },
         "en" : {
@@ -29897,84 +30080,18 @@
         }
       }
     },
-    "A refreshed Poki is ready. Open Setup and tap Install before %lld." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请在 %lld 前打开“配置”并轻点“安装”。续签版本已就绪。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請在 %lld 前開啟「設定精靈」並輕點「安裝」。續簽版本已就緒。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Setup and tap Install before %lld. A renewed Poki build is ready."
-          }
-        }
-      }
-    },
-    "Open Setup to refresh Poki before %lld." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请在 %lld 前打开“配置”为 Poki 续签。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請在 %lld 前開啟「設定精靈」為 Poki 續簽。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Setup to renew Poki before %lld."
-          }
-        }
-      }
-    },
     "%lld (Free, 7-day signing)" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld（免费，7 天签名）"
+            "value" : "%lld（免费，7 天安装签名）"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld（免費，7 天簽名）"
-          }
-        }
-      }
-    },
-    "Poki gets the next build ready by itself, %lld days before it expires or when your channel has an update. It installs only when you tap Install." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会在到期前 %lld 天或所选更新通道有新版本时自动准备安装包，仅在你轻点“安装”后才会安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會在到期前 %lld 天或所選更新通道有新版本時自動準備安裝包，僅在你輕點「安裝」後才會安裝。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki prepares the next build automatically %lld days before expiration or when your release channel has an update. It installs only when you tap Install."
+            "value" : "%lld（免費，7 天安裝簽名）"
           }
         }
       }
@@ -32024,29 +32141,6 @@
         }
       }
     },
-    "To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in to your Apple Account under Signing Options so Poki can download updates automatically, or update via Poki Setup on your Mac."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在“签名选项”中登录 Apple 账户即可自动下载更新，也可通过 Mac 上的 Poki Setup 更新。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在「簽名選項」中登入 Apple 帳號即可自動下載更新，也可透過 Mac 上的 Poki Setup 更新。"
-          }
-        }
-      }
-    },
     "Finishing the update: Poki will close to finish it" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32066,52 +32160,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在關閉 Poki 以完成更新"
-          }
-        }
-      }
-    },
-    "A free Apple Account works: Poki signs itself for 7 days at a time and gets ready to sign again before then. Your Apple ID and password go only to Apple. The anisette server Poki asks for its device headers never sees them." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A free Apple Account works. Poki signs itself for 7 days at a time and prepares the next renewal automatically. Your Apple ID and password go only to Apple; the anisette server never sees them."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "免费 Apple 账户即可使用。Poki 每次签名有效期 7 天，到期前会自动准备续签。Apple ID 和密码仅发送给 Apple，anisette 服务器无法读取。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "免費 Apple 帳號即可使用。Poki 每次簽名有效期 7 天，到期前會自動準備續簽。Apple ID 和密碼僅傳送給 Apple，anisette 伺服器無法讀取。"
-          }
-        }
-      }
-    },
-    "Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki prepares updates from this channel and more stable channels. If none has a release, it uses the next available less stable channel."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会从此通道及更稳定的通道准备更新。如果均无可用版本，会使用下一个有版本的较不稳定通道。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會從此通道及更穩定的通道準備更新。如果均無可用版本，會使用下一個有版本的較不穩定通道。"
           }
         }
       }

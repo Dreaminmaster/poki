@@ -35,10 +35,12 @@ struct AccountPage: View {
                     Picker("Team", selection: Binding(get: { signer.status?.team_id ?? "" }, set: { id in
                         if let team = signer.teams.first(where: { $0.team_id == id }) { Task { await signer.choose(team: team) } }
                     })) {
-                        ForEach(signer.teams) { team in Text(team.is_free ? "\(team.name) (Free)" : team.name).tag(team.team_id) }
+                        ForEach(signer.teams) { team in
+                            Text(verbatim: team.is_free ? AppLocalization.text(LocalizedStringResource("\(team.name) (Free)")) : team.name).tag(team.team_id)
+                        }
                     }
                 } else if let team = signer.teams.first {
-                    LabeledContent("Team", value: team.is_free ? "\(team.name) (Free, 7-day signing)" : team.name)
+                    LabeledContent("Team", value: team.is_free ? AppLocalization.text(LocalizedStringResource("\(team.name) (Free, 7-day signing)")) : team.name)
                 }
             } footer: {
                 Text(signer.status?.keeps_password == true
@@ -49,7 +51,7 @@ struct AccountPage: View {
             Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
         } else {
             if signer.needsReauth, signer.lastError != SelfSigner.reauthMessage {
-                Section { Label(SelfSigner.localizedErrorText(SelfSigner.reauthMessage), systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                Section { Label(SelfSigner.localizedErrorText(SelfSigner.reauthMessage), systemImage: "exclamationmark.triangle").foregroundStyle(Tint.amberInk) }
             }
             Section {
                 TextField("Apple ID", text: $appleID)
@@ -61,7 +63,7 @@ struct AccountPage: View {
                     .textContentType(.password)
                 Toggle("Keep Me Signed In", isOn: $keepPassword)
             } footer: {
-                Text("A free Apple Account works: Poki signs itself for 7 days at a time and gets ready to sign again before then. Your Apple ID and password go only to Apple. The anisette server Poki asks for its device headers never sees them.")
+                Text("You can use a free Apple Account. Signing lasts 7 days, and Poki automatically prepares a renewal before it expires. Your Apple Account and password are sent only to Apple.")
             }
             Section {
                 Button("Sign In") { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } }
@@ -72,103 +74,145 @@ struct AccountPage: View {
     }
 }
 
+/// The Apple Account as a page of its own under Signing & Updates.
+struct AppleAccountPage: View {
+    var body: some View {
+        Form { AccountPage() }
+            .navigationTitle(AppLocalization.text("Apple Account"))
+            .navigationBarTitleDisplayMode(.inline)
+            .settingsPage()
+    }
+}
+
 /// What the signer is doing, or why it stopped.
 struct SignerActivityRows: View {
     let signer: SelfSigner
     var body: some View {
         if let working = signer.working {
             Section {
-                if let f = signer.fraction { ProgressView(value: f) { Text(working) } } else { LabeledContent { ProgressView() } label: { Text(working) } }
+                if let f = signer.fraction { ProgressView(value: f) { Text(verbatim: local(working)) } } else { LabeledContent { ProgressView() } label: { Text(verbatim: local(working)) } }
             }
         }
         if let error = signer.lastError {
-            // The signer's words are English; those the strings table knows are shown in the owner's language.
-            Section { Label(SelfSigner.localizedErrorText(error), systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+            Section { problem(Text(verbatim: local(error))) }
         }
-        if let error = signer.updateCheckError {
-            Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-        } else if let notice = signer.latest?.source_notice {
-            Section { Label(notice, systemImage: "info.circle") }
+        // The core's own sentences name its servers. They are in the log; the page says what to do.
+        if signer.updateCheckError != nil {
+            Section { problem(Text("Poki couldn’t check for updates. Check your internet connection and try again.")) }
+        } else if signer.latest?.source_notice != nil {
+            Section {
+                Label { Text("The primary download server is unavailable. Poki is using a backup server for this update.") } icon: { Image(systemName: "info.circle") }
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(Color(.secondaryLabel))
+            }
         }
+    }
+
+    /// The signer's words are English; those the strings table knows are shown in Poki's language.
+    private func local(_ text: String) -> String { SelfSigner.localizedErrorText(text) }
+
+    private func problem(_ text: Text) -> some View {
+        Label { text } icon: { Image(systemName: "exclamationmark.triangle") }
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(Tint.red)
     }
 }
 
-/// The Setup page's signing section: when Poki stops opening, the build that is ready, and Install.
+/// Settings › Signing & Updates: the installed Poki and the newest one, when its signing ends, the
+/// update or the renewal to install, and the way to the Apple Account and to Advanced.
+struct SigningUpdatesPage: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List { SigningSection() }
+            .navigationTitle(AppLocalization.text("Signing & Updates"))
+            .navigationBarTitleDisplayMode(.inline)
+            // The page says what the newest Poki is, so it looks it up when it opens. It only looks:
+            // downloading starts from the button, or from the signer's own rounds.
+            .task {
+                let signer = model.signer
+                if signer.latest != nil, let last = signer.lastCheck, Date().timeIntervalSince(last) < 60 { return }
+                await signer.lookUp()
+            }
+    }
+}
+
+/// The rows of Signing & Updates. Setup's checklist shows them too.
 struct SigningSection: View {
-    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(AppModel.self) private var model
     private var signer: SelfSigner { model.signer }
 
     var body: some View {
         Section {
-            LabeledContent {
-                Text(verbatim: "\(signer.installedVersion) (\(signer.installedBuild))")
-            } label: {
-                Label("Poki Version", systemImage: "info.circle")
+            SettingsRow(title: "Version", symbol: "info", value: "\(signer.installedVersion) (\(signer.installedBuild))")
+            if let latest = signer.latest {
+                let newer = signer.isNewer(latest)
+                SettingsRow(title: "Latest Version", symbol: "sparkles",
+                            value: newer ? "\(latest.version) (\(latest.build))" : AppLocalization.text(LocalizedStringResource("Up to Date")), warns: newer)
+            } else if signer.lookingUp {
+                SettingsRow(title: "Latest Version", symbol: "sparkles", value: AppLocalization.text(LocalizedStringResource("Checking…")))
+            } else if signer.updateCheckError != nil {
+                SettingsRow(title: "Latest Version", symbol: "sparkles", value: AppLocalization.text(LocalizedStringResource("Unable to Check")))
             }
-            LabeledContent {
-                if let expiry = signer.expiry {
-                    // The date and its countdown stay readable when the row needs more room.
-                    (Text(expiry, format: .dateTime.month(.abbreviated).day().year()) + Text(verbatim: " · ") + Text(expiry, style: .relative).foregroundStyle(countdownColor))
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("No Profile").foregroundStyle(Color(.secondaryLabel))
+            SignedUntilRow(expiry: signer.expiry, countdownColor: countdownColor)
+            if !signer.updateNotReady, let next = signer.next {
+                SettingsRow(title: next.kind == "update" ? "Update Ready" : "Renewal Ready", symbol: "checkmark.seal",
+                            value: next.kind == "update" ? "\(next.version) (\(next.build))"
+                                : AppLocalization.text(LocalizedStringResource("Until \(next.expires.formatted(.dateTime.month(.abbreviated).day().year().locale(AppLocalization.locale)))")))
+            }
+        }
+
+        // The actions under what they act on. A newer build not yet downloaded comes first: one tap
+        // downloads and installs it (or, without an Apple Account, opens the sign-in).
+        Section {
+            switch signer.updateStep {
+            case .download:
+                SignerAction(signer: signer, title: "Download and Install Update", systemImage: "arrow.down") { await signer.downloadAndInstallUpdate() }
+            case .signIn:
+                NavigationLink { AppleAccountPage() } label: {
+                    SettingsLabel("Sign In to Download the Update", systemImage: "person.badge.plus")
                 }
-            } label: {
-                Label("Signed Until", systemImage: "signature")
-            }
-            // A newer build that isn't downloaded yet shows even when a refresh (or an older update) is
-            // ready, so it is never hidden behind it.
-            if signer.updateNotReady, let latest = signer.latest {
-                LabeledContent { Text(verbatim: "\(latest.version) (\(latest.build))") } label: { Label("Update Available", systemImage: "sparkles") }
-            } else if let next = signer.next {
-                LabeledContent {
-                    Text(next.kind == "update" ? "\(next.version) (\(next.build))" : "Until \(next.expires.formatted(.dateTime.month(.abbreviated).day().year().locale(AppLocalization.locale)))")
-                        .fixedSize(horizontal: false, vertical: true)
-                } label: {
-                    Label(next.kind == "update" ? "Update Ready" : "Refresh Ready", systemImage: "checkmark.seal")
-                }
-            }
-            NavigationLink { SigningOptionsPage() } label: {
-                Label("Signing Options", systemImage: "slider.horizontal.3")
-            }
-            // The actions last, under what they act on. A newer build not yet downloaded comes first:
-            // one tap downloads and installs it (or, without an Apple Account, opens the sign-in).
-            if signer.updateNotReady {
-                if signer.signedIn {
-                    SignerAction(signer: signer, title: "Download and Install Update", systemImage: "arrow.down.circle") { await signer.downloadAndInstallUpdate() }
-                } else {
-                    SignInToUpdateLink()
-                }
-            } else if let next = signer.next {
-                // Idle is partly time (a minute since the last agent step), which nothing observes, so
-                // the row looks again every few seconds instead of staying as it was first drawn.
-                TimelineView(.periodic(from: .now, by: 5)) { _ in
-                    SignerAction(signer: signer, title: next.kind == "update" ? "Install Update" : "Install Refresh", systemImage: "arrow.down.app") { await signer.install() }
+            case .install, nil:
+                if let next = signer.next {
+                    // Idle is partly time (a minute since the last agent step), which nothing observes, so
+                    // the row looks again every few seconds instead of staying as it was first drawn.
+                    TimelineView(.periodic(from: .now, by: 5)) { _ in
+                        SignerAction(signer: signer, title: next.kind == "update" ? "Install Update" : "Install Renewal", systemImage: "arrow.down.app") { await signer.install() }
+                    }
                 }
             }
             if signer.needsCode {
                 Button {
                     signer.presentCodeSheet()
                 } label: {
-                    Label("Enter Verification Code…", systemImage: "lock.shield")
+                    SettingsLabel("Enter Verification Code…", systemImage: "lock.shield")
                 }
             }
             if signer.signedIn {
-                SignerAction(signer: signer, title: "Prepare Refresh Now", systemImage: "arrow.clockwise") { await signer.prepare(kind: "refresh") }
+                SignerAction(signer: signer, title: "Prepare Renewal Now", systemImage: "arrow.clockwise") { await signer.prepare(kind: "refresh") }
             }
-        } header: {
-            Text("Signing")
         } footer: {
             Text(footer)
+        }
+
+        Section {
+            NavigationLink { AppleAccountPage() } label: {
+                SettingsRow(title: "Apple Account", symbol: "person",
+                            value: signer.signedIn ? signer.status?.apple_id : AppLocalization.text(LocalizedStringResource("Not Signed In")))
+            }
+            NavigationLink { SigningOptionsPage() } label: {
+                SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
+            }
+        } footer: {
+            Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
         }
         SignerActivityRows(signer: signer)
     }
 
+    /// Amber when the next build is due, red on the last day.
     private var countdownColor: Color {
-        guard let days = signer.daysLeft else { return .secondary }
-        return days <= 1 ? .red : days <= SelfSigner.refreshWithDaysLeft ? .orange : .secondary
+        guard let days = signer.daysLeft else { return Color(.secondaryLabel) }
+        return days <= 1 ? Tint.red : days <= SelfSigner.refreshWithDaysLeft ? Tint.amberInk : Color(.secondaryLabel)
     }
 
     private var footer: String {
@@ -179,11 +223,46 @@ struct SigningSection: View {
                 ? AppLocalization.text(LocalizedStringResource("Installing closes Poki for a moment. Your chats and setup stay."))
                 : (model.signingBusyReason ?? "") + " " + AppLocalization.text(LocalizedStringResource("Install is available when Poki isn’t running a task."))
         }
-        return AppLocalization.text(LocalizedStringResource("Poki gets the next build ready by itself, \(Int(SelfSigner.refreshWithDaysLeft)) days before it expires or when your channel has an update. It installs only when you tap Install."))
+        return AppLocalization.text(LocalizedStringResource("Poki automatically prepares a renewal \(Int(SelfSigner.refreshWithDaysLeft)) days before signing expires, or prepares an update when one is available. Nothing is installed until you tap Install."))
     }
 }
 
-/// What the Signing page offers under Status when the channel has a newer Poki (ESP-387).
+/// When the installed Poki stops opening: the date under the row's name and the time left where the
+/// other rows have their value (under the date at the accessibility sizes, as in `SettingsRow`).
+private struct SignedUntilRow: View {
+    var expiry: Date?
+    var countdownColor: Color
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var iconSpacing = SettingsRowMetrics.iconSpacing
+
+    var body: some View {
+        HStack(spacing: min(18, iconSpacing)) {
+            SettingsIcon(symbol: "signature")
+                .padding(.vertical, SettingsRowMetrics.iconLineInset)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Signed Until").font(.body).foregroundStyle(Color(.label))
+                if let expiry {
+                    Text(expiry, format: .dateTime.month(.abbreviated).day().year())
+                        .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                }
+                if typeSize.isAccessibilitySize { left }
+            }
+            Spacer(minLength: 8)
+            if !typeSize.isAccessibilitySize { left.lineLimit(1).layoutPriority(1) }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var left: some View {
+        if let expiry {
+            Text(expiry, style: .relative).font(.subheadline).monospacedDigit().foregroundStyle(countdownColor)
+        } else {
+            Text("Unknown").font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+        }
+    }
+}
+
+/// What the Signing & Updates page offers when there is a newer Poki.
 enum UpdateStep: Equatable {
     /// One tap downloads it, signs it and installs it.
     case download
@@ -206,21 +285,8 @@ struct SignerAction: View {
     let work: () async -> Void
 
     var body: some View {
-        Button(title, systemImage: systemImage) { Task { await work() } }
+        Button { Task { await work() } } label: { SettingsLabel(title, systemImage: systemImage) }
             .disabled(signer.working != nil)
-    }
-}
-
-/// Without an Apple Account, the way to one that downloads the update.
-struct SignInToUpdateLink: View {
-    var body: some View {
-        NavigationLink {
-            Form { AccountPage() }
-                .navigationTitle(AppLocalization.text("Apple Account"))
-                .navigationBarTitleDisplayMode(.inline)
-        } label: {
-            Label("Sign In to Download the Update", systemImage: "person.crop.circle.badge.plus")
-        }
     }
 }
 
@@ -240,111 +306,103 @@ struct ExpiryWarning {
     }
 }
 
-struct ExpiryWarningSection: View {
-    let warning: ExpiryWarning
-
-    var body: some View {
-        Section {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Poki’s signing ends soon").font(Prominent.font(.headline, .semibold))
-                    Text(warning.message).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                }
-            } icon: {
-                Image(systemName: "clock.badge.exclamationmark.fill").foregroundStyle(.orange)
-            }
-        }
-    }
-}
-
-/// The release channel, the anisette server, and the optional Apple Account.
+/// Signing & Updates › Advanced: the release channel Poki follows, and the server that helps Poki
+/// sign in to the Apple Account (the core's anisette server). Poki's own server is used until the
+/// person names another.
 struct SigningOptionsPage: View {
     @Environment(AppModel.self) private var model
-    @State private var anisette = ""
-    /// The channel's newest build has been looked up (found or not) since the page opened.
-    @State private var checked = false
+    @State private var address = ""
+    /// Custom was tapped, so the address field shows before the signer has an address to keep.
+    @State private var entering = false
+    /// The address last handed to the signer, so leaving the page does not hand it over twice.
+    @State private var sent: String?
+    @FocusState private var typing: Bool
     private var signer: SelfSigner { model.signer }
+    private var saved: String? { signer.customSignInServer }
 
     var body: some View {
-        Form {
-            Section {
-                LabeledContent("Updates") { Text(verbatim: "Beta") }
+        List {
+            if let status = signer.status, !status.channels.isEmpty {
+                Section {
+                    ForEach(status.channels) { channel in
+                        ChoiceRow(title: Text(verbatim: channel.title), selected: channel.id == status.channel) {
+                            if channel.id != status.channel { Task { await signer.setChannel(channel.id) } }
+                        }
+                    }
+                } header: {
+                    SettingsHeader("Release Channel")
+                } footer: {
+                    Text("Poki receives updates from the selected release channel.")
+                }
             }
             Section {
-                LabeledContent("Installed") { Text(verbatim: "\(signer.installedVersion) (\(signer.installedBuild))") }
-                LabeledContent("Newest Beta") {
-                    if let latest = signer.latest {
-                        Text(verbatim: "\(latest.version) (\(latest.build))")
-                    } else {
-                        (checked ? Text("Not Found") : Text("Checking…")).foregroundStyle(Color(.secondaryLabel))
-                    }
+                ChoiceRow(title: Text("Default"), selected: saved == nil) {
+                    entering = false
+                    address = ""
+                    sent = nil
+                    typing = false
+                    if saved != nil { Task { await signer.setAnisette("") } }
                 }
-                if let latest = signer.latest {
-                    LabeledContent("Status") { signer.isNewer(latest) ? Text("Update Available") : Text("Up to Date") }
+                // The tick moves to Custom once the signer has taken the address.
+                ChoiceRow(title: Text("Custom"), selected: saved != nil) {
+                    entering = true
+                    typing = true
                 }
-                // The way to the update from here, under the status that announces it.
-                switch signer.updateStep {
-                case .download:
-                    SignerAction(signer: signer, title: "Download and Install Update", systemImage: "arrow.down.circle") { await signer.downloadAndInstallUpdate() }
-                case .install:
-                    TimelineView(.periodic(from: .now, by: 5)) { _ in
-                        SignerAction(signer: signer, title: "Install Update", systemImage: "arrow.down.app") { await signer.install() }
-                    }
-                case .signIn:
-                    Text("Sign in to your Apple Account to update here. Or update with Set up Poki or Renew in Poki Setup on your Mac.")
-                        .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                    SignInToUpdateLink()
-                case nil:
-                    EmptyView()
+                if entering || saved != nil {
+                    TextField("Server Address", text: $address)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .focused($typing)
+                        .onSubmit { save() }
                 }
             } header: {
-                Text("Version")
-            }
-            .task(id: signer.status?.channel) {
-                checked = false
-                await signer.checkLatest()
-                checked = true
-            }
-            Section {
-                TextField("https://new.ani.sidestore.io", text: $anisette)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onSubmit { Task { await signer.setAnisette(anisette) } }
-                Button("Use Default Server") { anisette = ""; Task { await signer.setAnisette("") } }
-            } header: {
-                Text("Anisette Server")
+                SettingsHeader("Sign-In Server")
             } footer: {
-                Text("Apple’s sign-in needs device headers that only Apple hardware makes. Poki gets them from this anisette server. It never sees your Apple ID or password.")
-            }
-            Section {
-                if signer.needsCode {
-                    Button {
-                        signer.presentCodeSheet()
-                    } label: {
-                        Label("Enter Verification Code…", systemImage: "lock.shield")
-                    }
-                }
-                NavigationLink {
-                    Form { AccountPage() }
-                        .navigationTitle(AppLocalization.text("Apple Account"))
-                        .navigationBarTitleDisplayMode(.inline)
-                } label: {
-                    LabeledContent {
-                        if signer.signedIn { Text(verbatim: signer.status?.apple_id ?? "") }
-                        else { Text("Optional").foregroundStyle(Color(.secondaryLabel)) }
-                    } label: {
-                        Label("Apple Account", systemImage: "person.crop.circle")
-                    }
-                }
-            } footer: {
-                Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+                Text("Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail.")
             }
             SignerActivityRows(signer: signer)
         }
-        .navigationTitle(AppLocalization.text("Signing"))
+        .navigationTitle(AppLocalization.text("Advanced"))
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { anisette = signer.status?.anisette ?? "" }
+        .settingsPage()
+        // The signer's answer can come after the page opens, and it is what the field shows.
+        .onChange(of: saved, initial: true) { _, saved in
+            if let saved { address = saved }
+        }
+        // An address typed and left with Back is kept like one sent with Done.
+        .onDisappear { save() }
+    }
+
+    private func save() {
+        let url = address.trimmingCharacters(in: .whitespaces)
+        guard !url.isEmpty, url != saved, url != sent else { return }
+        sent = url
+        Task { await signer.setAnisette(url) }
+    }
+}
+
+/// One choice of a few, ticked when it is the one in use (the rows of Settings › Language).
+private struct ChoiceRow: View {
+    let title: Text
+    let selected: Bool
+    let choose: () -> Void
+
+    var body: some View {
+        Button(action: choose) {
+            HStack {
+                title.foregroundStyle(Color(.label))
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(.rect)
+        }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
