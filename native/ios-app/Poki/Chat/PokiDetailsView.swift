@@ -409,6 +409,19 @@ struct ConnectionView: View {
             }
 
             Section {
+                Toggle(isOn: Binding(get: { model.showsReadyActivity }, set: { model.setShowsReadyActivity($0) })) {
+                    SettingsRow(title: "Show Ready", symbol: "platter.filled.top.iphone")
+                }
+                .accessibilityIdentifier("liveActivity.ready")
+            } header: {
+                SettingsHeader("Live Activity")
+            } footer: {
+                Text(model.showsReadyActivity
+                     ? "Poki shows Ready on the Lock Screen and in the Dynamic Island while it waits for a task."
+                     : "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications.")
+            }
+
+            Section {
                 ForEach(SetupStep.shown) { step in
                     let done = model.stepReadyForUse(step)
                     NavigationLink(value: step) {

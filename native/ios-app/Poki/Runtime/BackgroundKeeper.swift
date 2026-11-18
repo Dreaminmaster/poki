@@ -8,6 +8,12 @@ import Foundation
 /// interrupted it), when iOS would otherwise suspend Poki mid-session. Then it is the coarsest
 /// accuracy, with no indicator under Always Allow, and it stops again as soon as the audio is back.
 /// The location is never read or sent anywhere.
+///
+/// Screen History holds the keeper too, whether or not Poki is on (the owner, 2026-11-18). Held for
+/// Screen History alone, it must not touch what the owner hears or show anything: under Always
+/// Allow it is location only, with no audio session opened at all, and otherwise the silent audio,
+/// which mixes with other apps' sound. It never asks for a location permission and never shows the
+/// location indicator.
 @MainActor
 @Observable
 final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
@@ -38,62 +44,52 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     }
 
     /// Who wants Poki kept running: the session (Poki is on) and Screen History, each on its own.
-    /// The keeper runs while either does, and stops when neither does.
+    /// The keeper runs while either does.
     private var sessionHold = false
     private(set) var historyHold = false
+    /// Held for Screen History alone under Always Allow: location only, no audio session.
+    private var quiet: Bool { historyHold && !sessionHold && always }
 
     /// Poki turned on. Called while Poki is in front (iOS only starts background location from the foreground).
     func start() {
         sessionHold = true
-        begin()
+        apply()
     }
 
     /// Poki turned off. The keeper stays while Screen History holds it.
     func stop() {
         sessionHold = false
-        if !historyHold { finish() }
+        apply()
     }
 
-    /// Screen History is on: Poki is kept running for it, whether or not Poki itself is on. Called
-    /// while Poki is in front, as `start` is.
+    /// Screen History is on. Called while Poki is in front, as `start` is.
     func holdForHistory() {
         guard !historyHold else { return }
         historyHold = true
-        AppLog.shared.add("background", "Screen History keeps Poki running")
-        begin()
+        apply()
+        AppLog.shared.add("background", "Screen History keeps Poki running (\(quiet ? "location only" : "silent audio"))")
     }
 
     func releaseHistory() {
         guard historyHold else { return }
         historyHold = false
-        if !sessionHold { finish() }
+        apply()
     }
 
-    private func begin() {
-        guard !isOn else { return }
+    /// Brings the keeper to what its holders need now.
+    private func apply() {
+        guard sessionHold || historyHold else { finish(); return }
         isOn = true
-        // iOS 26 and later: the system's continued processing task keeps Poki up, with no audio and
-        // no location. Silent audio only when iOS refuses it or ends it early.
-        if #available(iOS 26.0, *) {
-            let run = ContinuedRun.shared
-            continued = run
-            run.onExpired = { [weak self] in
-                guard let self, self.isOn else { return }
-                self.startAudio(); self.watchInterruptions()
-            }
-            // Started for Screen History alone, the system's card says so and not that Poki is on.
-            let began = sessionHold
-                ? run.begin(subtitle: AppLocalization.text(LocalizedStringResource("Agents can reach this iPhone")))
-                : run.begin(title: AppLocalization.text(LocalizedStringResource("Screen History is on")),
-                            subtitle: AppLocalization.text(LocalizedStringResource("Poki reads the app in front")))
-            if began { return }
+        if quiet {
+            audio.stop()
+            audioLost = false
+            startLocation()
+            return
         }
-        startAudio()
         watchInterruptions()
+        if !audioPaused, !audio.isOn { startAudio() }
+        if !audioLost, !pairingHold { stopLocation() }
     }
-
-    /// The iOS 26 continued run (typed loosely so this class builds for iOS 18).
-    private var continued: AnyObject?
 
     /// Silent audio could not hold Poki up (it would be suspended): location stands in until it can.
     private(set) var audioLost = false
@@ -110,12 +106,24 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         if lost { startLocation() } else if !pairingHold { stopLocation() }
     }
 
+    private var recovered: NSObjectProtocol?
+
     private func watchInterruptions() {
+        // The silent engine restarts itself after a route change or a media reset; location stands
+        // in when it could not, and goes again when it could.
+        if recovered == nil {
+            recovered = NotificationCenter.default.addObserver(forName: KeepAlive.changed, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isOn, !self.audioPaused, !self.quiet else { return }
+                    self.setAudioLost(!self.audio.isOn)
+                }
+            }
+        }
         guard interruption == nil else { return }
         interruption = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
             Task { @MainActor in
-                guard let self, self.isOn, !self.audioPaused else { return }
+                guard let self, self.isOn, !self.audioPaused, !self.quiet else { return }
                 switch type {
                 case .began: self.setAudioLost(true)
                 case .ended:
@@ -135,18 +143,18 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     func pauseAudio() { audioPaused = true; audio.stop() }
     func resumeAudio() {
         audioPaused = false
-        guard isOn else { return }
-        if #available(iOS 26.0, *), (continued as? ContinuedRun)?.isRunning == true { return }
+        guard isOn, !quiet else { return }
         startAudio()
     }
 
     private func finish() {
         guard isOn else { return }
         isOn = false
-        if #available(iOS 26.0, *) { (continued as? ContinuedRun)?.end() }
         audioLost = false
         if let interruption { NotificationCenter.default.removeObserver(interruption) }
         interruption = nil
+        if let recovered { NotificationCenter.default.removeObserver(recovered) }
+        recovered = nil
         if !pairingHold { stopLocation() }
         audio.stop()
     }
@@ -167,7 +175,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         guard pairingHold else { return }
         pairingHold = false
         activity?.invalidate(); activity = nil
-        if isOn && audioLost { startLocation() } else { stopLocation() }
+        if isOn && (audioLost || quiet) { startLocation() } else { stopLocation() }
     }
 
     private func startPairingLocation() {
@@ -180,7 +188,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
 
     private func startLocation() {
         if pairingHold { startPairingLocation(); return }
-        guard audioLost, allowed else { stopLocation(); return }
+        guard audioLost || quiet, allowed else { stopLocation(); return }
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = !always
         if !always, activity == nil { activity = CLBackgroundActivitySession() }
@@ -196,6 +204,8 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         let status = manager.authorizationStatus
         Task { @MainActor in
             self.authorization = status
+            // Always Allow given or taken away changes how Screen History alone is kept running.
+            if self.isOn { self.apply() }
             if self.pairingHold || (self.isOn && self.audioLost) { self.startLocation() }
         }
     }

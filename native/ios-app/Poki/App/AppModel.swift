@@ -19,6 +19,17 @@ final class AppModel {
     /// The relay Poki connects to: the address, while the relay is on.
     var activeRelay: RelayAddress? { relayEnabled ? relayAddress : nil }
 
+    /// Settings › Connection › Show Ready. Off, no Live Activity stays while Poki waits for work.
+    var showsReadyActivity: Bool { _ = readySetting; return !ActivityController.hidesReady }
+    func setShowsReadyActivity(_ on: Bool) {
+        UserDefaults.standard.set(!on, forKey: ActivityController.hidesReadyKey)
+        readySetting += 1
+        log.add("activity", on ? "Ready Live Activity turned on" : "Ready Live Activity turned off: shown only for work that starts while Poki is in front")
+        activity.idleSettingChanged()
+    }
+    /// Bumped so views reading `showsReadyActivity` update.
+    private(set) var readySetting = 0
+
     func setRelayEnabled(_ on: Bool) {
         guard on != relayEnabled, relayAddress != nil || !on else { return }
         relayEnabled = on

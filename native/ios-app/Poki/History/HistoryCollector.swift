@@ -10,7 +10,7 @@ import UIKit
 /// task) is `HistoryCapture`'s own; the collector only makes sure a run exists.
 ///
 /// Reading another app means Poki is in the background, so something has to keep Poki running.
-/// `BackgroundKeeper` does (the continued run, silent audio or location), and Screen History holds
+/// `BackgroundKeeper` does (location alone under Always Allow, else silent audio), and Screen History holds
 /// it by itself while it is on, whether or not Poki is on (the owner, 2026-11-18: collection is
 /// persistent whenever Screen History is on). `hold` and `staysUp` are the two places that decide
 /// it, so another way of staying up can replace the keeper without touching the rest.
