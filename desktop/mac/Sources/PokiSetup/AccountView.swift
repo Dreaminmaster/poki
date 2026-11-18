@@ -82,14 +82,14 @@ struct AccountView: View {
                 .confirmationDialog("Sign out of \(a.appleId ?? "this Apple Account")?", isPresented: $confirmSignOut) {
                     Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
                 } message: {
-                    Text("Poki stays on your iPhones, but Poki Setup can't renew it until you sign in again.")
+                    Text("Poki stays on your devices, but Poki Setup can't renew it until you sign in again.")
                 }
         }
     }
 
     @ViewBuilder private var signInForm: some View {
         HeroSection {
-            PageHero(symbol: "person.crop.circle", title: "Sign in with your Apple Account", subtitle: "Poki Setup uses it the way Xcode does: to sign Poki for your iPhone. A free Apple Account works. Your password goes to Apple only.")
+            PageHero(symbol: "person.crop.circle", title: "Sign in with your Apple Account", subtitle: "Poki Setup uses it the way Xcode does: to sign Poki for your iPhone or iPad. A free Apple Account works. Your password goes to Apple only.")
         }
         if model.account?.needsReauth == true {
             Section {

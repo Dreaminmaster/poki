@@ -97,6 +97,20 @@ pub fn run() {
             commands::channels,
             commands::set_channel,
             commands::qr_svg,
+            commands::poki_running,
+            commands::dev_state,
+            commands::dev_set_prefs,
+            commands::github_sign_in_start,
+            commands::github_sign_in_finish,
+            commands::github_sign_in_cancel,
+            commands::github_use_cli,
+            commands::github_use_token,
+            commands::github_sign_out,
+            commands::test_builds,
+            commands::test_build_download,
+            commands::test_build_next,
+            commands::test_build_synced,
+            commands::test_builds_delete_downloads,
         ])
         .run(tauri::generate_context!())
         .expect("Poki Setup could not start");
