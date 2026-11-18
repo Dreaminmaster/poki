@@ -3,8 +3,6 @@ import UniformTypeIdentifiers
 
 struct SetupView: View {
     @EnvironmentObject var model: AppModel
-    @State private var ipa: URL?
-    @State private var choosingIPA = false
     @State private var handOff = false
     @State private var result: InstallAnswer?
     @State private var failed: String?
@@ -18,14 +16,11 @@ struct SetupView: View {
     var body: some View {
         Form {
             HeroSection {
-                PageHero(symbol: nil, title: "Set Up Poki", subtitle: "Poki Setup signs Poki with your Apple Account, installs it on your iPhone and keeps it signed.")
+                PageHero(symbol: nil, title: "Set Up Poki", subtitle: "Poki Setup signs Poki with your Apple Account, installs it on your iPhone or iPad and keeps it signed.")
             }
             phoneSection
             accountSection
             appSection
-            if let steps = model.steps["install"], !steps.isEmpty {
-                Section("Progress") { StepsView(steps: steps) }
-            }
             if let result { resultSection(result) }
         }
         .pokiPage()
@@ -43,9 +38,6 @@ struct SetupView: View {
         } message: {
             Text(certificateQuestion ?? "")
         }
-        .fileImporter(isPresented: $choosingIPA, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
-            if case .success(let url) = r { ipa = url }
-        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -54,7 +46,7 @@ struct SetupView: View {
                     Label("Install Poki", systemImage: "arrow.down.app")
                 }
                 .disabled(!canInstall)
-                .help("Sign Poki with your Apple Account and install it on the iPhone")
+                .help("Sign Poki with your Apple Account and install it on the device")
             }
         }
     }
@@ -66,7 +58,7 @@ struct SetupView: View {
             if let err = model.phonesError {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Poki Setup can't see iPhones right now")
+                        Text("Poki Setup can't see devices right now")
                         Text(err.message).font(.callout).foregroundStyle(.secondary)
                     }
                 } icon: {
@@ -79,8 +71,8 @@ struct SetupView: View {
                         .foregroundStyle(Color.pokiBlue)
                         .frame(width: 40)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Connect your iPhone").font(.headline)
-                        Text("Use a cable, unlock the iPhone and tap Trust when it asks.")
+                        Text("Connect your iPhone or iPad").font(.headline)
+                        Text("Use a cable, unlock the device and tap Trust when it asks.")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -89,20 +81,20 @@ struct SetupView: View {
                 .padding(.vertical, 4)
             } else {
                 if model.phones.count > 1 {
-                    Picker("iPhone", selection: Binding(get: { model.selectedPhone?.id ?? "" }, set: { model.selectedUDID = $0 })) {
+                    Picker("Device", selection: Binding(get: { model.selectedPhone?.id ?? "" }, set: { model.selectedUDID = $0 })) {
                         ForEach(model.phones) { Text($0.title).tag($0.id) }
                     }
                 }
                 if let row = model.selectedPhone { phoneRows(row) }
             }
         } header: {
-            Text("iPhone")
+            Text("Device")
         }
     }
 
     @ViewBuilder private func phoneRows(_ row: PhoneRow) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: "iphone.gen3")
+            Image(systemName: deviceSymbol(row.facts?.productType, name: row.title))
                 .font(.system(size: 30, weight: .light))
                 .foregroundStyle(Color.pokiBlue)
                 .frame(width: 40)
@@ -232,14 +224,14 @@ struct SetupView: View {
 
     @ViewBuilder private var appSection: some View {
         Section {
-            // What gets installed: the channel, with the release under it (or the IPA file picked).
+            // What gets installed: the channel, with the release under it. Test builds and IPA
+            // files are under Developer.
             Picker(selection: channelChoice) {
                 ForEach(model.channels) { c in Text(c.title).tag(c.id) }
             } label: {
                 Text("Poki")
                 Text(installLine)
             }
-            .disabled(ipa != nil)
             // Poki Setup itself.
             LabeledContent {
                 if let u = model.update, u.newer {
@@ -255,9 +247,6 @@ struct SetupView: View {
             }
             HStack {
                 Menu {
-                    Button(ipa == nil ? "Install from an IPA File…" : "Choose Another IPA File…") { choosingIPA = true }
-                    if ipa != nil { Button("Use the Release Instead") { ipa = nil } }
-                    Divider()
                     Toggle("Also Show a QR Code for Wi-Fi Pairing", isOn: $handOff)
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -277,7 +266,11 @@ struct SetupView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canInstall)
             }
-            if let message = failed ?? channelError {
+            if let steps = model.steps["install"], !steps.isEmpty {
+                JobProgress(steps: steps, running: installing, weights: JobProgress.install, doneTitle: "Poki is installed")
+            }
+            // A failure shows on the bar; one from before the first step shows here.
+            if let message = (model.steps["install"]?.isEmpty ?? true) ? (failed ?? channelError) : channelError {
                 Text(message).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
         } header: {
@@ -287,9 +280,8 @@ struct SetupView: View {
         }
     }
 
-    /// The line under "Poki": what Install will put on the iPhone.
+    /// The line under "Poki": what Install will put on the device.
     private var installLine: String {
-        if let ipa { return "From \(ipa.lastPathComponent)" }
         if let latest = model.latest { return buildLine(latest) }
         return "No release published yet"
     }
@@ -315,12 +307,12 @@ struct SetupView: View {
     private var footer: String? {
         if model.accountError != nil { return "Unlock your keychain and choose “Always Allow”, then tap Retry above." }
         if model.account?.signedIn != true { return "Sign in first. Your Apple Account password goes to Apple only." }
-        if ipa == nil && model.latest == nil { return "No Poki release is published yet. Use ⋯ to install from the Poki IPA you downloaded (the “external” one)." }
+        if model.latest == nil { return "No Poki release is published yet. To install an IPA file, use Developer › Test Builds." }
         return nil
     }
 
     private var canInstall: Bool {
-        !installing && model.selectedPhone?.facts != nil && model.account?.signedIn == true && (ipa != nil || model.latest != nil)
+        !installing && model.selectedPhone?.facts != nil && model.account?.signedIn == true && model.latest != nil
     }
 
     @ViewBuilder private func resultSection(_ r: InstallAnswer) -> some View {
@@ -330,14 +322,14 @@ struct SetupView: View {
             ForEach(Array(r.notes.enumerated()), id: \.offset) { _, n in
                 Text(n).font(.callout).foregroundStyle(.secondary)
             }
-            Text("On the iPhone: open Settings › General › VPN & Device Management, trust your Apple Account, then open Poki.")
+            Text("On the device, open Settings › General › VPN & Device Management, trust your Apple Account, then open Poki.")
                 .font(.callout)
             if let h = r.handoff {
                 HStack(alignment: .top, spacing: 16) {
                     QRCode(text: h.link, size: 150)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Scan with the iPhone's Camera").font(.headline)
-                        Text("Keep the iPhone on the same Wi-Fi as this Mac. Poki opens and saves its pairing file.")
+                        Text("Scan with the device's Camera").font(.headline)
+                        Text("Keep the device on the same Wi-Fi as this Mac. Poki opens and saves its pairing file.")
                             .font(.callout).foregroundStyle(.secondary)
                         Button("Copy Link") { copyToPasteboard(h.link) }
                     }
@@ -351,7 +343,7 @@ struct SetupView: View {
         failed = nil
         result = nil
         do {
-            result = try await model.install(udid: phone.id, ipa: ipa, handOff: handOff)
+            result = try await model.install(udid: phone.id, ipa: nil, handOff: handOff)
         } catch let e as CoreError where e.kind == "certificate_limit" {
             failed = e.message
             certificateQuestion = e.message

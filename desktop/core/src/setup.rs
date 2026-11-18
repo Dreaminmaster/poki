@@ -524,6 +524,12 @@ pub struct Options {
     pub hand_off: bool,
     /// Pre-seed the developer disk image into Poki's container.
     pub seed_ddi: bool,
+    /// The test build `ipa` came from (Developer > Test Builds), kept in the device's record so
+    /// renewals can sign it again.
+    pub test_build: Option<crate::devbuilds::BuildRef>,
+    /// Close Poki on the device before replacing it. Without it, an install that finds Poki
+    /// running stops with [`Error::PokiRunning`] so the person can be asked first.
+    pub close_poki: bool,
 }
 
 #[cfg(feature = "device")]
@@ -599,12 +605,24 @@ pub async fn run(signer: &mut Signer, opts: Options, reporter: &Reporter) -> Res
     let team = signer.team().await?;
     reporter.done("account", Some(format!("{} ({})", team.name, if team.is_free { "free, 7-day signing" } else { "paid" })));
 
-    reporter.step("release", "Getting Poki");
+    match &opts.test_build {
+        Some(b) if opts.ipa.is_none() => reporter.step("release", &format!("Downloading test build {}", b.run_number)),
+        _ => reporter.step("release", "Getting Poki"),
+    }
     let (ipa, signing_zip, tag) = match &opts.ipa {
+        None if opts.test_build.is_some() => {
+            let b = opts.test_build.as_ref().expect("checked above");
+            let (ipa, zipp) = crate::devbuilds::fetch(b.artifact_id, reporter, "release").await?;
+            (ipa, zipp, b.tag())
+        }
         Some(p) => {
             let beside = p.with_file_name("Poki-signing.zip");
             let zipp = opts.signing_zip.clone().or_else(|| beside.is_file().then_some(beside));
-            (p.clone(), zipp, format!("local:{}", p.file_name().unwrap_or_default().to_string_lossy()))
+            let tag = match &opts.test_build {
+                Some(b) => b.tag(),
+                None => format!("local:{}", p.file_name().unwrap_or_default().to_string_lossy()),
+            };
+            (p.clone(), zipp, tag)
         }
         None => {
             let rel = release::latest().await?;
@@ -621,6 +639,10 @@ pub async fn run(signer: &mut Signer, opts: Options, reporter: &Reporter) -> Res
     device::install::install_profiles(&phone, &built.profiles, reporter).await?;
     let existing = device::install::find_apps(&phone, crate::POKI_BUNDLE_ID).await.unwrap_or_default();
     let upgrade = existing.iter().any(|a| a.bundle_id == built.bundle_id);
+    if upgrade {
+        let path = existing.iter().find(|a| a.bundle_id == built.bundle_id).and_then(|a| a.path.clone());
+        make_sure_poki_is_closed(&phone, path, opts.close_poki, reporter).await?;
+    }
     device::install::install_ipa(&phone, &built.ipa, upgrade, reporter).await?;
 
     reporter.step("pairing_file", "Giving Poki its pairing file");
@@ -682,10 +704,60 @@ pub async fn run(signer: &mut Signer, opts: Options, reporter: &Reporter) -> Res
         last_error: None,
         wifi_address: facts.wifi_address.clone(),
         pairing_handed_off: handed,
+        test_build: opts.test_build.clone(),
     };
     keeper::put(rec.clone())?;
     reporter.done("all", Some(format!("Poki {} is on {}", built.version, facts.name)));
     Ok(Done { record: rec, handoff, notes: built.notes })
+}
+
+#[cfg(feature = "device")]
+/// Before an update replaces Poki: checks it is not running, and closes it when `close` says so.
+/// When the device cannot say what is running (the developer disk image is not mounted, an older
+/// iOS), the update goes on, as it did before this check.
+pub async fn make_sure_poki_is_closed(phone: &Phone, app_path: Option<String>, close: bool, reporter: &Reporter) -> Result<()> {
+    reporter.step("close", "Making sure Poki is closed");
+    if !matches!(device::ddi::mounted(phone).await, Ok(true)) {
+        if let Err(e) = device::ddi::mount(phone, &Reporter::silent()).await {
+            tracing::warn!(error = %e, "could not mount the developer disk image before checking for Poki");
+        }
+    }
+    match device::running::poki(phone, app_path.clone()).await {
+        Ok(list) if list.is_empty() => {
+            reporter.done("close", Some("Poki is not running".into()));
+            Ok(())
+        }
+        Ok(_) if close => {
+            reporter.part("close", 0.5, Some("Closing Poki on the device".into()));
+            device::running::close_poki(phone, app_path).await?;
+            reporter.done("close", Some("Closed Poki".into()));
+            Ok(())
+        }
+        Ok(_) => Err(Error::PokiRunning("Poki is open on the device. Close it before updating, or let Poki Setup close it.".into())),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not check whether Poki is running");
+            reporter.note("close", format!("Could not check whether Poki is running ({e}). Updating anyway."));
+            reporter.done("close", None);
+            Ok(())
+        }
+    }
+}
+
+/// Whether Poki is running on the device: Some(true or false), or None when the device cannot say.
+#[cfg(feature = "device")]
+pub async fn poki_running(udid: &str) -> Result<Option<bool>> {
+    let phone = pick_phone(Some(udid)).await?;
+    if !matches!(device::ddi::mounted(&phone).await, Ok(true)) {
+        let _ = device::ddi::mount(&phone, &Reporter::silent()).await;
+    }
+    let path = device::install::find_apps(&phone, crate::POKI_BUNDLE_ID).await.ok().and_then(|apps| apps.into_iter().find_map(|a| a.path));
+    match device::running::poki(&phone, path).await {
+        Ok(l) => Ok(Some(!l.is_empty())),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not tell whether Poki is running");
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(feature = "device")]
@@ -703,15 +775,29 @@ pub async fn renew(signer: &mut Signer, udid: &str, reporter: &Reporter) -> Resu
         let facts = device::info::read(&phone).await?;
         let teams = signer.teams().await?;
         let team = teams.into_iter().find(|t| t.team_id == rec.team_id).ok_or_else(|| Error::msg(format!("The Apple ID signed in is not on team {} any more.", rec.team_name)))?;
-        let rel = release::latest().await?;
-        let (ipa, zipp) = release::fetch(&rel, reporter).await?;
+        // A test build is signed again while renewals keep test builds (Developer > Test Builds).
+        let kept = match &rec.test_build {
+            Some(b) => crate::devbuilds::for_renewal(b, reporter).await.map(|found| (found, b.clone())),
+            None => None,
+        };
+        let (ipa, zipp, tag, test_build) = match kept {
+            Some(((ipa, zipp), b)) => (ipa, zipp, b.tag(), Some(b)),
+            None => {
+                let rel = release::latest().await?;
+                let (ipa, zipp) = release::fetch(&rel, reporter).await?;
+                (ipa, zipp, rel.tag, None)
+            }
+        };
         let out = crate::paths::cache_dir()?.join(format!("Poki-{}-{}.ipa", team.team_id, udid));
         let built = sign_for_team(signer, &team, Some((udid, &facts.name)), &ipa, zipp.as_deref(), &out, reporter).await?;
         device::install::install_profiles(&phone, &built.profiles, reporter).await?;
+        // A renewal runs by itself, or after the person was asked: it closes Poki first.
+        let path = device::install::find_apps(&phone, &rec.bundle_id).await.ok().and_then(|apps| apps.into_iter().find(|a| a.bundle_id == rec.bundle_id).and_then(|a| a.path));
+        make_sure_poki_is_closed(&phone, path, true, reporter).await?;
         device::install::install_ipa(&phone, &built.ipa, true, reporter).await?;
         let apple_id = signer.account.apple_id().unwrap_or("").to_string();
         hand_signing_identity(&phone, &built, &apple_id, reporter).await;
-        Ok(keeper::Record { version: built.version, build: built.build, release_tag: rel.tag, signed_at: keeper::now(), profile_expires_at: built.profile_expires_at, last_checked_at: Some(keeper::now()), last_error: None, wifi_address: facts.wifi_address.clone().or(rec.wifi_address.clone()), ..rec.clone() })
+        Ok(keeper::Record { version: built.version, build: built.build, release_tag: tag, test_build, signed_at: keeper::now(), profile_expires_at: built.profile_expires_at, last_checked_at: Some(keeper::now()), last_error: None, wifi_address: facts.wifi_address.clone().or(rec.wifi_address.clone()), ..rec.clone() })
     }
     .await;
     match result {

@@ -19,9 +19,11 @@ struct PokiSetupApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Poki") {
-                Button("Set Up an iPhone") { model.page = .setup }.keyboardShortcut("1")
-                Button("iPhones") { model.page = .phones }.keyboardShortcut("2")
+                Button("Set Up a Device") { model.page = .setup }.keyboardShortcut("1")
+                Button("Devices") { model.page = .phones }.keyboardShortcut("2")
                 Button("Apple Account") { model.page = .account }.keyboardShortcut("3")
+                Button("Test Builds") { model.page = model.dev.signedIn ? .testBuilds : .github }.keyboardShortcut("4")
+                Button("GitHub Account") { model.page = .github }.keyboardShortcut("5")
                 Divider()
                 Button("Renew Signatures Now") { Task { await model.renewDue() } }
                 Divider()
@@ -60,7 +62,7 @@ struct MenuBarContent: View {
 
     var body: some View {
         if model.records.isEmpty {
-            Text("No iPhones set up yet")
+            Text("No devices set up yet")
         } else {
             ForEach(model.records) { r in
                 Text("\(r.phoneName): \(r.isExpired ? "expired" : "\(max(r.daysLeft, 0)) days left")")

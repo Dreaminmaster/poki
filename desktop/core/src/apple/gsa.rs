@@ -290,6 +290,11 @@ fn status(response: &plist::Value) -> Status {
 
 fn apple_error(st: &Status) -> Error {
     tracing::warn!("Apple sign-in status ec={} hsc={} em={:?}", st.ec, st.hsc, st.em);
+    // -22411 is a rate limit only with 503. With 401 Apple turned the session away: after a
+    // verified code, an app token asked for with the 409 session from before the code gets this.
+    if st.ec == -22411 && st.hsc != 503 {
+        return Error::NeedsPerson(SESSION_REJECTED.into());
+    }
     if is_rate_limit_code_or_text(st.ec, &st.em) {
         return rate_limited();
     }
@@ -386,59 +391,8 @@ impl Client {
         password: &str,
         caller: CodeCaller,
     ) -> Result<Outcome> {
-        let apple_id_clean = apple_id.trim().to_lowercase();
         let anisette = self.anisette.headers().await?;
-        let mut client = srp::Client::new();
-
-        let mut init = plist::Dictionary::new();
-        init.insert("A2k".into(), plist::Value::Data(client.a_pub.clone()));
-        init.insert("cpd".into(), plist::Value::Dictionary(anisette.cpd()));
-        init.insert("o".into(), "init".into());
-        init.insert("ps".into(), plist::Value::Array(vec!["s2k".into(), "s2k_fo".into()]));
-        init.insert("u".into(), apple_id_clean.clone().into());
-        let r1 = self.gs_request(&anisette, init).await?;
-        let st = status(&r1);
-        if st.ec != 0 {
-            return Err(apple_error(&st));
-        }
-        let sp = s(&r1, "sp").unwrap_or("s2k");
-        let salt = data(&r1, "s").ok_or_else(|| Error::msg("sign-in: no salt"))?.to_vec();
-        let iterations = dict(&r1, "i").and_then(|v| v.as_signed_integer()).ok_or_else(|| Error::msg("sign-in: no iteration count"))? as u32;
-        let b_pub = data(&r1, "B").ok_or_else(|| Error::msg("sign-in: no B"))?.to_vec();
-        let c_value = dict(&r1, "c").cloned().unwrap_or(plist::Value::String(String::new()));
-
-        let derived = srp::Client::derive_password(password, &salt, iterations, sp == "s2k_fo");
-        let m1 = client.process(&apple_id_clean, &derived, &salt, &b_pub).map_err(Error::msg)?;
-
-        let mut complete = plist::Dictionary::new();
-        complete.insert("c".into(), c_value);
-        complete.insert("M1".into(), plist::Value::Data(m1));
-        complete.insert("cpd".into(), plist::Value::Dictionary(anisette.cpd()));
-        complete.insert("o".into(), "complete".into());
-        complete.insert("u".into(), apple_id_clean.clone().into());
-        let r2 = self.gs_request(&anisette, complete).await?;
-        let st = status(&r2);
-        if st.ec != 0 {
-            return Err(apple_error(&st));
-        }
-        let m2 = data(&r2, "M2").ok_or_else(|| Error::msg("sign-in: no M2"))?;
-        if !client.verify_server(m2) {
-            return Err(Error::msg("Apple's sign-in answer did not verify (M2 mismatch). Check the clock on this computer and try again."));
-        }
-        let spd = data(&r2, "spd").ok_or_else(|| Error::msg("sign-in: no spd"))?;
-        let spd = decrypt_spd(client.key(), spd)?;
-        let session = Session {
-            apple_id: apple_id.trim().to_string(),
-            adsid: s(&spd, "adsid").unwrap_or("").to_string(),
-            gs_idms_token: s(&spd, "GsIdmsToken").unwrap_or("").to_string(),
-            first_name: s(&spd, "fn").unwrap_or("").to_string(),
-            last_name: s(&spd, "ln").unwrap_or("").to_string(),
-            sk: data(&spd, "sk").unwrap_or(&[]).to_vec(),
-            c: data(&spd, "c").unwrap_or(&[]).to_vec(),
-        };
-        if session.adsid.is_empty() || session.gs_idms_token.is_empty() {
-            return Err(Error::msg("Apple's sign-in answer had no account token."));
-        }
+        let (session, st) = self.srp_sign_in(apple_id, password, &anisette).await?;
         tracing::info!("sign-in answered hsc {} au {:?}", st.hsc, st.au);
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let make_pending = |via: Factor, phone_id: u64, session: Session| Pending {
@@ -481,6 +435,64 @@ impl Client {
             Step::Repair => Err(Error::NeedsPerson("Apple wants something on this Apple Account fixed before it can be used here. Sign in at account.apple.com, turn on two-factor authentication and accept any new terms, then sign in again.".into())),
             Step::Unsupported(other) => Err(Error::msg(format!("Apple asked for a verification step this app does not support ({other})."))),
         }
+    }
+
+    /// The password step (SRP init and complete) with the given anisette headers. It only reads
+    /// Apple's answer and never asks for a code.
+    async fn srp_sign_in(&self, apple_id: &str, password: &str, anisette: &Anisette) -> Result<(Session, Status)> {
+        let apple_id_clean = apple_id.trim().to_lowercase();
+        let mut client = srp::Client::new();
+
+        let mut init = plist::Dictionary::new();
+        init.insert("A2k".into(), plist::Value::Data(client.a_pub.clone()));
+        init.insert("cpd".into(), plist::Value::Dictionary(anisette.cpd()));
+        init.insert("o".into(), "init".into());
+        init.insert("ps".into(), plist::Value::Array(vec!["s2k".into(), "s2k_fo".into()]));
+        init.insert("u".into(), apple_id_clean.clone().into());
+        let r1 = self.gs_request(anisette, init).await?;
+        let st = status(&r1);
+        if st.ec != 0 {
+            return Err(apple_error(&st));
+        }
+        let sp = s(&r1, "sp").unwrap_or("s2k");
+        let salt = data(&r1, "s").ok_or_else(|| Error::msg("sign-in: no salt"))?.to_vec();
+        let iterations = dict(&r1, "i").and_then(|v| v.as_signed_integer()).ok_or_else(|| Error::msg("sign-in: no iteration count"))? as u32;
+        let b_pub = data(&r1, "B").ok_or_else(|| Error::msg("sign-in: no B"))?.to_vec();
+        let c_value = dict(&r1, "c").cloned().unwrap_or(plist::Value::String(String::new()));
+
+        let derived = srp::Client::derive_password(password, &salt, iterations, sp == "s2k_fo");
+        let m1 = client.process(&apple_id_clean, &derived, &salt, &b_pub).map_err(Error::msg)?;
+
+        let mut complete = plist::Dictionary::new();
+        complete.insert("c".into(), c_value);
+        complete.insert("M1".into(), plist::Value::Data(m1));
+        complete.insert("cpd".into(), plist::Value::Dictionary(anisette.cpd()));
+        complete.insert("o".into(), "complete".into());
+        complete.insert("u".into(), apple_id_clean.clone().into());
+        let r2 = self.gs_request(anisette, complete).await?;
+        let st = status(&r2);
+        if st.ec != 0 {
+            return Err(apple_error(&st));
+        }
+        let m2 = data(&r2, "M2").ok_or_else(|| Error::msg("sign-in: no M2"))?;
+        if !client.verify_server(m2) {
+            return Err(Error::msg("Apple's sign-in answer did not verify (M2 mismatch). Check the clock on this computer and try again."));
+        }
+        let spd = data(&r2, "spd").ok_or_else(|| Error::msg("sign-in: no spd"))?;
+        let spd = decrypt_spd(client.key(), spd)?;
+        let session = Session {
+            apple_id: apple_id.trim().to_string(),
+            adsid: s(&spd, "adsid").unwrap_or("").to_string(),
+            gs_idms_token: s(&spd, "GsIdmsToken").unwrap_or("").to_string(),
+            first_name: s(&spd, "fn").unwrap_or("").to_string(),
+            last_name: s(&spd, "ln").unwrap_or("").to_string(),
+            sk: data(&spd, "sk").unwrap_or(&[]).to_vec(),
+            c: data(&spd, "c").unwrap_or(&[]).to_vec(),
+        };
+        if session.adsid.is_empty() || session.gs_idms_token.is_empty() {
+            return Err(Error::msg("Apple's sign-in answer had no account token."));
+        }
+        Ok((session, st))
     }
 
     fn twofa_request(&self, rb: reqwest::RequestBuilder, pending: &Pending, anisette: &Anisette) -> reqwest::RequestBuilder {
@@ -667,10 +679,29 @@ impl Client {
             }
             return Err(err);
         }
-        if !pending.session.sk.is_empty() && !pending.session.c.is_empty() {
-            return Ok(pending.session.clone());
+        if pending.session.sk.is_empty() || pending.session.c.is_empty() {
+            return Err(incomplete_session());
         }
-        Err(incomplete_session())
+        // Apple has checked the code, so this anisette identity is trusted now. Sign in once more
+        // with it to get the full session: Apple turns away app-token requests made with the 409
+        // session from before the code (hsc 401, ec -22411). This sign-in only reads Apple's
+        // answer and never asks for a code, so a sign-in still costs at most one code.
+        let anisette = self.anisette.headers_pinned().await?;
+        match self.srp_sign_in(&pending.apple_id, &pending.password, &anisette).await {
+            Ok((session, st)) if signed_in_with_keys(&session, &st) => {
+                tracing::info!("signed in again after the code: hsc {}", st.hsc);
+                Ok(session)
+            }
+            Ok((_, st)) => {
+                tracing::warn!("Apple still asked for a second factor after the code (hsc {} au {:?}); using the session from before the code", st.hsc, st.au);
+                Ok(pending.session.clone())
+            }
+            Err(e) if is_rate_limit(&e) => Err(e),
+            Err(e) => {
+                tracing::warn!("signing in again after the code failed ({e}); using the session from before the code");
+                Ok(pending.session.clone())
+            }
+        }
     }
 
     /// The app token for Xcode's services, which the developer portal wants.
@@ -727,6 +758,16 @@ enum Step<'a> {
     Unsupported(&'a str),
 }
 
+/// A password step that opened a session good for app tokens: signed in, or the repair answer
+/// that still carries the session keys.
+fn signed_in_with_keys(session: &Session, st: &Status) -> bool {
+    let keys = !session.sk.is_empty() && !session.c.is_empty();
+    match next_step(st.hsc, st.au.as_deref()) {
+        Step::SignedIn | Step::Repair => keys,
+        _ => false,
+    }
+}
+
 fn next_step(hsc: i64, au: Option<&str>) -> Step<'_> {
     match au {
         Some("trustedDeviceSecondaryAuth") => Step::AskTrustedDevice,
@@ -744,6 +785,8 @@ const WRONG_CODE_MARKER: &str = "That verification code is incorrect.";
 pub const WRONG_CODE_FIRST: &str = "That verification code is incorrect. Check the 6-digit code and enter the newest code you received.";
 pub const WRONG_CODE_WAIT: &str = "That verification code is incorrect. Stop and wait a few minutes before trying again so Apple does not lock this Apple Account, then enter the newest 6-digit code.";
 pub const EXPIRED_CODE: &str = "That verification code has expired. Enter the newest 6-digit code, or request a new code.";
+/// Apple's -22411 with any status but 503: it turned this session away, which is not a rate limit.
+pub const SESSION_REJECTED: &str = "Apple did not accept this sign-in (error -22411). Sign out, then sign in again.";
 pub const INCOMPLETE_SESSION: &str = "Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session.";
 
 pub fn rate_limited() -> Error { Error::NeedsPerson(RATE_LIMITED.into()) }
@@ -1127,6 +1170,10 @@ mod rate_limit_regressions {
         second_apptokens: Option<(u16, i64, String)>,
         /// Runs while an apptokens request is in flight, before the answer goes back.
         on_apptokens: Option<fn()>,
+        /// What Apple does once a code is checked: the next password step answers 200 with a
+        /// new session, and app tokens asked for with the 409 session from before the code get
+        /// hsc 401 with ec -22411.
+        apple_after_code: bool,
     }
 
     impl Default for MockBehavior {
@@ -1148,6 +1195,7 @@ mod rate_limit_regressions {
                 apptokens_em: String::new(),
                 second_apptokens: None,
                 on_apptokens: None,
+                apple_after_code: false,
             }
         }
     }
@@ -1177,11 +1225,14 @@ mod rate_limit_regressions {
         plist_xml(root)
     }
 
-    fn encrypt_spd_for_test(srp_key: &[u8], include_keys: bool) -> Vec<u8> {
+    const TOKEN_BEFORE_CODE: &str = "idms-tok-1";
+    const TOKEN_AFTER_CODE: &str = "idms-tok-after-code";
+
+    fn encrypt_spd_for_test(srp_key: &[u8], include_keys: bool, idms_token: &str) -> Vec<u8> {
         use aes::cipher::{BlockEncryptMut, KeyIvInit};
         let mut spd = plist::Dictionary::new();
         spd.insert("adsid".into(), "000123-abc".into());
-        spd.insert("GsIdmsToken".into(), "idms-tok-1".into());
+        spd.insert("GsIdmsToken".into(), idms_token.into());
         spd.insert("fn".into(), "Test".into());
         spd.insert("ln".into(), "Person".into());
         if include_keys {
@@ -1217,6 +1268,12 @@ mod rate_limit_regressions {
         et.extend_from_slice(&iv);
         et.extend_from_slice(&ct);
         et
+    }
+
+    async fn return_gs(stream: &mut tokio::net::TcpStream, body: Vec<u8>) {
+        let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/x-xml-plist\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+        let _ = stream.write_all(head.as_bytes()).await;
+        let _ = stream.write_all(&body).await;
     }
 
     async fn start_mock_gsa(initial: MockBehavior) -> MockGsa {
@@ -1304,8 +1361,13 @@ mod rate_limit_regressions {
                                         if let Some((key, m2)) = srp_srv.verify_and_m2(&a_pub, m1) {
                                             let mut r = plist::Dictionary::new();
                                             r.insert("M2".into(), plist::Value::Data(m2));
+                                            if b.apple_after_code && already_validated {
+                                                r.insert("spd".into(), plist::Value::Data(encrypt_spd_for_test(&key, true, TOKEN_AFTER_CODE)));
+                                                return_gs(&mut stream, gs_response(r, 0, 200, None)).await;
+                                                return;
+                                            }
                                             let include_keys = b.hsc != 409 || b.include_session_keys_on_409;
-                                            r.insert("spd".into(), plist::Value::Data(encrypt_spd_for_test(&key, include_keys)));
+                                            r.insert("spd".into(), plist::Value::Data(encrypt_spd_for_test(&key, include_keys, TOKEN_BEFORE_CODE)));
                                             let eff_au = if b.hsc == 409 && already_validated && !b.include_session_keys_on_409 {
                                                 None
                                             } else {
@@ -1328,7 +1390,9 @@ mod rate_limit_regressions {
                                         if let Some(hook) = b.on_apptokens {
                                             hook();
                                         }
+                                        let before_code = s(req, "t") == Some(TOKEN_BEFORE_CODE);
                                         let (app_status, app_ec, app_em) = match (call_num, &b.second_apptokens) {
+                                            _ if b.apple_after_code && before_code => (401, -22411, "This action cannot be completed at this time".to_string()),
                                             (n, Some((st, ec, em))) if n >= 2 => (*st, *ec, em.clone()),
                                             _ => (b.apptokens_status, b.apptokens_ec, b.apptokens_em.clone()),
                                         };
@@ -1541,7 +1605,7 @@ mod rate_limit_regressions {
     }
 
     #[test]
-    fn verified_code_uses_session_directly_without_second_sign_in() {
+    fn verified_code_signs_in_again_without_a_second_code() {
         run_in_vault(async {
             let mock = start_mock_gsa(MockBehavior::default()).await;
             let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
@@ -1552,11 +1616,56 @@ mod rate_limit_regressions {
             signer.finish_sign_in(pending, "654321").await.unwrap();
             let c = mock.counts.lock().unwrap().clone();
             assert_eq!(c.device_validate, 1, "validated code once");
-            assert_eq!(c.srp_complete, 1, "must use the session directly and NOT call sign_in_once a second time");
-            assert_eq!(c.trusted_device_push, 1, "total codes requested in one sign-in must be 1");
+            assert_eq!(c.srp_complete, 2, "signs in once more after the code");
+            assert_eq!(c.total_codes_sent(), 1, "total codes requested in one sign-in must be 1");
 
             let token = signer.token().await.unwrap();
             assert_eq!(token.token, "xcode-auth-token-ok");
+        });
+    }
+
+    /// Apple turns away app tokens for the 409 session from before the code (hsc 401, ec -22411)
+    /// and answers the next password step with 200. A sign-in with a code must still end with an
+    /// app token, which is what the team list and every signing step need, after one code.
+    #[test]
+    fn sign_in_with_a_code_gets_an_app_token_after_one_code() {
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior { apple_after_code: true, ..MockBehavior::default() }).await;
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+            let pending = signer.sign_in("person@example.com", "correct-horse-battery", true).await.unwrap().expect("needs code");
+            signer.finish_sign_in(pending, "654321").await.unwrap();
+
+            let token = signer.token().await.expect("an app token after the code");
+            assert_eq!(token.token, "xcode-auth-token-ok");
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!(c.total_codes_sent(), 1, "one code for the whole sign-in");
+            assert_eq!(c.apptokens, 1);
+            assert!(!signer.is_rate_limited(), "no cooldown");
+        });
+    }
+
+    /// -22411 with hsc 401 is Apple turning the session away, not a rate limit: the person is asked
+    /// to sign in again, and nothing is locked for an hour.
+    #[test]
+    fn apptokens_401_with_ec_22411_asks_to_sign_in_again_without_cooldown() {
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                hsc: 200,
+                au: None,
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: "This action cannot be completed at this time".into(),
+                ..MockBehavior::default()
+            })
+            .await;
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+            assert!(signer.sign_in("person@example.com", "correct-horse-battery", true).await.unwrap().is_none());
+
+            let err = signer.token().await.unwrap_err();
+            assert!(!is_rate_limit(&err), "401 with -22411 is not a rate limit, got: {err}");
+            assert!(err.to_string().to_lowercase().contains("sign in again"), "asks to sign in again, got: {err}");
+            assert!(!signer.is_rate_limited(), "no one-hour cooldown");
+            assert_eq!(mock.counts.lock().unwrap().total_codes_sent(), 0);
         });
     }
 
@@ -1610,7 +1719,7 @@ mod rate_limit_regressions {
             assert_eq!(mock.counts.lock().unwrap().sms_send, 1);
 
             signer.finish_sign_in(pending, "654321").await.unwrap();
-            assert_eq!(mock.counts.lock().unwrap().srp_complete, 1);
+            assert_eq!(mock.counts.lock().unwrap().srp_complete, 2, "signs in once more after the code");
             assert_eq!(mock.counts.lock().unwrap().sms_send, 1);
         });
     }
@@ -1920,6 +2029,7 @@ mod rate_limit_regressions {
                     last_error: None,
                     wifi_address: None,
                     pairing_handed_off: false,
+                    test_build: None,
                 };
                 crate::keeper::put(due_rec).unwrap();
                 assert_eq!(crate::keeper::due().unwrap().len(), 1);
@@ -2062,6 +2172,7 @@ mod rate_limit_regressions {
                     last_error: None,
                     wifi_address: None,
                     pairing_handed_off: false,
+                    test_build: None,
                 };
                 crate::keeper::put(due_rec).unwrap();
             }

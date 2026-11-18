@@ -97,6 +97,10 @@ enum Cmd {
         /// last attempt named. Every app it signed stops opening until it is installed again.
         #[arg(long)]
         replace_certificate: bool,
+        /// Close Poki on the device when it is running and an update would replace it. Without
+        /// it, the install stops with the error kind poki_running so the person can be asked.
+        #[arg(long)]
+        close_poki: bool,
     },
     /// Sign an IPA for a team without installing it.
     Sign {
@@ -510,7 +514,7 @@ async fn run() -> Result<()> {
                 }
             })
         }
-        Cmd::Install { udid, ipa, signing_zip, hand_off, seed_ddi, wait, replace_certificate } => {
+        Cmd::Install { udid, ipa, signing_zip, hand_off, seed_ddi, wait, replace_certificate, close_poki } => {
             if replace_certificate && poki_setup_core::apple::identity::approve_replacement()? == 0 {
                 return Err(anyhow!("No certificate is waiting to be replaced. Run install without --replace-certificate first; it names the certificate if your account is at its limit."));
             }
@@ -518,7 +522,7 @@ async fn run() -> Result<()> {
             if !signer.signed_in() {
                 return Err(anyhow!("Sign in first: poki-setup login you@example.com"));
             }
-            let done = setup::run(&mut signer, setup::Options { udid, ipa, signing_zip, wait: Some(Duration::from_secs(wait)), hand_off, seed_ddi }, &reporter).await?;
+            let done = setup::run(&mut signer, setup::Options { udid, ipa, signing_zip, wait: Some(Duration::from_secs(wait)), hand_off, seed_ddi, test_build: None, close_poki }, &reporter).await?;
             for n in &done.notes {
                 reporter.note("install", n.clone());
             }

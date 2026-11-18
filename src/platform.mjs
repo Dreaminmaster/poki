@@ -724,7 +724,7 @@ export function terminateAppMatch(app, runningProcesses) {
 export async function platformTool(ctx, name, args = {}) {
   if (name === 'start_simulator') return startSimulator(ctx, args);
   const target = await ctx.target();
-  if (target.remote && !['list_apps', 'launch_app'].includes(name)) throw new Error(`${name} is unavailable over RemotePairing. Remove this device from remote-devices.json and reconnect over USB or local Wi-Fi.`);
+  if (target.remote && !['list_apps', 'launch_app', 'get_clipboard'].includes(name)) throw new Error(`${name} is unavailable over RemotePairing. Remove this device from remote-devices.json and reconnect over USB or local Wi-Fi.`);
   if (!['list_apps', 'get_clipboard', 'list_crashes', 'get_crash', 'download_app_container', 'start_recording', 'stop_recording'].includes(name)) ctx.changed(target);
   const changesApps = ['install_app', 'uninstall_app', 'build_and_run'].includes(name);
   try {
@@ -795,11 +795,20 @@ export async function platformTool(ctx, name, args = {}) {
     case 'clear_location': await stopLocation(ctx, target); return { simulated: false };
     case 'get_clipboard': {
       if (target.kind === 'simulator') return JSON.parse((await platformRun(join(root, 'build/simulator'), [], { input: JSON.stringify({ id: target.id, op: 'clipboard' }) })).stdout);
-      const result = await physical(target.id, ['pasteboard', 'paste']);
-      const listing = await physical(target.id, ['pasteboard', 'items']);
-      const types = [...listing.stdout.matchAll(/^\[\d+\] ([^:]+):/gm)].map(match => match[1]);
+      let text, types;
+      if (target.remote) {
+        const clipboard = await ctx.bridge({ op: 'pasteboard', action: 'get' });
+        const listing = await ctx.bridge({ op: 'pasteboard', action: 'items' });
+        text = clipboard.text ?? '';
+        types = listing.items.map(item => item.uti);
+      } else {
+        const result = await physical(target.id, ['pasteboard', 'paste']);
+        const listing = await physical(target.id, ['pasteboard', 'items']);
+        text = result.stdout;
+        types = [...listing.stdout.matchAll(/^\[\d+\] ([^:]+):/gm)].map(match => match[1]);
+      }
       const imageInfo = JSON.parse((await platformRun(join(root, 'build/simulator'), [], { input: JSON.stringify({ op: 'image_types', types }) })).stdout);
-      return { text: result.stdout, ...imageInfo, types };
+      return { text, ...imageInfo, types };
     }
     case 'set_clipboard': {
       if (target.kind === 'simulator') await platformRun('xcrun', ['simctl', 'pbcopy', target.id], { input: args.text });
