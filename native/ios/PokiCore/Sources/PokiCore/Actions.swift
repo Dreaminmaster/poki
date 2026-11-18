@@ -11,12 +11,13 @@ import Foundation
 //   {launch: "bundle" | {bundle, fresh?}}      {wait: ms}       {back: true}
 //   {handoff: {kind, text}} hands a step to the owner on the phone (no input until Done, or {handoff: false})
 //   {wait_until: "text" | {text, gone?, ms?} | {settled: true, ms?}}
+//   {path: {goal, steps: [{tap: "text"}, {type: "…", into?: "text"}, …]}} steps written ahead, by text
 
 /// Every action `do` sends and a routine replays. An action is the first of these keys it holds, in
 /// this order: `perform` sends it as that and the approval check (`Computer.sensitive`) judges it as
 /// that, so a new kind of action is not sent before both say what it does.
 enum ActionKind: String, CaseIterable {
-    case run, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, pinch, button, launch, waitUntil = "wait_until", wait
+    case run, path, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, pinch, button, launch, waitUntil = "wait_until", wait
 
     init?(_ action: JSON) {
         guard let kind = Self.allCases.first(where: { action[$0.rawValue] != nil }) else { return nil }
@@ -27,7 +28,7 @@ enum ActionKind: String, CaseIterable {
     var movesScreen: Bool {
         switch self {
         case .tap, .type, .back, .key, .swipe, .scrollTo, .longPress, .drag, .pinch: true
-        case .run, .handoff, .button, .launch, .waitUntil, .wait: false
+        case .run, .path, .handoff, .button, .launch, .waitUntil, .wait: false
         }
     }
 
@@ -35,7 +36,7 @@ enum ActionKind: String, CaseIterable {
     /// routine.
     func changesScreen(_ action: JSON) -> Bool {
         switch self {
-        case .launch, .run: true
+        case .launch, .run, .path: true
         case .button: action["button"]?.text?.lowercased() == "home"
         default: movesScreen
         }
@@ -47,7 +48,7 @@ enum ActionKind: String, CaseIterable {
         switch self {
         case .tap, .back, .swipe, .scrollTo, .longPress, .drag, .pinch: true
         case .type: action["ref"] != nil
-        case .run, .handoff, .key, .button, .launch, .waitUntil, .wait: false
+        case .run, .path, .handoff, .key, .button, .launch, .waitUntil, .wait: false
         }
     }
 }
@@ -298,7 +299,14 @@ extension Computer {
         let spec = action[kind.rawValue] ?? .null
         switch kind {
         case .run:
-            return ("run", try await runRoutine(spec, until: until))
+            runEndedOnARead = false
+            let text = try await runRoutine(spec, until: until)
+            // A run whose end check found its texts has read the screen it ends on: no pause before the read.
+            return (runEndedOnARead ? "run_read" : "run", text)
+        case .path:
+            runEndedOnARead = false
+            let text = try await runPath(spec, until: until)
+            return (runEndedOnARead ? "run_read" : "run", text)
         case .tap:
             let p = try point(spec)
             try await tap(p, within: frame(of: spec))
@@ -417,7 +425,11 @@ extension Computer {
             }
             return ("button", "button \(name)")
         case .launch:
-            guard let bundle = spec.string ?? spec["bundle"]?.string, !bundle.isEmpty else { throw ActionFailure(message: "launch takes a bundle id", delivery: .notSent) }
+            guard let bundle = spec.string ?? spec["bundle"]?.string, !bundle.isEmpty else { throw ActionFailure(message: "launch takes a bundle id or an app's name", delivery: .notSent) }
+            // A name the host could not turn into a bundle id: nothing is sent for it.
+            if config.appNames(), !bundle.contains(".") || bundle.contains(" ") {
+                throw ActionFailure(message: "launch \(bundle): no app named \"\(bundle)\" is known on this phone. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+            }
             let fresh = spec["fresh"]?.bool ?? false
             // A fresh launch ends the app first, so a page it was left on cannot answer for it, and
             // starts it through XCTest's launch. Otherwise the app is activated: brought to the front

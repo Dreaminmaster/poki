@@ -35625,6 +35625,70 @@
           }
         }
       }
+    },
+    "Apps by Name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按名称打开 App"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "依名稱打開 App"
+          }
+        }
+      }
+    },
+    "Read When the Screen Settles" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕稳定后立即读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕穩定後立即讀取"
+          }
+        }
+      }
+    },
+    "Speed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "速度"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "速度"
+          }
+        }
+      }
+    },
+    "On by default. Apps by Name lets an agent open an app by its name and keep it as the app it works in. Read When the Screen Settles reads the screen as soon as it has changed and holds still after an app opens, a swipe or a button, in place of a fixed pause. Changes count from the next step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认开启。“按名称打开 App”让智能体用名称打开 App，并把它作为当前操作的 App。“屏幕稳定后立即读取”会在打开 App、轻扫或按下按钮后，屏幕一有变化并稳定下来就读取，不再固定等待。更改从下一步起生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設開啟。「依名稱打開 App」讓代理用名稱打開 App，並把它作為目前操作的 App。「螢幕穩定後立即讀取」會在打開 App、滑動或按下按鈕後，螢幕一有變化並穩定下來就讀取，不再固定等待。更動從下一步起生效。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

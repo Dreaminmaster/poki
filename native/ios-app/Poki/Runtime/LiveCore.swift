@@ -24,6 +24,10 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
+        // Apps by name, from the apps Poki knows; the two speed-ups read their Testing Options switch.
+        config.resolveApp = { KnownApps.find($0)?.id }
+        config.appNames = { SpeedOptions.appNames }
+        config.quickRead = { SpeedOptions.quickRead }
         config.screenHistory = HistoryStore.agentSource
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
