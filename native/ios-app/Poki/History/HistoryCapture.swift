@@ -73,6 +73,11 @@ final class HistoryCapture: ObservableObject {
     /// The run in progress. Ending a run moves it on, so a late answer from an older one is ignored.
     private var run = 0
     private var once = false
+    /// A run with no end of its own, started by `HistoryCollector` while Screen History is on.
+    private var always = false
+    var isAlways: Bool { always && isRunning }
+    /// Whether the iPhone is locked or its screen is dark, once the lock is being watched.
+    var screenOff: Bool { watchLock(); return lockedOrDark }
     /// Set when a run's launcher call was ended to wait (an agent's task took the screen), so the
     /// run goes on afterwards and is not taken for finished.
     private var interrupted = false
@@ -196,15 +201,18 @@ final class HistoryCapture: ObservableObject {
 
     // MARK: Short runs
 
-    /// Reads once after `waitSeconds`, or every `interval` seconds for `minutes`.
-    func start(minutes: Int? = nil, model: AppModel) {
+    /// Reads once after `waitSeconds`, or every `interval` seconds for `minutes`, or with `always`
+    /// until the iPhone locks or the owner stops it (the collector starts it again after a lock).
+    func start(minutes: Int? = nil, always: Bool = false, model: AppModel) {
         guard !isRunning else { return }
         if !enabled { enabled = true }
         watchLock()
-        if let refused = refusal(model) { set(refused); return }
+        // A run with no end waits for the connection or an agent's task like any run under way.
+        if let refused = refusal(model), !always || refused == .locked || refused == .notPaired { set(refused); return }
         run += 1
         let me = run
-        once = minutes == nil
+        once = minutes == nil && !always
+        self.always = always
         prune()
         Task { await self.tidy() }
         interrupted = false
@@ -215,6 +223,16 @@ final class HistoryCapture: ObservableObject {
         Self.withdrawNotice()
         background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
             Task { @MainActor in
+                // While something else keeps Poki running (Poki is on), the run does not live on
+                // this background time: only the task is given back, and reading goes on.
+                if let self, self.run == me, self.isAlways, HistoryCollector.shared.staysUp(model) {
+                    AppLog.shared.add("history", "background time given back; Poki stays up and reading goes on")
+                    if self.background != .invalid {
+                        UIApplication.shared.endBackgroundTask(self.background)
+                        self.background = .invalid
+                    }
+                    return
+                }
                 AppLog.shared.add("history", "iOS ended the background time")
                 // Not the owner's doing, and not the run's time being up.
                 if let self, self.run == me, self.isRunning, !self.once { self.notice() }
@@ -223,9 +241,10 @@ final class HistoryCapture: ObservableObject {
         }
         let wait = once ? Self.waitSeconds : 0
         set(once ? .waiting : .reading)
-        let duration = max(10, (minutes ?? 0) * 60)
-        let until = Date().addingTimeInterval(Double(wait + (once ? 0 : duration)))
-        ends = until
+        // A run with no end asks the launcher for an hour at a time.
+        let duration = always ? 3600 : max(10, (minutes ?? 0) * 60)
+        let until = always ? Date.distantFuture : Date().addingTimeInterval(Double(wait + (once ? 0 : duration)))
+        ends = always ? nil : until
         #if !targetEnvironment(simulator)
         let screen = UIScreen.main.bounds
         let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
@@ -244,7 +263,7 @@ final class HistoryCapture: ObservableObject {
             // for the time left. Only the lock, the owner and the run's own time end it.
             var tries = 0
             while self.run == me {
-                let left = self.once ? duration : Int(until.timeIntervalSinceNow.rounded())
+                let left = self.once || self.always ? duration : Int(until.timeIntervalSinceNow.rounded())
                 if left < (self.once ? 1 : 5) { break }
                 if let refused = self.refusal(model) {
                     if self.once || refused == .locked || refused == .notPaired { self.end(me, refused); return }
@@ -267,6 +286,12 @@ final class HistoryCapture: ObservableObject {
                     }
                     guard self.run == me else { return }
                     if self.interrupted { self.interrupted = false; continue }
+                    if self.always {
+                        // The launcher's hour is up, or it answered early: ask again, never in a tight loop.
+                        tries = 0
+                        try? await Task.sleep(for: .seconds(2))
+                        continue
+                    }
                     break
                 } catch {
                     AppLog.shared.add("history", "capture stopped: \(error.localizedDescription)")
@@ -373,8 +398,8 @@ final class HistoryCapture: ObservableObject {
         guard lockToken == NOTIFY_TOKEN_INVALID else { return }
         let changed: @Sendable (Int32) -> Void = { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.lockedOrDark else { return }
-                self.end(self.run, .locked)
+                guard let self else { return }
+                if self.lockedOrDark { self.end(self.run, .locked) } else { HistoryCollector.shared.evaluate("the iPhone unlocked") }
             }
         }
         notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)

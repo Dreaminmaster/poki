@@ -393,7 +393,8 @@ private struct HistoryRecordPage: View {
 
 // MARK: Testing Options
 
-/// General › Testing Options › Screen History: the only place a read starts.
+/// General › Testing Options › Screen History: a single read, a short run, and Stop for the
+/// collector's run (`HistoryCollector`), which starts by itself while Screen History is on.
 struct HistoryTestingSection: View {
     @ObservedObject var capture = HistoryCapture.shared
     @Environment(AppModel.self) private var model
@@ -419,12 +420,12 @@ struct HistoryTestingSection: View {
             .disabled(capture.isRunning)
             Button("Start Short Run") { capture.start(minutes: minutes, model: model) }
                 .disabled(capture.isRunning)
-            Button("Stop", role: .destructive) { capture.stop() }
+            Button("Stop", role: .destructive) { HistoryCollector.shared.ownerStop() }
                 .disabled(!capture.isRunning)
         } header: {
             Text("Screen History")
         } footer: {
-            Text("An experiment. Poki reads the text of the app in front only after you start here, and keeps it on this iPhone. Leave Poki after starting. A run ends when its time is up, when the iPhone locks, or when iOS ends Poki's time in the background. Password fields are left out, and nothing is sent anywhere.")
+            Text("An experiment. While Screen History and Poki are both on, Poki reads the text of the app in front and keeps it on this iPhone. Reading waits while the iPhone is locked or an agent works, then goes on by itself. Stop holds it until you open Poki again. Password fields are left out, and nothing is sent anywhere.")
         }
     }
 }
