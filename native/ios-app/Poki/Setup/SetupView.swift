@@ -656,7 +656,10 @@ private struct BackgroundPage: View {
             } else if !model.background.allowed {
                 Button("Allow Location Access") { model.background.requestPermission() }
             } else if !model.background.always {
-                Button("Change to Always Allow") { model.background.requestPermission() }
+                // iOS shows its own Always Allow prompt once. After that the change is made in Settings.
+                if !model.background.askedAlways {
+                    Button("Change to Always Allow") { model.background.requestPermission() }
+                }
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
             }
         } footer: {

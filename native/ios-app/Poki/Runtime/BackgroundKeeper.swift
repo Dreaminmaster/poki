@@ -6,7 +6,7 @@ import Foundation
 /// up. Silent audio does it; location is the backup only when it is needed: while a pairing waits in
 /// Settings, and when the silent audio cannot play (it failed to start, or another app's audio
 /// interrupted it), when iOS would otherwise suspend Poki mid-session. Then it is the coarsest
-/// accuracy, with no indicator under Always Allow, and it stops again as soon as the audio is back.
+/// accuracy, only under Always Allow where iOS shows no indicator, and it stops again as soon as the audio is back.
 /// The location is never read or sent anywhere.
 ///
 /// Screen History holds the keeper too, whether or not Poki is on (the owner, 2026-11-18). Held for
@@ -18,7 +18,6 @@ import Foundation
 @Observable
 final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
-    private var activity: CLBackgroundActivitySession?
     private let audio = KeepAlive()
     private(set) var authorization: CLAuthorizationStatus
     private(set) var isOn = false
@@ -39,8 +38,28 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     /// offers the upgrade on the second request.
     var always: Bool { authorization == .authorizedAlways }
 
+    /// iOS shows its "Change to Always Allow" prompt once for an app, ever. After that only Settings
+    /// can change it, so Setup sends the owner there and does not offer a button that does nothing.
+    private(set) var askedAlways = UserDefaults.standard.bool(forKey: "background.askedAlways")
+    /// Set by Setup's first request, so the Always Allow prompt follows While Using at once and the
+    /// owner answers both in one place, one time.
+    private var upgradeAfterFirstAnswer = false
+
+    /// Setup's button, and nothing else, asks for location: no prompt comes up by itself later.
     func requestPermission() {
-        if authorization == .notDetermined { manager.requestWhenInUseAuthorization() } else { manager.requestAlwaysAuthorization() }
+        if authorization == .notDetermined {
+            upgradeAfterFirstAnswer = true
+            manager.requestWhenInUseAuthorization()
+        } else {
+            askAlways()
+        }
+    }
+
+    private func askAlways() {
+        guard authorization == .authorizedWhenInUse, !askedAlways else { return }
+        askedAlways = true
+        UserDefaults.standard.set(true, forKey: "background.askedAlways")
+        manager.requestAlwaysAuthorization()
     }
 
     /// Who wants Poki kept running: the session (Poki is on) and Screen History, each on its own.
@@ -159,51 +178,57 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         audio.stop()
     }
 
-    /// While a pairing waits in Settings, location keeps Poki running (with the silent audio), so the
-    /// pairing listener answers when Settings connects. While Using is enough here: the updates start
-    /// in front, and a CLBackgroundActivitySession carries them into the background (iOS shows its
-    /// location indicator meanwhile). Ended when the pairing ends.
+    /// Location runs only under Always Allow, and never with iOS's blue indicator in the status bar
+    /// or the Dynamic Island (the owner, 2026-11-18). iOS shows that indicator for an app that has
+    /// only While Using and carries updates into the background with a CLBackgroundActivitySession,
+    /// or that asks for it with `showsBackgroundLocationIndicator`: Poki does neither. With While
+    /// Using alone the silent audio is all that keeps Poki running.
+    ///
+    /// While a pairing waits in Settings, location keeps Poki running beside the silent audio, so the
+    /// pairing listener answers when Settings connects. Ended when the pairing ends.
     private(set) var pairingHold = false
     func holdForPairing() {
         guard !pairingHold else { return }
         pairingHold = true
-        if authorization == .notDetermined { manager.requestWhenInUseAuthorization() }
         startPairingLocation()
     }
 
     func releasePairing() {
         guard pairingHold else { return }
         pairingHold = false
-        activity?.invalidate(); activity = nil
         if isOn && (audioLost || quiet) { startLocation() } else { stopLocation() }
     }
 
     private func startPairingLocation() {
-        guard pairingHold, allowed else { return }
-        if activity == nil { activity = CLBackgroundActivitySession() }
+        guard pairingHold, always else { return }
         manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = !always
+        manager.showsBackgroundLocationIndicator = false
         manager.startUpdatingLocation()
     }
 
     private func startLocation() {
-        if pairingHold { startPairingLocation(); return }
-        guard audioLost || quiet, allowed else { stopLocation(); return }
+        if pairingHold, always { startPairingLocation(); return }
+        guard audioLost || quiet, always else { stopLocation(); return }
         manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = !always
-        if !always, activity == nil { activity = CLBackgroundActivitySession() }
+        manager.showsBackgroundLocationIndicator = false
         manager.startUpdatingLocation()
     }
 
     private func stopLocation() {
         manager.stopUpdatingLocation()
-        activity?.invalidate(); activity = nil
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         Task { @MainActor in
             self.authorization = status
+            // Setup's first answer was While Using: iOS's Always Allow prompt follows at once.
+            if self.upgradeAfterFirstAnswer, status != .notDetermined {
+                self.upgradeAfterFirstAnswer = false
+                self.askAlways()
+            }
+            // Always Allow taken away while location was running: it stops, so no indicator shows.
+            if !self.always { self.stopLocation() }
             // Always Allow given or taken away changes how Screen History alone is kept running.
             if self.isOn { self.apply() }
             if self.pairingHold || (self.isOn && self.audioLost) { self.startLocation() }
