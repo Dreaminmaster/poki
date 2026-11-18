@@ -24,6 +24,16 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(activity.state.phase, .done)
     }
 
+    func testReadyOffStartsNoIdleActivityAndKeepsItWanted() {
+        UserDefaults.standard.set(true, forKey: ActivityController.hidesReadyKey)
+        defer { UserDefaults.standard.removeObject(forKey: ActivityController.hidesReadyKey) }
+        let activity = ActivityController()
+        activity.start(deviceName: "iPhone")
+        XCTAssertFalse(activity.isRunning, "With Ready off nothing shows while Poki waits")
+        XCTAssertTrue(activity.waitsForWork)
+        XCTAssertNil(activity.lastError, "Waiting for work is not a fault")
+    }
+
     func testStoppedRunShowsItsOutcomeBeforeReturningToIdle() async throws {
         let activity = ActivityController()
         activity.foldAfter = .milliseconds(20)

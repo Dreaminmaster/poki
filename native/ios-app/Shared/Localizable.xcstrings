@@ -22681,6 +22681,7 @@
       }
     },
     "Senses" : {
+      "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -39976,23 +39977,6 @@
         }
       }
     },
-    "Senses" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "感知"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "感知"
-          }
-        }
-      }
-    },
     "The address listed no model. Add one under Chat once it is saved." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40262,6 +40246,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 個模型"
+          }
+        }
+      }
+    },
+    "Show Ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示就绪"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示就緒"
+          }
+        }
+      }
+    },
+    "Poki shows Ready on the Lock Screen and in the Dynamic Island while it waits for a task." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 等待任务时，会在锁定屏幕和灵动岛上显示“就绪”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 等待任務時，會在鎖定畫面和動態島上顯示「就緒」。"
+          }
+        }
+      }
+    },
+    "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会在后台保持就绪，锁定屏幕上不显示任何内容。你在 Poki 中开始的任务仍会显示进度。智能体的任务和批准请求将以通知形式送达。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會在背景保持就緒，鎖定畫面上不顯示任何內容。你在 Poki 中開始的任務仍會顯示進度。智慧體的任務和批准請求將以通知形式送達。"
           }
         }
       }
