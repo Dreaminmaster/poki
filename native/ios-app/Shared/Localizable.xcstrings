@@ -36044,18 +36044,18 @@
         }
       }
     },
-    "A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot." : {
+    "A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot. To use a model of one of your accounts, open the account above and choose Decisions." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。这部 iPhone 上的模型不会向外发送任何内容。服务商的模型会收到任务目标和屏幕上各元素的名称，不含截屏。"
+            "value" : "一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。这部 iPhone 上的模型不会向外发送任何内容。服务商的模型会收到任务目标和屏幕上各元素的名称，不含截屏。要使用你某个账户的模型，请打开上方的账户并选择“决策”。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。只有答案明確時才會操作，且絕不會點按需要你批准的內容。這部 iPhone 上的模型不會向外傳送任何內容。服務商的模型會收到任務目標和螢幕上各元素的名稱，不含截圖。"
+            "value" : "一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。只有答案明確時才會操作，且絕不會點按需要你批准的內容。這部 iPhone 上的模型不會向外傳送任何內容。服務商的模型會收到任務目標和螢幕上各元素的名稱，不含截圖。若要使用你某個帳號的模型，請打開上方的帳號並選擇「決策」。"
           }
         }
       }
@@ -36076,33 +36076,54 @@
         }
       }
     },
+<<<<<<< HEAD
     "Download Model" : {
+=======
+    "Decisions" : {
+>>>>>>> dev/quick-fixes
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "下载模型"
+=======
+            "value" : "决策"
+>>>>>>> dev/quick-fixes
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "下載模型"
+=======
+            "value" : "決策"
+>>>>>>> dev/quick-fixes
           }
         }
       }
     },
+<<<<<<< HEAD
     "Cancel Download" : {
+=======
+    "A small, fast model works best. It helps a routine go on when a prompt is in the way or a button was renamed, acts only when the answer is clear and never taps anything that needs your approval. It gets the goal of the task and the names of the elements on screen, with no screenshot. Only one decision model is in use at a time." : {
+>>>>>>> dev/quick-fixes
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "取消下载"
+=======
+            "value" : "小而快的模型效果最好。它在弹出提示或按钮改名时帮助流程继续进行，只有答案明确时才会操作，且绝不会轻点需要你批准的内容。它会收到任务目标和屏幕上各元素的名称，不含截屏。同一时间只使用一个决策模型。"
+>>>>>>> dev/quick-fixes
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
+<<<<<<< HEAD
             "value" : "取消下載"
           }
         }
@@ -36184,6 +36205,9 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載一個小模型在這部 iPhone 上執行，無論是否有 Apple Intelligence。它可以作為決策模型，並在沒有 Apple Intelligence 的 iPhone 上撰寫螢幕歷史的摘要。只保留一個模型，選擇另一個會移除之前的。不會向任何地方傳送內容。"
+=======
+            "value" : "小而快的模型效果最好。它在跳出提示或按鈕改名時幫助流程繼續進行，只有答案明確時才會操作，且絕不會點按需要你批准的內容。它會收到任務目標和螢幕上各元素的名稱，不含截圖。同一時間只使用一個決策模型。"
+>>>>>>> dev/quick-fixes
           }
         }
       }
