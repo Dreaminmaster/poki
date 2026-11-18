@@ -35747,6 +35747,118 @@
           }
         }
       }
+    },
+    "Download Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載模型"
+          }
+        }
+      }
+    },
+    "Cancel Download" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消下載"
+          }
+        }
+      }
+    },
+    "Remove Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除模型"
+          }
+        }
+      }
+    },
+    "Downloaded Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载的模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下載的模型"
+          }
+        }
+      }
+    },
+    "This model is on this iPhone and runs here. Pick it as the decision model above. Screen History uses it for its notes where the iPhone has no Apple Intelligence. Nothing is sent anywhere." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模型已在这部 iPhone 上并在本机运行。可在上方将它选为决策模型。在没有 Apple 智能的 iPhone 上，屏幕历史会用它撰写摘要。不会向任何地方发送内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此模型已在這部 iPhone 上並在本機執行。可在上方將它選為決策模型。在沒有 Apple Intelligence 的 iPhone 上，螢幕歷史會用它撰寫摘要。不會向任何地方傳送內容。"
+          }
+        }
+      }
+    },
+    "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载未完成。请在 Wi-Fi 下重试，将从中断处继续。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載未完成。請在 Wi-Fi 下重試，將從中斷處繼續。"
+          }
+        }
+      }
+    },
+    "Download a small model to run on this iPhone, with or without Apple Intelligence. It can be the decision model, and it writes Screen History’s notes where the iPhone has no Apple Intelligence. Only one model is kept, and picking another removes the one before. Nothing is sent anywhere." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载一个小模型在这部 iPhone 上运行，无论是否有 Apple 智能。它可以作为决策模型，并在没有 Apple 智能的 iPhone 上撰写屏幕历史的摘要。只保留一个模型，选择另一个会移除之前的。不会向任何地方发送内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載一個小模型在這部 iPhone 上執行，無論是否有 Apple Intelligence。它可以作為決策模型，並在沒有 Apple Intelligence 的 iPhone 上撰寫螢幕歷史的摘要。只保留一個模型，選擇另一個會移除之前的。不會向任何地方傳送內容。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

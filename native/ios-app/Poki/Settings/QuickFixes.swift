@@ -39,6 +39,8 @@ enum QuickFixes {
         case none
         /// Apple's own model, where Apple Intelligence is on the iPhone.
         case apple
+        /// The model downloaded to this iPhone (BacktapeModel).
+        case downloaded
         /// The provider's model named in the settings.
         case provider
 
@@ -46,6 +48,7 @@ enum QuickFixes {
             switch self {
             case .none: "none"
             case .apple: "apple"
+            case .downloaded: "downloaded"
             case .provider: "provider"
             }
         }
@@ -54,6 +57,7 @@ enum QuickFixes {
             switch raw {
             case "none": self = .none
             case "apple": self = .apple
+            case "downloaded": self = .downloaded
             case "provider": self = .provider
             default: return nil
             }
@@ -82,9 +86,11 @@ enum QuickFixes {
 
     /// What can be picked now: off, the model on this iPhone where there is one, and the models of
     /// the provider that has been added.
+    @MainActor
     static var options: [Option] {
         var out = [Option(choice: .none, name: AppLocalization.text("Off"))]
         if OnDeviceDecisions.appleAvailable { out.append(Option(choice: .apple, name: AppLocalization.text("Apple Intelligence"))) }
+        if let name = OnDeviceDecisions.downloadedName { out.append(Option(choice: .downloaded, name: name)) }
         let settings = settings
         if providerDecider != nil {
             var models = DeciderSettings.models(settings.provider)
@@ -95,11 +101,13 @@ enum QuickFixes {
     }
 
     /// The row that is picked now.
+    @MainActor
     static var picked: Option {
         let all = options
         switch choice {
         case .none: return all[0]
         case .apple: return all.first { $0.choice == .apple } ?? all[0]
+        case .downloaded: return all.first { $0.choice == .downloaded } ?? all[0]
         case .provider: return all.first { $0.choice == .provider && $0.model == settings.modelInUse && settings.hasModel } ?? all[0]
         }
     }
@@ -118,6 +126,7 @@ enum QuickFixes {
         switch choice {
         case .none: return nil
         case .apple: return OnDeviceDecisions.apple
+        case .downloaded: return OnDeviceDecisions.downloaded
         case .provider: return settings.hasModel ? providerDecider : nil
         }
     }
@@ -133,9 +142,6 @@ enum QuickFixes {
         if typed.isEmpty, settings.provider == .openai { return ModelKeys.key(.openai) ?? "" }
         return typed
     }
-
-    /// The model in use, for the Models page; nil while fast decisions are off.
-    static var modelInUse: String? { decider == nil ? nil : picked.name }
 
     /// Whether a provider has been added, with or without a model picked.
     static var hasProvider: Bool { providerDecider != nil }
@@ -155,6 +161,21 @@ enum OnDeviceDecisions {
     static var apple: PromptDecider? {
         guard appleAvailable else { return nil }
         return PromptDecider(name: "Apple Intelligence", maxState: 5000) { prompt, instructions in await askApple(prompt, instructions: instructions) }
+    }
+
+    /// The downloaded model's name once it is on the phone and can run; nil until then.
+    @MainActor
+    static var downloadedName: String? {
+        BacktapeModel.supported && BacktapeModel.shared.ready ? BacktapeModel.shared.choice.name : nil
+    }
+
+    /// The downloaded model as the decider. Its files are checked when it is asked: a model removed
+    /// since gives no answer, which is an error and never a guess.
+    static var downloaded: PromptDecider? {
+        guard BacktapeModel.supported else { return nil }
+        return PromptDecider(name: "downloaded model", maxState: 5000) { prompt, instructions in
+            await BacktapeModel.shared.respond(to: prompt, instructions: instructions, maxTokens: 160, temperature: 0)
+        }
     }
 
     private static func askApple(_ prompt: String, instructions: String) async -> String? {
@@ -213,11 +234,68 @@ struct DecisionModelRows: View {
         .onChange(of: picked) { _, new in QuickFixes.pick(new) }
         NavigationLink { QuickFixesView() } label: { SettingsLabel("Decision Model Providers", systemImage: "cloud") }
             .accessibilityIdentifier("models.fastDecisions")
-            .onAppear {
-                // Back from the providers' page: its models, and its pick, may have changed.
-                options = QuickFixes.options
-                picked = QuickFixes.picked
+            .onAppear(perform: refresh)
+            // The downloaded model joins the menu when its download ends, and leaves it when removed.
+            .onChange(of: BacktapeModel.shared.state) { _, _ in refresh() }
+    }
+
+    /// Back from the providers' page, or a download ended: the models, and the pick, may have changed.
+    private func refresh() {
+        options = QuickFixes.options
+        picked = QuickFixes.picked
+    }
+}
+
+/// Settings › Models: the model the owner can download to this iPhone. It is offered whether or not
+/// the iPhone has Apple Intelligence.
+struct DownloadedModelSection: View {
+    let model = BacktapeModel.shared
+
+    var body: some View {
+        if BacktapeModel.supported {
+            Section {
+                Picker(selection: Binding(get: { model.choice.id }, set: { id in
+                    if let picked = BacktapeModel.choices.first(where: { $0.id == id }) { model.choice = picked }
+                })) {
+                    ForEach(BacktapeModel.choices) { choice in
+                        Text(verbatim: "\(choice.name), \(ByteCountFormatter.string(fromByteCount: choice.bytes, countStyle: .file))").tag(choice.id)
+                    }
+                } label: {
+                    SettingsLabel("Model", systemImage: "arrow.down.circle")
+                }
+                .accessibilityIdentifier("models.downloaded.choice")
+                switch model.state {
+                case .missing, .failed:
+                    Button("Download Model") { model.download() }
+                        .accessibilityIdentifier("models.downloaded.download")
+                case .downloading(let part):
+                    LabeledContent {
+                        Text(verbatim: "\(Int(part * 100)) %").monospacedDigit()
+                    } label: {
+                        ProgressView(value: part)
+                    }
+                    Button("Cancel Download") { model.cancel() }
+                case .ready:
+                    Button("Remove Model", role: .destructive) { model.remove() }
+                        .accessibilityIdentifier("models.downloaded.remove")
+                }
+            } header: {
+                Text("Downloaded Model").textCase(nil)
+            } footer: {
+                Text(footer)
             }
+        }
+    }
+
+    private var footer: LocalizedStringKey {
+        switch model.state {
+        case .ready:
+            "This model is on this iPhone and runs here. Pick it as the decision model above. Screen History uses it for its notes where the iPhone has no Apple Intelligence. Nothing is sent anywhere."
+        case .failed:
+            "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped."
+        default:
+            "Download a small model to run on this iPhone, with or without Apple Intelligence. It can be the decision model, and it writes Screen History’s notes where the iPhone has no Apple Intelligence. Only one model is kept, and picking another removes the one before. Nothing is sent anywhere."
+        }
     }
 }
 

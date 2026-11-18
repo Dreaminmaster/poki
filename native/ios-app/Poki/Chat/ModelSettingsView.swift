@@ -56,6 +56,8 @@ struct ModelSettingsView: View {
             } footer: {
                 Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. A model on this iPhone sends nothing out. A provider’s model gets the goal of the task and the names of the elements on screen, with no screenshot.")
             }
+
+            DownloadedModelSection()
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).

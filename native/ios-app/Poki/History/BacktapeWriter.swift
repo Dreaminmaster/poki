@@ -23,8 +23,9 @@ enum BacktapeWriter {
         return false
     }
 
+    /// Apple's model first; the downloaded one where Apple's is missing.
     @MainActor
-    static var available: Bool { apple }
+    static var available: Bool { apple || BacktapeModel.shared.ready }
 
     @MainActor
     static func write(_ entries: [HistoryEntry], period: String = "10 minutes") async -> BacktapeNote? {
@@ -70,6 +71,6 @@ enum BacktapeWriter {
             }
         }
         #endif
-        return nil
+        return await BacktapeModel.shared.respond(to: text, instructions: instructions)
     }
 }
