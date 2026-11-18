@@ -21,7 +21,10 @@ final class AppCapsuleTests: XCTestCase {
 
     /// Old code knew seven apps: of the Chinese pills only WeChat's prompt had a capsule.
     func testEveryHomePillPutsItsAppInTheFieldAsACapsule() {
-        for language in [AppLanguage.simplifiedChinese, .english] {
+        for (preference, language) in [("zh-Hans", AppLanguage.simplifiedChinese), ("en", .english), ("zh-Hant", .traditionalChinese)] {
+            let saved = AppLocalization.shared.preference
+            AppLocalization.shared.preference = preference
+            defer { AppLocalization.shared.preference = saved }
             for pill in HomeIdea.examples(for: language) {
                 XCTAssertEqual(apps(pill.prompt), [pill.app], "\(language) \(pill.prompt)")
                 XCTAssertEqual(joined(pill.prompt), pill.prompt)

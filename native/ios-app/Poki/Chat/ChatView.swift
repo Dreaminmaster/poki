@@ -27,6 +27,8 @@ struct ChatView: View {
     var openAgents: () -> Void = {}
     /// Opens Updates, from the home page's hint.
     var openUpdates: () -> Void = {}
+    var sessionStore: SessionStore = .shared
+    var shortcutStore: HomeShortcutStore = .shared
 
     private var voice: VoiceModel { model.voice }
     /// The taps on Poki's picture, for the bear to answer.
@@ -121,7 +123,8 @@ struct ChatView: View {
             }
             // The home page stays in the tree while the conversation is in front, neither seen nor
             // touched, so a new conversation brings it back on the same animation.
-            HomePage(home: home, writing: writing, rise: flightRise, pick: { model.prepareForTask(); draft.wrappedValue = $0; writing = true }) {
+            HomePage(home: home, writing: writing, rise: flightRise, sessionStore: sessionStore, shortcutStore: shortcutStore,
+                     pick: { model.prepareForTask(); chat.setDraftActivity(true); draft.wrappedValue = $0; writing = true }) {
                 if home, let update { UpdatePill(version: update, open: openUpdates) }
                 if home, let hint = homeHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel,
@@ -175,6 +178,9 @@ struct ChatView: View {
         // The bear says hi as a talk begins.
         .onChange(of: voice.isOn) { _, on in if on { pokes += 1 } }
         .onChange(of: writing) { _, focused in if focused { model.prepareForTask() } }
+        .onChange(of: draft.wrappedValue) { _, text in
+            chat.setDraftActivity(!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
         .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { pageHeight = $0 }
         .animation(.snappy, value: voice.isOn)
         .animation(.snappy, value: model.approvals.first?.id)
@@ -501,6 +507,8 @@ struct SetupHintLine: View {
     var openModel: () -> Void
     var openAgents: () -> Void = {}
     var openUpdates: () -> Void = {}
+    var sessionStore: SessionStore = .shared
+    var shortcutStore: HomeShortcutStore = .shared
 
     var body: some View {
         VStack(spacing: 2) {

@@ -62,6 +62,7 @@ const zh: Record<string, string> = {
   "Start": "开始",
   "Filter": "过滤",
   "Support bundle": "支持包",
+  "Support bundles can contain device identifiers, local paths and raw logs. Review the archive before sharing.": "支持包可能包含设备标识、本机路径和原始日志。分享前请先检查压缩包。",
   "Save support bundle…": "保存支持包…",
   "Mount developer disk image": "挂载开发者磁盘映像",
   "Language": "语言",

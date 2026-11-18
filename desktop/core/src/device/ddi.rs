@@ -8,29 +8,62 @@ use idevice::{IdeviceService, lockdown::LockdownClient, mobile_image_mounter::Im
 use sha2::{Digest, Sha384};
 use std::path::{Path, PathBuf};
 
-pub const MIRROR: &str = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/main/PersonalizedImages/Xcode_iOS_DDI_Cryptex";
-pub const FILES: [&str; 5] = ["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"];
-const PAYLOAD_KEYS: [&str; 4] = ["Cryptex1,GenericDmg", "Cryptex1,GenericTrustCache", "Cryptex1,CryptexInfoPlist", "Cryptex1,GenericVolume"];
+const MIRROR_BASE: &str = "https://raw.githubusercontent.com/doronz88/DeveloperDiskImage/main/PersonalizedImages";
 
-pub fn dir() -> Result<PathBuf> {
-    Ok(paths::cache_dir()?.join("ddi"))
+/// Which image a phone takes. iOS 26.4 and later install a Cryptex1 cryptex; earlier iOS mounts the
+/// personalized image through the image mounter. Poki on the phone picks by the same rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Cryptex,
+    Personalized,
 }
 
-/// Checks every payload in `dir` against the manifest; returns the image's build.
-pub fn verify(dir: &Path) -> Result<String> {
-    let manifest: plist::Dictionary = plist::from_file(dir.join("BuildManifest.plist"))
-        .map_err(|_| Error::msg("BuildManifest.plist is missing or unreadable"))?;
-    let identities = manifest.get("BuildIdentities").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let identity = identities
-        .iter()
-        .filter_map(|v| v.as_dictionary())
-        .find(|id| {
-            let m = id.get("Manifest").and_then(|m| m.as_dictionary());
-            m.is_some_and(|m| PAYLOAD_KEYS.iter().all(|k| m.contains_key(*k)))
-        })
-        .ok_or_else(|| Error::msg("BuildManifest.plist has no Cryptex1 build identity"))?;
-    let entries = identity.get("Manifest").and_then(|m| m.as_dictionary()).unwrap();
-    for key in PAYLOAD_KEYS {
+impl Kind {
+    /// The image for an iOS version ("18.7.7"); the cryptex when the version cannot be read.
+    pub fn for_ios(ios: &str) -> Self {
+        let mut parts = ios.trim().split('.');
+        let Some(major) = parts.next().and_then(|p| p.parse::<u32>().ok()) else { return Kind::Cryptex };
+        let minor = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+        if (major, minor) >= (26, 4) { Kind::Cryptex } else { Kind::Personalized }
+    }
+
+    pub fn mirror(self) -> String {
+        format!("{MIRROR_BASE}/{}", if self == Kind::Cryptex { "Xcode_iOS_DDI_Cryptex" } else { "Xcode_iOS_DDI_Personalized" })
+    }
+
+    pub fn files(self) -> &'static [&'static str] {
+        match self {
+            Kind::Cryptex => &["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache", "Image.dmg.cryptex_info", "Image.dmg.root_hash"],
+            Kind::Personalized => &["BuildManifest.plist", "Image.dmg", "Image.dmg.trustcache"],
+        }
+    }
+
+    fn payload_keys(self) -> &'static [&'static str] {
+        match self {
+            Kind::Cryptex => &["Cryptex1,GenericDmg", "Cryptex1,GenericTrustCache", "Cryptex1,CryptexInfoPlist", "Cryptex1,GenericVolume"],
+            Kind::Personalized => &["PersonalizedDMG", "LoadableTrustCache"],
+        }
+    }
+}
+
+/// The image this phone takes, by the iOS version lockdown reports.
+pub async fn kind_of(phone: &Phone) -> Kind {
+    let ios = async {
+        let provider = phone.provider().ok()?;
+        let mut lockdown = LockdownClient::connect(&*provider).await.ok()?;
+        lockdown.get_value(Some("ProductVersion"), None).await.ok()?.as_string().map(str::to_string)
+    }
+    .await;
+    Kind::for_ios(ios.as_deref().unwrap_or(""))
+}
+
+pub fn dir(kind: Kind) -> Result<PathBuf> {
+    Ok(paths::cache_dir()?.join(if kind == Kind::Cryptex { "ddi" } else { "ddi-personalized" }))
+}
+
+/// Checks one build identity's payloads against the files in `dir`.
+fn check(entries: &plist::Dictionary, keys: &[&str], dir: &Path) -> Result<()> {
+    for key in keys {
         let entry = entries.get(key).and_then(|e| e.as_dictionary());
         let path = entry
             .and_then(|e| e.get("Info"))
@@ -45,13 +78,38 @@ pub fn verify(dir: &Path) -> Result<String> {
             return Err(Error::msg(format!("{path} does not match its SHA-384 digest")));
         }
     }
-    Ok(manifest.get("ProductBuildVersion").and_then(|v| v.as_string()).unwrap_or("unknown").to_string())
+    Ok(())
+}
+
+/// Checks every payload in `dir` against the manifest; returns the image's build. The cryptex
+/// manifest is checked by its first identity. The personalized manifest lists the same file names
+/// with different digests for different chips, so the files must match any one identity whole.
+pub fn verify(dir: &Path, kind: Kind) -> Result<String> {
+    let manifest: plist::Dictionary = plist::from_file(dir.join("BuildManifest.plist"))
+        .map_err(|_| Error::msg("BuildManifest.plist is missing or unreadable"))?;
+    let keys = kind.payload_keys();
+    let identities = manifest.get("BuildIdentities").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let candidates: Vec<&plist::Dictionary> = identities
+        .iter()
+        .filter_map(|v| v.as_dictionary())
+        .filter_map(|id| id.get("Manifest").and_then(|m| m.as_dictionary()))
+        .filter(|m| keys.iter().all(|k| m.contains_key(*k)))
+        .collect();
+    let mut first = None;
+    for entries in candidates.iter().take(if kind == Kind::Cryptex { 1 } else { usize::MAX }) {
+        match check(entries, keys, dir) {
+            Ok(()) => return Ok(manifest.get("ProductBuildVersion").and_then(|v| v.as_string()).unwrap_or("unknown").to_string()),
+            Err(e) => first = first.or(Some(e)),
+        }
+    }
+    Err(first.unwrap_or_else(|| Error::msg("BuildManifest.plist has no build identity for this kind of image")))
 }
 
 /// Makes sure the image is on this computer, downloading it when it is not. Returns its build.
-pub async fn ensure(reporter: &Reporter) -> Result<(PathBuf, String)> {
-    let dir = dir()?;
-    if let Ok(build) = verify(&dir) {
+pub async fn ensure(reporter: &Reporter, kind: Kind) -> Result<(PathBuf, String)> {
+    let dir = dir(kind)?;
+    let (files, mirror) = (kind.files(), kind.mirror());
+    if let Ok(build) = verify(&dir, kind) {
         return Ok((dir, build));
     }
     reporter.step("ddi", "Downloading the developer disk image");
@@ -59,16 +117,16 @@ pub async fn ensure(reporter: &Reporter) -> Result<(PathBuf, String)> {
     let _ = std::fs::remove_dir_all(&partial);
     std::fs::create_dir_all(&partial)?;
     let client = reqwest::Client::builder().user_agent(concat!("PokiSetup/", env!("CARGO_PKG_VERSION"))).build()?;
-    for (i, name) in FILES.iter().enumerate() {
-        reporter.part("ddi", i as f64 / FILES.len() as f64, Some(format!("Downloading {name}")));
-        let res = client.get(format!("{MIRROR}/{name}")).send().await?;
+    for (i, name) in files.iter().enumerate() {
+        reporter.part("ddi", i as f64 / files.len() as f64, Some(format!("Downloading {name}")));
+        let res = client.get(format!("{mirror}/{name}")).send().await?;
         if !res.status().is_success() {
             let _ = std::fs::remove_dir_all(&partial);
             return Err(Error::msg(format!("downloading {name} failed with HTTP {}", res.status())));
         }
         std::fs::write(partial.join(name), res.bytes().await?)?;
     }
-    let build = verify(&partial).inspect_err(|_| {
+    let build = verify(&partial, kind).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(&partial);
     })?;
     let _ = std::fs::remove_dir_all(&dir);
@@ -97,7 +155,7 @@ pub async fn mount(phone: &Phone, reporter: &Reporter) -> Result<()> {
         reporter.note("mount", "The developer disk image is already mounted.");
         return Ok(());
     }
-    let (dir, _) = ensure(reporter).await?;
+    let (dir, _) = ensure(reporter, kind_of(phone).await).await?;
     reporter.step("mount", "Mounting the developer disk image");
     let provider = phone.provider()?;
     let mut lockdown = LockdownClient::connect(&*provider).await?;
@@ -125,12 +183,14 @@ pub async fn mount(phone: &Phone, reporter: &Reporter) -> Result<()> {
 
 /// Copies the image into Poki's container so the phone does not download it.
 pub async fn seed_container(phone: &Phone, bundle_id: &str, reporter: &Reporter) -> Result<()> {
-    let (dir, _) = ensure(reporter).await?;
+    let kind = kind_of(phone).await;
+    let (dir, _) = ensure(reporter, kind).await?;
+    let files = kind.files();
     reporter.step("seed", "Copying the disk image into Poki");
-    for (i, name) in FILES.iter().enumerate() {
+    for (i, name) in files.iter().enumerate() {
         let bytes = std::fs::read(dir.join(name))?;
         super::container::write_file(phone, bundle_id, &format!("{}/ddi/{name}", super::container::SUPPORT_DIR), &bytes).await?;
-        reporter.part("seed", (i + 1) as f64 / FILES.len() as f64, Some(name.to_string()));
+        reporter.part("seed", (i + 1) as f64 / files.len() as f64, Some(name.to_string()));
     }
     reporter.done("seed", None);
     Ok(())

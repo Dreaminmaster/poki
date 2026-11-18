@@ -16,6 +16,7 @@ final class AutomationStartupTests: XCTestCase {
             AppLocalization.shared.preference = language
         }
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
+        await model.diskImage.ensureChecked()
         let chat = ChatModel(app: model)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
@@ -194,6 +195,7 @@ final class AutomationStartupTests: XCTestCase {
         XCTAssertFalse(store.isReady, "Downloaded disk image files must not report Ready when developer frameworks cannot load")
 
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
+        await model.diskImage.ensureChecked()
         let chat = ChatModel(app: model)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)

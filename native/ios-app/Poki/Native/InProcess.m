@@ -791,7 +791,7 @@ static NSArray<NSData *> *PKWorkspaceAppearance(UIImage *image) {
     CGFloat width = CGImageGetWidth(raster) / 2.0, height = CGImageGetHeight(raster);
     const size_t columns = 24, rows = 20;
     CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
-    CGContextRef context = CGBitmapContextCreate(NULL, columns, rows, 8, columns, gray, kCGImageAlphaNone);
+    CGContextRef context = CGBitmapContextCreate(NULL, columns, rows, 8, columns, gray, (CGBitmapInfo)kCGImageAlphaNone);
     CGColorSpaceRelease(gray);
     if (!context) return nil;
     NSMutableArray<NSData *> *panes = [NSMutableArray arrayWithCapacity:2];
@@ -1494,6 +1494,15 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
             NSData *cropped = PKCropped(picture, CGRectIsNull(viewport) ? geometry.bounds : viewport, geometry);
             if (!cropped) {
                 if (code) *code = @"screenshot_does_not_match_active_display";
+#if __IPHONE_OS_VERSION_MAX_ALLOWED < 270100
+                // Linked against an SDK before iOS 27.1, Poki is letterboxed on both displays of
+                // a Duo: its UIScreen is the letterbox, and the picture is the whole panel (#419).
+                if (code && PKIsDuo() && CGRectIsNull(viewport)) *code = @"duo_needs_ios_27_1_sdk_build";
+#endif
+                UIImage *seen = [UIImage imageWithData:picture];
+                NSLog(@"PokiInProcess: picture %.0fx%.0f px does not fit display %.0fx%.0f pt (native %.0fx%.0f px), viewport %@",
+                      seen.size.width * seen.scale, seen.size.height * seen.scale, geometry.bounds.size.width, geometry.bounds.size.height,
+                      geometry.nativeSize.width, geometry.nativeSize.height, NSStringFromCGRect(viewport));
             } else if (geometry.routesDisplay && [screen respondsToSelector:@selector(displayID)]) {
                 @synchronized (self) {
                     _capturedGeometry = geometry;

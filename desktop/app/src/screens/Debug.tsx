@@ -34,7 +34,7 @@ export default function Debug() {
   return (
     <>
       <h1 className="page-title">{t("Debug")}</h1>
-      <p className="page-sub">For maintainers: the iPhone's live log, the developer disk image, and a support bundle with secrets taken out.</p>
+      <p className="page-sub">{t("Support bundles can contain device identifiers, local paths and raw logs. Review the archive before sharing.")}</p>
       <ErrorBox error={error} />
       <Card>
         <div className="row">

@@ -86,6 +86,29 @@
         }
       }
     },
+    "Failed to download the developer disk image. Make sure your network can reach GitHub (turn on a proxy or a global VPN), then tap Download Again. You can also write it from Poki Setup on your computer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to download the developer disk image. Make sure your network can reach GitHub (turn on a proxy or a global VPN), then tap Download Again. You can also write it from Poki Setup on your computer."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载开发者磁盘映像失败。请确认网络能访问 GitHub（开启代理或全局 VPN），然后点重新下载；也可以用电脑上的 Poki Setup 写入。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載開發者磁碟映像失敗。請確認網路能存取 GitHub（開啟代理或全域 VPN），然後點一下重新下載；也可以用電腦上的 Poki Setup 寫入。"
+          }
+        }
+      }
+    },
     "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki and turn Automation on." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34831,6 +34854,446 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "螢幕歷史由一個只屬於 Poki 的 4 到 8 位 PIN 鎖定。iPhone 的密碼無法打開它。"
+          }
+        }
+      }
+    },
+    "Send a message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send a message"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "傳訊息"
+          }
+        }
+      }
+    },
+    "Send a WeChat message to " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send a WeChat message to "
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用微信发一条消息给"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用微信傳一則訊息給"
+          }
+        }
+      }
+    },
+    "Check delivery" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check delivery"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查物流"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查物流"
+          }
+        }
+      }
+    },
+    "Open Taobao and check the delivery status of my latest order" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Taobao and check the delivery status of my latest order"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开淘宝，看看我最近一单的物流到哪了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開淘寶，看看我最近一筆訂單的物流到哪了"
+          }
+        }
+      }
+    },
+    "Find nearby restaurants" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find nearby restaurants"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找附近餐厅"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找附近餐廳"
+          }
+        }
+      }
+    },
+    "Find top-rated nearby restaurants on Dianping" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find top-rated nearby restaurants on Dianping"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用大众点评找附近评分高的餐厅"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用大眾點評找附近評分高的餐廳"
+          }
+        }
+      }
+    },
+    "Order takeout" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Order takeout"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点外卖"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點外賣"
+          }
+        }
+      }
+    },
+    "Open Meituan Waimai and find good food nearby" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Meituan Waimai and find good food nearby"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开美团外卖，帮我看看附近有什么好吃的"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開美團外賣，幫我看看附近有什麼好吃的"
+          }
+        }
+      }
+    },
+    "Check orders" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check orders"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查订单"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查訂單"
+          }
+        }
+      }
+    },
+    "Open Pinduoduo and check my order status" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Pinduoduo and check my order status"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开拼多多，看看我的订单到哪了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開拼多多，看看我的訂單到哪了"
+          }
+        }
+      }
+    },
+    "Search guides" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search guides"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜攻略"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜攻略"
+          }
+        }
+      }
+    },
+    "Search Xiaohongshu for guides: " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Xiaohongshu for guides: "
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在小红书搜一下攻略："
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在小紅書搜尋一下攻略："
+          }
+        }
+      }
+    },
+    "View my listings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View my listings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看我的闲置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看我的閒置"
+          }
+        }
+      }
+    },
+    "Open Xianyu and check for new messages on my listings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Xianyu and check for new messages on my listings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开闲鱼，看看我发布的闲置有没有新消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開閒魚，看看我發佈的閒置有沒有新訊息"
+          }
+        }
+      }
+    },
+    "Check prices" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check prices"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查价格"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查價格"
+          }
+        }
+      }
+    },
+    "Check the price on JD: " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check the price on JD: "
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在京东查一下价格："
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在京東查一下價格："
+          }
+        }
+      }
+    },
+    "Navigate home" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Navigate home"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导航回家"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "導航回家"
+          }
+        }
+      }
+    },
+    "Open Baidu Maps and navigate home" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Baidu Maps and navigate home"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开百度地图，导航回家"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開百度地圖，導航回家"
+          }
+        }
+      }
+    },
+    "Check routes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check routes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查路线"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查路線"
+          }
+        }
+      }
+    },
+    "Open Amap and check the route to " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Amap and check the route to "
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开高德地图，查一下路线，目的地是"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開高德地圖，查一下路線，目的地是"
           }
         }
       }

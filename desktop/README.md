@@ -24,7 +24,7 @@ desktop/
 | Keeps it alive | the phones this computer set up, with their expiry; renewal is due with 2 days left and runs by itself every 6 h when the password is kept |
 | Relay | deploys `deploy/cf-relay/worker.js` to your own Cloudflare account through the API and shows the `poki://setup?relay=` QR |
 | Connectors | keeps links the phone made, runs the OAuth round and `tools/list` through the phone, writes client snippets |
-| Debug | live syslog, developer disk image, support bundle with secrets removed |
+| Debug | live syslog, developer disk image, support bundle for private review before sharing |
 
 ## For agents
 

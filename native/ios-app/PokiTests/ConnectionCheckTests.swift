@@ -28,7 +28,7 @@ final class ModelServerStub: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host() else { return false }
-        return ["model-server.test", "openrouter.ai", "api.anthropic.com"].contains(host)
+        return ["model-server.test", "openrouter.ai", "api.anthropic.com", "opencode.ai"].contains(host)
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -131,6 +131,28 @@ final class ConnectionCheckTests: XCTestCase {
     private func check(_ answer: (status: Int, body: String)?) async -> ConnectionCheck.Result {
         ModelServerStub.answer = answer
         return await ConnectionCheck.run(.custom, key: key, customURL: "https://model-server.test/v1", modelID: "house-model")
+    }
+
+    func testOpenCodeConnectionCheckSendsAnIsolatedSessionHeader() async {
+        ModelServerStub.responder = { request, _ in
+            let session = request.value(forHTTPHeaderField: "x-opencode-session")
+            let isOpenCode = request.url?.host() == "opencode.ai"
+            if isOpenCode {
+                guard let session, UUID(uuidString: session) != nil else {
+                    return (400, "application/json", #"{"error":{"message":"MissingSessionID"}}"#)
+                }
+            } else if session != nil {
+                return (400, "application/json", #"{"error":{"message":"Unexpected session header"}}"#)
+            }
+            return (401, "application/json", #"{"error":{"message":"Invalid credential"}}"#)
+        }
+
+        let openCode = await ConnectionCheck.run(.custom, key: key,
+            customURL: "https://opencode.ai/inference/go/openai/v1", modelID: "deepseek-v4-pro")
+        XCTAssertEqual(openCode, .badKey(reason: "Invalid credential"))
+        let other = await ConnectionCheck.run(.custom, key: key,
+            customURL: "https://model-server.test/v1", modelID: "house-model")
+        XCTAssertEqual(other, .badKey(reason: "Invalid credential"))
     }
 
     func testEachAnswerIsWordedForTheOwner() async {
