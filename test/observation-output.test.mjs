@@ -55,3 +55,15 @@ test('a tree that names only the top of the screen gets the screenshot text it l
   assert.match(looked, /, accessibility \+ ocr\)/);
   assert.deepEqual(looked.split('\n').filter(line => /^[ +]\d+ /.test(line)).map(line => line.match(/"(.*)"/)[1]), [...header.map(e => e[1]), ...products.map(e => e[0])]);
 });
+test('only a phone with a second built-in panel takes its screenshot through the helper', async t => {
+  const shots = async state => {
+    const f = await fixture(t);
+    await f.set(state);
+    const result = await f.call('observe_device', { source: 'ocr', include_image: false });
+    assert.ok(!result.isError, JSON.stringify(result.content));
+    const events = await f.events();
+    return { command: events.filter(event => event.args?.includes('screenshot')).length, helper: events.filter(event => event.op === 'screenshot').length };
+  };
+  assert.deepEqual(await shots({}), { command: 1, helper: 0 });
+  assert.deepEqual(await shots({ secondPanel: true }), { command: 0, helper: 1 });
+});
