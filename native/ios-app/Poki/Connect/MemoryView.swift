@@ -16,7 +16,6 @@ struct MemoryView: View {
     @State private var message: String?
     @State private var exportURL: URL?
     @State private var confirmClear = false
-    @State private var quickFixes = ""
     private let store = RoutineStore.shared
 
     var body: some View {
@@ -31,15 +30,6 @@ struct MemoryView: View {
                 SettingsHeader("Routines")
             } footer: {
                 Text("An agent saves a routine after a task that worked; the next time it repeats the task in one step and stops where the screen differs. Swipe a routine to forget it.")
-            }
-
-            Section {
-                NavigationLink(value: SettingsRoute.quickFixes) {
-                    SettingsRow(title: "Quick Fixes", symbol: "wand.and.sparkles", value: quickFixes)
-                }
-                .accessibilityIdentifier("memory.quickFixes")
-            } footer: {
-                Text("A routine that meets a prompt or a renamed button can fix the step and go on, in place of stopping.")
             }
 
             Section {
@@ -112,14 +102,13 @@ struct MemoryView: View {
     private func reload() {
         routines = store.routines.sorted { $0.updated > $1.updated }
         notes = store.notes
-        quickFixes = AppLocalization.text(QuickFixes.enabled && QuickFixes.isSetUp ? "On" : "Off")
         let tmp = FileManager.default.temporaryDirectory
         let export = tmp.appendingPathComponent(RoutineStore.backupName)
         if let data = try? store.exportData(), (try? data.write(to: export, options: .atomic)) != nil { exportURL = export }
     }
 }
 
-/// A routine: its name, how many steps, how often it worked, how many steps Quick Fixes repaired, and
+/// A routine: its name, how many steps, how often it worked, how many steps were fixed on the way, and
 /// a flag when it stopped twice in a row.
 private struct RoutineRow: View {
     var routine: Routine

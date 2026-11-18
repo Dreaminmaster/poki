@@ -129,6 +129,8 @@ final class Computer: @unchecked Sendable {
     var trace: [RecordedStep] = []
     /// A routine ran whole in this task (the finish line does not offer to save it again).
     var routineRanWhole = false
+    /// The app a session named with `app`: kept across its calls until it lets go of it.
+    var sessionApp: (bundle: String, name: String, session: String?)?
     /// The last run or path ended on a check that found what it looked for on screen.
     var runEndedOnARead = false
     /// Steps fixed on the way since PokiCore started (status says so).
@@ -813,8 +815,59 @@ final class Computer: @unchecked Sendable {
         return min(max(0, until - now()), actions.reduce(0) { $0 + actionCap($1) } + longestPause + config.readTimeout)
     }
 
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
-        restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy))
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil) async -> ToolResult {
+        var actions = actions
+        var bound: String?
+        if config.appNames() {
+            actions = actions.map(withAppNames)
+            // The session's app: named once, kept until it is let go, a task ends or a new one begins.
+            if beginsTask() { sessionApp = nil }
+            if let app {
+                if app == .bool(false) || app == .null {
+                    sessionApp = nil
+                } else if let given = app.string?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
+                    guard let bundle = config.resolveApp(given) ?? (given.contains(".") && !given.contains(" ") ? given : nil) else {
+                        return ToolResult(text: "do: no app named \"\(given)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
+                    }
+                    sessionApp = (bundle, given, session)
+                    // In front already by a read just made: nothing to bring forward.
+                    let inFront = lastForeground?.bundleID == bundle && lastTreeAt.map { now() - $0 < 10 } == true
+                    if !inFront, actions.first?["launch"] == nil, actions.count < 20 { actions.insert(["launch": .string(bundle)], at: 0) }
+                } else {
+                    return ToolResult(text: "do: app takes the app's name or bundle id, or false to let go of the session's app; nothing was sent", jpeg: nil, isError: true)
+                }
+            }
+            if let kept = sessionApp, kept.session == session { bound = kept.bundle }
+        }
+        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy))
+        if finish { sessionApp = nil }
+        else if let bound, let kept = sessionApp, let front = lastForeground?.bundleID, front != bound, !config.isPoki(lastForeground) {
+            result.text += "\nthe session's app \(kept.name) (\(bound)) is not in front; \(lastForeground?.describe ?? front) is. app: \"\(kept.name)\" brings it back; app: false lets go of it"
+        }
+        return result
+    }
+
+    /// A launch by name as a launch by bundle id, also inside a path's steps. A name the host does not
+    /// know is left as it is, and the launch says so.
+    func withAppNames(_ action: JSON) -> JSON {
+        guard case .object(var o) = action else { return action }
+        if let spec = o["launch"] {
+            if let given = spec.string { if let bundle = config.resolveApp(given) { o["launch"] = .string(bundle) } }
+            else if case .object(var inner) = spec, let given = inner["bundle"]?.string ?? inner["name"]?.string ?? inner["app"]?.string {
+                inner["bundle"] = .string(config.resolveApp(given) ?? given)
+                inner["name"] = nil
+                inner["app"] = nil
+                o["launch"] = .object(inner)
+            }
+            return .object(o)
+        }
+        if case .object(var path)? = o["path"], let steps = path["steps"]?.array {
+            path["steps"] = .array(steps.map(withAppNames))
+            o["path"] = .object(path)
+            return .object(o)
+        }
+        if let steps = o["path"]?.array { o["path"] = .array(steps.map(withAppNames)); return .object(o) }
+        return action
     }
 
     func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
@@ -900,6 +953,9 @@ final class Computer: @unchecked Sendable {
         started = prepared
         let before = lastForeground
         var extra: [String] = []
+        // The screen before the actions, for the read after them: only a read that differs from it
+        // shows that the actions have landed.
+        let seenBefore: String? = size.flatMap { screen in lastTreeAt == nil ? nil : listable(lastAll, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
 
         // Approval: from the first action that needs it, nothing is sent until the owner approves it
         // on the phone. The actions before it are plain and go first (seen on the phone: a last
@@ -984,7 +1040,12 @@ final class Computer: @unchecked Sendable {
         lastKind = moreKind ?? lastKind
         if let lastKind {
             let pause = min(Self.settle[lastKind] ?? 0.4, max(0, until - now() - config.readTimeout - 0.3))
-            if pause > 0.01 {
+            if pause >= 0.6, config.quickRead(), let seen = seenBefore {
+                // The long pauses (a launch, a swipe, a hardware button) cover the slowest screens: one
+                // that has changed and holds still across two reads is read now.
+                let (waited, settled) = await settledPause(pause, before: seen)
+                did.append(settled ? "read after \(Int((waited * 1000).rounded())) ms: the screen had changed and held still" : "paused \(Int((waited * 1000).rounded())) ms before reading")
+            } else if pause > 0.01 {
                 await sleep(seconds: pause)
                 did.append("paused \(Int((pause * 1000).rounded())) ms before reading")
             }
@@ -1330,6 +1391,27 @@ final class Computer: @unchecked Sendable {
     }
 
     /// How long `pressNow` reads for two reads in a row that agree.
+    /// Up to `pause` seconds before the read after the actions, ended early once the screen differs
+    /// from `before` and two reads in a row agree. A read that fails or takes long ends the sampling,
+    /// and the rest of the pause is slept as it always was.
+    func settledPause(_ pause: Double, before: String) async -> (waited: Double, settled: Bool) {
+        let began = now()
+        guard let screen = size else { await sleep(seconds: pause); return (pause, false) }
+        await sleep(seconds: min(pause, 0.15))
+        var last: String?
+        while pause - (now() - began) > 0.25 {
+            let left = pause - (now() - began)
+            guard let tree = try? await runner.tree(timeout: max(0.3, left), format: config.treeFormat) else { break }
+            let signature = listable(tree.elements, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+            if signature != before, signature == last { return (now() - began, true) }
+            last = signature
+            await sleep(seconds: 0.06)
+        }
+        let rest = pause - (now() - began)
+        if rest > 0.01 { await sleep(seconds: rest) }
+        return (now() - began, false)
+    }
+
     static let settleWindow = 2.0
 
     /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when

@@ -34835,54 +34835,6 @@
         }
       }
     },
-    "Quick Fixes" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快速修复"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "快速修復"
-          }
-        }
-      }
-    },
-    "Fix Steps on the Way" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "途中修复步骤"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "途中修復步驟"
-          }
-        }
-      }
-    },
-    "When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks a fast decision model how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "流程遇到意外情况时，例如弹出的提示或改了名字的按钮，Poki 会询问一个快速决策模型该如何继续。只有答案明确时才会执行，并且绝不会点按需要你批准的内容。有效的修复会被记住，下次运行时无需再询问。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "流程遇到意外情況時，例如彈出的提示或改了名稱的按鈕，Poki 會詢問一個快速決策模型該如何繼續。只有答案明確時才會執行，並且絕不會點按需要你批准的內容。有效的修復會被記住，下次執行時無需再詢問。"
-          }
-        }
-      }
-    },
     "Provider" : {
       "localizations" : {
         "zh-Hans" : {
@@ -34995,22 +34947,6 @@
         }
       }
     },
-    "Decision Model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "决策模型"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "決策模型"
-          }
-        }
-      }
-    },
     "The request goes from this iPhone straight to this provider with your own token. It holds the goal of the task and the names of the elements on screen. No screenshot is sent and password fields are left out. The token stays in this iPhone’s keychain." : {
       "localizations" : {
         "zh-Hans" : {
@@ -35091,22 +35027,6 @@
         }
       }
     },
-    "A routine that meets a prompt or a renamed button can fix the step and go on, in place of stopping." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "流程遇到提示或改了名字的按钮时，可以修复该步骤并继续，而不是停下来。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "流程遇到提示或改了名稱的按鈕時，可以修復該步驟並繼續，而不是停下來。"
-          }
-        }
-      }
-    },
     "%lld steps fixed on the way" : {
       "localizations" : {
         "en" : {
@@ -35137,6 +35057,198 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "途中修復了 %lld 步"
+          }
+        }
+      }
+    },
+    "Fast Decisions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速决策"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速決策"
+          }
+        }
+      }
+    },
+    "Fast Decision Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速决策模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速決策模型"
+          }
+        }
+      }
+    },
+    "No Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未选模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未選模型"
+          }
+        }
+      }
+    },
+    "Not Set Up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設定"
+          }
+        }
+      }
+    },
+    "Remove Provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除服务商"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除服務商"
+          }
+        }
+      }
+    },
+    "Remove this provider and its token from this iPhone?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要从这部 iPhone 移除此服务商及其令牌吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要從這部 iPhone 移除此服務商及其權杖嗎？"
+          }
+        }
+      }
+    },
+    "Apps by Name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按名称打开 App"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "依名稱打開 App"
+          }
+        }
+      }
+    },
+    "Read When the Screen Settles" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕稳定后立即读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕穩定後立即讀取"
+          }
+        }
+      }
+    },
+    "Speed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "速度"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "速度"
+          }
+        }
+      }
+    },
+    "On by default. Apps by Name lets an agent open an app by its name and keep it as the app it works in. Read When the Screen Settles reads the screen as soon as it has changed and holds still after an app opens, a swipe or a button, in place of a fixed pause. Changes count from the next step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认开启。“按名称打开 App”让智能体用名称打开 App，并把它作为当前操作的 App。“屏幕稳定后立即读取”会在打开 App、轻扫或按下按钮后，屏幕一有变化并稳定下来就读取，不再固定等待。更改从下一步起生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設開啟。「依名稱打開 App」讓代理用名稱打開 App，並把它作為目前操作的 App。「螢幕穩定後立即讀取」會在打開 App、滑動或按下按鈕後，螢幕一有變化並穩定下來就讀取，不再固定等待。更動從下一步起生效。"
+          }
+        }
+      }
+    },
+    "Poki uses this model from the moment you pick it. When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks it how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing. Choose None to stop using it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选好模型后 Poki 即开始使用。流程遇到意外情况时，例如弹出提示或按钮改了名称，Poki 会询问它如何继续。只有答案明确时才会操作，且绝不会轻点需要你批准的内容。有效的修复会被记住，下次运行无需再问。选择“无”即可停用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選好模型後 Poki 即開始使用。流程遇到意外情況時，例如跳出提示或按鈕改了名稱，Poki 會詢問它如何繼續。只有答案明確時才會操作，且絕不會點按需要你批准的內容。有效的修復會被記住，下次執行無需再問。選擇「無」即可停用。"
+          }
+        }
+      }
+    },
+    "A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Optional. Poki uses it once you add a provider and pick a model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一个小而快的模型，在弹出提示或按钮改名时帮助流程继续进行。可选。添加服务商并选好模型后，Poki 即会使用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一個小而快的模型，在跳出提示或按鈕改名時幫助流程繼續進行。可選。加入服務商並選好模型後，Poki 即會使用。"
           }
         }
       }

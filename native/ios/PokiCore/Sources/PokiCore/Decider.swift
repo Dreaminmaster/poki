@@ -140,6 +140,19 @@ public struct DeciderSettings: Sendable, Equatable, Codable {
         }
     }
 
+    /// The decision models a provider serves that Poki knows by name, the fastest first; a custom
+    /// address serves whatever its owner names.
+    public static func models(_ provider: Provider) -> [String] {
+        switch provider {
+        case .cloudflare: ["clef-flash", "clef"]
+        case .typesafe: ["jev-latest"]
+        case .custom: []
+        }
+    }
+
+    /// Whether a model has been picked: fast decisions are on from then, with no other switch.
+    public var hasModel: Bool { !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
     public var modelInUse: String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? Self.defaultModel(provider) : trimmed

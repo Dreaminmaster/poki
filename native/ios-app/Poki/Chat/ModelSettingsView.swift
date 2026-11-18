@@ -46,6 +46,14 @@ struct ModelSettingsView: View {
                 Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
             }
             }
+
+            // The decision model, in use from the moment a provider is added and a model picked.
+            Section {
+                FastDecisionsRow()
+                .accessibilityIdentifier("models.fastDecisions")
+            } footer: {
+                Text("A small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Optional. Poki uses it once you add a provider and pick a model.")
+            }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).

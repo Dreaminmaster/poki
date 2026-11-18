@@ -584,7 +584,7 @@ extension Computer {
         let routine = try Self.pathRoutine(spec)
         // A described target is the decider's to find: without one the step could only wait and stop.
         if config.decider() == nil, let i = routine.steps.firstIndex(where: { $0.target?.isDescribed == true }) {
-            throw ActionFailure(message: "path: step \(i + 1) describes its target with find, which needs Quick Fixes turned on in Poki's settings; name the target by the text it shows, or send the step after a look; nothing was sent", delivery: .notSent)
+            throw ActionFailure(message: "path: step \(i + 1) describes its target with find, which needs a fast decision model picked in Poki's settings (Models, Fast Decisions); name the target by the text it shows, or send the step after a look; nothing was sent", delivery: .notSent)
         }
         return try await replay(routine, params: [:], store: nil, until: until)
     }

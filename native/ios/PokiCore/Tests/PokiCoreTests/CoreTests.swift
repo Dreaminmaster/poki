@@ -1272,7 +1272,7 @@ final class ReturnToOriginTests: XCTestCase {
     /// front, so the read is made again until it is (cdebb5d), and only then does the phone go back
     /// to the app the task began in (ESP-176). The answer shows the work's screen, not the origin's.
     func testALaunchThatFinishesReadsTheLaunchedAppBeforeGoingBack() async {
-        let (core, wda, _) = makeCore()
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }  // the fixed pause: the reads of a quick read would already see the app arrive
         let front = LockedBox("ai.x.grok"), pending = LockedBox<String?>(nil), lagging = LockedBox(0)
         wda.set("GET /wda/activeAppInfo") { _ in
             if let target = pending.value {

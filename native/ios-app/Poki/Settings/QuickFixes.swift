@@ -1,22 +1,18 @@
 import PokiCore
 import SwiftUI
 
-/// Quick Fixes: the owner's own decision model (Cloudflare's Clef, TypeSafe's Jev, or one they host),
-/// which a routine or a path asks how to go on where it would otherwise stop: a prompt in the way, a
-/// button renamed or moved. Off until the owner turns it on and enters their own token. The call goes
-/// from this iPhone straight to that provider, never through Poki's relay, and holds the task's goal
-/// and the screen's elements as text: no screenshot, and nothing a password field holds.
+/// Fast decisions: the owner's own decision model (Cloudflare's Clef, TypeSafe's Jev, or one they
+/// host), which a routine or a path asks how to go on where it would otherwise stop: a prompt in the
+/// way, a button renamed or moved. There is no switch: it is in use from the moment a provider is
+/// added and a model is picked on Settings › Models › Fast Decisions, and out of use when the model
+/// is set back to None or the provider is removed. The call goes from this iPhone straight to that
+/// provider, never through Poki's relay, and holds the task's goal and the screen's elements as text:
+/// no screenshot, and nothing a password field holds.
 ///
 /// The settings are in the app's defaults; the token is in the keychain and is never printed or logged.
 enum QuickFixes {
-    static let enabledKey = "quickFixes.enabled"
     private static let settingsKey = "quickFixes.settings"
     private static let tokenAccount = "quick-fixes.token"
-
-    static var enabled: Bool {
-        get { UserDefaults.standard.bool(forKey: enabledKey) }
-        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
-    }
 
     static var settings: DeciderSettings {
         get {
@@ -34,14 +30,60 @@ enum QuickFixes {
         }
     }
 
-    /// The decider PokiCore asks, read at each run: nil while Quick Fixes is off or not set up.
+    /// The decider PokiCore asks, read at each run: nil until a provider is added and a model picked.
     static var decider: Decider? {
-        guard enabled else { return nil }
+        let settings = settings
+        guard settings.hasModel else { return nil }
         return settings.decider(token: token)
     }
 
-    /// Whether the settings and the token make a decider, whatever the switch says.
-    static var isSetUp: Bool { settings.decider(token: token) != nil }
+    /// The model in use, for the Models page; nil while fast decisions are off.
+    static var modelInUse: String? { decider == nil ? nil : settings.modelInUse }
+
+    /// Whether a provider has been added, with or without a model picked.
+    static var hasProvider: Bool { settings.decider(token: token) != nil }
+
+    static func remove() {
+        token = ""
+        settings = DeciderSettings()
+    }
+}
+
+/// The two speed-ups being tried (General › Testing Options), both on unless turned off there.
+enum SpeedOptions {
+    static let appNamesKey = "testing.appNames"
+    static let quickReadKey = "testing.quickRead"
+    static var appNames: Bool { UserDefaults.standard.object(forKey: appNamesKey) as? Bool ?? true }
+    static var quickRead: Bool { UserDefaults.standard.object(forKey: quickReadKey) as? Bool ?? true }
+}
+
+/// General › Testing Options: the switches for the two speed-ups.
+struct SpeedTestingSection: View {
+    @AppStorage(SpeedOptions.appNamesKey) private var appNames = true
+    @AppStorage(SpeedOptions.quickReadKey) private var quickRead = true
+    var body: some View {
+        Section {
+            Toggle("Apps by Name", isOn: $appNames)
+            Toggle("Read When the Screen Settles", isOn: $quickRead)
+        } header: {
+            Text("Speed")
+        } footer: {
+            Text("On by default. Apps by Name lets an agent open an app by its name and keep it as the app it works in. Read When the Screen Settles reads the screen as soon as it has changed and holds still after an app opens, a swipe or a button, in place of a fixed pause. Changes count from the next step.")
+        }
+    }
+}
+
+/// The row on Settings › Models: the model in use, read again each time the page comes back.
+struct FastDecisionsRow: View {
+    @State private var value = ""
+    var body: some View {
+        NavigationLink { QuickFixesView() } label: {
+            LabeledContent {
+                Text(verbatim: value)
+            } label: { SettingsLabel("Fast Decisions", systemImage: "bolt") }
+        }
+        .onAppear { value = QuickFixes.modelInUse ?? AppLocalization.text(QuickFixes.hasProvider ? "No Model" : "Not Set Up") }
+    }
 }
 
 extension DeciderSettings.Provider {
@@ -54,14 +96,15 @@ extension DeciderSettings.Provider {
     }
 }
 
-/// Settings › Memory › Quick Fixes.
+/// Settings › Models › Fast Decisions: the provider, its token and the model. Picking a model turns
+/// fast decisions on; None turns them off.
 struct QuickFixesView: View {
-    @State private var enabled = QuickFixes.enabled
     @State private var settings = QuickFixes.settings
     @State private var token = QuickFixes.token
     @State private var checking = false
     @State private var result: CheckResult?
     @State private var fixed = 0
+    @State private var confirmRemove = false
 
     private enum CheckResult: Equatable {
         case works(Int)
@@ -70,16 +113,6 @@ struct QuickFixesView: View {
 
     var body: some View {
         Form {
-            Section {
-                Toggle(isOn: $enabled) {
-                    SettingsLabel("Fix Steps on the Way", systemImage: "wand.and.sparkles")
-                }
-                .disabled(!ready && !enabled)
-                .accessibilityIdentifier("quickFixes.enabled")
-            } footer: {
-                Text("When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks a fast decision model how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing.")
-            }
-
             Section {
                 Picker(selection: $settings.provider) {
                     ForEach(DeciderSettings.Provider.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -94,9 +127,8 @@ struct QuickFixesView: View {
                 case .typesafe:
                     EmptyView()
                 }
-                field("Model", text: $settings.model, prompt: DeciderSettings.defaultModel(settings.provider), identifier: "quickFixes.model")
                 LabeledContent {
-                    SecureField(text: $token, prompt: Text("Required")) { Text("API Token") }
+                    SecureField(text: $token, prompt: Text(settings.provider == .custom ? "Optional" : "Required")) { Text("API Token") }
                         .multilineTextAlignment(.trailing)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("quickFixes.token")
@@ -104,9 +136,28 @@ struct QuickFixesView: View {
                     Text("API Token")
                 }
             } header: {
-                SettingsHeader("Decision Model")
+                SettingsHeader("Provider")
             } footer: {
                 Text("The request goes from this iPhone straight to this provider with your own token. It holds the goal of the task and the names of the elements on screen. No screenshot is sent and password fields are left out. The token stays in this iPhone’s keychain.")
+            }
+
+            Section {
+                if settings.provider == .custom {
+                    field("Model", text: $settings.model, prompt: AppLocalization.text("None"), identifier: "quickFixes.model")
+                } else {
+                    Picker(selection: $settings.model) {
+                        Text("None").tag("")
+                        ForEach(DeciderSettings.models(settings.provider), id: \.self) { Text(verbatim: $0).tag($0) }
+                    } label: {
+                        SettingsLabel("Model", systemImage: "bolt")
+                    }
+                    .disabled(!hasProvider)
+                    .accessibilityIdentifier("quickFixes.model")
+                }
+            } header: {
+                SettingsHeader("Fast Decision Model")
+            } footer: {
+                Text("Poki uses this model from the moment you pick it. When a routine meets something unexpected, such as a prompt in the way or a renamed button, Poki asks it how to go on. It acts only when the answer is clear and never taps anything that needs your approval. A fix that worked is remembered, so the next run asks nothing. Choose None to stop using it.")
             }
 
             Section {
@@ -117,7 +168,7 @@ struct QuickFixesView: View {
                         if checking { ProgressView() }
                     }
                 }
-                .disabled(!ready || checking)
+                .disabled(!hasProvider || checking)
                 .accessibilityIdentifier("quickFixes.check")
                 if fixed > 0 { LabeledContent("Steps Fixed", value: fixed.formatted()) }
             } footer: {
@@ -127,29 +178,41 @@ struct QuickFixesView: View {
                 case nil: EmptyView()
                 }
             }
+
+            if hasProvider {
+                Section {
+                    Button("Remove Provider", role: .destructive) { confirmRemove = true }
+                        .accessibilityIdentifier("quickFixes.remove")
+                }
+            }
         }
-        .navigationTitle(AppLocalization.text("Quick Fixes"))
+        .navigationTitle(AppLocalization.text("Fast Decisions"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fixed = RoutineStore.shared.routines.reduce(0) { $0 + ($1.fixes ?? 0) } }
-        .onChange(of: enabled) { _, on in QuickFixes.enabled = on }
-        .onChange(of: settings) { _, new in
+        .onChange(of: settings) { old, new in
+            var new = new
+            // Another provider's models are its own: the pick starts again at None.
+            if old.provider != new.provider, new.provider != .custom, !DeciderSettings.models(new.provider).contains(new.model) {
+                new.model = ""
+                settings = new
+            }
             QuickFixes.settings = new
             result = nil
-            turnOffIfIncomplete()
         }
         .onChange(of: token) { _, new in
             QuickFixes.token = new
             result = nil
-            turnOffIfIncomplete()
+        }
+        .confirmationDialog("Remove this provider and its token from this iPhone?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove Provider", role: .destructive) {
+                QuickFixes.remove()
+                settings = QuickFixes.settings
+                token = ""
+            }
         }
     }
 
-    private var ready: Bool { settings.decider(token: token) != nil }
-
-    /// The switch never stays on over settings that make no decider.
-    private func turnOffIfIncomplete() {
-        if enabled, !ready { enabled = false }
-    }
+    private var hasProvider: Bool { settings.decider(token: token) != nil }
 
     private func field(_ title: LocalizedStringKey, text: Binding<String>, prompt: String, identifier: String, url: Bool = false) -> some View {
         LabeledContent {

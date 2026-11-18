@@ -515,7 +515,7 @@ final class DeciderTests: XCTestCase {
         let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "General"], ["tap": ["find": "the About row"]]]]]]])
 
         XCTAssertTrue(result.isError)
-        XCTAssertTrue(result.text.contains("needs Quick Fixes"), result.text)
+        XCTAssertTrue(result.text.contains("needs a fast decision model"), result.text)
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, taps)
     }
 

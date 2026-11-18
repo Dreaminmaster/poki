@@ -426,7 +426,11 @@ extension Computer {
             }
             return ("button", "button \(name)")
         case .launch:
-            guard let bundle = spec.string ?? spec["bundle"]?.string, !bundle.isEmpty else { throw ActionFailure(message: "launch takes a bundle id", delivery: .notSent) }
+            guard let bundle = spec.string ?? spec["bundle"]?.string, !bundle.isEmpty else { throw ActionFailure(message: "launch takes a bundle id or an app's name", delivery: .notSent) }
+            // A name the host could not turn into a bundle id: nothing is sent for it.
+            if config.appNames(), !bundle.contains(".") || bundle.contains(" ") {
+                throw ActionFailure(message: "launch \(bundle): no app named \"\(bundle)\" is known on this phone. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+            }
             let fresh = spec["fresh"]?.bool ?? false
             // A fresh launch ends the app first, so a page it was left on cannot answer for it, and
             // starts it through XCTest's launch. Otherwise the app is activated: brought to the front

@@ -1581,7 +1581,7 @@ final class GymTests: XCTestCase {
     /// whole tree under Photos' picture. The read is now made again, in the same call, until the
     /// launched app is in front.
     func testTheReadAfterALaunchIsMadeAgainUntilTheLaunchedAppIsInFront() async {
-        let (core, wda, _) = makeCore()
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }  // the fixed pause: the reads of a quick read would already see the app arrive
         _ = await core.call("look", [:])
         let launched = LockedBox(false), readsAfter = LockedBox(0)
         wda.set("POST /wda/apps/activate") { _ in launched.value = true; return (200, ["value": .null]) }
