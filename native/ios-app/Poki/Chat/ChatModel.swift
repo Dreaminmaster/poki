@@ -947,7 +947,12 @@ final class ChatModel {
         let token = runToken
         awaitingModel = false
         let started = Date()
-        let answer = await performCall(call)
+        let historyRevision = call.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
+        let rawAnswer = await performCall(call)
+        // Main-actor boundary: validate again after the await before recording or returning
+        // any private text. A valid answer may have become stale on the way back from Core.
+        let answer = call.name == "screen_history"
+            ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: historyRevision) : rawAnswer
         let record = CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError)
         taskCalls.append(record)
         guard sessionID == session else {

@@ -1,4 +1,5 @@
 import Foundation
+import PokiCore
 import SwiftUI
 import UIKit
 import notify
@@ -9,6 +10,8 @@ private final class HistoryQueryPermissionLease: @unchecked Sendable {
     private let lock = NSLock()
     private var value: UInt64 = 0
     private var deletions = 0
+    private var enabled = UserDefaults.standard.bool(forKey: "history.enabled")
+    private var unlocked = false
 
     var revision: UInt64 {
         lock.lock()
@@ -16,10 +19,25 @@ private final class HistoryQueryPermissionLease: @unchecked Sendable {
         return value
     }
 
-    var deleting: Bool {
+    /// Read the complete grant under the same lock as its revision.
+    var grant: UInt64? {
         lock.lock()
         defer { lock.unlock() }
-        return deletions > 0
+        return enabled && unlocked && deletions == 0 ? value : nil
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        lock.lock()
+        self.enabled = enabled
+        value &+= 1
+        lock.unlock()
+    }
+
+    func setUnlocked(_ unlocked: Bool) {
+        lock.lock()
+        self.unlocked = unlocked
+        value &+= 1
+        lock.unlock()
     }
 
     func revoke() {
@@ -72,11 +90,30 @@ final class HistoryCapture: ObservableObject {
     nonisolated static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
     nonisolated private static let queryLease = HistoryQueryPermissionLease()
     nonisolated static var accessRevision: UInt64 { queryLease.revision }
-    nonisolated static var agentQueryAllowed: Bool { isEnabled && !queryLease.deleting }
+    nonisolated static var agentQueryRevision: UInt64? {
+        guard isEnabled else { return nil }
+        return queryLease.grant
+    }
+    nonisolated static var agentQueryAllowed: Bool { agentQueryRevision != nil }
+
+    nonisolated static func revokeAgentQueries() { queryLease.revoke() }
+
+    /// HistoryLock owns authentication; publish its decision to the synchronous agent gate.
+    nonisolated static func setAgentHistoryUnlocked(_ unlocked: Bool) {
+        queryLease.setUnlocked(unlocked)
+    }
+
+    nonisolated static func validateAgentAnswer(_ answer: PokiCore.ToolAnswer, revision: UInt64?) -> PokiCore.ToolAnswer {
+        guard !answer.isError else { return answer }
+        guard let revision, agentQueryRevision == revision else {
+            return PokiCore.ToolAnswer(text: PokiCore.screenHistoryRevokedMessage, jpeg: nil, isError: true)
+        }
+        return answer
+    }
 
     @Published var enabled: Bool {
         didSet {
-            Self.queryLease.revoke()
+            Self.queryLease.setEnabled(enabled)
             save(enabled, Self.enabledKey)
             if !enabled { stop() }
         }
@@ -278,16 +315,29 @@ final class HistoryCapture: ObservableObject {
         if why == .locked { HistoryStore.shared.close() }
     }
 
-    private func watchLock() {
-        guard lockToken == NOTIFY_TOKEN_INVALID else { return }
+    /// Monitor device lock independently of a recording run. The observer lives for the
+    /// application lifetime; a locked phone must revoke reads even when capture is idle.
+    func watchLock() {
         let changed: @Sendable (Int32) -> Void = { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.lockedOrDark else { return }
-                self.end(self.run, .locked)
+            // notify_register_dispatch delivers on DispatchQueue.main.
+            MainActor.assumeIsolated {
+                self?.deviceLockChanged()
             }
         }
-        notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
-        notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
+        if lockToken == NOTIFY_TOKEN_INVALID {
+            notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
+        }
+        if screenToken == NOTIFY_TOKEN_INVALID {
+            notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
+        }
+        deviceLockChanged()
+    }
+
+    private func deviceLockChanged() {
+        guard lockedOrDark else { return }
+        HistoryLock.shared.lock()
+        HistoryStore.shared.close()
+        end(run, .locked)
     }
 
     /// One read from the launcher. Only a screen whose text changed carries text.

@@ -24,8 +24,10 @@ final class HistoryLock: ObservableObject {
     private init() {
         hasPIN = Self.stored() != nil
         biometricsOn = UserDefaults.standard.object(forKey: "history.lock.biometrics") as? Bool ?? true
-        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.lock() }
+        for name in [UIApplication.didEnterBackgroundNotification, UIApplication.protectedDataWillBecomeUnavailableNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.lock() }
+            }
         }
     }
 
@@ -63,8 +65,12 @@ final class HistoryLock: ObservableObject {
         // No "Enter Passcode" button: the iPhone's passcode does not open history.
         context.localizedFallbackTitle = ""
         let reason = AppLocalization.text("Unlock Screen History")
+        let revision = HistoryCapture.accessRevision
         let passed = (try? await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)) ?? false
-        if passed { opened() }
+        // A late biometric success must not reopen history after a background/device lock.
+        if passed, revision == HistoryCapture.accessRevision, usesBiometrics,
+           UIApplication.shared.applicationState != .background,
+           UIApplication.shared.isProtectedDataAvailable { opened() }
     }
 
     /// Asks for Face ID or Touch ID again, for something that cannot be undone. The page stays as it is.
@@ -103,12 +109,16 @@ final class HistoryLock: ObservableObject {
         var salt = Data(count: 16)
         guard salt.withUnsafeMutableBytes({ SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }) == errSecSuccess else { return false }
         let value = salt + Self.digest(pin, salt: salt)
+        HistoryCapture.revokeAgentQueries()
         let match: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service, kSecAttrAccount as String: Self.account]
         SecItemDelete(match as CFDictionary)
         var add = match
         add[kSecValueData as String] = value
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return false }
+        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else {
+            lock()
+            return false
+        }
         hasPIN = true
         opened()
         return true
@@ -132,6 +142,7 @@ final class HistoryLock: ObservableObject {
     @discardableResult
     func removePIN() -> Bool {
         guard unlocked, usesBiometrics else { return false }
+        HistoryCapture.revokeAgentQueries()
         let match: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service, kSecAttrAccount as String: Self.account]
         SecItemDelete(match as CFDictionary)
         hasPIN = false
@@ -142,6 +153,7 @@ final class HistoryLock: ObservableObject {
     @discardableResult
     func setBiometrics(_ on: Bool) -> Bool {
         guard unlocked, on || hasPIN else { return false }
+        HistoryCapture.revokeAgentQueries()
         biometricsOn = on
         UserDefaults.standard.set(on, forKey: "history.lock.biometrics")
         return true
@@ -150,12 +162,16 @@ final class HistoryLock: ObservableObject {
     // MARK: State
 
     private func opened() {
+        HistoryCapture.setAgentHistoryUnlocked(true)
         unlocked = true
         failures = 0
         blockedUntil = nil
     }
 
-    func lock() { unlocked = false }
+    func lock() {
+        HistoryCapture.setAgentHistoryUnlocked(false)
+        unlocked = false
+    }
 }
 
 /// Shows its content only while iPhone History is unlocked.

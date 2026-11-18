@@ -22,6 +22,9 @@ struct PokiApp: App {
         SettingsVault.restore()
         AppLocalization.publish()
         SettingsVault.watch()
+        // Install history lock observers before any local or external agent can query the store.
+        _ = HistoryLock.shared
+        HistoryCapture.shared.watchLock()
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
         FieldDictation.keepButtonForUpgrade()
