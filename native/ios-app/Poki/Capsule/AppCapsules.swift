@@ -62,6 +62,8 @@ enum CapsuleText {
                 i + name.text.length <= text.length
                     && text.compare(name.text as String, options: name.options, range: NSRange(location: i, length: name.text.length)) == .orderedSame
                     && wholeWord(name.text, at: i, in: text)
+                    && KnownApps.allowsNameMatch(name.text as String, appID: name.app.id,
+                                                 followedBy: text.substring(from: i + name.text.length))
                     && (!name.onlyAsApp || appGoes(after: text.substring(to: i)))
             }
             if let hit {
