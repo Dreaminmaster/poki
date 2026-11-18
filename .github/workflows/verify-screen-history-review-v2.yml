@@ -1,0 +1,107 @@
+name: Screen History review verification
+
+on:
+  push:
+    branches:
+      - ci/screen-history-446-review-v2
+
+permissions:
+  contents: read
+
+jobs:
+  screen-history:
+    runs-on: xcode-27
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest released Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          command -v xcodegen || brew install xcodegen
+          command -v timeout || brew install coreutils
+          mkdir -p out
+      - name: Build and cache simulator launcher
+        uses: actions/cache@v4
+        with:
+          path: native/launcher/target
+          key: history-launcher-sim-${{ runner.os }}-${{ hashFiles('native/launcher/Cargo.lock', 'native/launcher/Cargo.toml', 'native/launcher/src/**', 'native/launcher/fetch-idevice.sh') }}
+      - name: Build simulator launcher and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          native/launcher/fetch-idevice.sh
+          rustup target add aarch64-apple-ios-sim
+          cargo build --release --locked --target aarch64-apple-ios-sim --manifest-path native/launcher/Cargo.toml
+          native/ios-app/scripts/make-assets.sh
+          xcodegen generate --spec native/ios-app/project.yml
+      - name: Create a fresh disposable simulator for PIN fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r TYPE RUNTIME < <(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          groups = json.load(sys.stdin)["devices"]
+          def version(r): return tuple(map(int, r.rsplit("iOS-",1)[1].split("-")))
+          sdk = tuple(map(int, sys.argv[1].split(".")))
+          for runtime in sorted((r for r in groups if "iOS-" in r and version(r) <= sdk), key=version, reverse=True):
+              phones = [x for x in groups[runtime] if x.get("isAvailable") and "iPhone" in x["name"] and x.get("deviceTypeIdentifier")]
+              pro = [x for x in phones if "Pro" in x["name"] and "Max" not in x["name"]]
+              if pro or phones:
+                  print((pro or phones)[0]["deviceTypeIdentifier"], runtime)
+                  break
+          else: raise SystemExit("No supported iOS simulator")
+          ' "$(xcrun --sdk iphonesimulator --show-sdk-version)")
+          UDID="$(xcrun simctl create "Poki History Review 446" "$TYPE" "$RUNTIME")"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Build actual PokiTests and preserve complete logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -project native/ios-app/Poki.xcodeproj -scheme Poki \
+            -destination "id=$UDID" -derivedDataPath build/history-review -jobs 2 \
+            -resultBundlePath out/history-build.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee out/build.log
+      - name: Run targeted production ScreenHistoryTests
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/history-review/Build/Products/Debug-iphonesimulator/Poki.app"
+          BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")"
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl privacy "$UDID" grant location-always "$BUNDLE"
+          timeout 900 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
+            -destination "id=$UDID" -derivedDataPath build/history-review \
+            -only-testing:PokiTests/ScreenHistoryTests -parallel-testing-enabled NO \
+            -resultBundlePath out/history-tests.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee out/tests.log
+          xcrun xcresulttool get test-results summary --path out/history-tests.xcresult --format json | tee out/summary.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("out/summary.json"))
+          assert d["totalTestCount"] >= 19, d
+          assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
+          PY
+      - name: Preserve build and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-review-446-results
+          path: out/
+          if-no-files-found: warn
+      - name: Delete only the temporary simulator
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${UDID:-}" ]; then
+            xcrun simctl shutdown "$UDID" || true
+            xcrun simctl delete "$UDID" || true
+          fi
