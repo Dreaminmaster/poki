@@ -32,6 +32,31 @@ final class AppCapsuleTests: XCTestCase {
         }
     }
 
+    func testWeChatMiniProgramNameStaysTextInComposerAndRouting() {
+        let weChat = "com.tencent.xin"
+        let diDi = "com.xiaojukeji.didi"
+        XCTAssertEqual(AppIconStore.bundleIDs(namedIn: "打开查找"), ["com.apple.findmy"])
+        for request in [
+            "帮我在微信滴滴充电小程序里查找我附近最便宜的充电桩",
+            "在微信裡的「滴滴充電」小程式找充電樁",
+        ] {
+            XCTAssertEqual(apps(request), [weChat], request)
+            XCTAssertEqual(AppIconStore.bundleIDs(namedIn: request), [weChat], request)
+            XCTAssertEqual(joined(request), request)
+        }
+
+        for request in [
+            "微信滴滴充电小程序里查价格，再打开滴滴出行",
+            "打开微信然后打开滴滴出行查小程序订单",
+            "打开微信和滴滴出行",
+            "打开微信和滴滴出行看小程序订单",
+        ] {
+            XCTAssertEqual(apps(request), [weChat, diDi], request)
+            XCTAssertEqual(AppIconStore.bundleIDs(namedIn: request), [weChat, diDi], request)
+            XCTAssertEqual(joined(request), request)
+        }
+    }
+
     func testTypedNamesBecomeCapsulesWhereTheyNameAnApp() {
         XCTAssertEqual(apps("帮我在拼多多和京东比一下价格"), ["com.xunmeng.pinduoduo", "com.360buy.jdmobile"])
         XCTAssertEqual(apps("打开百度地图导航回家"), ["com.baidu.map"], "the longest name wins")

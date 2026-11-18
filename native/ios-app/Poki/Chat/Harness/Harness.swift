@@ -30,7 +30,9 @@ enum Harness {
         return text
     }()
 
-    static var instructions: String { [PokiCore.toolInstructions, system, WebTools.instructions].joined(separator: "\n\n") }
+    static var instructions: String {
+        [PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.isEnabled), system, WebTools.instructions].joined(separator: "\n\n")
+    }
 
     static let splitViewInstructions = """
     You are Poki, completing the owner's task in two visible iPhone Split View apps while Poki stays in the background. Reply in the owner's language. Publish a short plan with report_plan before acting.
@@ -42,8 +44,10 @@ enum Harness {
     /// The instructions for a task: the above, then the saved notes and the routines that fit it.
     @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
         if inSplitView {
-            if ApprovalClassifier.mode == .reply { return splitViewInstructions + "\n\n" + replyApprovals }
-            return splitViewInstructions
+            var parts = [splitViewInstructions]
+            if HistoryCapture.isEnabled { parts.append(PokiCore.screenHistoryInstructions) }
+            if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
+            return parts.joined(separator: "\n\n")
         }
         let brief = PokiCore.memoryBrief(for: task)
         var parts = [instructions]
@@ -79,23 +83,30 @@ enum Harness {
     }
 
     /// Poki's own browser's tools (ESP-145) sit beside the phone's.
-    static let tools: [ToolSpec] = phoneTools + WebTools.specs + [reportPlan, finishTask]
+    static var tools: [ToolSpec] {
+        catalogTools(includeScreenHistory: HistoryCapture.isEnabled) + WebTools.specs + [reportPlan, finishTask]
+    }
 
-    static let splitViewTools: [ToolSpec] = [
-        ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
-                 schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
-        ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
-                 schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-    ] + phoneTools.filter { $0.name == "status" } + [reportPlan, finishTask]
+    static var splitViewTools: [ToolSpec] {
+        [
+            ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
+                     schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
+            ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
+                     schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
+        ] + catalogTools(includeScreenHistory: HistoryCapture.isEnabled).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+    }
 
     /// PokiCore's catalog: look, do and status.
-    static let phoneTools: [ToolSpec] = {
-        guard let data = PokiCore.toolCatalogJSON.data(using: .utf8), let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
+    static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false)
+
+    private static func catalogTools(includeScreenHistory: Bool) -> [ToolSpec] {
+        guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
+              let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
             guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
             return ToolSpec(name: name, description: description, schema: schema)
         }
-    }()
+    }
 
     private static func object(_ properties: [String: Any], _ required: [String]) -> [String: Any] {
         ["type": "object", "properties": properties, "required": required, "additionalProperties": false]

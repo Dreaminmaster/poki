@@ -62,19 +62,32 @@ enum CapsuleText {
                 i + name.text.length <= text.length
                     && text.compare(name.text as String, options: name.options, range: NSRange(location: i, length: name.text.length)) == .orderedSame
                     && wholeWord(name.text, at: i, in: text)
-                    && (!name.onlyAsApp || appGoes(at: i, in: text))
+                    && (!name.onlyAsApp || appGoes(after: text.substring(to: i)))
             }
             if let hit {
                 if run < i { out.append(.text(text.substring(with: NSRange(location: run, length: i - run)))) }
                 out.append(.app(hit.app, text.substring(with: NSRange(location: i, length: hit.text.length))))
                 i += hit.text.length
                 run = i
+                if hit.app.id == weChatID, let miniProgram = weChatMiniProgramPrefix(in: text.substring(from: i)) {
+                    i += miniProgram.utf16.count
+                }
             } else {
                 i += 1
             }
         }
         if run < text.length { out.append(.text(text.substring(from: run))) }
         return out
+    }
+
+    static let weChatID = "com.tencent.xin"
+
+    /// The name and marker immediately after WeChat are part of the request, not a second app.
+    /// Stop at clause punctuation or a new app-opening instruction.
+    static func weChatMiniProgramPrefix(in suffix: String) -> Substring? {
+        guard let range = suffix.range(of: #"^\h*(?:里的|裡的|的)?\h*(?:「[^」\r\n]{1,24}」|“[^”\r\n]{1,24}”|(?!(?:和|与|與|及|再|并|並))(?:(?!然后|然後|打开|打開)[\p{L}\p{N}]){1,24}?)\h*(?:小程序|小程式)"#,
+                                       options: .regularExpression) else { return nil }
+        return suffix[range]
     }
 
     /// Every app's names, by their first letter (lower-cased), longest first.
@@ -107,8 +120,8 @@ enum CapsuleText {
 
     /// Where an app's name goes in a request: the start of the message, or right after a word that
     /// opens or uses an app.
-    private static func appGoes(at i: Int, in text: NSString) -> Bool {
-        let before = text.substring(to: i).trimmingCharacters(in: .whitespaces)
+    static func appGoes(after prefix: String) -> Bool {
+        let before = prefix.trimmingCharacters(in: .whitespaces)
         return before.isEmpty || ["打开", "打開", "用", "在", "去"].contains { before.hasSuffix($0) }
     }
 

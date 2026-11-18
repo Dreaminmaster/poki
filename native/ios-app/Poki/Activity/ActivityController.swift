@@ -122,13 +122,14 @@ final class ActivityController {
 
     /// Starts the Live Activity if it is not running. iOS only allows this while Poki is in front, so
     /// it is called when the person taps something (Start, Start pairing, a setup step), never later
-    /// from the background.
-    func start(deviceName: String) {
+    /// from the background. The one exception is `fromIntent`: an intent iOS runs for the person
+    /// (Talk Here, a LiveActivityIntent) may start it with Poki in the background.
+    func start(deviceName: String, fromIntent: Bool = false) {
         wanted = deviceName
         guard activity == nil else { return }
         // Keep it wanted for the next foreground update, without asking ActivityKit to start from
         // the background. Direct callers and update-driven restarts share the same restriction.
-        guard canStart() else { return }
+        guard fromIntent || canStart() else { return }
         if state.isQuiet, hidesWhenIdle() { lastError = nil; return }
         guard enabled else { lastError = "Live Activities are off for Poki (Settings > Poki > Live Activities)."; return }
         // A Live Activity left from an earlier run of the app is replaced.

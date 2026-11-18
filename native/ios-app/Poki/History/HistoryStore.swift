@@ -1,4 +1,5 @@
 import Foundation
+import PokiCore
 import SQLite3
 
 /// One kept read of the screen: when, which app, the screen's title where the tree gave one, and
@@ -325,5 +326,72 @@ final class HistoryStore: @unchecked Sendable {
         await withCheckedContinuation { (done: CheckedContinuation<Value, Never>) in
             queue.async { done.resume(returning: work()) }
         }
+    }
+
+    static let agentSource = ScreenHistorySource(
+        isEnabled: { HistoryCapture.isEnabled },
+        entries: { start, end in
+            let raw = await HistoryStore.shared.entries(from: start, to: end)
+            return await MainActor.run {
+                let capture = HistoryCapture.shared
+                return raw.compactMap { entry in
+                    guard capture.keeps(entry.app),
+                          entry.app.caseInsensitiveCompare("com.apple.springboard") != .orderedSame,
+                          !HistoryCapture.overlays.contains(where: { $0.caseInsensitiveCompare(entry.app) == .orderedSame }) else {
+                        return nil
+                    }
+                    let known = KnownApps.find(entry.app)
+                    let extraAliases = entry.app.caseInsensitiveCompare("com.atebits.Tweetie2") == .orderedSame ? ["Twitter", "推特"] : []
+                    let aliases = (known?.names ?? []) + (known?.ids ?? []) + extraAliases
+                    return ScreenHistoryEntry(
+                        at: entry.at,
+                        app: agentAppName(entry.app),
+                        bundleID: entry.app,
+                        appAliases: aliases,
+                        title: entry.title,
+                        text: entry.text
+                    )
+                }
+            }
+        }
+    )
+
+    @MainActor
+    private static func agentAppName(_ bundleID: String) -> String {
+        if let service = BacktapeApps.service(bundleID) {
+            return AppLocalization.bundle.localizedString(forKey: service.name, value: service.name, table: nil)
+        }
+        if let known = AppIconStore.name(bundleID) {
+            return known
+        }
+        if let installed = installedAppName(bundleID) {
+            return installed
+        }
+        return humanizedBundleName(bundleID)
+    }
+
+    private static func installedAppName(_ bundleID: String) -> String? {
+        guard let proxyClass = NSClassFromString("LSApplicationProxy") as? NSObject.Type else { return nil }
+        let factory = NSSelectorFromString("applicationProxyForIdentifier:")
+        let nameSelector = NSSelectorFromString("localizedName")
+        guard proxyClass.responds(to: factory),
+              let proxy = proxyClass.perform(factory, with: bundleID)?.takeUnretainedValue() as? NSObject,
+              proxy.responds(to: nameSelector),
+              let raw = proxy.perform(nameSelector)?.takeUnretainedValue() as? String else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.caseInsensitiveCompare(bundleID) != .orderedSame else { return nil }
+        return trimmed
+    }
+
+    private static func humanizedBundleName(_ bundleID: String) -> String {
+        let generic: Set<String> = ["ios", "iphone", "ipad", "mobile", "app", "client"]
+        let segments = bundleID.split(separator: ".").map(String.init)
+        guard segments.count >= 2 else { return bundleID }
+        let chosen = segments.dropFirst().reversed().first(where: { !generic.contains($0.lowercased()) }) ?? segments.last ?? bundleID
+        let spaced = chosen.replacingOccurrences(of: "-", with: " ")
+        guard let first = spaced.first else { return bundleID }
+        return first.uppercased() + spaced.dropFirst()
     }
 }

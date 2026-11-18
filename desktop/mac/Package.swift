@@ -11,5 +11,10 @@ let package = Package(
             name: "PokiSetup",
             path: "Sources/PokiSetup"
         ),
+        .testTarget(
+            name: "PokiSetupTests",
+            dependencies: ["PokiSetup"],
+            path: "Tests/PokiSetupTests"
+        ),
     ]
 )

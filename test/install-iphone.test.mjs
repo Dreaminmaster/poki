@@ -263,7 +263,7 @@ test('the issue draft is only printed: it never runs gh, and it says the person 
   const template = await readFile(join(root, '.github/ISSUE_TEMPLATE/install-failure.yml'), 'utf8');
   const labels = [...template.matchAll(/^\s+label: (.+)$/gm)].map(m => m[1]);
   assert.deepEqual([...draft.matchAll(/^### (.+)$/gm)].map(m => m[1]), labels, 'the draft follows the install-failure template field by field');
-  assert.match(draft, /### Step it stopped at\n\nPair \(Trust This Computer\)\n/, 'the step is one of the template options');
+  assert.match(draft, /### Failed installation step\n\nPair \(Trust This Computer\)\n/, 'the step is one of the template options');
 });
 
 test('the agent guide documents every error code the installer can print', async () => {
@@ -729,4 +729,87 @@ test('a Poki too old to write its hello still counts as open once devicectl sees
   assert.match(events.find(e => e.event === 'skipped' && e.step === 'model_key').reason, /Settings > Models > Add Account/);
   assert.match(events.find(e => e.event === 'skipped' && e.step === 'loopback').reason, /10\.7\.0\.1/);
   assert.doesNotMatch(await mac.securityLog(), /api-key/, 'a Poki that cannot take the key does not make the installer read it');
+});
+
+test('wrong verification code reuses the pending sign-in once without re-running sign_in, and rate limits stop immediately', async t => {
+  await t.test('retries finish_sign_in on the same pending session and stops after two wrong codes', async t => {
+    const state = await stateDir(t);
+    const bridge = join(state, 'twofa-wrong.mjs');
+    const countsLog = join(state, 'counts.json');
+    await writeFile(bridge, `
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
+const child = spawn(process.execPath, [${JSON.stringify(fakeBridge)}], { stdio: ['pipe', 'pipe', 'inherit'] });
+const counts = { sign_in: 0, finish_sign_in: 0 };
+createInterface({ input: process.stdin }).on('line', line => {
+  const req = JSON.parse(line);
+  if (req.cmd === 'sign_in') counts.sign_in += 1;
+  if (req.cmd === 'finish_sign_in') {
+    counts.finish_sign_in += 1;
+    writeFileSync(${JSON.stringify(countsLog)}, JSON.stringify(counts));
+    process.stdout.write(JSON.stringify({ id: req.id, err: { kind: 'needs_person', message: 'Apple did not accept that verification code.' } }) + '\\n');
+    return;
+  }
+  writeFileSync(${JSON.stringify(countsLog)}, JSON.stringify(counts));
+  child.stdin.write(line + '\\n');
+}).on('close', () => child.stdin.end());
+createInterface({ input: child.stdout }).on('line', line => process.stdout.write(line + '\\n'));
+`);
+    let codePrompts = 0;
+    const result = await runInstaller(state, {
+      args: ['--bridge', bridge],
+      answer: {
+        ...personAnswers(state),
+        apple_code: async () => {
+          codePrompts += 1;
+          await typeCode(state, '000000\n');
+        },
+      },
+    });
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.events.at(-1).code, 'apple_code_wrong');
+    const counts = JSON.parse(await readFile(countsLog, 'utf8'));
+    assert.equal(counts.sign_in, 1, 'mistyping a code must never start a second SRP sign-in');
+    assert.equal(counts.finish_sign_in, 2, 'stops after two rejected codes so Apple does not lock the account');
+    assert.equal(codePrompts, 2);
+  });
+
+  await t.test('Apple rate limit stops immediately without rotating anisette or retrying sign_in', async t => {
+    const state = await stateDir(t);
+    const bridge = join(state, 'twofa-limit.mjs');
+    const countsLog = join(state, 'counts.json');
+    await writeFile(bridge, `
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
+const child = spawn(process.execPath, [${JSON.stringify(fakeBridge)}], { stdio: ['pipe', 'pipe', 'inherit'] });
+const counts = { sign_in: 0, set_anisette: 0 };
+createInterface({ input: process.stdin }).on('line', line => {
+  const req = JSON.parse(line);
+  if (req.cmd === 'sign_in') {
+    counts.sign_in += 1;
+    writeFileSync(${JSON.stringify(countsLog)}, JSON.stringify(counts));
+    process.stdout.write(JSON.stringify({
+      id: req.id,
+      err: {
+        kind: 'needs_person',
+        message: 'Apple has had too many sign-in attempts or codes for this Apple Account. Wait about an hour before you sign in again, because each new try asks Apple for another code.',
+      },
+    }) + '\\n');
+    return;
+  }
+  if (req.cmd === 'set_anisette') counts.set_anisette += 1;
+  writeFileSync(${JSON.stringify(countsLog)}, JSON.stringify(counts));
+  child.stdin.write(line + '\\n');
+}).on('close', () => child.stdin.end());
+createInterface({ input: child.stdout }).on('line', line => process.stdout.write(line + '\\n'));
+`);
+    const result = await runInstaller(state, { args: ['--bridge', bridge], answer: personAnswers(state) });
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.events.at(-1).code, 'apple_account_limit');
+    const counts = JSON.parse(await readFile(countsLog, 'utf8'));
+    assert.equal(counts.sign_in, 1, 'rate-limited sign-in must stop after the first response');
+    assert.equal(counts.set_anisette, 0, 'rate limit is per Apple Account and must not rotate anisette servers');
+  });
 });
