@@ -60,7 +60,18 @@ struct AccountView: View {
             .frame(minHeight: PageHeroMetrics.height)
         }
         Section("Signing") {
-            if model.teams.isEmpty {
+            if model.teams.isEmpty, let teamsError = model.teamsError {
+                LabeledContent("Team") {
+                    Text(teamsError)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.trailing)
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button("Try Again") { Task { await model.refreshAccount() } }
+                }
+            } else if model.teams.isEmpty {
                 LabeledContent("Team") { ProgressView().controlSize(.small) }
             } else {
                 Picker("Team", selection: Binding(get: { a.teamId ?? model.teams.first?.teamId ?? "" }, set: { id in
