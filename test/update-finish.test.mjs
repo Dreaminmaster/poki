@@ -31,6 +31,10 @@ test('an installed update gives restart instructions when the old process surviv
     await writeFile(join(dir, 'SelfSigner.swift'), source.slice(0, source.indexOf('enum SignerBridge {'))
       .replace('import UIKit', 'import Observation').replace('import UserNotifications', '')
       .replace(/\bexit\(/g, 'ProcessExit.terminate('));
+    const signingViews = await readFile(new URL('../native/ios-app/Poki/Signing/SigningViews.swift', import.meta.url), 'utf8');
+    const updateStep = signingViews.match(/^enum UpdateStep: Equatable \{[\s\S]*?^\}/m)?.[0];
+    assert.ok(updateStep, 'SigningViews.swift must declare UpdateStep');
+    await writeFile(join(dir, 'UpdateStep.swift'), updateStep);
     const app = await readFile(new URL('../native/ios-app/Poki/App/AppModel.swift', import.meta.url), 'utf8');
     const method = (name) => {
       const begin = app.indexOf(`    func ${name}(`);
@@ -51,6 +55,7 @@ test('an installed update gives restart instructions when the old process surviv
       let pairer = Pairer()
       var sessionOn = true
       var sessionStartTask: Task<Void, Never>?
+      var pendingPrepareForTask = true
       var idleTimer: Timer?
       enum AutomationPath { case inProcess, runner }
       var automationPath = AutomationPath.inProcess
@@ -72,7 +77,7 @@ test('an installed update gives restart instructions when the old process surviv
       ${method('windDownForUpdate')}
     }`);
     await exec('swiftc', ['-parse-as-library', '-D', 'POKI_APP',
-      fileURLToPath(new URL('../native/ios-app/Shared/AppLocalization.swift', import.meta.url)), join(dir, 'SelfSigner.swift'), join(dir, 'AppModel.swift'),
+      fileURLToPath(new URL('../native/ios-app/Shared/AppLocalization.swift', import.meta.url)), join(dir, 'SelfSigner.swift'), join(dir, 'UpdateStep.swift'), join(dir, 'AppModel.swift'),
       fileURLToPath(new URL('./fixtures/update-finish/Runtime.swift', import.meta.url)),
       '-o', executable]);
     for (const language of ['en', 'zh-Hans', 'zh-Hant']) {
