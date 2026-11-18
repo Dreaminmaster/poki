@@ -34810,6 +34810,118 @@
         }
       }
     },
+    "Senses" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感知"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感知"
+          }
+        }
+      }
+    },
+    "Security" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全性"
+          }
+        }
+      }
+    },
+    "How Poki Works" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 如何工作"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 如何運作"
+          }
+        }
+      }
+    },
+    "Safety and Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全与访问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全與存取"
+          }
+        }
+      }
+    },
+    "This App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 App"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 App"
+          }
+        }
+      }
+    },
+    "Records" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記錄"
+          }
+        }
+      }
+    },
+    "The Activity Log lists every step Poki took and every approval. The Observing Record lists when Screen History was reading, stopped or left an app out." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活动记录列出 Poki 执行的每一步和每次审批。读取记录列出屏幕历史何时在读取、何时停止以及何时略过了某个 App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活動記錄列出 Poki 執行的每一步和每次審批。讀取記錄列出螢幕歷史何時在讀取、何時停止以及何時略過了某個 App。"
+          }
+        }
+      }
+    },
     "Screen History Settings" : {
       "localizations" : {
         "zh-Hans" : {

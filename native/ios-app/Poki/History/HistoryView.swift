@@ -100,7 +100,7 @@ struct HistoryPage: View {
                 BacktapeLibrary(layout: layout)
             }
         }
-        .navigationTitle(AppLocalization.text("Screen History"))
+        .navigationTitle(AppLocalization.text("Senses"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if !locked {
@@ -157,7 +157,7 @@ struct ScreenHistorySettingsView: View {
                     HistoryPage().settingsPage()
                 } label: {
                     SettingsRow(
-                        title: "View History",
+                        title: "Senses",
                         symbol: "clock.arrow.circlepath",
                         value: size.entries > 0 ? "\(size.entries)" : nil
                     )
@@ -358,7 +358,7 @@ private struct HistoryPermissionsPage: View {
 }
 
 /// When reading was on, paused, blocked or left an app out.
-private struct HistoryRecordPage: View {
+struct HistoryRecordPage: View {
     @State private var records: [HistoryRecord] = []
 
     private func detail(_ record: HistoryRecord) -> String {

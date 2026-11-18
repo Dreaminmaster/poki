@@ -4,12 +4,12 @@ import SwiftUI
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
 // conversations. It replaced the earlier details screen and its "More Settings" layer. Every part of Poki a
 // person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute,
-// Approvals, Agents, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance, Language), and
+// Security, Agents, Senses, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance, Language), and
 // what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
 // approval method is changed on Poki's card in the chat only. The rows are PokiSettingsKit's.
 
 /// Settings: Poki on top, as a group of rows like the groups under it (the owner, 2026-11-13: not a
-/// card of its own): the bear and its name, where Poki stands, and the Activity Log. Then any problem
+/// card of its own): the bear and its name, where Poki stands, Senses and Memory. Then any problem
 /// that keeps Poki from working, and the parts of Poki in three groups of rows.
 struct PokiDetailsView: View {
     @Environment(AppModel.self) private var model
@@ -19,7 +19,6 @@ struct PokiDetailsView: View {
     /// Opens a run in the chat (from the Activity Log).
     var openSession: (String) -> Void = { _ in }
     @Binding var path: NavigationPath
-    @ObservedObject private var historyCapture = HistoryCapture.shared
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
 
@@ -38,10 +37,16 @@ struct PokiDetailsView: View {
                     SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: PokiStatusCopy.word(status), dot: status.mood.dot)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("details.status")
-                    NavigationLink(value: DetailsRoute.history) {
-                        SettingsRow(title: "Activity Log", symbol: "clock")
+                    // Senses: what Poki and agents did, and with Screen History on what the owner did
+                    // (the owner, 2026-11-16: the Activity Log is part of it). Memory right under it.
+                    NavigationLink { HistoryPage().settingsPage() } label: {
+                        SettingsRow(title: "Senses", symbol: "clock.arrow.circlepath")
                     }
-                    .accessibilityIdentifier("details.activity")
+                    .accessibilityIdentifier("details.senses")
+                    NavigationLink(value: SettingsRoute.memory) {
+                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
+                    }
+                    .accessibilityIdentifier("moreSettings.memory")
                 }
 
                 if !isSample {
@@ -73,36 +78,32 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Dictation & Mute", symbol: "mic")
                     }
                     .accessibilityIdentifier("details.voice")
-                    // What always asks, what each method does and the sensitivity. The method in use shows
-                    // here; it is changed on Poki's card in the chat.
-                    NavigationLink(value: DetailsRoute.approvals) {
-                        SettingsRow(title: "Approvals", symbol: "checkmark.shield", value: model.approvalMode.title)
-                    }
-                    .accessibilityIdentifier("moreSettings.approvals")
+                } header: {
+                    SettingsHeader("How Poki Works")
                 }
 
-                // Who else uses it, and what it keeps.
+                // What Poki may do and read, and who else may use it.
                 Section {
+                    // Approvals, what Screen History may read, its lock and the records, on one page.
+                    // The approval method in use shows here.
+                    NavigationLink(value: DetailsRoute.approvals) {
+                        SettingsRow(title: "Security", symbol: "checkmark.shield", value: model.approvalMode.title)
+                    }
+                    .accessibilityIdentifier("moreSettings.approvals")
                     NavigationLink(value: DetailsRoute.agents) {
                         SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right", value: agentsValue)
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
-                    NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
-                    }
-                    .accessibilityIdentifier("moreSettings.memory")
-                    NavigationLink(value: DetailsRoute.screenHistory) {
-                        SettingsRow(title: "Screen History", symbol: "rectangle.stack", value: screenHistoryValue)
-                    }
-                    .accessibilityIdentifier("details.screenHistory")
-                    NavigationLink(value: DetailsRoute.conversations) {
-                        SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
-                    }
-                    .accessibilityIdentifier("details.searchConversations")
+                } header: {
+                    SettingsHeader("Safety and Access")
                 }
 
                 // The app itself.
                 Section {
+                    NavigationLink(value: DetailsRoute.conversations) {
+                        SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
+                    }
+                    .accessibilityIdentifier("details.searchConversations")
                     NavigationLink(value: DetailsRoute.updates) {
                         SettingsRow(title: "Signing & Updates", symbol: "signature", value: updatesValue, warns: updateWaits)
                     }
@@ -132,6 +133,8 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("details.health")
                     .id(Self.lastRow)
+                } header: {
+                    SettingsHeader("This App")
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
                         .monospacedDigit()
@@ -182,7 +185,7 @@ struct PokiDetailsView: View {
                         .navigationTitle(AppLocalization.text("Signing & Updates"))
                         .navigationBarTitleDisplayMode(.inline)
                 case .approvals:
-                    ApprovalsSettingsView()
+                    SecuritySettingsView()
                 case .appearance:
                     AppearanceView()
                 case .interfaceSize:
@@ -229,11 +232,6 @@ struct PokiDetailsView: View {
     private var archivedValue: String? {
         let count = SessionStore.shared.archivedSessions.count
         return count == 0 ? nil : "\(count)"
-    }
-
-    private var screenHistoryValue: String {
-        let on = !isSample && historyCapture.enabled
-        return AppLocalization.text(LocalizedStringResource(on ? "On" : "Off"))
     }
 
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
@@ -287,8 +285,6 @@ private struct ConversationsSettingsView: View {
                         }
                         .accessibilityIdentifier("archived.row")
                     }
-                } header: {
-                    Text("Archived Conversations").textCase(nil)
                 }
                 if archived.isEmpty {
                     ContentUnavailableView("No Archived Conversations", systemImage: "archivebox",
@@ -691,14 +687,14 @@ private struct LanguageSettingsView: View {
 /// how much your chat model may approve by itself. The way of asking is chosen here and on Poki's card (the
 /// same setting); the chat's Approvals are off line links here to turn them back on. The sensitivity's
 /// four levels are segments in their own order, least asking first.
-struct ApprovalsSettingsView: View {
+struct SecurityApprovalSections: View {
     @Environment(AppModel.self) private var model
     /// The way of asking says itself in one line; Learn More opens the whole of it.
     @State private var more = false
 
     var body: some View {
         @Bindable var model = model
-        List {
+        Group {
             Section {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "lock.fill").foregroundStyle(Tint.amberInk).accessibilityHidden(true)
@@ -762,8 +758,15 @@ struct ApprovalsSettingsView: View {
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Approvals"))
-        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Approvals as a page of its own: Security's first sections.
+struct ApprovalsSettingsView: View {
+    var body: some View {
+        List { SecurityApprovalSections() }
+            .navigationTitle(AppLocalization.text("Approvals"))
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
