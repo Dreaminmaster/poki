@@ -17,22 +17,90 @@ use std::time::Duration;
 pub struct Signer {
     pub account: store::Account,
     client: gsa::Client,
+    pending: Option<Pending>,
+    caller: gsa::CodeCaller,
+}
+
+fn now_unix() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 impl Signer {
     pub fn open() -> Result<Signer> {
         let account = store::load()?;
-        let source = account.anisette.clone().unwrap_or_else(Source::default_for_platform);
-        Ok(Signer { account, client: gsa::Client::new(Provider::new(source))? })
+        let now = now_unix();
+        let pending = store::load_pending().filter(|p| p.is_fresh(now));
+        let source = pending
+            .as_ref()
+            .and_then(|p| p.anisette.clone())
+            .or_else(|| account.anisette.clone())
+            .unwrap_or_else(Source::default_for_platform);
+        Ok(Signer { account, client: gsa::Client::new(Provider::new(source))?, pending, caller: gsa::CodeCaller::TokenRefresh })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(client: gsa::Client) -> Result<Signer> {
+        let account = store::load()?;
+        let pending = store::load_pending().filter(|p| p.is_fresh(now_unix()));
+        Ok(Signer { account, client, pending, caller: gsa::CodeCaller::TokenRefresh })
+    }
+
+    pub fn set_caller(&mut self, caller: gsa::CodeCaller) {
+        self.caller = caller;
+    }
+
+    pub fn pending(&self) -> Option<&Pending> {
+        self.pending.as_ref().filter(|p| p.is_fresh(now_unix()))
+    }
+
+    pub fn set_pending_keep_password(&mut self, keep_password: bool) {
+        if let Some(p) = &mut self.pending {
+            p.keep_password = keep_password;
+            let _ = store::save_pending(p);
+        }
+    }
+
+    pub fn is_rate_limited(&self) -> bool {
+        self.account.is_rate_limited(now_unix())
+    }
+
+    pub fn rate_limited_until(&self) -> Option<i64> {
+        let now = now_unix();
+        self.account.rate_limited_until.filter(|&until| now < until)
     }
 
     pub fn set_anisette(&mut self, source: Source) -> Result<()> {
         self.account.anisette = Some(source.clone());
         self.client = gsa::Client::new(Provider::new(source))?;
-        store::save(&self.account)
+        self.persist()
     }
 
-    pub fn signed_in(&self) -> bool { self.account.session.is_some() }
+    pub fn signed_in(&self) -> bool { self.account.session.is_some() && !self.account.needs_reauth }
+
+    pub fn needs_reauth(&self) -> bool { self.account.needs_reauth }
+
+    /// Another client (the CLI, a second app) may have changed the sign-in-again state since this
+    /// one loaded the account. Takes the stored account then, so a stale copy neither signs in with
+    /// the kept password nor writes the state away. True when the account now needs a fresh sign-in.
+    pub fn sync_account(&mut self) -> bool {
+        if let Ok(stored) = store::load() {
+            if stored.needs_reauth != self.account.needs_reauth {
+                self.account = stored;
+                self.pending = store::load_pending().filter(|p| p.is_fresh(now_unix()));
+            }
+        }
+        self.account.needs_reauth
+    }
+
+    /// Saves the account without lifting a sign-in-again state another client stored meanwhile.
+    /// Only a sign-in the person finishes lifts it, and those save directly.
+    fn persist(&mut self) -> Result<()> {
+        if !self.account.needs_reauth && store::load().is_ok_and(|a| a.needs_reauth) {
+            self.account.needs_reauth = true;
+            self.account.xcode_token = None;
+        }
+        store::save(&self.account)
+    }
 
     /// Keeps the anisette server that worked (the client may have moved to a fallback).
     fn remember_anisette(&mut self) {
@@ -44,73 +112,247 @@ impl Signer {
 
     /// Starts a sign-in. `keep_password` lets the keeper re-sign without asking again.
     pub async fn sign_in(&mut self, apple_id: &str, password: &str, keep_password: bool) -> Result<Option<Pending>> {
-        match self.client.sign_in(apple_id.trim(), password).await? {
+        self.sign_in_as(apple_id, password, keep_password, gsa::CodeCaller::SignIn).await
+    }
+
+    /// A sign-in the person started. It goes ahead in the sign-in-again state, and lifts it once
+    /// Apple opens the session.
+    pub async fn sign_in_as(
+        &mut self,
+        apple_id: &str,
+        password: &str,
+        keep_password: bool,
+        caller: gsa::CodeCaller,
+    ) -> Result<Option<Pending>> {
+        self.sync_account();
+        self.start_sign_in(apple_id, password, keep_password, caller, true).await
+    }
+
+    /// A sign-in with the kept password that nobody asked for (renewals, teams, tokens). The stored
+    /// sign-in-again state is read right before the request goes out, so a state another client
+    /// stored while this one waited on Apple stops it.
+    async fn background_sign_in(&mut self, apple_id: &str, password: &str) -> Result<Option<Pending>> {
+        if self.sync_account() {
+            return Err(gsa::incomplete_session());
+        }
+        let caller = self.caller;
+        self.start_sign_in(apple_id, password, true, caller, false).await
+    }
+
+    async fn start_sign_in(
+        &mut self,
+        apple_id: &str,
+        password: &str,
+        keep_password: bool,
+        caller: gsa::CodeCaller,
+        by_person: bool,
+    ) -> Result<Option<Pending>> {
+        let now = now_unix();
+        if self.account.is_rate_limited(now) {
+            return Err(gsa::rate_limited());
+        }
+        if let Some(existing) = &mut self.pending {
+            if existing.is_fresh_for(apple_id, now) {
+                existing.keep_password = keep_password;
+                let _ = store::save_pending(existing);
+                return Ok(Some(existing.clone()));
+            }
+        }
+        let outcome = match self.client.sign_in_with_caller(apple_id.trim(), password, caller).await {
+            Ok(o) => o,
+            Err(e) => {
+                if gsa::is_rate_limit(&e) {
+                    self.account.mark_rate_limited(now);
+                    let _ = self.persist();
+                }
+                return Err(e);
+            }
+        };
+        match outcome {
             SignInOutcome::SignedIn(session) => {
+                self.pending = None;
+                let _ = store::clear_pending();
+                self.account.clear_rate_limit();
                 self.remember_anisette();
                 self.account.session = Some(session);
                 self.account.password = keep_password.then(|| password.to_string());
                 self.account.xcode_token = None;
-                store::save(&self.account)?;
+                if by_person {
+                    self.account.needs_reauth = false;
+                    store::save(&self.account)?;
+                } else {
+                    self.persist()?;
+                }
                 Ok(None)
             }
-            SignInOutcome::NeedsCode(p) => {
-                // The code is checked with the anisette identity that asked for it. Keep the server
-                // that answered (the client may have moved to a fallback), so a second run
-                // (`poki-setup login --code`) checks the code as the same "Mac".
-                let saved_password = self.account.password.clone();
+            SignInOutcome::NeedsCode(mut p) => {
+                p.keep_password = keep_password;
+                p.anisette = Some(self.client.anisette().source().clone());
                 self.remember_anisette();
-                store::save(&store::Account { password: saved_password, ..self.account.clone() })?;
-                self.account.password = keep_password.then(|| password.to_string());
+                self.persist()?;
+                let _ = store::save_pending(&p);
+                self.pending = Some(p.clone());
                 Ok(Some(p))
             }
         }
     }
 
     pub async fn finish_sign_in(&mut self, pending: Pending, code: &str) -> Result<()> {
-        let session = self.client.finish(pending, code).await?;
-        self.remember_anisette();
-        self.account.session = Some(session);
-        self.account.xcode_token = None;
-        store::save(&self.account)?;
+        let now = now_unix();
+        if self.account.is_rate_limited(now) {
+            return Err(gsa::rate_limited());
+        }
+        let mut active = match self.pending.take() {
+            Some(saved) if saved.same_challenge(&pending) => saved,
+            _ => pending,
+        };
+        match self.client.finish(&mut active, code).await {
+            Ok(session) => {
+                self.pending = None;
+                let _ = store::clear_pending();
+                self.account.clear_rate_limit();
+                self.account.needs_reauth = false;
+                self.remember_anisette();
+                self.account.password = active.keep_password.then(|| active.password_str().to_string());
+                self.account.session = Some(session);
+                self.account.xcode_token = None;
+                store::save(&self.account)?;
+                Ok(())
+            }
+            Err(e) => {
+                if gsa::is_rate_limit(&e) {
+                    self.account.mark_rate_limited(now);
+                    let _ = self.persist();
+                }
+                if gsa::is_incomplete_session(&e) {
+                    self.pending = None;
+                    let _ = store::clear_pending();
+                    self.account.needs_reauth = true;
+                    self.account.xcode_token = None;
+                    store::save(&self.account)?;
+                } else {
+                    let _ = store::save_pending(&active);
+                    self.pending = Some(active);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    pub fn cancel_sign_in(&mut self) -> Result<()> {
+        self.pending = None;
+        let _ = store::clear_pending();
+        self.account = store::load()?;
         Ok(())
     }
 
+    /// A new code for the sign-in waiting on one: always the person's request, so it goes ahead in
+    /// the sign-in-again state. A verification step another client used up is dropped first.
+    pub async fn resend_code(&mut self) -> Result<Pending> {
+        self.sync_account();
+        let now = now_unix();
+        if self.account.is_rate_limited(now) {
+            return Err(gsa::rate_limited());
+        }
+        let mut active = self
+            .pending
+            .take()
+            .or_else(store::load_pending)
+            .filter(|p| p.is_fresh(now))
+            .ok_or_else(|| Error::NeedsPerson("Sign in again. The verification step has expired.".into()))?;
+        let wait = active.resend_wait_secs(now);
+        if wait > 0 {
+            let _ = store::save_pending(&active);
+            self.pending = Some(active);
+            return Err(Error::NeedsPerson(format!("Wait {wait} seconds before requesting another verification code.")));
+        }
+        match self.client.resend(&mut active, now).await {
+            Ok(()) => {
+                let _ = store::save_pending(&active);
+                self.pending = Some(active.clone());
+                Ok(active)
+            }
+            Err(e) => {
+                if gsa::is_rate_limit(&e) {
+                    self.account.mark_rate_limited(now);
+                    let _ = self.persist();
+                }
+                let _ = store::save_pending(&active);
+                self.pending = Some(active);
+                Err(e)
+            }
+        }
+    }
+
     pub fn sign_out(&mut self) -> Result<()> {
+        self.pending = None;
+        let _ = store::clear_pending();
         self.account = store::Account { anisette: self.account.anisette.clone(), ..Default::default() };
         store::clear()?;
         store::save(&self.account)
     }
 
+    async fn fetch_xcode_token(&mut self, session: &gsa::Session) -> Result<AppToken> {
+        match self.client.xcode_token(session).await {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                if gsa::is_rate_limit(&e) {
+                    self.account.mark_rate_limited(now_unix());
+                    let _ = self.persist();
+                }
+                Err(e)
+            }
+        }
+    }
+
     /// A token good for at least ten minutes, refreshed from the session or, when the
-    /// session is gone and the password is kept, from a fresh sign-in.
+    /// session is expired and the password is kept, from a fresh sign-in.
     pub async fn token(&mut self) -> Result<AppToken> {
+        self.sync_account();
+        let now = now_unix();
+        if self.account.is_rate_limited(now) {
+            return Err(gsa::rate_limited());
+        }
+        if let Some(pending) = &self.pending {
+            if pending.is_fresh(now) {
+                return Err(Error::NeedsCode(Box::new(pending.clone())));
+            }
+            self.pending = None;
+            let _ = store::clear_pending();
+        }
+        if self.account.needs_reauth {
+            return Err(gsa::incomplete_session());
+        }
         if let Some(t) = &self.account.xcode_token {
             if t.valid_for(600) {
                 return Ok(t.clone());
             }
         }
         let session = self.account.session.clone().ok_or_else(|| Error::NeedsPerson("Sign in with your Apple ID first.".into()))?;
-        let fresh = match self.client.xcode_token(&session).await {
+        let fetched = self.fetch_xcode_token(&session).await;
+        // Another client may have stored the sign-in-again state while Apple answered.
+        if self.sync_account() {
+            return Err(gsa::incomplete_session());
+        }
+        let fresh = match fetched {
             Ok(t) => t,
-            Err(Error::NeedsPerson(_)) | Err(Error::Apple { .. }) if self.account.password.is_some() => {
+            Err(e) if gsa::is_session_expired(&e) && self.account.password.is_some() => {
                 let (id, pw) = (session.apple_id.clone(), self.account.password.clone().unwrap());
-                match self.client.sign_in(&id, &pw).await? {
-                    SignInOutcome::SignedIn(s) => {
-                        let t = self.client.xcode_token(&s).await?;
-                        self.account.session = Some(s);
-                        t
+                match self.background_sign_in(&id, &pw).await? {
+                    None => {
+                        let s = self.account.session.clone().unwrap();
+                        self.fetch_xcode_token(&s).await?
                     }
-                    SignInOutcome::NeedsCode(pending) => {
-                        self.remember_anisette();
-                        let _ = store::save(&self.account);
-                        return Err(Error::NeedsCode(Box::new(pending)));
-                    }
+                    Some(pending) => return Err(Error::NeedsCode(Box::new(pending))),
                 }
             }
             Err(e) => return Err(e),
         };
         self.account.xcode_token = Some(fresh.clone());
-        store::save(&self.account)?;
+        self.persist()?;
+        if self.account.needs_reauth {
+            return Err(gsa::incomplete_session());
+        }
         Ok(fresh)
     }
 
@@ -131,7 +373,7 @@ impl Signer {
         }
         let pick = if teams.len() == 1 { teams[0].clone() } else { teams.iter().find(|t| !t.is_free).or(teams.first()).cloned().unwrap() };
         self.account.team_id = Some(pick.team_id.clone());
-        store::save(&self.account)?;
+        self.persist()?;
         Ok(pick)
     }
 
@@ -164,7 +406,7 @@ impl Signer {
 
     pub fn choose_team(&mut self, team_id: &str) -> Result<()> {
         self.account.team_id = Some(team_id.to_string());
-        store::save(&self.account)
+        self.persist()
     }
 }
 
@@ -449,6 +691,9 @@ pub async fn run(signer: &mut Signer, opts: Options, reporter: &Reporter) -> Res
 #[cfg(feature = "device")]
 /// Signs Poki again for a phone this computer set up and reinstalls it (an upgrade keeps data).
 pub async fn renew(signer: &mut Signer, udid: &str, reporter: &Reporter) -> Result<keeper::Record> {
+    if signer.sync_account() {
+        return Err(gsa::incomplete_session());
+    }
     let rec = keeper::get(udid)?.ok_or_else(|| Error::msg("This computer did not set up that iPhone."))?;
     let result: Result<keeper::Record> = async {
         let phone = pick_phone(Some(udid)).await?;
@@ -484,10 +729,20 @@ pub async fn renew(signer: &mut Signer, udid: &str, reporter: &Reporter) -> Resu
 #[cfg(feature = "device")]
 /// Renews every phone that is due. Returns (udid, result) pairs.
 pub async fn renew_due(signer: &mut Signer, reporter: &Reporter) -> Vec<(String, Result<keeper::Record>)> {
+    if signer.sync_account() || signer.is_rate_limited() || signer.pending().is_some() {
+        return vec![];
+    }
+    let prev_caller = signer.caller;
+    signer.set_caller(gsa::CodeCaller::KeeperRenew);
     let mut out = vec![];
     for r in keeper::due().unwrap_or_default() {
         let res = renew(signer, &r.udid, reporter).await;
+        let stop = matches!(&res, Err(Error::NeedsCode(_))) || matches!(&res, Err(e) if gsa::is_rate_limit(e));
         out.push((r.udid.clone(), res));
+        if stop {
+            break;
+        }
     }
+    signer.set_caller(prev_caller);
     out
 }

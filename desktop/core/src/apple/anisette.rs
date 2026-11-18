@@ -117,8 +117,62 @@ impl Provider {
 
     pub fn source(&self) -> &Source { &self.source }
 
+    /// Pins this provider to `source` without discarding an already-connected remote client for the
+    /// same URL, so finishing a 2FA check stays on the exact "Mac" identity that asked for the code.
+    pub fn pin_source(&mut self, source: Source) {
+        if self.source != source {
+            self.source = source;
+            self.remote = None;
+            self.last = None;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(source: Source, headers: Headers) -> Self {
+        Provider { source, remote: None, last: Some(headers), fallbacks: Vec::new() }
+    }
+
+    /// Headers for finishing an in-flight 2FA sign-in: never rotates to another fallback server,
+    /// never switches from System to Remote, and never wipes `adi_pb` to provision a new identity.
+    pub async fn headers_pinned(&mut self) -> Result<Headers> {
+        #[cfg(test)]
+        if self.remote.is_none() && self.fallbacks.is_empty() {
+            if let Some(h) = &self.last {
+                return Ok(h.clone());
+            }
+        }
+        if let Some(h) = &self.last {
+            if h.fresh() {
+                return Ok(h.clone());
+            }
+        }
+        match &self.source {
+            Source::System => {
+                let map = system::headers()?;
+                let h = Headers { map: with_time(map), made_at: std::time::Instant::now() };
+                self.last = Some(h.clone());
+                Ok(h)
+            }
+            Source::Remote { url } => {
+                if self.remote.is_none() {
+                    self.remote = Some(remote::Client::new(url.clone()).await?);
+                }
+                let map = self.remote.as_mut().unwrap().headers_pinned().await?;
+                let h = Headers { map: with_time(map), made_at: std::time::Instant::now() };
+                self.last = Some(h.clone());
+                Ok(h)
+            }
+        }
+    }
+
     /// A fresh header set, provisioning the remote identity on first use.
     pub async fn headers(&mut self) -> Result<Headers> {
+        #[cfg(test)]
+        if self.remote.is_none() && self.fallbacks.is_empty() {
+            if let Some(h) = &self.last {
+                return Ok(h.clone());
+            }
+        }
         if let Some(h) = &self.last {
             if h.fresh() {
                 return Ok(h.clone());
@@ -390,6 +444,13 @@ pub mod remote {
                 }
                 Err(e) => Err(e),
             }
+        }
+
+        pub async fn headers_pinned(&mut self) -> Result<HashMap<String, String>> {
+            if self.state.adi_pb.is_none() {
+                return Err(Error::msg("The saved machine identity for this sign-in is missing. Sign in again."));
+            }
+            self.fetch().await
         }
 
         async fn fetch(&self) -> Result<HashMap<String, String>> {

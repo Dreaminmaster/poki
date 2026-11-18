@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Rebuild the contributor list from GitHub data, and keep the README
-// "Core contributors" wall in step with it.
+// Rebuild the contributor list from GitHub data, and keep the Contributors
+// section of CONTRIBUTING.md (co-creator, core and thanks walls) in step with it.
 //
 //   node scripts/contributors.mjs                      report: counted, pending, new
 //   node scripts/contributors.mjs --out-dir <dir>      also write contributors.json and contributors.md there
 //   node scripts/contributors.mjs --check              exit 1 if someone qualifies but is not on the wall
-//   node scripts/contributors.mjs --write-readme       rewrite the co-creator, core and thanks sections in all six READMEs from scripts/contributors.curated.json
+//   node scripts/contributors.mjs --write-readme       rewrite the co-creator, core and thanks walls in CONTRIBUTING.md from scripts/contributors.curated.json
 //
 // Statuses in the curated file: counted (co-creator and core sections), community (thanks wall and the JSON,
 // early feedback and attempts), pending (undecided), excluded (not a contribution).
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const repo = 'JosssphZhou/poki';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const curatedPath = join(root, 'scripts/contributors.curated.json');
-const readmes = { en: 'README.md', 'zh-CN': 'README.zh-CN.md', 'zh-TW': 'README.zh-TW.md', ja: 'README.ja.md', ko: 'README.ko.md', es: 'README.es.md' };
+const contributing = 'CONTRIBUTING.md';
 const start = '<!-- CORE-CONTRIBUTORS:START -->';
 const end = '<!-- CORE-CONTRIBUTORS:END -->';
 const coCreatorLogin = 'ZhehanZhang';
@@ -92,7 +92,7 @@ function collect() {
   return { owner, people: [...people.values()] };
 }
 
-function wallLogins(file = readmes.en) {
+function wallLogins(file = contributing) {
   const text = readFileSync(join(root, file), 'utf8');
   const from = text.indexOf(start);
   const core = from === -1 ? text.slice(text.search(/^## Core contributors/m)) : text.slice(from, text.indexOf(end, from));
@@ -142,7 +142,7 @@ function activity(r) {
   return [...r.issues.map(i => `issue #${i.number} (${i.state})`), ...r.otherPulls.map(x => `PR #${x.number} (${x.state})`), ...r.mergedPulls.map(x => `PR #${x.number} (merged)`)].join(', ');
 }
 
-// ---- README wall -------------------------------------------------------
+// ---- Contributors wall -------------------------------------------------------
 
 const escapeAttr = s => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/\*/g, '&#42;');
 // An entry can set "display" to show a different name than the GitHub login. Links still use the login.
@@ -211,17 +211,18 @@ try {
     if (!coCreator) throw new Error(`No counted contributor found for: ${coCreatorLogin}`);
     const rows = result.counted.filter(r => r.login !== coCreatorLogin && r.entry?.lines);
     const missing = result.counted.filter(r => r.reviewed && !r.entry?.lines).map(r => r.login);
-    if (missing.length) throw new Error(`No README lines yet for: ${missing.join(', ')}`);
+    if (missing.length) throw new Error(`No wall lines yet for: ${missing.join(', ')}`);
     const kinds = refKind(people);
     const changed = [];
-    for (const [language, file] of Object.entries(readmes)) {
-      const path = join(root, file);
+    const language = 'en';
+    {
+      const path = join(root, contributing);
       const before = readFileSync(path, 'utf8');
-      const withCoCreator = injectWall(before, renderCoCreator(coCreator, language), file, coCreatorStart, coCreatorEnd);
-      const after = injectWall(withCoCreator, renderWall(rows, language, kinds), file);
-      if (before !== after) { writeFileSync(path, after); changed.push(file); }
+      const withCoCreator = injectWall(before, renderCoCreator(coCreator, language), contributing, coCreatorStart, coCreatorEnd);
+      const after = injectWall(withCoCreator, renderWall(rows, language, kinds), contributing);
+      if (before !== after) { writeFileSync(path, after); changed.push(contributing); }
     }
-    console.log(changed.length ? `Updated ${changed.join(', ')}` : 'README walls already up to date.');
+    console.log(changed.length ? `Updated ${changed.join(', ')}` : 'CONTRIBUTING.md walls already up to date.');
     // The thanks wall draws from the same curated file.
     const thanks = spawnSync(process.execPath, [join(root, 'bin/thanks-wall.mjs')], { encoding: 'utf8' });
     process.stdout.write(thanks.stdout); process.stderr.write(thanks.stderr);
@@ -229,7 +230,7 @@ try {
   }
 
   const names = list => list.map(r => r.login).join(', ') || 'none';
-  console.log(`Counted ${result.counted.length}. On the README wall: ${result.counted.filter(r => r.onWall).length}.`);
+  console.log(`Counted ${result.counted.length}. On the wall: ${result.counted.filter(r => r.onWall).length}.`);
   console.log(`New (counted, not on the wall): ${names(result.missingFromWall)}`);
   console.log(`Not reviewed yet (not in contributors.curated.json): ${names(result.unreviewed)}`);
   console.log(`Pending a decision: ${names(result.pending)}`);

@@ -39,6 +39,9 @@ async fn with_signer<T>(state: &Shared, f: impl AsyncFnOnce(&mut setup::Signer) 
     if guard.is_none() {
         *guard = Some(setup::Signer::open()?);
     }
+    if guard.as_mut().unwrap().sync_account() {
+        *state.pending.lock().await = None;
+    }
     match f(guard.as_mut().unwrap()).await {
         Ok(v) => Ok(v),
         Err(poki_setup_core::Error::NeedsCode(pending)) => {
@@ -137,6 +140,7 @@ pub async fn devmode(app: AppHandle, udid: String) -> R<bool> {
 #[derive(Serialize)]
 pub struct AccountView {
     signed_in: bool,
+    needs_reauth: bool,
     apple_id: Option<String>,
     name: Option<String>,
     team_id: Option<String>,
@@ -147,16 +151,17 @@ pub struct AccountView {
 
 #[tauri::command]
 pub async fn account(state: State<'_, Shared>) -> R<AccountView> {
-    let pending = state.pending.lock().await.as_ref().map(|p| p.via);
     with_signer(&state, async |s| {
+        let mem_pending = state.pending.lock().await.as_ref().map(|p| p.via);
         Ok(AccountView {
             signed_in: s.signed_in(),
+            needs_reauth: s.needs_reauth(),
             apple_id: s.account.apple_id().map(|a| a.to_string()),
             name: s.account.display_name(),
             team_id: s.account.team_id.clone(),
             password_kept: s.account.password.is_some(),
             anisette: s.account.anisette.clone().unwrap_or_else(Source::default_for_platform),
-            pending_factor: pending,
+            pending_factor: mem_pending.or_else(|| s.pending().map(|p| p.via)),
         })
     })
     .await
@@ -173,13 +178,19 @@ pub async fn sign_in(state: State<'_, Shared>, apple_id: String, password: Strin
 
 #[tauri::command]
 pub async fn finish_sign_in(state: State<'_, Shared>, code: String) -> R<()> {
-    let pending = state.pending.lock().await.take().ok_or_else(|| poki_setup_core::Error::msg("Start the sign-in again."))?;
-    let keep = pending.clone();
-    let result = with_signer(&state, async |s| s.finish_sign_in(pending, &code).await).await;
+    let mut updated_pending = None;
+    let result = with_signer(&state, async |s| {
+        let mem_pending = state.pending.lock().await.take();
+        let pending = mem_pending.or_else(|| s.pending().cloned()).ok_or_else(|| poki_setup_core::Error::msg("Start the sign-in again."))?;
+        let r = s.finish_sign_in(pending, &code).await;
+        if r.is_err() {
+            updated_pending = s.pending().cloned();
+        }
+        r
+    })
+    .await;
     if result.is_err() {
-        // A wrong code: keep the waiting sign-in so the person can type the code again. Starting
-        // over would ask Apple for another code, which replaces this one and counts toward its limit.
-        *state.pending.lock().await = Some(keep);
+        *state.pending.lock().await = updated_pending;
     }
     result
 }
