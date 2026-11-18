@@ -28,12 +28,22 @@ struct AnisetteSource: Codable, Equatable {
 
 struct AccountState: Decodable {
     var signedIn: Bool
+    var needsReauth: Bool? = nil
     var appleId: String?
     var name: String?
     var teamId: String?
     var passwordKept: Bool
     var anisette: AnisetteSource
     var pendingFactor: String?
+    var rateLimited: Bool? = nil
+    var rateLimitedUntil: Int? = nil
+
+    func isRateLimited(at now: Date = .now) -> Bool {
+        if let until = rateLimitedUntil {
+            return now.timeIntervalSince1970 < TimeInterval(until)
+        }
+        return rateLimited == true
+    }
 }
 
 struct SignInAnswer: Decodable {

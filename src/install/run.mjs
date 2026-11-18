@@ -97,8 +97,8 @@ function classify(step, error) {
     if (/Developer Mode/i.test(text)) return 'developer_mode_off';
     if (/unlock/i.test(text) && kind !== 'apple') return 'phone_locked';
     if (kind === 'apple' || step === 'apple_account') {
-      if (/App ID|maximum|too many|certificate/i.test(text)) return 'apple_account_limit';
-      if (/-8004[56]|\b5\d\d\b|unavailable|busy/i.test(text)) return 'apple_server_busy';
+      if (/App ID|maximum|too many|Wait about an hour|rate.?limit|certificate/i.test(text)) return 'apple_account_limit';
+      if (/-8004[56]/.test(text) || ((/\b5\d\d\b|unavailable|busy/i.test(text)) && !/send a code|text a code|verification code/i.test(text))) return 'apple_server_busy';
       if (/verification code|-21669|code/i.test(text)) return 'apple_code_wrong';
       if (/password|-22406|incorrect/i.test(text)) return 'apple_sign_in_rejected';
     }
