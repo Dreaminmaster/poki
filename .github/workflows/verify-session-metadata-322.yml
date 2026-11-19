@@ -1,0 +1,135 @@
+name: Persistent session metadata and chat verification
+
+on:
+  push:
+    branches:
+      - ci/session-metadata-322-current
+
+permissions:
+  contents: read
+
+jobs:
+  screen-history:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest released Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          command -v xcodegen || brew install xcodegen
+          mkdir -p out
+          if ! command -v timeout >/dev/null && ! command -v gtimeout >/dev/null; then brew install coreutils; fi
+      - name: Select and boot a fresh simulator before compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          xcrun simctl list -j > out/simctl-inventory.json
+          SDK="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          cat > /tmp/poki-history-select.py <<'PY'
+          import json, re, sys
+          
+          def version(value):
+              if not isinstance(value, str) or not re.fullmatch(r'\d+(?:\.\d+)*', value):
+                  return None
+              parts = tuple(int(part) for part in value.split('.'))
+              return (parts + (0, 0, 0))[:3]
+          
+          def select(info, sdk_text):
+              sdk = version(sdk_text)
+              if sdk is None:
+                  raise ValueError(f'Unexpected simulator SDK version {sdk_text!r}')
+              types = {item['identifier']: item for item in info.get('devicetypes', []) if item.get('identifier')}
+              runtimes = []
+              for runtime in info.get('runtimes', []):
+                  rver = version(runtime.get('version'))
+                  identifier = runtime.get('identifier', '')
+                  if runtime.get('isAvailable') and identifier.startswith('com.apple.CoreSimulator.SimRuntime.iOS-') and rver is not None and (18, 0, 0) <= rver <= sdk:
+                      runtimes.append((rver, identifier, runtime))
+              for _, identifier, runtime in sorted(runtimes, key=lambda item: item[:2], reverse=True):
+                  phones = []
+                  for device in info.get('devices', {}).get(identifier, []):
+                      device_type = device.get('deviceTypeIdentifier')
+                      if device.get('isAvailable') and device_type and device_type.startswith('com.apple.CoreSimulator.SimDeviceType.iPhone-'):
+                          phones.append((device.get('name', ''), device_type))
+                  if not phones:
+                      for item in runtime.get('supportedDeviceTypes', []):
+                          device_type = item if isinstance(item, str) else item.get('identifier')
+                          if device_type and device_type.startswith('com.apple.CoreSimulator.SimDeviceType.iPhone-'):
+                              phones.append((types.get(device_type, {}).get('name', device_type), device_type))
+                  if phones:
+                      phones.sort(key=lambda item: ('Pro' not in item[0], 'Max' in item[0], item[0]))
+                      return phones[0][1], identifier
+              raise ValueError(f'No compatible available iPhone simulator for SDK {sdk_text}')
+          
+          if __name__ == '__main__':
+              info = json.load(sys.stdin)
+              try:
+                  print(*select(info, sys.argv[1]))
+              except ValueError as error:
+                  print(error, file=sys.stderr)
+                  sys.exit(1)
+          PY
+          CHOICE="$(python3 /tmp/poki-history-select.py "$SDK" < out/simctl-inventory.json)"
+          read -r TYPE RUNTIME <<< "$CHOICE"
+          printf 'SDK %s\nDevice type %s\nRuntime %s\n' "$SDK" "$TYPE" "$RUNTIME" | tee out/simulator-selection.log
+          UDID="$(xcrun simctl create "Poki History Review 446 main v2" "$TYPE" "$RUNTIME")"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b 2>&1 | tee out/simulator-boot.log
+      - name: Build simulator launcher and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          native/launcher/fetch-idevice.sh
+          rustup target add aarch64-apple-ios-sim
+          cargo build --release --locked --target aarch64-apple-ios-sim --manifest-path native/launcher/Cargo.toml
+          native/ios-app/scripts/make-assets.sh
+          xcodegen generate --spec native/ios-app/project.yml
+      - name: Build actual PokiTests and preserve complete logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -project native/ios-app/Poki.xcodeproj -scheme Poki \
+            -destination "id=$UDID" -derivedDataPath build/history-review -jobs 2 \
+            -resultBundlePath out/history-build.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee out/build.log
+      - name: Run session metadata, connection and chat regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TIMEOUT=$(command -v timeout || command -v gtimeout)
+          "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
+            -destination "id=$UDID" -derivedDataPath build/history-review \
+            -only-testing:PokiTests/ModelSessionMetadataTests -only-testing:PokiTests/ConnectionCheckTests -only-testing:PokiTests/ChatHarnessTests -parallel-testing-enabled NO \
+            -resultBundlePath out/session-tests.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee out/session-tests.log
+          xcrun xcresulttool get test-results summary --path out/session-tests.xcresult | tee out/session-summary.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("out/session-summary.json"))
+          assert d["totalTestCount"] >= 40 and d["failedTests"] == 0 and d["skippedTests"] == 0, d
+          PY
+      - name: Preserve build and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-metadata-322-results
+          path: out/
+          if-no-files-found: warn
+      - name: Delete only the temporary simulator
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${UDID:-}" ]; then
+            xcrun simctl shutdown "$UDID" || true
+            xcrun simctl delete "$UDID" || true
+          fi
