@@ -81,6 +81,22 @@
         }
       }
     },
+    "Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. The Poki shortcut turns it on again when Wi-Fi disconnects. Add it once and Poki keeps reading on cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，而在蜂窝网络下 iOS 不允许启动它。Poki 快捷指令会在 Wi-Fi 断开时重新打开它。添加一次，Poki 在蜂窝网络下也能继续读取。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而在行動網路下 iOS 不允許啟動它。Poki 捷徑會在 Wi-Fi 斷開時重新打開它。加入一次，Poki 在行動網路下也能繼續讀取。"
+          }
+        }
+      }
+    },
     "Set Up by Hand" : {
       "localizations" : {
         "zh-Hans" : {

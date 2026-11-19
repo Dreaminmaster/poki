@@ -54,11 +54,15 @@ struct LoopbackPrompt: ViewModifier {
         case builtIn
         case proxy(name: String, url: URL)
         case openSetup
+        /// On cellular with the reconnect shortcut set up: Wi-Fi or the shortcut brings it back.
         case wiFi
+        /// On cellular without the shortcut: iOS will not start the loopback, and the shortcut is
+        /// what keeps it going there (offered with the loopback in Setup too).
+        case shortcut
     }
 
     private var action: Action {
-        if model.loopback.cellularOnly { return .wiFi }
+        if model.loopback.cellularOnly { return HistoryReconnect.shared.lastAt == nil ? .shortcut : .wiFi }
         switch model.setup.loopback {
         case .builtIn: return .builtIn
         case .proxy:
@@ -107,6 +111,8 @@ struct LoopbackPrompt: ViewModifier {
             if let url = URL(string: "poki://setup") { UIApplication.shared.open(url) }
         case .wiFi:
             shown = false
+        case .shortcut:
+            UIApplication.shared.open(HistoryReconnect.shortcut)
         }
     }
 
@@ -176,7 +182,9 @@ private struct LoopbackPromptSheet: View {
 
     private var message: String {
         let reads: String
-        if action == .wiFi {
+        if action == .shortcut {
+            reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. The Poki shortcut turns it on again when Wi-Fi disconnects. Add it once and Poki keeps reading on cellular."))
+        } else if action == .wiFi {
             reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Connect to Wi-Fi and Poki turns it on again."))
         } else if let lastRead {
             let since = lastRead.formatted(.relative(presentation: .named))
@@ -193,6 +201,7 @@ private struct LoopbackPromptSheet: View {
         case .proxy(let name, _): AppLocalization.text(LocalizedStringResource("Open \(name)"))
         case .openSetup: AppLocalization.text(LocalizedStringResource("Open Setup"))
         case .wiFi: AppLocalization.text(LocalizedStringResource("OK"))
+        case .shortcut: AppLocalization.text(LocalizedStringResource("Get the Shortcut"))
         }
     }
 }
