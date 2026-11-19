@@ -283,6 +283,8 @@ final class HistoryCapture: ObservableObject {
                 self.resume()
                 let request: [String: Any] = [
                     "op": "run", "device_address": "10.7.0.1", "pairing_file": model.pairingPath ?? "", "host_name": "Poki",
+                    // After a restart the image is gone and the audit service with it: the run mounts it again.
+                    "ddi_dir": AppFiles.ddiDirectory.path,
                     "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": max(10, left),
                     "include_text": true, "include_tree": true,
                 ]
