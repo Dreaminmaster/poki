@@ -55,6 +55,28 @@ final class LoopbackWaitTests: XCTestCase {
 }
 
 final class ToolTests: XCTestCase {
+    func testSentDialogTouchesDoNotConfirmAnUnchangedScreen() async {
+        let (core, wda, _) = makeCore()
+        wda.source([("StaticText", "Confirm")])
+        _ = await core.call("look", [:])
+
+        for touch: JSON in [["tap": [180, 120]], ["long_press": ["x": 180, "y": 120, "ms": 800]]] {
+            let result = await core.call("do", ["actions": .array([touch])])
+            XCTAssertFalse(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("(sent,"), result.text)
+            XCTAssertTrue(result.text.contains("screen_changed: false"), result.text)
+            XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        }
+
+        wda.set("POST /wda/tap") { [weak wda] _ in
+            wda?.source([("StaticText", "Next page")])
+            return (200, ["value": nil])
+        }
+        let changed = await core.call("do", ["actions": [["tap": [180, 120]]]])
+        XCTAssertTrue(changed.text.contains("screen_changed: true"), changed.text)
+        XCTAssertFalse(changed.text.contains("touch effect: unconfirmed"), changed.text)
+    }
+
     func testLookListsElementsWithAPicture() async {
         let (core, _, _) = makeCore()
         let result = await core.call("look", [:])

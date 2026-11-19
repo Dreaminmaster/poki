@@ -1,28 +1,30 @@
 <p align="center">
-  <img src="docs/images/poki-icon.png" width="64" height="64" alt="Poki icon">
+  <a href="https://poki.bot"><img src="docs/images/poki-hero.gif" width="100%" alt="Poki usa tu iPhone igual que tú. Un agente que toca, escribe y desliza en tu iPhone real."></a>
 </p>
 
 <h1 align="center">Poki usa tu iPhone como lo harías tú</h1>
 
+<h3 align="center">Copia este prompt y envíaselo a tu agente de código</h3>
+
+```text
+Install Poki on my iPhone from https://github.com/JosssphZhou/poki
+```
+
+<p align="center"><sub>Primero conecta tu iPhone por USB y desbloquéalo. Una cuenta de Apple gratuita sirve.</sub></p>
+
+<!-- badges:start -->
 <p align="center">
-  <img src="docs/images/poki-home.gif" width="500" alt="Animación de la página de inicio del sitio web de Poki">
+  <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.4_Beta-blue" alt="Poki App 0.4.4 Beta"></a>
+  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
+<!-- badges:end -->
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | Español<br>
   <a href="https://poki.bot">poki.bot</a>
 </p>
-
-<!-- badges:start -->
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
-  <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/forks"><img src="https://img.shields.io/github/forks/JosssphZhou/poki" alt="GitHub forks"></a>
-  <a href="https://github.com/JosssphZhou/poki/issues"><img src="https://img.shields.io/github/issues/JosssphZhou/poki" alt="GitHub issues"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.4_Beta-blue" alt="Poki App 0.4.4 Beta"></a>
-  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
-</p>
-<!-- badges:end -->
 
 <p align="center">
   <strong>Si Poki te resulta útil, haz clic en ★ Star para apoyar el proyecto.</strong>
@@ -32,7 +34,17 @@
 
 Poki es un agente de código abierto para iPhone que opera todo tu iPhone por ti. La app Poki funciona directamente en el propio iPhone, lee la pantalla y toca, escribe y desplaza contenido en apps reales usando tu propia cuenta de modelo. Tú eliges cómo pide permiso; los pagos, las eliminaciones y las acciones en Wallet siempre piden confirmación.
 
+<p align="center">
+  <img src="docs/images/poki-order-demo.gif" width="280" alt="Poki hace un pedido en Uber Eats por sí solo">
+</p>
+
 ## Por qué Poki
+
+<p align="center">
+  <img src="docs/images/why-1-errands.png" width="32%" alt="Plan paso a paso de Poki para pedir sopa de fideos con carne, mostrado en el chat">
+  <img src="docs/images/why-2-routines.png" width="32%" alt="Poki en la Dynamic Island mientras trabaja en otra app">
+  <img src="docs/images/why-3-standalone.png" width="32%" alt="Poki pidiendo aprobación antes de un pago: ¿Permitir pago?">
+</p>
 
 - **Evita saltar entre apps para tareas cotidianas.** Pide ayuda a Poki en el chat, mantén pulsado el botón de Acción o usa Siri para buscar en el navegador integrado, consultar el tiempo o crear una nota. En iPhone Duo, Poki trabaja en dos apps a la vez en Vista dividida.
 - **Ejecuta tareas repetidas con un toque o con la voz.** En lugar de repetir los mismos pasos cada día, abre una habilidad guardada desde la pantalla de inicio o inicia una charla por voz mientras la Dynamic Island muestra cada paso.
@@ -69,13 +81,14 @@ Poki es un agente de código abierto para iPhone que opera todo tu iPhone por ti
 | Conexión | Conexión externa que enrute `10.7.0.1` de vuelta al iPhone (LocalDevVPN, Karing o Shadowrocket). |
 | Cuenta de modelo | Sesión de ChatGPT Plus/Pro, clave API (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, OpenCode Go) o servidor compatible con OpenAI. |
 
-- Instalación completa, actualizaciones, preguntas frecuentes, límites y hoja de ruta: [Guía de Poki para iPhone](docs/iphone-guide.es.md)
-- Registro de cambios: [CHANGELOG.md](CHANGELOG.md)
 - Skill para agentes y asistente de escritorio: [skill install-poki](skills/install-poki/SKILL.md) y [Poki Setup](desktop/README.md)
 - Verificación, límites y canales de publicación: [Verificación](docs/verification.md) y [Canales de publicación](docs/release-channels.md)
 - Herramientas anteriores desde ordenador (sin nuevas actualizaciones): [Poki MCP y Poki Agent](docs/poki-mcp.md)
 
 </details>
+
+- Instalación completa, actualizaciones, preguntas frecuentes, límites y hoja de ruta: [Guía de Poki para iPhone](docs/iphone-guide.es.md)
+- Registro de cambios: [CHANGELOG.md](CHANGELOG.md)
 
 ## Comunidad
 
@@ -85,4 +98,8 @@ Poki es un agente de código abierto para iPhone que opera todo tu iPhone por ti
 
 Consulta la lista de colaboradores en [CONTRIBUTING.md](CONTRIBUTING.md#contributors).
 
-Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Código abierto bajo [AGPL-3.0-only](LICENSE). Los recursos de marca se rigen por [BRAND.md](BRAND.md). Consulta [Guía de Poki para iPhone](docs/iphone-guide.es.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) y el [Descargo de responsabilidad](docs/iphone-guide.es.md#descargo-de-responsabilidad).
+<br>
+
+<p align="center"><img src="docs/images/poki-icon.png" width="40" height="40" alt="Poki"></p>
+
+<p align="center"><sub>Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Código abierto bajo <a href="LICENSE">AGPL-3.0-only</a>. Los recursos de marca se rigen por <a href="BRAND.md">BRAND.md</a>. Consulta <a href="docs/iphone-guide.es.md">Guía de Poki para iPhone</a>, <a href="THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a> y el <a href="docs/iphone-guide.es.md#descargo-de-responsabilidad">Descargo de responsabilidad</a>.</sub></p>

@@ -182,7 +182,7 @@ final class Computer: @unchecked Sendable {
 
     /// Reads the screen and answers with the facts, whatever part of the read failed. `changes` lists
     /// only what changed since the read before (a `do`); `full` lists every element, as the tree has it.
-    func readAndReply(until: Double, full: Bool, changes: Bool = false, did: [String] = [], error: String? = nil, extra: [String] = []) async -> ToolResult {
+    func readAndReply(until: Double, full: Bool, changes: Bool = false, checkingTouch: Bool = false, did: [String] = [], error: String? = nil, extra: [String] = []) async -> ToolResult {
         let inWorkspace = selectedPane != nil
         let readTimeout = inWorkspace ? max(config.readTimeout, 6) : config.readTimeout
         let budget = max(0.8, min(readTimeout, until - now() - 0.2))
@@ -239,6 +239,7 @@ final class Computer: @unchecked Sendable {
         let picture = reading.png.map { PictureSketch(png: $0) }
         let pictureMoved = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } } ?? false
         var changedLine: String?
+        var touchEffectUnconfirmed = false
         if changes, treeRead, let before = lastTree {
             let pictureChanged: Bool? = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } }
             // Where and how much the picture moved, so a small change (an indicator fading, a badge)
@@ -254,7 +255,10 @@ final class Computer: @unchecked Sendable {
                 changedLine = "screen_changed: true (only the picture changed\(where_); the elements are the same)"
                 if let now = picture, let last = lastPicture { pictureOnlyShare = now.change(from: last)?.share }
             }
-            else { changedLine = "screen_changed: false (the elements\(pictureChanged == false ? " and the picture" : "") are the same as in the read before)" }
+            else {
+                changedLine = "screen_changed: false (the elements\(pictureChanged == false ? " and the picture" : "") are the same as in the read before)"
+                touchEffectUnconfirmed = checkingTouch && sameApp && reading.foreground?.bundleID != nil
+            }
         }
         if treeRead { lastTree = tree }
         if let picture { lastPicture = picture }
@@ -438,6 +442,9 @@ final class Computer: @unchecked Sendable {
         if let error { header.append("error: \(error)") }
         if let line = handoffLine(clear: true) { header.append(line) }
         if let changedLine { header.append(changedLine) }
+        if touchEffectUnconfirmed {
+            header.append("touch effect: unconfirmed (sent reports the input request, not the app’s response). Verify the expected screen or element before repeating the touch or continuing.")
+        }
         header += extra
         header.append(heading)
         if let typed = typedInto, gone.contains(where: { $0.ref == typed.ref }), let i = shown.firstIndex(where: { Self.fieldTypes.contains($0.type) && ($0.value ?? "").contains(typed.text) }), let n = assigned[i] {
@@ -1077,15 +1084,17 @@ final class Computer: @unchecked Sendable {
             }
         }
         let readStarted = now()
+        let checkingTouch = actions.count == 1 && error == nil
+            && (moreKind == ActionKind.tap.rawValue || moreKind == ActionKind.longPress.rawValue)
         // What the model saw last, so a read made again in this call still compares with it.
         let seenTree = lastTree, seenPicture = lastPicture
-        var result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra)
+        var result = await readAndReply(until: until, full: full, changes: true, checkingTouch: checkingTouch, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra)
         // The read shows Poki in front where another app was being worked in: a tap at the top of
         // the screen landed on Poki's Live Activity in the Dynamic Island. The app comes back and
         // the read is made again, so the model never sees (or acts in) Poki's own screen.
         if config.isPoki(lastForeground), !toRun.contains(where: { $0["launch"] != nil }), until - now() > config.readTimeout + 1,
            let back = await bringBack(from: before, why: "after the actions (a tap near the top of the screen lands on Poki's Live Activity in the Dynamic Island)", check: false) {
-            result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + [back])
+            result = await readAndReply(until: until, full: full, changes: true, checkingTouch: checkingTouch, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + [back])
         }
         // After a launch the runner's tree can still be the old app's while the picture is the new
         // app's (gym: Photos launched from Safari answered Safari's whole tree under Photos' screen,
@@ -1110,7 +1119,7 @@ final class Computer: @unchecked Sendable {
             let why = notYetInFront ? "\(launched!) was not in front yet" : "the whole picture had changed while the elements had not (an app's tree can lag its screen)"
             lastTree = seenTree
             lastPicture = seenPicture
-            result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["the screen was read again (\(rereads)): \(why)"])
+            result = await readAndReply(until: until, full: full, changes: true, checkingTouch: checkingTouch, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["the screen was read again (\(rereads)): \(why)"])
         }
         // The app this call opened answers no tree because its process has no accessibility server
         // (on the phone, WeChat for half an hour: "Error getting main window kAXErrorServerNotFound",
@@ -1130,7 +1139,7 @@ final class Computer: @unchecked Sendable {
             await sleep(seconds: 0.4)
             lastTree = seenTree
             lastPicture = seenPicture
-            result = await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["\(app) answered no element tree (no accessibility server in its process: kAXErrorServerNotFound); \(how), so its earlier page is gone"])
+            result = await readAndReply(until: until, full: full, changes: true, checkingTouch: checkingTouch, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + ["\(app) answered no element tree (no accessibility server in its process: kAXErrorServerNotFound); \(how), so its earlier page is gone"])
         }
         if let line = sendCheck(toRun, error: error, textsBefore: textsBefore) { result.text += "\n" + line }
         if selectedPane != nil, error?.contains("split_view_changed") == true {

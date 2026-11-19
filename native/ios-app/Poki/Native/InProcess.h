@@ -43,6 +43,10 @@ typedef struct {
 
 /// Finds the pane on the opposite edge of a side-by-side window; CGRectNull for other layouts.
 FOUNDATION_EXPORT CGRect PKPeerPane(CGRect screen, CGRect window);
+/// The upright, full-size AX window, or CGRectNull when its axes cannot be determined.
+FOUNDATION_EXPORT CGRect PKDuoFullWindow(id _Nullable root);
+/// Converts upright points to the physical panel's fixed portrait coordinates.
+FOUNDATION_EXPORT BOOL PKDuoFixedBasis(CGSize size, NSInteger orientation, CGAffineTransform *basis);
 
 /// Returns a launcher touch point only when the visible labels and accessibility frames agree on one target.
 FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> *candidates,
@@ -105,8 +109,10 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// The pane used for the latest read, or CGRectNull for a full-screen app. Both the screenshot
 /// and the tree use points relative to the pane. Gestures add its origin back before dispatch.
 @property (nonatomic, readonly) CGRect viewport;
-/// Reads the geometry of Poki's visible scene. Falls back to the main screen when it is hidden.
+/// Current geometry without a new XCTest request, including the last observed full-screen Duo panel.
 - (PKDisplayGeometry)displayGeometry;
+/// Renews the full-screen Duo geometry before reporting the dimensions of a read.
+- (PKDisplayGeometry)readDisplayGeometry;
 /// Sends upright display coordinates using the same display geometry that bounded the gesture.
 - (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry;
 /// The front app's elements in WebDriverAgent's XML source format, and the element with the

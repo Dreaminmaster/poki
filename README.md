@@ -1,28 +1,28 @@
 <p align="center">
-  <img src="docs/images/poki-icon.png" width="64" height="64" alt="Poki icon">
+  <a href="https://poki.bot"><img src="docs/images/poki-hero.gif" width="100%" alt="Poki uses your iPhone like you do. An agent that taps, types and swipes on your real iPhone."></a>
 </p>
 
-<h1 align="center">Poki uses your iPhone like you do</h1>
+<h3 align="center">Copy this prompt and send it to your coding agent</h3>
 
+```text
+Install Poki on my iPhone from https://github.com/JosssphZhou/poki
+```
+
+<p align="center"><sub>Connect your iPhone over USB and unlock it first. A free Apple Account works.</sub></p>
+
+<!-- badges:start -->
 <p align="center">
-  <img src="docs/images/poki-home.gif" width="500" alt="Poki website home page animation">
+  <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.4_Beta-blue" alt="Poki App 0.4.4 Beta"></a>
+  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
+<!-- badges:end -->
 
 <p align="center">
   English | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.es.md">Español</a><br>
   <a href="https://poki.bot">poki.bot</a>
 </p>
-
-<!-- badges:start -->
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
-  <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/forks"><img src="https://img.shields.io/github/forks/JosssphZhou/poki" alt="GitHub forks"></a>
-  <a href="https://github.com/JosssphZhou/poki/issues"><img src="https://img.shields.io/github/issues/JosssphZhou/poki" alt="GitHub issues"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.4_Beta-blue" alt="Poki App 0.4.4 Beta"></a>
-  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
-</p>
-<!-- badges:end -->
 
 <p align="center">
   <strong>If Poki is useful to you, click ★ Star to support the project.</strong>
@@ -32,7 +32,17 @@
 
 Poki is an open-source iPhone agent that operates your entire iPhone for you. The Poki app runs directly on your iPhone, reads the screen, and taps, types, and scrolls inside real apps using your own model account. You choose how it asks for permission; payments, deletions, and Wallet actions always stop for your confirmation.
 
+<p align="center">
+  <img src="docs/images/poki-order-demo.gif" width="280" alt="Poki orders on Uber Eats by itself">
+</p>
+
 ## Why Poki
+
+<p align="center">
+  <img src="docs/images/why-1-errands.png" width="32%" alt="Poki's step-by-step plan for ordering beef noodle soup, shown in chat">
+  <img src="docs/images/why-2-routines.png" width="32%" alt="Poki in the Dynamic Island while it works in another app">
+  <img src="docs/images/why-3-standalone.png" width="32%" alt="Poki asking for approval before a payment: Allow payment?">
+</p>
 
 - **Skip multi-app tapping for everyday errands.** Ask Poki in chat, hold the Action Button, or trigger Siri to look things up in the built-in browser, check tomorrow's weather, or create a note. On iPhone Duo, Poki works across two apps side by side in Split View.
 - **Run saved skills by tap or by voice.** Launch a saved skill from the home screen instead of repeating the same steps every day, or start a hands-free spoken chat with Talk to Poki while Dynamic Island tracks each step.
@@ -69,13 +79,14 @@ Poki is an open-source iPhone agent that operates your entire iPhone for you. Th
 | Connection | External connection routing `10.7.0.1` back to the iPhone (LocalDevVPN, Karing, or Shadowrocket). |
 | Model account | ChatGPT Plus/Pro sign-in, an API key (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, OpenCode Go), or an OpenAI-compatible server. |
 
-- Full installation, updating, FAQ, known issues, and roadmap: [Poki iPhone App Guide](docs/iphone-guide.md)
-- Changelog and version history: [CHANGELOG.md](CHANGELOG.md)
 - Agent installer skill and Poki Setup: [install-poki skill](skills/install-poki/SKILL.md) and [Poki Setup](desktop/README.md)
 - Verification, limits, and release channels: [Verification](docs/verification.md) and [Release channels](docs/release-channels.md)
 - Earlier computer-driven tools (no longer updated): [Poki MCP and Poki Agent](docs/poki-mcp.md)
 
 </details>
+
+- Full installation, updating, FAQ, known issues, and roadmap: [Poki iPhone App Guide](docs/iphone-guide.md)
+- Changelog and version history: [CHANGELOG.md](CHANGELOG.md)
 
 ## Community
 
@@ -85,4 +96,8 @@ Poki is an open-source iPhone agent that operates your entire iPhone for you. Th
 
 See all contributors in [CONTRIBUTING.md](CONTRIBUTING.md#contributors).
 
-Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Open source under [AGPL-3.0-only](LICENSE). Brand assets are governed by [BRAND.md](BRAND.md). See [Poki iPhone App Guide](docs/iphone-guide.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [Disclaimer](docs/iphone-guide.md#disclaimer).
+<br>
+
+<p align="center"><img src="docs/images/poki-icon.png" width="40" height="40" alt="Poki"></p>
+
+<p align="center"><sub>Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. Open source under <a href="LICENSE">AGPL-3.0-only</a>. Brand assets are governed by <a href="BRAND.md">BRAND.md</a>. See <a href="docs/iphone-guide.md">Poki iPhone App Guide</a>, <a href="THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a>, and <a href="docs/iphone-guide.md#disclaimer">Disclaimer</a>.</sub></p>
