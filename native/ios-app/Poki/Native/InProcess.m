@@ -1,4 +1,5 @@
 #import "InProcess.h"
+#import "DuoDisplayMatch.h"
 #import "RecoveredNative.h"
 #import <TargetConditionals.h>
 #import <dlfcn.h>
@@ -24,6 +25,7 @@
 + (id)sharedDevice;
 + (id)mainScreen;
 - (id)accessibilityInterface;
+- (void)getInterfaceOrientationWithReply:(void (^)(NSInteger, NSError *))reply;
 - (id)activeApplications;
 - (int)processIdentifier;
 - (id)systemApplication;
@@ -217,6 +219,53 @@ static CGRect PKOppositePane(PKDisplayGeometry geometry) {
     BOOL candidateIsLeft = CGRectGetMidX(candidate) < CGRectGetMidX(screen);
     CGFloat x = candidateIsLeft ? CGRectGetMaxX(screen) - width : CGRectGetMinX(screen);
     return CGRectMake(x, CGRectGetMinY(screen), width, screen.size.height);
+}
+
+static BOOL PKDuoFullExtent(CGRect frame) {
+    return !CGRectIsEmpty(frame) && !CGRectIsInfinite(frame) && isfinite(frame.size.width) && isfinite(frame.size.height) &&
+           fabs(frame.origin.x) <= 2 && fabs(frame.origin.y) <= 2;
+}
+
+// An application root can be in fixed portrait coordinates after a rotation. A
+// full-size Window also supplies the upright axes. Conflicting direct windows are
+// ambiguous even when their longer and shorter sides agree.
+static CGRect PKDuoWindowObservation(id root, BOOL *hasWindows, BOOL *conflict) {
+    if (!root || ![PKTypeName([root elementType]) isEqualToString:@"Application"] || !PKDuoFullExtent([root frame]))
+        return CGRectNull;
+    CGRect bounds = [root frame], found = CGRectNull;
+    for (id child in [root children]) {
+        if (![PKTypeName([child elementType]) isEqualToString:@"Window"]) continue;
+        if (hasWindows) *hasWindows = YES;
+        CGRect window = [child frame];
+        if (!PKDuoFullExtent(window) ||
+            fabs(MIN(window.size.width, window.size.height) - MIN(bounds.size.width, bounds.size.height)) > 2 ||
+            fabs(MAX(window.size.width, window.size.height) - MAX(bounds.size.width, bounds.size.height)) > 2)
+            continue;
+        CGRect upright = (CGRect){CGPointZero, window.size};
+        if (!CGRectIsNull(found) && !CGRectEqualToRect(found, upright)) {
+            if (conflict) *conflict = YES;
+            return CGRectNull;
+        }
+        found = upright;
+    }
+    return found;
+}
+
+CGRect PKDuoFullWindow(id root) { return PKDuoWindowObservation(root, NULL, NULL); }
+
+BOOL PKDuoFixedBasis(CGSize size, NSInteger orientation, CGAffineTransform *basis) {
+    if (!isfinite(size.width) || !isfinite(size.height) || size.width <= 0 || size.height <= 0 || size.width == size.height ||
+        UIInterfaceOrientationIsLandscape(orientation) != (size.width > size.height)) return NO;
+    switch (orientation) {
+        case UIInterfaceOrientationPortrait: *basis = CGAffineTransformIdentity; return YES;
+        case UIInterfaceOrientationPortraitUpsideDown:
+            *basis = CGAffineTransformMake(-1, 0, 0, -1, size.width, size.height); return YES;
+        case UIInterfaceOrientationLandscapeRight:
+            *basis = CGAffineTransformMake(0, 1, -1, 0, size.height, 0); return YES;
+        case UIInterfaceOrientationLandscapeLeft:
+            *basis = CGAffineTransformMake(0, -1, 1, 0, 0, size.width); return YES;
+        default: return NO;
+    }
 }
 
 /// The front app's AX element. One active app is the front one. Several (an alert over an app, split
@@ -585,33 +634,49 @@ static CGRect PKWorkspaceFrame(id root, PKDisplayGeometry display, BOOL right) {
 
 /// Match XCTest's active screens to the current UIKit display in either orientation. One iPhone
 /// Duo pane is not a separate physical display; both panes match the same inner screen.
-static id PKAutomationScreen(PKDisplayGeometry geometry) {
+static id PKUniqueAutomationScreen(PKDisplayGeometry geometry) {
     Class type = NSClassFromString(@"XCUIScreen");
-    id main = [type mainScreen];
-    if (!geometry.routesDisplay) return main;
     NSArray *screens = [type respondsToSelector:@selector(screens)] ? [(id)type screens] : nil;
+    if (!screens.count) {
+        id screen = [type mainScreen];
+        screens = screen ? @[screen] : @[];
+    }
     id matched = nil;
+    id rendered = nil;
+    NSUInteger renderMatches = 0;
     for (id screen in screens) {
         if (![screen respondsToSelector:@selector(bounds)]) continue;
         CGSize size = [screen bounds].size;
+        if (size.width <= 0 || size.height <= 0 || !isfinite(size.width) || !isfinite(size.height)) continue;
         // XCTest reports pixels; support point-sized bounds too if the platform reports those.
-        BOOL pixels = fabs(MIN(size.width, size.height) - MIN(geometry.nativeSize.width, geometry.nativeSize.height)) < 8 &&
+        BOOL pixels = geometry.nativeSize.width > 0 && geometry.nativeSize.height > 0 &&
+                      fabs(MIN(size.width, size.height) - MIN(geometry.nativeSize.width, geometry.nativeSize.height)) < 8 &&
                       fabs(MAX(size.width, size.height) - MAX(geometry.nativeSize.width, geometry.nativeSize.height)) < 8;
         CGSize points = geometry.bounds.size;
         BOOL logical = fabs(MIN(size.width, size.height) - MIN(points.width, points.height)) < 4 &&
                        fabs(MAX(size.width, size.height) - MAX(points.width, points.height)) < 4;
-        if (!pixels && !logical) continue;
-        if (matched) { matched = nil; break; }
-        matched = screen;
+        if (pixels || logical) {
+            if (matched) return nil;
+            matched = screen;
+        } else if (PKIsDuo()) {
+            for (NSUInteger scale = 2; scale <= 4; scale++) {
+                if (!PKDuoMatchesRenderSize(size, points, scale)) continue;
+                rendered = screen;
+                renderMatches++;
+                break;
+            }
+        }
     }
-    if (matched) return matched;
-    // The test service can report stale or differently scaled bounds after a fold. Try its active
-    // main screen, but only use its image or accept input if the actual pixels match the pane's display.
-    return main;
+    return matched ?: (renderMatches == 1 ? rendered : nil);
 }
 
-static UIImage *PKUprightImage(NSData *data, PKDisplayGeometry geometry) {
-    UIImage *image = [UIImage imageWithData:data];
+static id PKAutomationScreen(PKDisplayGeometry geometry) {
+    id main = [NSClassFromString(@"XCUIScreen") mainScreen];
+    if (!geometry.routesDisplay) return main;
+    return PKUniqueAutomationScreen(geometry) ?: main;
+}
+
+static UIImage *PKNormalizeImage(UIImage *image, PKDisplayGeometry geometry) {
     if (!image.CGImage) return nil;
     CGSize screen = geometry.bounds.size;
     CGSize size = image.size;
@@ -632,13 +697,41 @@ static UIImage *PKUprightImage(NSData *data, PKDisplayGeometry geometry) {
     return [renderer imageWithActions:^(__unused UIGraphicsImageRendererContext *context) { [image drawAtPoint:CGPointZero]; }];
 }
 
+static UIImage *PKUprightImage(NSData *data, PKDisplayGeometry geometry) {
+    return PKNormalizeImage([UIImage imageWithData:data], geometry);
+}
+
 /// The screenshot cut to the viewport: the picture is in pixels, the viewport in points.
-static NSData *PKCropped(NSData *data, CGRect viewport, PKDisplayGeometry geometry) {
+static NSData *PKCropped(NSData *data, CGRect viewport, PKDisplayGeometry geometry, id targetScreen) {
     CGRect screen = geometry.bounds;
     if (CGRectIsEmpty(screen)) return nil;
-    UIImage *image = PKUprightImage(data, geometry);
+    UIImage *source = [UIImage imageWithData:data];
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270100
+    BOOL fullDuo = PKIsDuo() && CGRectIsNull(geometry.peer) && CGRectEqualToRect(viewport, screen);
+    if (fullDuo && source.CGImage && CGImageGetWidth(source.CGImage) < CGImageGetHeight(source.CGImage)) {
+        // On a fixed portrait raster, the EXIF quarter-turn distinguishes the two
+        // landscapes even though their upright pixel dimensions are identical.
+        if ((source.imageOrientation == UIImageOrientationRight && geometry.orientation != UIInterfaceOrientationLandscapeLeft) ||
+            (source.imageOrientation == UIImageOrientationLeft && geometry.orientation != UIInterfaceOrientationLandscapeRight) ||
+            (source.imageOrientation == UIImageOrientationDown && geometry.orientation != UIInterfaceOrientationPortraitUpsideDown)) return nil;
+    }
+#endif
+    UIImage *image = PKNormalizeImage(source, geometry);
     if (!image.CGImage) return nil;
     CGFloat w = CGImageGetWidth(image.CGImage), h = CGImageGetHeight(image.CGImage);
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270100
+    if (fullDuo) {
+        if (![targetScreen respondsToSelector:@selector(bounds)]) return nil;
+        CGSize grid = [targetScreen bounds].size;
+        // Some XCTest versions expose only point bounds. Check the actual frame
+        // against both axes at one render scale, independent of Poki's own scene.
+        BOOL fits = NO;
+        for (NSUInteger candidate = 2; candidate <= 4; candidate++) {
+            if (PKDuoFrameMatchesGrid(CGSizeMake(w, h), screen.size, grid, candidate)) { fits = YES; break; }
+        }
+        if (!fits) return nil;
+    }
+#endif
     CGFloat sx = w / screen.size.width, sy = h / screen.size.height;
     // A picture from the cover display or with axes exchanged cannot be used for inner-pane taps.
     if (fabs(sx / sy - 1) > 0.04) return nil;
@@ -856,6 +949,7 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
     PKDisplayGeometry _capturedGeometry;
     CGRect _capturedViewport;
     NSNumber *_capturedDisplay;
+    uint64_t _duoCaptureRequest;
     PKWorkspace *_workspace;
     /// Bundle ids by pid, asked of testmanagerd once per process (a round trip each, on every read before).
     NSMutableDictionary<NSNumber *, NSString *> *_bundleByPID;
@@ -871,6 +965,9 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
     // Written and read on the main thread. Geometry still comes from the active screen, not the sensor.
     UIDeviceOrientation _lastPhysicalOrientation;
     uint64_t _orientationRevision;
+    PKDisplayGeometry _duoFullScreen;
+    NSNumber *_duoPanelID;
+    uint64_t _duoPanelGeneration, _duoPanelRevision, _duoSample, _duoPublishedSample;
     /// The generation that has answered with an element tree, and the one being checked now.
     uint64_t _readableGeneration, _provingGeneration;
     NSLock *_proofLock;
@@ -931,6 +1028,8 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
 - (void)setWorkspace:(PKWorkspace *)workspace {
     @synchronized (self) {
         _workspace = workspace;
+        _duoPublishedSample = ++_duoSample;
+        _duoPanelGeneration = 0;
         _viewport = CGRectNull;
         _capturedDisplay = nil;
         _lastFront = nil;
@@ -1294,6 +1393,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
         return [PKOutcome delivery:PKDeliveryNotSent code:@"event_api_unavailable" detail:@"no XCSynthesizedEventRecord"];
     }
     id record;
+    NSNumber *recordDisplay = nil;
     if (geometry.routesDisplay) {
         id screen = PKAutomationScreen(geometry);
         BOOL confirmed;
@@ -1309,7 +1409,8 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
             !PKInstanceSignature(recordClass, selector, "@", @[@"@", @"q", @"q"])) {
             return [PKOutcome delivery:PKDeliveryNotSent code:@"target_display_input_unavailable" detail:nil];
         }
-        record = [[recordClass alloc] initWithName:@"Poki touch" displayID:(unsigned long long)[screen displayID] interfaceOrientation:geometry.orientation];
+        recordDisplay = @([screen displayID]);
+        record = [[recordClass alloc] initWithName:@"Poki touch" displayID:recordDisplay.unsignedLongLongValue interfaceOrientation:geometry.orientation];
     } else {
         record = oriented ? [[recordClass alloc] initWithName:@"Poki touch" interfaceOrientation:geometry.orientation] : [[recordClass alloc] initWithName:@"Poki touch"];
     }
@@ -1327,6 +1428,16 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     SEL dispatch = @selector(_XCT_synthesizeEvent:implicitConfirmationInterval:completion:);
     if (!proxy || !PKSignature(proxy, dispatch, "v", @[@"@", @"d", @"@?"])) {
         return [PKOutcome delivery:PKDeliveryNotSent code:@"event_dispatch_abi_mismatch" detail:@"the daemon proxy has no event synthesis with the expected signature"];
+    }
+    if (PKIsDuo() && geometry.routesDisplay && !workspace && CGRectIsNull(geometry.peer)) {
+        NSString *code = nil;
+        if (![self refreshDuoFullScreenGeometryForSession:session generation:generation error:&code])
+            return [PKOutcome delivery:PKDeliveryNotSent code:code detail:@"look again to confirm the current display"];
+        @synchronized (self) {
+            if (![_capturedDisplay isEqual:recordDisplay] || !CGRectEqualToRect(_capturedViewport, _viewport) ||
+                !PKSameDisplay(_capturedGeometry, geometry))
+                return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the captured display changed before dispatch"];
+        }
     }
     if (geometry.routesDisplay && !PKSameDisplay(geometry, self.displayGeometry))
         return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the display changed before dispatch"];
@@ -1432,12 +1543,28 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
 - (nullable NSData *)screenshot:(NSString **)code refreshViewport:(BOOL)refreshViewport {
     @try {
         NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
-        PKDisplayGeometry geometry = self.displayGeometry;
         PKWorkspace *selected = self.selectedWorkspace;
+        PKDisplayGeometry geometry = self.displayGeometry;
+        id session = nil;
+        uint64_t generation = 0, request = 0;
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270100
+        if (PKIsDuo() && !selected && CGRectIsNull(geometry.peer)) {
+            @synchronized (self) {
+                request = ++_duoCaptureRequest;
+                _capturedDisplay = nil;
+            }
+            // Session readiness itself takes a screenshot. Reuse its session here
+            // without recursively starting another readiness check.
+            session = [_sessions prepare:NULL];
+            generation = _sessions.generation;
+            if (![self refreshDuoFullScreenGeometryForSession:session generation:generation error:code]) return nil;
+            geometry = self.displayGeometry;
+        }
+#endif
         NSDictionary *workspaceFront = nil;
         if (selected && !refreshViewport) { if (code) *code = @"target_pane_unconfirmed"; return nil; }
         if (selected && ![self sharedFront:&workspaceFront ax:NULL code:code]) return nil;
-        id screen = PKAutomationScreen(geometry);
+        id screen = request ? PKUniqueAutomationScreen(geometry) : PKAutomationScreen(geometry);
         if (!screen) { if (code) *code = @"target_display_unavailable"; return nil; }
         // A JPEG from testmanagerd (what WebDriverAgent uses): a fraction of the PNG's bytes to
         // encode, send and decode; PokiCore makes its own 402-pixel JPEG from any image. XCTest's
@@ -1464,7 +1591,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
             // Read the crop before exposing any pixels to PokiCore. Share the target lookup with
             // the tree read; during a held request use only a previously confirmed split crop.
             PKDisplayGeometry current = self.displayGeometry;
-            if ((selected || !CGRectIsNull(geometry.peer) || !CGRectIsNull(current.peer)) &&
+            if ((request || selected || !CGRectIsNull(geometry.peer) || !CGRectIsNull(current.peer)) &&
                 (selected != self.selectedWorkspace || !PKSameDisplay(geometry, current))) {
                 if (code) *code = @"display_changed_during_screenshot";
                 return nil;
@@ -1491,7 +1618,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                 viewport = self.viewport;
             }
             if (CGRectIsNull(viewport) && !geometry.routesDisplay) return picture;
-            NSData *cropped = PKCropped(picture, CGRectIsNull(viewport) ? geometry.bounds : viewport, geometry);
+            NSData *cropped = PKCropped(picture, CGRectIsNull(viewport) ? geometry.bounds : viewport, geometry, screen);
             if (!cropped) {
                 if (code) *code = @"screenshot_does_not_match_active_display";
 #if __IPHONE_OS_VERSION_MAX_ALLOWED < 270100
@@ -1504,7 +1631,16 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                       seen.size.width * seen.scale, seen.size.height * seen.scale, geometry.bounds.size.width, geometry.bounds.size.height,
                       geometry.nativeSize.width, geometry.nativeSize.height, NSStringFromCGRect(viewport));
             } else if (geometry.routesDisplay && [screen respondsToSelector:@selector(displayID)]) {
+                if (request && (![self refreshDuoFullScreenGeometryForSession:session generation:generation error:code] ||
+                                !PKSameDisplay(geometry, self.displayGeometry))) {
+                    if (code) *code = @"display_changed_during_screenshot";
+                    return nil;
+                }
                 @synchronized (self) {
+                    if (request && request != _duoCaptureRequest) {
+                        if (code) *code = @"display_changed_during_screenshot";
+                        return nil;
+                    }
                     _capturedGeometry = geometry;
                     _capturedViewport = viewport;
                     _capturedDisplay = @([screen displayID]);
@@ -1750,7 +1886,7 @@ static const int PKFrontKey = -1;
     @synchronized (self) { return _viewport; }
 }
 
-- (PKDisplayGeometry)displayGeometry {
+- (PKDisplayGeometry)sceneDisplayGeometry {
     __block PKDisplayGeometry result;
     void (^read)(void) = ^{
         [self trackDuoOrientation];
@@ -1819,6 +1955,157 @@ static const int PKFrontKey = -1;
     };
     if (NSThread.isMainThread) read(); else dispatch_sync(dispatch_get_main_queue(), read);
     return result;
+}
+
+// Geometry is queried from the main thread as well as inside foreground discovery. Keep
+// this accessor free of XCTest I/O; the read and input entry points renew the observation.
+- (PKDisplayGeometry)displayGeometry {
+    PKDisplayGeometry scene = self.sceneDisplayGeometry;
+    if (!PKIsDuo() || !CGRectIsNull(scene.peer)) return scene;
+    uint64_t generation = self.generation;
+    @synchronized (self) {
+        if (_workspace || !_duoPanelGeneration || _duoPanelGeneration != generation) return scene;
+        PKDisplayGeometry panel = _duoFullScreen;
+        panel.orientationRevision = scene.orientationRevision + _duoPanelRevision;
+        return panel;
+    }
+}
+
+// Poki's own scene can remain attached to the cover while Clock is active on the inner
+// screen. Obtain the current window and its signed interface orientation on the existing
+// XCTest session. Width and height alone cannot distinguish the two landscape directions.
+- (BOOL)refreshDuoFullScreenGeometryForSession:(id)session generation:(uint64_t)generation error:(NSString **)code {
+    if (!PKIsDuo()) return YES;
+#if __IPHONE_OS_VERSION_MAX_ALLOWED < 270100
+    // Leave the older SDK's letterbox diagnostic in the screenshot path (#419).
+    return YES;
+#else
+    PKDisplayGeometry scene = self.sceneDisplayGeometry;
+    if (self.hasSelectedPane || !CGRectIsNull(scene.peer) || self.isPokiSceneVisible) {
+        @synchronized (self) {
+            _duoPublishedSample = ++_duoSample;
+            if (_duoPanelGeneration) {
+                _duoPanelGeneration = 0;
+                _capturedDisplay = nil;
+            }
+        }
+        return YES;
+    }
+    if (!session || NSThread.isMainThread || ![_sessions isCurrent:session generation:generation]) {
+        if (code) *code = @"target_display_unavailable";
+        return NO;
+    }
+    uint64_t sample;
+    @synchronized (self) { sample = ++_duoSample; }
+    // Do not call sharedFront here. Its ordinary front lookup prepares a session; session
+    // readiness itself calls screenshot, so it could wait on its own front lookup or capture.
+    id ax = [self accessibilityFor:generation];
+    id element = ax ? PKBounded(PKFrontKey, PKFrontSeconds, NULL, ^id {
+        return PKForegroundElement(ax, scene, NULL, ^NSString *(int pid) {
+            return [self bundleForPID:pid session:session];
+        });
+    }) : nil;
+    id root = element ? PKRequestSnapshotWithin(1, ax, element, 2, 24, NULL) : nil;
+    BOOL hasWindows = NO, conflict = NO, fixedExtent = NO;
+    CGRect window = PKDuoWindowObservation(root, &hasWindows, &conflict);
+    if (CGRectIsNull(window) && root && !conflict && [PKTypeName([root elementType]) isEqualToString:@"Application"] &&
+        PKDuoFullExtent([root frame])) {
+        // SpringBoard's home screen and system prompts need not expose a full-size
+        // direct Window. An app with no Window can use its root only if the system's
+        // fresh root independently identifies the same panel. Partial app windows
+        // still go through the existing pane rules.
+        int pid = PKAXPid(element);
+        NSString *bundle = pid > 0 ? [self bundleForPID:pid session:session] : nil;
+        fixedExtent = [bundle isEqualToString:@"com.apple.springboard"];
+        if (!fixedExtent && !hasWindows && [ax respondsToSelector:@selector(systemApplication)]) {
+            id system = PKBounded(0, 0.4, NULL, ^id { return [ax systemApplication]; });
+            id systemRoot = system ? PKRequestSnapshotWithin(0.6, ax, system, 1, 1, NULL) : nil;
+            fixedExtent = systemRoot && PKDuoFullExtent([systemRoot frame]) &&
+                          PKDuoMatchesRenderSize([systemRoot frame].size, [root frame].size, 1);
+        }
+        if (fixedExtent) window = (CGRect){CGPointZero, [root frame].size};
+    }
+    PKDisplayGeometry panel = {window, CGRectNull, CGSizeZero, CGAffineTransformIdentity,
+                               UIInterfaceOrientationUnknown, NO, YES, 0};
+    id screen = CGRectIsNull(window) ? nil : PKUniqueAutomationScreen(panel);
+    NSNumber *panelID = [screen respondsToSelector:@selector(displayID)] ? @([screen displayID]) : nil;
+    if (panelID && PKSignature(session, @selector(getInterfaceOrientationWithReply:), "v", @[@"@?"])) {
+        dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        __block NSInteger observed = UIInterfaceOrientationUnknown;
+        [session getInterfaceOrientationWithReply:^(NSInteger orientation, NSError *error) {
+            if (!error) observed = orientation;
+            dispatch_semaphore_signal(done);
+        }];
+        if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 800 * NSEC_PER_MSEC)) == 0)
+            panel.orientation = observed;
+    }
+    if (panelID && panel.orientation == UIInterfaceOrientationUnknown) {
+        // Some session versions do not answer the orientation RPC. A fixed-axis PNG with
+        // an explicit rotation tag can still distinguish the two landscape directions.
+        static const int orientationCaptureKey = -2;
+        NSData *png = PKBounded(orientationCaptureKey, 0.8, NULL, ^id { return [[screen screenshot] PNGRepresentation]; });
+        UIImage *image = png.length ? [UIImage imageWithData:png] : nil;
+        if (image.CGImage) {
+            CGSize pixels = CGSizeMake(CGImageGetWidth(image.CGImage), CGImageGetHeight(image.CGImage));
+            BOOL correctGrid = NO;
+            for (NSInteger scale = 1; scale <= 4 && !correctGrid; scale++)
+                correctGrid = PKDuoMatchesRenderSize(pixels, window.size, scale);
+            if (correctGrid && pixels.width < pixels.height) {
+                switch (image.imageOrientation) {
+                    case UIImageOrientationLeft: panel.orientation = UIInterfaceOrientationLandscapeRight; break;
+                    case UIImageOrientationRight: panel.orientation = UIInterfaceOrientationLandscapeLeft; break;
+                    case UIImageOrientationDown: panel.orientation = UIInterfaceOrientationPortraitUpsideDown; break;
+                    default: break;
+                }
+            }
+        }
+    }
+    if (fixedExtent && UIInterfaceOrientationIsLandscape(panel.orientation) != (window.size.width > window.size.height)) {
+        window.size = CGSizeMake(window.size.height, window.size.width);
+        panel.bounds = window;
+    }
+    BOOL confirmed = panelID && PKDuoFixedBasis(window.size, panel.orientation, &panel.toFixed) &&
+                     [_sessions isCurrent:session generation:generation];
+    @synchronized (self) {
+        if (confirmed && sample < _duoPublishedSample) {
+            // A read running on another queue already published a newer observation.
+            confirmed = _duoPanelGeneration == generation && [_duoPanelID isEqual:panelID] &&
+                        PKSameDisplay(panel, _duoFullScreen);
+        } else if (sample >= _duoPublishedSample) {
+            _duoPublishedSample = sample;
+            if (confirmed) {
+                if (_duoPanelGeneration != generation || ![_duoPanelID isEqual:panelID] ||
+                    !PKSameDisplay(panel, _duoFullScreen)) {
+                    _duoPanelRevision++;
+                    _capturedDisplay = nil;
+                }
+                _duoFullScreen = panel;
+                _duoPanelID = panelID;
+                _duoPanelGeneration = generation;
+            } else {
+                _duoPanelGeneration = 0;
+                _capturedDisplay = nil;
+            }
+        }
+    }
+    if (!confirmed && code) *code = @"target_display_unavailable";
+    return confirmed;
+#endif
+}
+
+- (PKDisplayGeometry)readDisplayGeometry {
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270100
+    if (PKIsDuo()) {
+        if (self.hasSelectedPane || self.isPokiSceneVisible) return self.sceneDisplayGeometry;
+        PKOutcome *refused;
+        uint64_t generation = 0;
+        id session = [self current:&generation outcome:&refused];
+        if (![self refreshDuoFullScreenGeometryForSession:session generation:generation error:NULL])
+            return (PKDisplayGeometry){CGRectZero, CGRectNull, CGSizeZero, CGAffineTransformIdentity,
+                                       UIInterfaceOrientationUnknown, NO, YES, 0};
+    }
+#endif
+    return self.displayGeometry;
 }
 
 /// Use the same pane for image and tree, even when a third-party app's AX root reports full screen

@@ -571,6 +571,8 @@ final class ScreenHistoryTests: XCTestCase {
             NotificationCenter.default.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
             XCTAssertFalse(lock.unlocked, "Device lock must revoke even with no recording run")
             XCTAssertFalse(HistoryCapture.agentQueryAllowed)
+            XCTAssertFalse(lock.unlock(pin: fixturePIN), "Protected data is still unavailable")
+            NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
             XCTAssertTrue(lock.unlock(pin: fixturePIN))
         case .changePIN:
             // This regenerates the real credential's salt and grant, using only the fixture PIN.

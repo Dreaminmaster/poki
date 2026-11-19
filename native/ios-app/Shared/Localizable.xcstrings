@@ -1,6 +1,261 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "The saved key belongs to the previous address. Enter a key for this service if it needs one.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存的密钥属于原地址。若此服务需要密钥，请重新输入。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已儲存的金鑰屬於原位址。若此服務需要金鑰，請重新輸入。"
+          }
+        }
+      }
+    },
+    "Fetch Model List": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "获取模型列表"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取得模型列表"
+          }
+        }
+      }
+    },
+    "Choose a model from the service, or enter its ID manually.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从服务获取并选择模型，或手动输入模型 ID。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從服務取得並選擇模型，或手動輸入模型 ID。"
+          }
+        }
+      }
+    },
+    "Enter a valid HTTP or HTTPS service address.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入有效的 HTTP 或 HTTPS 服务地址。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請輸入有效的 HTTP 或 HTTPS 服務位址。"
+          }
+        }
+      }
+    },
+    "Authentication failed. Check the API key.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "认证失败，请检查 API 密钥。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "驗證失敗，請檢查 API 金鑰。"
+          }
+        }
+      }
+    },
+    "The service refused access to its model list.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务拒绝访问模型列表。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服務拒絕存取模型列表。"
+          }
+        }
+      }
+    },
+    "This service does not offer a model list. Enter a model ID manually.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此服务不提供模型列表，请手动输入模型 ID。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此服務不提供模型列表，請手動輸入模型 ID。"
+          }
+        }
+      }
+    },
+    "Too many requests. Try again later.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求过于频繁，请稍后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請求過於頻繁，請稍後再試。"
+          }
+        }
+      }
+    },
+    "The service could not return its model list. Try again later.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务暂时无法返回模型列表，请稍后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服務暫時無法傳回模型列表，請稍後再試。"
+          }
+        }
+      }
+    },
+    "The service returned an invalid model list.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务返回的模型列表格式无效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服務傳回的模型列表格式無效。"
+          }
+        }
+      }
+    },
+    "Could not reach the service. Check the connection and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接到服务，请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至服務，請檢查網路連線後再試。"
+          }
+        }
+      }
+    },
+    "No chat models were returned. You can enter a model ID manually.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未返回聊天模型，你可以手动输入模型 ID。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未傳回聊天模型，你可以手動輸入模型 ID。"
+          }
+        }
+      }
+    },
+    "No matching models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配的模型。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有符合的模型。"
+          }
+        }
+      }
+    },
+    "Search models": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索模型"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋模型"
+          }
+        }
+      }
+    },
+    "Choose a Model": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择模型"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇模型"
+          }
+        }
+      }
+    },
     "Release Channel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -25134,6 +25389,150 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "還沒有 Poki Setup？任何 lockdown 配對檔案都可以，pymobiledevice3、jitterbugpair 或 StikPair 都能生成。"
+          }
+        }
+      }
+    },
+    "Cellular Startup" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "蜂窝网络启动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行動網路啟動"
+          }
+        }
+      }
+    },
+    "Prepare for Cellular" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "准备切换到蜂窝网络"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "準備切換至行動網路"
+          }
+        }
+      }
+    },
+    "Switch to cellular and run a new task to verify automation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到蜂窝网络后，运行一个新任务来验证自动化。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換至行動網路後，執行一個新任務來驗證自動化。"
+          }
+        }
+      }
+    },
+    "Turn on Automation in Connection to prepare for cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在「连接」中开启自动化，再准备切换到蜂窝网络。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在「連線」中開啟自動化，再準備切換至行動網路。"
+          }
+        }
+      }
+    },
+    "Connect to Wi-Fi and check the local connection in Connection." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请连接 Wi-Fi，然后在「连接」中检查本地连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請連上 Wi-Fi，然後在「連線」中檢查本機連線。"
+          }
+        }
+      }
+    },
+    "Wait for the current task to finish before preparing for cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请等当前任务结束，再准备切换到蜂窝网络。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請等目前任務結束，再準備切換至行動網路。"
+          }
+        }
+      }
+    },
+    "Prepare the developer disk image before switching to cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到蜂窝网络前，请先准备开发者磁盘映像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換至行動網路前，請先準備開發者磁碟映像。"
+          }
+        }
+      }
+    },
+    "Poki is preparing the developer disk image." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在准备开发者磁盘映像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在準備開發者磁碟映像。"
+          }
+        }
+      }
+    },
+    "The image is still not mounted. Check the local connection and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "映像仍未挂载。请检查本地连接后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "映像仍未掛載。請檢查本機連線後再試一次。"
           }
         }
       }

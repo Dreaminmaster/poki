@@ -292,6 +292,19 @@ final class ChatModel {
         greet()
     }
 
+    /// The conversation `id` left the list, archived or deleted, maybe while its task still runs and a
+    /// reply is on the way. When it is this chat's, the task stops, nothing more is written into the
+    /// conversation (not the Stopped line, not a reply that comes in late), and a new one starts.
+    func conversationLeft(_ id: String) {
+        guard id == sessionID else { return }
+        leavingRemoved = true
+        defer { leavingRemoved = false }
+        newConversation()
+    }
+
+    /// Set while `conversationLeft` ends a removed conversation, so its last lines do not save it back.
+    private var leavingRemoved = false
+
     private func applyRestoredSession(_ session: SavedSession) {
         userChoseConversation = true
         loop = nil
@@ -312,7 +325,7 @@ final class ChatModel {
 
     /// The conversation as the Sessions list keeps it. Greeting-only conversations are not saved.
     private func persist() {
-        guard !isSample, hasUserMessages else { return }
+        guard !isSample, !leavingRemoved, hasUserMessages else { return }
         store.save(chat: self)
     }
 
@@ -768,8 +781,11 @@ final class ChatModel {
     private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
         taskCalls.removeAll()
-        app.prepareForTask()
+        // Split View needs both apps before the first model tool runs.
+        if splitViewSession != nil { app.prepareForTask() }
         app.chatTaskBegan(splitViewSession: splitViewSession)
+        // find_app and the task's icons see the phone's current apps.
+        InstalledApps.shared.refreshSoon()
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
@@ -782,6 +798,11 @@ final class ChatModel {
         let record = TaskRecord(session: session, task: text, calls: taskCalls, result: taskResult,
                                 seconds: Date().timeIntervalSince(taskStart))
         Self.afterTask?(record)
+        if !isSample {
+            ChatDebugLog.add(ChatDebugLog.entry(model: "\(engine), \(ModelKeys.selectedProvider.rawValue)/\(ModelKeys.selectedModel)",
+                                                named: AppIconStore.bundleIDs(namedIn: record.task), calls: record.calls,
+                                                finished: taskResult?.success, seconds: record.seconds))
+        }
         store.taskEnded(session, success: taskResult?.success, stopped: stopAsked)
         if kind == .poki, taskResult?.success == true { Haptics.done() }
     }
@@ -1039,6 +1060,9 @@ final class ChatModel {
             if let refusal = selectRoute(.web) { return refusal }
             showBrowser(opening: name == "web_open")
             return await WebTools.perform(name, arguments: call.arguments)
+        case "find_app":
+            let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
+            return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
             phoneStepUnderWay = true

@@ -9,6 +9,8 @@ enum ActivityBear: String, Hashable {
     case phone, needs, turn, done, tripped, ready, paused, thinking, checking
 
     var image: String { "ActivityBear-\(rawValue)" }
+    var compactImage: String { image + "Compact" }
+    var smallImage: String { image + "Small" }
 
     /// The middle of the smallest circle round the head and a raised hand, as shares of the side.
     var middle: (x: CGFloat, y: CGFloat) {
@@ -26,7 +28,7 @@ enum ActivityBear: String, Hashable {
     }
 
     /// Where the picture's top-left corner stands in the compact island's left block, the picture
-    /// 27.2 points a side (`ActivityMetrics.compactBear`), so the whole bear, ears and outline, stays
+    /// 27 points a side (`ActivityMetrics.compactBear`), so the whole bear, ears and outline, stays
     /// inside the 4.33 points the system cuts off the island's edge. Measured per pose in ESP-503's
     /// design (the island 36.67 tall, 393-point class): each pose's head sits elsewhere in its square.
     /// The design has no thinking bear; it stands where the ready one does.
