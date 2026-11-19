@@ -122,6 +122,8 @@ enum ResultCardLooks {
         Taobao.kind: Taobao.look,
         Dianping.kind: Dianping.look,
         UberEats.kind: UberEats.look,
+        RailwayTransfers.kind: RailwayTransfers.look,
+        AnyAppList.kind: AnyAppList.look,
     ]
 }
 

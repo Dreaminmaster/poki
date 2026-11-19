@@ -6,6 +6,8 @@ import SwiftUI
 enum Ctrip {
     static let app = "ctrip.com"
     static let blue = Color(light: 0x287DFA, dark: 0x4A93FF)
+    /// What a connection takes (不同航站楼转机), in 携程's orange.
+    static let warning = Color(light: 0xFF7700, dark: 0xFF9233)
     static let carried = "ctrip"
 
     static let flights = "ctrip.flights"
@@ -29,6 +31,8 @@ enum Ctrip {
 /// Flights, one row each as 携程's flight list draws them: departure and arrival large with their
 /// airports, the stops and the journey's length between, the arrival's extra days beside its time, the
 /// price on the right and the airline under the row. A return leg's price is what it adds ("+¥0").
+/// A flight with connections lists each one under it: where, the times between, the layover, and what
+/// the connection takes in orange (不同航站楼转机), from the item's `legs`.
 struct CtripFlightList: View {
     var card: ResultCard
     var selected: ResultCard.Item
@@ -57,6 +61,7 @@ struct CtripFlightList: View {
                         .frame(minWidth: 72, alignment: .trailing)
                 }
                 ResultCardParts.caption(ResultCardParts.line([item.text("airline"), item.title == item.text("airline") ? nil : item.title, item.text("cabin")]), lines: 1)
+                if let legs = ResultCardLeg.legs(of: item) { ResultCardChanges(legs: legs, warning: Ctrip.warning) }
                 ResultCardParts.caption(item.text("note"))
             }
         }

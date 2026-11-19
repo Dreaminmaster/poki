@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Leg %lld" : {
+      "comment" : "A result card's leg of a journey with changes, as 12306 numbers them (1程, 2程)",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld程"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld程"
+          }
+        }
+      }
+    },
     "Also uses" : {
       "localizations" : {
         "en" : {
