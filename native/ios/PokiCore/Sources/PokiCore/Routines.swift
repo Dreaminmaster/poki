@@ -660,6 +660,10 @@ extension Computer {
             } catch { throw stop(0, "\(app) could not be launched (\(error))") }
         }
 
+        /// No input goes into Poki, where the approval card and the approval settings are: a step that
+        /// would send it there stops the run, as a do sending it there is refused.
+        let inPoki = "Poki is in front, and \(CoreConfig.ownAppRefusal). Leave Poki first ({button: \"home\"} or {launch: \"bundle id\"})"
+
         var previous: String?
         /// What may be closed when it is in the way of a step: what the path allows.
         let allowed = (routine.dismiss ?? []).map { RoutineTarget(type: RoutineTarget.anyType, label: $0) }
@@ -674,6 +678,8 @@ extension Computer {
             // Each step is held by the rules a do is held by, on the screen it lands on: a step the owner
             // must approve is theirs, and the run hands it back rather than send it.
             var scan: SensitiveScan?
+            /// The screen this step lands on was read for it, so `front` is the app really in front.
+            var read = false
             if let target = step.target {
                 // Wait for the target, alone, on screen; after a step that changed nothing yet, give the
                 // screen a moment to move on so the same label on the old screen is not taken for it.
@@ -755,6 +761,7 @@ extension Computer {
                         continue attempts
                     }
                     let signatureNow = elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+                    if config.isPoki(lastForeground) { throw stop(index, "\(why); \(inPoki)") }
                     // Closing it is a tap like any other: what the owner must approve stays theirs.
                     refs[Self.runRef] = element
                     let tap: JSON = ["tap": .number(Double(Self.runRef))]
@@ -784,6 +791,7 @@ extension Computer {
                 refs[Self.runRef] = element
                 action = Self.replacingTarget(action, with: Self.runRef)
                 front = lastForeground
+                read = true
                 scan = SensitiveScan(front: lastForeground, secureOnScreen: lastAll.contains(where: \.isSecure))
             } else if config.sensitive.enabled, ActionKind(action)?.movesScreen == true {
                 // A step recorded without an element (a point, a key, a swipe) is judged on the screen read
@@ -793,8 +801,19 @@ extension Computer {
                     lastAll = tree.elements
                     lastForeground = tree.foreground
                     front = tree.foreground ?? front
+                    read = true
                     let elements = listable(tree.elements, screen)
                     scan = SensitiveScan(front: front, secureOnScreen: elements.contains(where: \.isSecure), elements: elements)
+                }
+            }
+            if ActionKind(action)?.movesScreen == true {
+                // Not read for this step: a launch may not have opened what it named, so the runner says.
+                if !read, let info = try? await runner.raw("GET", "/wda/activeAppInfo", timeout: 1.5, countsAsMiss: false), let bundle = info["bundleId"]?.string, !bundle.isEmpty {
+                    front = Foreground(bundleID: bundle, name: info["name"]?.string)
+                }
+                if config.isPoki(front) {
+                    refs[Self.runRef] = nil
+                    throw stop(index, inPoki)
                 }
             }
             if var scan, let reason = sensitive(action, &scan) {
