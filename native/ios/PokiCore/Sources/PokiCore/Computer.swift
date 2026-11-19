@@ -846,9 +846,7 @@ final class Computer: @unchecked Sendable {
                         return ToolResult(text: "do: no app named \"\(given)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
                     }
                     sessionApp = (bundle, given, session)
-                    // In front already by a read just made: nothing to bring forward.
-                    let inFront = lastForeground?.bundleID == bundle && lastTreeAt.map { now() - $0 < 10 } == true
-                    if !inFront, actions.first?["launch"] == nil, actions.count < 20 { actions.insert(["launch": .string(bundle)], at: 0) }
+                    if actions.first?["launch"] == nil, actions.count < 20, await !isInFront(bundle) { actions.insert(["launch": .string(bundle)], at: 0) }
                 } else {
                     return ToolResult(text: "do: app takes the app's name or bundle id, or false to let go of the session's app; nothing was sent", jpeg: nil, isError: true)
                 }
@@ -861,6 +859,16 @@ final class Computer: @unchecked Sendable {
             result.text += "\nthe session's app \(kept.name) (\(bound)) is not in front; \(lastForeground?.describe ?? front) is. app: \"\(kept.name)\" brings it back; app: false lets go of it"
         }
         return result
+    }
+
+    /// Whether the session's app is in front, so nothing needs bringing forward: the latest read says
+    /// so. A read more than a few seconds old is checked with the runner (the owner may have switched
+    /// apps since), and a runner that does not answer leaves the read's word standing.
+    func isInFront(_ bundle: String) async -> Bool {
+        guard lastForeground?.bundleID == bundle else { return false }
+        if let at = lastTreeAt, now() - at < 10 { return true }
+        guard let info = try? await runner.raw("GET", "/wda/activeAppInfo", timeout: 1.5, countsAsMiss: false), let front = info["bundleId"]?.string, !front.isEmpty else { return true }
+        return front == bundle
     }
 
     /// A launch by name as a launch by bundle id, also inside a path's steps. A name the host does not
