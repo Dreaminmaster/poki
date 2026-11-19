@@ -18,6 +18,12 @@ pub enum Error {
     /// The person has to act (Trust This Computer, a 2FA code, a passcode) before this can go on.
     #[error("{0}")]
     NeedsPerson(String),
+    /// Could not read or unlock the OS keychain (access denied or locked).
+    #[error("{0}")]
+    Keychain(String),
+    /// Apple asked for a 2FA code while renewing an existing session with the saved password.
+    #[error("Apple sent a verification code. Enter the 6-digit code to continue.")]
+    NeedsCode(Box<crate::apple::gsa::Pending>),
     #[error("signing failed: {0}")]
     Sign(String),
     /// The team is at Apple's certificate limit. Replacing a certificate stops every app it signed
@@ -25,6 +31,10 @@ pub enum Error {
     /// and try again.
     #[error("{0}")]
     CertificateLimit(String),
+    /// Poki is open on the device (in front or in the background) and the update would replace it
+    /// under it. The person decides whether Poki Setup closes it ([`crate::setup::Options::close_poki`]).
+    #[error("{0}")]
+    PokiRunning(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("network: {0}")]
@@ -56,8 +66,11 @@ impl Error {
             Error::Device(_) => "device",
             Error::Apple { .. } => "apple",
             Error::NeedsPerson(_) => "needs_person",
+            Error::Keychain(_) => "keychain",
+            Error::NeedsCode(_) => "needs_code",
             Error::Sign(_) => "sign",
             Error::CertificateLimit(_) => "certificate_limit",
+            Error::PokiRunning(_) => "poki_running",
             Error::Io(_) => "io",
             Error::Http(_) => "http",
             Error::Plist(_) => "plist",

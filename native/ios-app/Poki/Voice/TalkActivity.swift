@@ -13,16 +13,24 @@ final class TalkActivity {
     private let deviceName: @MainActor () -> String
     /// Poki is on: its Live Activity stays when the talk ends.
     private let keepsActivity: @MainActor () -> Bool
+    /// The talk went off.
+    private let ended: @MainActor () -> Void
+    /// End on the Live Activity: what stops with the talk.
+    private let endFromLiveActivityAction: (@MainActor () -> Void)?
     private var shown: PokiState.Voice?
+    private var wasMidTurn = false
     /// What EndTalkIntent's notification reaches; it holds this weakly, so an ended TalkActivity hears nothing.
     private let mailbox: Mailbox
 
     init(voice: VoiceModel, activity: ActivityController, deviceName: @escaping @MainActor () -> String,
-         keepsActivity: @escaping @MainActor () -> Bool) {
+         keepsActivity: @escaping @MainActor () -> Bool, ended: @escaping @MainActor () -> Void = {},
+         endFromLiveActivity: (@MainActor () -> Void)? = nil) {
         self.voice = voice
         self.activity = activity
         self.deviceName = deviceName
         self.keepsActivity = keepsActivity
+        self.ended = ended
+        endFromLiveActivityAction = endFromLiveActivity
         mailbox = Mailbox()
         mailbox.owner = self
         mailbox.listen()
@@ -41,27 +49,54 @@ final class TalkActivity {
     }
 
     private func follow() {
-        withObservationTracking { show(Self.state(of: voice)) } onChange: { [weak self] in
+        withObservationTracking { show(Self.state(of: voice)); turn(voice.midTurn) } onChange: { [weak self] in
             Task { @MainActor in self?.follow() }
         }
     }
 
-    private func show(_ talk: PokiState.Voice?) {
+    private func show(_ talk: PokiState.Voice?, fromIntent: Bool = false) {
         guard talk != shown else { return }
         let started = shown == nil
         shown = talk
         activity.update { $0.voice = talk }
-        // Started from a tap in Poki, the one time iOS lets a Live Activity start.
-        if started, talk != nil { activity.start(deviceName: deviceName()) }
+        // Started from a tap in Poki, or from Talk Here's intent: the times iOS lets a Live Activity start.
+        if started, talk != nil { activity.start(deviceName: deviceName(), fromIntent: fromIntent) }
         // Only a Live Activity that shows nothing else goes with the talk: an approval, a hand-off, a
         // problem, pairing or setup stays.
         if talk == nil, !keepsActivity(), activity.state.phase == .idle { activity.end() }
+        if talk == nil, !started { ended() }
+    }
+
+    /// The talk's turn is over: Poki has answered and has nothing left to do for the request. A run of
+    /// steps the turn took finishes now, with what Poki said, as the chat finishes its task's run. A talk
+    /// that ends mid-turn leaves its run to the Live Activity's quiet wait.
+    private func turn(_ mid: Bool) {
+        defer { wasMidTurn = mid }
+        guard wasMidTurn, !mid, voice.isOn, activity.state.stepCount > 0 else { return }
+        let asked = voice.lines.lastIndex { $0.role == .you }
+        let said = voice.lines[(asked.map { $0 + 1 } ?? 0)...].last { $0.role == .poki }?.text
+        activity.finishNow(alert: true, result: said, task: asked.map { voice.lines[$0].text })
+    }
+
+    /// Talk Here (TalkHereIntent), with Poki in the background: the Live Activity starts first, while
+    /// the intent runs, and the microphone only once it is up, because iOS ends an app that records in
+    /// the background without one. false: the Live Activity did not start, and nothing else did.
+    func startHere() async -> Bool {
+        show(.listening, fromIntent: true)
+        guard activity.isRunning else {
+            show(nil)
+            return false
+        }
+        await voice.start()
+        // Not connected: the talk's phase says why, and the Live Activity goes (`follow` sees no talk).
+        show(Self.state(of: voice))
+        return true
     }
 
     fileprivate func endFromLiveActivity() {
         guard voice.isOn else { return }
         AppLog.shared.add("voice", "the talk was ended from the Live Activity")
-        voice.stop()
+        if let endFromLiveActivityAction { endFromLiveActivityAction() } else { voice.stop() }
     }
 
     private final class Mailbox {

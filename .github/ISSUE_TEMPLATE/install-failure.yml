@@ -1,23 +1,23 @@
 name: Install failure
 description: Installing Poki on the iPhone stopped at a step and did not get past it.
-labels: [bug]
+labels: ["type:bug", "area:install"]
 body:
   - type: markdown
     attributes:
       value: |
         If an agent installed Poki for you, `node bin/install-iphone.mjs issue` fills this in. Read it before you submit.
-        Remove passcodes, passwords, tokens, API keys, your device's name and its UDID. `node bin/install-iphone.mjs diagnose` removes them for you. To report a vulnerability, use [private reporting](https://github.com/JosssphZhou/poki/security/advisories/new).
+        `node bin/install-iphone.mjs diagnose` removes passcodes, passwords, tokens, API keys, your device's name and its UDID for you. To report a vulnerability, use [private reporting](https://github.com/JosssphZhou/poki/security/advisories/new).
   - type: textarea
-    id: what
+    id: problem
     attributes:
-      label: What happened
-      description: What you expected, and what you saw instead.
+      label: Problem description
+      description: Expected behavior, actual behavior, any installer error code printed (for example, `trust_not_answered`), and steps you or the agent already tried.
     validations:
       required: true
   - type: dropdown
     id: step
     attributes:
-      label: Step it stopped at
+      label: Failed installation step
       options:
         - Get Poki Setup
         - Start Poki Setup
@@ -32,15 +32,10 @@ body:
         - Don't know
     validations:
       required: true
-  - type: input
-    id: code
-    attributes:
-      label: Error code
-      description: The `code` the installer printed, for example `trust_not_answered`. Leave empty if you used the Poki Setup window.
   - type: dropdown
     id: path
     attributes:
-      label: Install path
+      label: Installation method
       options:
         - Agent installer (node bin/install-iphone.mjs)
         - Poki Setup for Mac (window)
@@ -49,21 +44,25 @@ body:
     validations:
       required: true
   - type: textarea
-    id: tried
-    attributes:
-      label: What you or the agent tried
-  - type: textarea
     id: diagnostics
     attributes:
-      label: Diagnostics
-      description: The output of `node bin/install-iphone.mjs diagnose`, or the Poki Setup log with identifiers removed.
+      label: Diagnostics output
+      description: Output from `node bin/install-iphone.mjs diagnose`, or the Poki Setup log. Redact personal information and identifiers first.
       render: json
     validations:
       required: true
   - type: input
     id: versions
     attributes:
-      label: Versions
-      description: Poki Setup, Poki, macOS or Windows, Xcode (if installed), iPhone model and iOS.
+      label: Poki and Poki Setup versions
+      description: Include the host OS version, plus the Xcode version if installed.
+      placeholder: Poki Setup 0.2.1 (319) on Windows 11, Poki 0.4.4
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: iPhone model and iOS version
+      placeholder: iPhone 17 Pro, iOS 27.3
     validations:
       required: true

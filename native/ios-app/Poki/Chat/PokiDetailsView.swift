@@ -21,6 +21,7 @@ struct PokiDetailsView: View {
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
     @Binding var path: NavigationPath
+    @ObservedObject private var historyCapture = HistoryCapture.shared
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
 
@@ -92,6 +93,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
+                    NavigationLink(value: DetailsRoute.screenHistory) {
+                        SettingsRow(title: "Screen History", symbol: "rectangle.stack", value: screenHistoryValue)
+                    }
+                    .accessibilityIdentifier("details.screenHistory")
                     NavigationLink(value: DetailsRoute.conversations) {
                         SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
                     }
@@ -164,6 +169,8 @@ struct PokiDetailsView: View {
                     ActionLogView(openSession: { id in openSession(id, nil) })
                 case .conversations:
                     ConversationsSettingsView(openSession: { id, entryID in openSession(id, entryID) })
+                case .screenHistory:
+                    ScreenHistorySettingsView()
                 case .voice:
                     VoiceView(embedded: true)
                 case .connection:
@@ -173,9 +180,7 @@ struct PokiDetailsView: View {
                 case .agents:
                     AgentsAndRelayView(path: $path)
                 case .updates:
-                    Form { SigningSection() }
-                        .navigationTitle(AppLocalization.text("Signing & Updates"))
-                        .navigationBarTitleDisplayMode(.inline)
+                    SigningUpdatesPage()
                 case .approvals:
                     ApprovalsSettingsView()
                 case .appearance:
@@ -198,6 +203,7 @@ struct PokiDetailsView: View {
                     .settingsPage()
             }
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+            .sheet(isPresented: Bindable(model.signer).needsCodeSheet) { VerificationCodeSheet() }
         }
     }
 
@@ -230,6 +236,11 @@ struct PokiDetailsView: View {
         return count == 0 ? nil : "\(count)"
     }
 
+    private var screenHistoryValue: String {
+        let on = !isSample && historyCapture.enabled
+        return AppLocalization.text(LocalizedStringResource(on ? "On" : "Off"))
+    }
+
     private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
     /// The version is the page's last line, so the row only speaks up when an update waits.
     private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
@@ -239,7 +250,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
+    case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
     case sessionPreview(String)
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
@@ -770,7 +781,7 @@ struct AdvancedSettingsView: View {
         .onAppear {
             // The run log is written to tmp for the share sheet, as Memory did it.
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("poki-agent-debug.json")
-            if (try? RoutineStore.shared.debugBundle().write(to: file, options: .atomic)) != nil { runLog = file }
+            if (try? ChatDebugLog.exportBundle().write(to: file, options: .atomic)) != nil { runLog = file }
         }
     }
 }

@@ -57,43 +57,48 @@ struct InterfaceSizeSettingsView: View {
     @AppStorage(AppInterfaceSize.defaultsKey) private var preference = AppInterfaceSize.system
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var toggleHeight: CGFloat = 52
-    @State private var previewTitleHeight: CGFloat = 18
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var draft: String?
+    @State private var editing = false
 
     private let sliderHeight: CGFloat = 52
-    private let sectionSpacing: CGFloat = 20
-    private let previewSpacing: CGFloat = 8
     private let topInset: CGFloat = 20
     private let bottomInset: CGFloat = 12
 
-    private var followsSystem: Bool { AppInterfaceSize.category(for: preference) == nil }
+    private var displayedPreference: String { draft ?? preference }
+    private var displayedSize: DynamicTypeSize {
+        AppInterfaceSize.category(for: displayedPreference).flatMap(DynamicTypeSize.init) ?? typeSize
+    }
+    private var followsSystem: Bool { AppInterfaceSize.category(for: displayedPreference) == nil }
     private var index: Int {
-        let category = AppInterfaceSize.category(for: preference) ?? UIContentSizeCategory(typeSize)
+        let category = AppInterfaceSize.category(for: displayedPreference) ?? UIContentSizeCategory(typeSize)
         return AppInterfaceSize.categories.firstIndex(of: category) ?? 3
     }
 
     var body: some View {
         GeometryReader { geometry in
-            let controlsHeight = toggleHeight + (followsSystem ? 0 : sliderHeight)
-            let reservedHeight = topInset + controlsHeight + sectionSpacing + previewTitleHeight + previewSpacing + bottomInset
             ScrollView {
-                VStack(alignment: .leading, spacing: sectionSpacing) {
+                VStack(alignment: .leading, spacing: 20) {
                     VStack(spacing: 0) {
                         controls
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 20)
                     .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 25))
 
-                    VStack(alignment: .leading, spacing: previewSpacing) {
+                    VStack(alignment: .leading, spacing: 8) {
                         SettingsHeader("Preview")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 20)
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewTitleHeight = $0 }
-                        InterfaceSizePreview()
-                            .frame(height: max(520, geometry.size.height - reservedHeight))
+                        GeometryReader { preview in
+                            InterfaceSizePreview()
+                                .frame(width: preview.size.width, height: preview.size.height)
+                        }
+                        .frame(minHeight: 520)
                     }
                 }
+                .frame(minHeight: max(0, geometry.size.height - topInset - bottomInset), alignment: .top)
                 .padding(.horizontal, 16)
                 .padding(.top, topInset)
                 .padding(.bottom, bottomInset)
@@ -103,6 +108,13 @@ struct InterfaceSizeSettingsView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
+        // Keep this entire page live while tracking. Changing UIWindow traits during the native
+        // slider's tracking repeatedly invalidates UIKit and SwiftUI's glass/scroll layout together.
+        // The visible page shares one local category; persist and update the window when tracking ends.
+        .dynamicTypeSize(displayedSize)
+        .onDisappear(perform: commit)
+        .onChange(of: scenePhase) { _, phase in if phase != .active { commit() } }
+        .onChange(of: preference) { _, _ in if !editing { draft = nil } }
         .navigationTitle(AppLocalization.text(LocalizedStringResource("Interface Size")))
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -111,12 +123,12 @@ struct InterfaceSizeSettingsView: View {
         Toggle("Follow System", isOn: Binding(
             get: { followsSystem },
             set: { followsSystem in
+                draft = nil
                 preference = followsSystem ? AppInterfaceSize.system : UIContentSizeCategory(typeSize).rawValue
             }
         ))
         .padding(.vertical, 10)
         .frame(minHeight: 52)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { toggleHeight = $0 }
         .accessibilityIdentifier("interfaceSize.followSystem")
         VStack(spacing: 0) {
             Divider()
@@ -125,8 +137,9 @@ struct InterfaceSizeSettingsView: View {
                 set: { value in
                     let step = Int(value.rounded())
                     let selected = AppInterfaceSize.categories[step].rawValue
-                    if preference != selected {
-                        preference = selected
+                    if displayedPreference != selected {
+                        draft = selected
+                        if !editing { commit() }
                     }
                 }
             ), in: 0...Double(AppInterfaceSize.categories.count - 1), step: 1) {
@@ -135,6 +148,9 @@ struct InterfaceSizeSettingsView: View {
                 endpoint("Interface Size Minimum", size: 14)
             } maximumValueLabel: {
                 endpoint("Interface Size Maximum", size: 18)
+            } onEditingChanged: { tracking in
+                editing = tracking
+                if !tracking { commit() }
             }
             .sensoryFeedback(.selection, trigger: index)
             .tint(Color(.secondaryLabel))
@@ -148,6 +164,12 @@ struct InterfaceSizeSettingsView: View {
         .clipped()
         .allowsHitTesting(!followsSystem)
         .accessibilityHidden(followsSystem)
+    }
+
+    private func commit() {
+        guard let selected = draft else { return }
+        if preference != selected { preference = selected }
+        draft = nil
     }
 
     private func endpoint(_ label: LocalizedStringKey, size: CGFloat) -> some View {
@@ -193,7 +215,7 @@ private struct InterfaceSizePreview: View {
                 .accessibilityLabel(Text(verbatim: "Poki"))
         }
         .bottomBar(softEdge: true) {
-            ComposerInputView(input: .constant(""), focused: .constant(false), running: false,
+            ComposerInputView(input: .constant(""), focused: .constant(false), adding: .constant(false), running: false,
                               send: { _, _ in }, stop: {}, openVoice: {})
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)

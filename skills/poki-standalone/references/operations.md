@@ -107,7 +107,7 @@ Ask the user to unlock and accept Trust This Computer as needed. Then complete t
 3. Complete developer trust if iOS asks. Some signing teams have no such entry. Done when Poki opens without a trust error.
 4. Open Poki and complete its Automation Mode prompt. For Runner, open Runner to check its launch screen, then return to Poki. Done when the selected automation path works.
 
-If Developer Mode is missing, use the installer or Xcode preparation instructions for that phone. Do not install an unrelated Runner merely to expose the menu. Finish by reading the version and build in Poki at Settings > General > Updates > Poki Version. Preserve other automation apps and their state.
+If Developer Mode is missing, use the installer or Xcode preparation instructions for that phone. Do not install an unrelated Runner merely to expose the menu. Finish by reading the version and build in Poki at Settings > Signing & Updates > Version. Preserve other automation apps and their state.
 
 ## 4. Local connection, pairing and background operation
 

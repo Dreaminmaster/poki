@@ -2550,12 +2550,13 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 
 [[package]]
 name = "poki-setup-core"
-version = "0.2.4"
+version = "0.2.7"
 dependencies = [
  "aes",
  "aes-gcm",

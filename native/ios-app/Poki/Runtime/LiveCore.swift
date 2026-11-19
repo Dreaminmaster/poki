@@ -24,6 +24,7 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
+        config.screenHistory = HistoryStore.agentSource
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation

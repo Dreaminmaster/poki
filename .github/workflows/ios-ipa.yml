@@ -17,7 +17,8 @@ permissions:
 
 jobs:
   app:
-    runs-on: macos-latest
+    # The Xcode 27 image: the iOS 27.1 SDK or later, which the iPhone Duo needs (build-ipa).
+    runs-on: xcode-27
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -46,4 +47,4 @@ jobs:
             build/app-external
             build/app-local
             ~/Library/Developer/Xcode/DerivedData/ModuleCache.noindex
-          key: ipa-fast-${{ github.sha }}
+          key: ipa-xcode27-${{ github.sha }}

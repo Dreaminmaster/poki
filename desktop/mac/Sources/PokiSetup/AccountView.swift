@@ -7,19 +7,44 @@ struct AccountView: View {
     @State private var keep = true
     @State private var working = false
     @State private var error: String?
-    @State private var code = ""
     @State private var confirmSignOut = false
 
     var body: some View {
         Form {
             if let a = model.account, a.signedIn {
                 signedIn(a)
+            } else if let err = model.accountError {
+                keychainError(err)
             } else {
                 signInForm
             }
         }
         .pokiPage()
-        .sheet(isPresented: $model.needsCode) { codeSheet }
+    }
+
+    @ViewBuilder private func keychainError(_ err: CoreError) -> some View {
+        HeroSection {
+            PageHero(symbol: "key.slash", title: localized("Keychain Access Needed"), subtitle: localized("Poki Setup could not read your saved Apple Account from the macOS keychain. Your session was not signed out."))
+        }
+        Section {
+            Text(localized("When macOS asks to access your keychain, enter your Mac login password and choose “Always Allow”, then click Retry."))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(err.message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        Section {
+            HStack {
+                Spacer()
+                if working { ProgressView().controlSize(.small) }
+                Button(localized("Retry")) { Task { await retryAccount() } }
+                    .pokiProminentButton()
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(working)
+            }
+        }
     }
 
     @ViewBuilder private func signedIn(_ a: AccountState) -> some View {
@@ -27,54 +52,70 @@ struct AccountView: View {
             HStack(spacing: 14) {
                 AccountBadge(name: a.name, appleID: a.appleId, signedIn: true, size: PageHeroMetrics.icon)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(a.name ?? "Apple Account").font(.title3.weight(.bold)).lineLimit(1)
+                    Text(a.name ?? localized("Apple Account")).font(.title3.weight(.bold)).lineLimit(1)
                     Text(a.appleId ?? "").font(.callout).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
             }
             .frame(minHeight: PageHeroMetrics.height)
         }
-        Section("Signing") {
-            if model.teams.isEmpty {
-                LabeledContent("Team") { ProgressView().controlSize(.small) }
+        Section(localized("Signing")) {
+            if model.teams.isEmpty, let teamsError = model.teamsError {
+                LabeledContent(localized("Team")) {
+                    Text(teamsError.text)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.trailing)
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button(localized("Try Again")) { Task { await model.refreshAccount() } }
+                }
+            } else if model.teams.isEmpty {
+                LabeledContent(localized("Team")) { ProgressView().controlSize(.small) }
             } else {
-                Picker("Team", selection: Binding(get: { a.teamId ?? model.teams.first?.teamId ?? "" }, set: { id in
+                Picker(localized("Team"), selection: Binding(get: { a.teamId ?? model.teams.first?.teamId ?? "" }, set: { id in
                     if let t = model.teams.first(where: { $0.teamId == id }) { Task { await model.chooseTeam(t) } }
                 })) {
                     ForEach(model.teams) { t in Text(t.name).tag(t.teamId) }
                 }
                 if let t = model.teams.first(where: { $0.teamId == (a.teamId ?? model.teams.first?.teamId) }) {
-                    LabeledContent("Kind") {
-                        Text(t.isFree ? "Free Personal Team: apps last 7 days, Poki Setup renews them" : "Apple Developer Program: apps last a year")
+                    LabeledContent(localized("Kind")) {
+                        Text(t.isFree ? localized("Free Personal Team: apps last 7 days, Poki Setup renews them") : localized("Apple Developer Program: apps last a year"))
                             .foregroundStyle(.secondary).multilineTextAlignment(.trailing)
                     }
                 }
             }
-            StatusRow(title: "Automatic Renewal", value: a.passwordKept ? "On" : "Off: sign in again with “Keep me signed in”", tone: a.passwordKept ? .good : .warn)
+            StatusRow(title: localized("Automatic Renewal"), value: a.passwordKept ? localized("On") : localized("Off: sign in again with “Keep me signed in”"), tone: a.passwordKept ? .good : .warn)
         }
         Section {
-            Button("Sign Out…", role: .destructive) { confirmSignOut = true }
-                .confirmationDialog("Sign out of \(a.appleId ?? "this Apple Account")?", isPresented: $confirmSignOut) {
-                    Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
+            Button(localized("Sign Out…"), role: .destructive) { confirmSignOut = true }
+                .confirmationDialog(localized("Sign out of \(a.appleId ?? localized("this Apple Account"))?"), isPresented: $confirmSignOut) {
+                    Button(localized("Sign Out"), role: .destructive) { Task { await model.signOut() } }
                 } message: {
-                    Text("Poki stays on your iPhones, but Poki Setup can't renew it until you sign in again.")
+                    Text(localized("Poki stays on your devices, but Poki Setup can't renew it until you sign in again."))
                 }
         }
     }
 
     @ViewBuilder private var signInForm: some View {
         HeroSection {
-            PageHero(symbol: "person.crop.circle", title: "Sign in with your Apple Account", subtitle: "Poki Setup uses it the way Xcode does: to sign Poki for your iPhone. A free Apple Account works. Your password goes to Apple only.")
+            PageHero(symbol: "person.crop.circle", title: localized("Sign in with your Apple Account"), subtitle: localized("Poki Setup uses it the way Xcode does: to sign Poki for your iPhone or iPad. A free Apple Account works. Your password goes to Apple only."))
+        }
+        if model.account?.needsReauth == true {
+            Section {
+                Label(localized("Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session."), systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            }
         }
         Section {
-            TextField("Email or Phone Number", text: $appleID, prompt: Text("name@example.com"))
+            TextField(localized("Email or Phone Number"), text: $appleID, prompt: Text("name@example.com"))
                 .textContentType(.username)
-            SecureField("Password", text: $password, prompt: Text("Required"))
+            SecureField(localized("Password"), text: $password, prompt: Text(localized("Required")))
                 .textContentType(.password)
                 .onSubmit { Task { await signIn() } }
-            Toggle("Keep me signed in to renew Poki automatically", isOn: $keep)
+            Toggle(localized("Keep me signed in to renew Poki automatically"), isOn: $keep)
         } footer: {
-            Text("With a free account, apps stop opening after 7 days. Poki Setup renews Poki before then while this Mac is on, using the password kept in your keychain.")
+            Text(localized("With a free account, apps stop opening after 7 days. Poki Setup renews Poki before then while this Mac is on, using the password kept in your keychain."))
                 .font(.footnote).foregroundStyle(.secondary)
         }
         Section {
@@ -84,51 +125,13 @@ struct AccountView: View {
                 }
                 Spacer()
                 if working { ProgressView().controlSize(.small) }
-                Button("Sign In") { Task { await signIn() } }
+                Button(localized("Sign In")) { Task { await signIn() } }
                     .pokiProminentButton()
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
                     .disabled(working || appleID.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
             }
         }
-    }
-
-    private var codeSheet: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "lock.shield").font(.system(size: 40)).foregroundStyle(Color.pokiBlue)
-            Text("Two-Factor Authentication").font(.title2.weight(.semibold))
-            Text(model.codeVia == "sms" ? "Enter the code Apple sent to your phone number." : "Enter the verification code shown on your other Apple devices.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            TextField("6-digit code", text: $code)
-                .font(.system(size: 24, weight: .medium, design: .monospaced))
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 200)
-                .onSubmit { Task { await verify() } }
-                .onChange(of: code) { _, new in
-                    let digits = new.filter(\.isNumber)
-                    if digits != new { code = digits }
-                    if digits.count == 6 { Task { await verify() } }
-                }
-            if let error { Text(error).foregroundStyle(.red).font(.callout) }
-            HStack {
-                Button("Cancel") {
-                    model.needsCode = false
-                    code = ""
-                }
-                .keyboardShortcut(.cancelAction)
-                Spacer()
-                if working { ProgressView().controlSize(.small) }
-                Button("Verify") { Task { await verify() } }
-                    .pokiProminentButton()
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(code.count != 6 || working)
-            }
-        }
-        .padding(24)
-        .frame(width: 380)
     }
 
     private func signIn() async {
@@ -138,24 +141,16 @@ struct AccountView: View {
         defer { working = false }
         do {
             try await model.signIn(appleID: appleID.trimmingCharacters(in: .whitespaces), password: password, keep: keep)
-            if !model.needsCode { password = "" }
+            password = ""
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func verify() async {
-        guard !working, code.count == 6 else { return }
+    private func retryAccount() async {
+        guard !working else { return }
         working = true
-        error = nil
         defer { working = false }
-        do {
-            try await model.finishSignIn(code: code)
-            code = ""
-            password = ""
-        } catch {
-            self.error = error.localizedDescription
-            code = ""
-        }
+        await model.refreshAccount()
     }
 }

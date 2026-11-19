@@ -161,18 +161,18 @@
         }
       }
     },
-    "Press and hold the Action button to open Poki and start talking. To type a task instead, choose Shortcut there, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
+    "Press and hold the Action button to talk with Poki without leaving the app you’re in. Press and hold it again to end the talk. To open Poki and talk there instead, choose Controls, then Talk to Poki. To type a task, choose Shortcut, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按住操作按钮，就会打开 Poki 并开始说话。想改成输入任务，就在那里选「快捷指令」，再选「发任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
+            "value" : "按住操作按钮，不离开当前 App 就能和 Poki 说话，再按住一次就结束。想打开 Poki 在里面说话，选「控制」，再选「和 Poki 说话」。想输入任务，选「快捷指令」，再选「发送任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按住動作按鈕，就會打開 Poki 並開始說話。想改成輸入任務，就在那裡選「捷徑」，再選「發任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
+            "value" : "按住動作按鈕，不離開目前的 App 就能和 Poki 說話，再按住一次就結束。想打開 Poki 在裡面說話，選「控制項目」，再選「和 Poki 說話」。想輸入任務，選「捷徑」，再選「傳送任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
           }
         }
       }
@@ -257,18 +257,18 @@
         }
       }
     },
-    "Settings › Action Button › Controls › Talk to Poki" : {
+    "Settings › Action Button › Shortcut › Poki Anytime" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "设置 › 操作按钮 › 控制 › 和 Poki 说话"
+            "value" : "设置 › 操作按钮 › 快捷指令 › 随时 Poki"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "設定 › 動作按鈕 › 控制項目 › 和 Poki 說話"
+            "value" : "設定 › 動作按鈕 › 捷徑 › 隨時 Poki"
           }
         }
       }
@@ -317,6 +317,118 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要 Poki 做什麼？"
+          }
+        }
+      }
+    },
+    "Poki Anytime" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "随时 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隨時 Poki"
+          }
+        }
+      }
+    },
+    "Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不离开当前 App，直接和 Poki 说话。Poki 能看到这个 App，也能在里面操作。再运行一次就结束对话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不離開目前的 App，直接和 Poki 說話。Poki 能看到這個 App，也能在裡面操作。再執行一次就結束對話。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t show the talk on the Lock Screen, so it opens to talk." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 没能在锁定屏幕上显示对话，所以打开 Poki 来说话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 沒能在鎖定畫面上顯示對話，所以打開 Poki 來說話。"
+          }
+        }
+      }
+    },
+    "Finish setting up Poki first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先完成 Poki 的设置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先完成 Poki 的設定。"
+          }
+        }
+      }
+    },
+    "Set up Poki’s voice first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先设置 Poki 的语音。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先設定 Poki 的語音。"
+          }
+        }
+      }
+    },
+    "Poki is doing a task. Here it is." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在做任务，这是它在做的事。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在做任務，這是它在做的事。"
+          }
+        }
+      }
+    },
+    "Allow Poki to use the microphone first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先允许 Poki 使用麦克风。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先允許 Poki 使用麥克風。"
           }
         }
       }

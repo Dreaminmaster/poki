@@ -4,8 +4,8 @@ import UserNotifications
 
 /// Poki keeps its own signing, the way Poki Setup does on a computer (PokiLauncher's signer, which is
 /// Poki Setup's Rust core): the Apple Account is signed in here, with anisette from a remote server,
-/// the next build is signed ahead of time (the installed copy for a refresh, the chosen channel's
-/// release for an update), and it is installed over the loopback only when the person taps Install
+/// the next build is signed ahead of time (the installed copy for a refresh, the newest release
+/// for an update), and it is installed over the loopback only when the person taps Install
 /// and no task is running, because iOS ends Poki when the new copy lands.
 ///
 /// Secrets (the Apple session, the kept password, the team key, the anisette identity) live only in
@@ -13,6 +13,7 @@ import UserNotifications
 @MainActor
 @Observable
 final class SelfSigner {
+    /// A release channel the core offers.
     struct Channel: Decodable, Hashable, Identifiable {
         let id: String
         let title: String
@@ -20,7 +21,11 @@ final class SelfSigner {
 
     struct Status: Decodable, Equatable {
         var signed_in: Bool
+        var needs_reauth: Bool?
         var needs_code: Bool
+        var rate_limited: Bool?
+        var rate_limited_until: Int64?
+        var resend_available_at: Int64?
         var apple_id: String?
         var name: String?
         var team_id: String?
@@ -57,7 +62,6 @@ final class SelfSigner {
         let tag: String
         let version: String
         let build: String
-        let channel: String
         let source: String?
         let source_notice: String?
     }
@@ -67,7 +71,7 @@ final class SelfSigner {
     /// Home warns, and a notification reminds once a day, when the installed profile has this many days left.
     static let warnWithDaysLeft: Double = 2
     /// How often Poki looks after its signing by itself while it stays up. Without an Apple Account it
-    /// only looks up the channel, and no more often than this: GitHub limits unsigned reads per hour.
+    /// only looks up the newest build, and no more often than this: GitHub limits unsigned reads per hour.
     static let checkEvery: TimeInterval = 3 * 3600
 
     private(set) var status: Status?
@@ -129,12 +133,37 @@ final class SelfSigner {
 
     var signedIn: Bool { status?.signed_in == true || Self.screenshotSignedIn }
     var needsCode: Bool { status?.needs_code == true }
+    /// Apple took a code but never opened the session: nothing signs in until the person does.
+    var needsReauth: Bool { status?.needs_reauth == true }
+    static let reauthMessage = "Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session."
+    var rateLimited: Bool { rateLimitRemainingSeconds() > 0 }
+    var needsCodeSheet = false
+    static let resendCooldown: TimeInterval = 60
+    private var localResendAvailableAt: Date?
+    private static let prepareRetryBackoff: TimeInterval = 15 * 60
+    private var lastPrepareFailure: Date?
+    private var teamsTask: Task<Void, Never>?
+    typealias Transport = ([String: Any], (@Sendable ([String: Any]) -> Void)?) async throws -> Data
+    var transport: Transport
+
+    init(transport: @escaping Transport = SignerBridge.call) {
+        self.transport = transport
+    }
+
+    @discardableResult
+    private func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
+        try await transport(request, progress)
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
+        try SignerBridge.unwrap(type, from: try await transport(request, progress))
+    }
     var daysLeft: Double? { expiry.map { $0.timeIntervalSinceNow / 86_400 } }
     /// The build Install would put on: an update when one is ready, else a refresh.
     var next: Prepared? { ready["update"] ?? ready["refresh"] }
-    /// The channel has a newer Poki than the installed one.
+    /// There is a newer Poki than the installed one.
     var updateAvailable: Bool { latest.map(isNewer) ?? false }
-    /// A newer Poki is on the channel, but no signed copy of it is ready to install yet. Compared by
+    /// A newer Poki is out, but no signed copy of it is ready to install yet. Compared by
     /// version and build, not tag: the rolling releases (app-prealpha-latest, ios-prealpha-latest)
     /// keep one tag for every build, so a copy prepared from an earlier build has the same tag.
     var updateNotReady: Bool {
@@ -145,13 +174,21 @@ final class SelfSigner {
     /// Why Poki cannot download the update by itself, when it cannot. Nil when it can.
     var updateBlocker: String? {
         guard updateNotReady else { return nil }
-        if !signedIn { return AppLocalization.text(LocalizedStringResource("To download updates by itself, Poki needs your Apple Account: sign in under Signing Options. Or update Poki from Poki Setup on your Mac.")) }
+        if !signedIn { return AppLocalization.text(LocalizedStringResource("Sign in to your Apple Account so Poki can download updates automatically, or update Poki using Poki Setup on your Mac.")) }
         if phone() == nil { return unreachable }
         return nil
     }
-    /// How to get the channel's newer Poki from here, or nil when there is none.
+    /// How to get the newer Poki from here, or nil when there is none.
     var updateStep: UpdateStep? { UpdateStep(updateAvailable: updateAvailable, copyReady: !updateNotReady, signedIn: signedIn) }
-    var channelTitle: String { status?.channels.first { $0.id == status?.channel }?.title ?? status?.channel ?? "" }
+    /// The newest build is being looked up now.
+    var lookingUp: Bool { lookup != nil }
+    /// The core's own sign-in server (its anisette DEFAULT_REMOTE), which the page does not spell out.
+    static let defaultSignInServer = "https://new.ani.sidestore.io"
+    /// The sign-in server the person named, or nil while Poki uses its own.
+    var customSignInServer: String? {
+        guard let url = status?.anisette, url.trimmingCharacters(in: ["/"]) != Self.defaultSignInServer else { return nil }
+        return url
+    }
 
     static var home: URL {
         let url = AppFiles.support.appendingPathComponent("signer", isDirectory: true)
@@ -170,8 +207,8 @@ final class SelfSigner {
         SignerBridge.installVault()
         Task {
             do {
-                _ = try await SignerBridge.call(["op": "configure", "home": Self.home.path, "device_name": UIDevice.current.name])
-                if let imported = try? await SignerBridge.decode([String: AnyDecodable].self, ["op": "import_identity", "path": Self.handedIdentity.path]),
+                _ = try await call(["op": "configure", "home": Self.home.path, "device_name": UIDevice.current.name])
+                if let imported = try? await decode([String: AnyDecodable].self, ["op": "import_identity", "path": Self.handedIdentity.path]),
                    imported["imported"]?.value as? Bool == true {
                     log.add("signing", "took Poki Setup's signing key into the Keychain")
                 }
@@ -191,50 +228,138 @@ final class SelfSigner {
     }
 
     func reload() async {
-        do { status = try await SignerBridge.decode(Status.self, ["op": "status"]) } catch { lastError = error.localizedDescription }
+        do { status = try await decode(Status.self, ["op": "status"]) } catch { lastError = error.localizedDescription }
     }
 
     // MARK: Account
 
     func signIn(appleID: String, password: String, keepPassword: Bool) async {
+        lastPrepareFailure = nil
         await run("Signing in") {
-            _ = try await SignerBridge.call(["op": "sign_in", "apple_id": appleID, "password": password, "keep_password": keepPassword])
+            _ = try await self.call(["op": "sign_in", "apple_id": appleID, "password": password, "keep_password": keepPassword])
         }
         await reload()
-        if signedIn { await loadTeams() }
+        if signedIn, !needsCode, !rateLimited { await loadTeams() }
     }
 
     func finishSignIn(code: String) async {
-        await run("Checking the code") { _ = try await SignerBridge.call(["op": "finish_sign_in", "code": code]) }
+        lastPrepareFailure = nil
+        await run("Checking the code") { _ = try await self.call(["op": "finish_sign_in", "code": code]) }
         await reload()
-        if signedIn { await loadTeams() }
+        if !needsCode { needsCodeSheet = false }
+        if signedIn, !needsCode, !rateLimited { await loadTeams() }
+    }
+
+    func presentCodeSheet() {
+        if needsCode { needsCodeSheet = true }
+    }
+
+    func dismissCodeSheet() {
+        needsCodeSheet = false
+    }
+
+    func resendCooldownSeconds(at now: Date = .now) -> Int {
+        var until = status?.resend_available_at.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        if let localResendAvailableAt, until == nil || localResendAvailableAt > until! {
+            until = localResendAvailableAt
+        }
+        guard let until else { return 0 }
+        return max(0, Int(ceil(until.timeIntervalSince(now))))
+    }
+
+    func rateLimitRemainingSeconds(at now: Date = .now) -> Int {
+        if let until = status?.rate_limited_until {
+            return max(0, Int(ceil(TimeInterval(until) - now.timeIntervalSince1970)))
+        }
+        return status?.rate_limited == true ? 3600 : 0
+    }
+
+    func canResendCode(at now: Date = .now) -> Bool {
+        needsCode && working == nil && rateLimitRemainingSeconds(at: now) == 0 && resendCooldownSeconds(at: now) == 0
+    }
+
+    func resendButtonTitle(at now: Date = .now) -> String {
+        let rateWait = rateLimitRemainingSeconds(at: now)
+        if rateWait >= 60 {
+            let minutes = (rateWait + 59) / 60
+            return AppLocalization.text(LocalizedStringResource("Resend Verification Code (wait \(minutes) min)"))
+        }
+        if rateWait > 0 {
+            return AppLocalization.text(LocalizedStringResource("Resend Verification Code (wait \(rateWait) s)"))
+        }
+        let cooldown = resendCooldownSeconds(at: now)
+        if cooldown > 0 {
+            return AppLocalization.text(LocalizedStringResource("Resend Verification Code (\(cooldown) s)"))
+        }
+        return AppLocalization.text(LocalizedStringResource("Resend Verification Code"))
+    }
+
+    static func localizedErrorText(_ error: String) -> String {
+        AppLocalization.bundle.localizedString(forKey: error, value: error, table: nil)
+    }
+
+    func resendCode(now: Date = .now) async {
+        guard needsCode, working == nil, rateLimitRemainingSeconds(at: now) == 0, resendCooldownSeconds(at: now) == 0 else { return }
+        localResendAvailableAt = now.addingTimeInterval(Self.resendCooldown)
+        await run("Sending a new code") { _ = try await self.call(["op": "resend_code"]) }
+        await reload()
+    }
+
+    func cancelSignIn() async {
+        needsCodeSheet = false
+        localResendAvailableAt = nil
+        await run("Cancelling sign-in") { _ = try await self.call(["op": "cancel_sign_in"]) }
+        lastError = nil
+        await reload()
     }
 
     func signOut() async {
-        await run("Signing out") { _ = try await SignerBridge.call(["op": "sign_out"]) }
+        needsCodeSheet = false
+        localResendAvailableAt = nil
+        await run("Signing out") { _ = try await self.call(["op": "sign_out"]) }
         teams = []
         await reload()
     }
 
     func loadTeams() async {
-        do { teams = try await SignerBridge.decode([Team].self, ["op": "teams"]) } catch { lastError = error.localizedDescription }
-        await reload()
+        if let teamsTask {
+            await teamsTask.value
+            return
+        }
+        guard !needsCode, !rateLimited, !needsReauth else { return }
+        let task = Task { @MainActor in
+            do {
+                teams = try await decode([Team].self, ["op": "teams"])
+            } catch {
+                lastError = error.localizedDescription
+                if (error as? SignerError)?.code == "needs_code" {
+                    await reload()
+                    if needsCode { needsCodeSheet = true }
+                    return
+                }
+            }
+            await reload()
+        }
+        teamsTask = task
+        defer { teamsTask = nil }
+        await task.value
     }
 
     func choose(team: Team) async {
-        await run("Choosing the team") { _ = try await SignerBridge.call(["op": "choose_team", "team_id": team.team_id]) }
+        await run("Choosing the team") { _ = try await self.call(["op": "choose_team", "team_id": team.team_id]) }
         await reload()
     }
 
+    /// Follows another release channel and looks up its newest build.
     func setChannel(_ id: String) async {
-        await run(nil) { _ = try await SignerBridge.call(["op": "set_channel", "channel": id]) }
+        await run(nil) { _ = try await self.call(["op": "set_channel", "channel": id]) }
         await reload()
         latest = nil
         await checkLatest()
     }
 
     func setAnisette(_ url: String) async {
-        await run(nil) { _ = try await SignerBridge.call(["op": "set_anisette", "url": url]) }
+        await run(nil) { _ = try await self.call(["op": "set_anisette", "url": url]) }
         await reload()
     }
 
@@ -255,20 +380,33 @@ final class SelfSigner {
         ready = found
     }
 
-    /// At launch, back in front and every few hours: looks up the channel's newest build, so Home and
-    /// Signing can say an update is out, and prepares what is due. Without an Apple Account or the
-    /// loopback it only looks, at most once every `checkEvery`.
+    static func shouldAllowAutoPrepare(canPrepare: Bool, needsCode: Bool, rateLimited: Bool, working: String?, lastFailure: Date?, now: Date = .now) -> Bool {
+        guard canPrepare, !needsCode, !rateLimited, working == nil else { return false }
+        if let lastFailure, now.timeIntervalSince(lastFailure) < prepareRetryBackoff { return false }
+        return true
+    }
+
+    static func isMaintainThrottled(lastCheck: Date?, now: Date = .now) -> Bool {
+        guard let lastCheck else { return false }
+        return now.timeIntervalSince(lastCheck) < checkEvery - 60
+    }
+
+    /// At launch, back in front and every few hours: looks up the newest build, so Home and
+    /// Signing & Updates can say an update is out, and prepares what is due. Throttled across foreground and
+    /// loopback transitions, and paused while a 2FA code or rate-limit cooldown is active.
     func maintain() {
         guard installFinish == .idle else { return }
         // Not before start() has the signer configured (it calls this itself once it has).
-        guard status != nil else { return }
-        // A minute short of the interval, so the timer's own run is never just too early.
-        if !canPrepare, let last = lastCheck, Date().timeIntervalSince(last) < Self.checkEvery - 60 { return }
+        guard status != nil, !needsCode, !rateLimited else { return }
+        if Self.isMaintainThrottled(lastCheck: lastCheck) {
+            if canPrepare { Task { await prepareDue() } }
+            return
+        }
         Task { await checkLatest() }
     }
 
-    /// Looks up the newest build on the Beta channel, then prepares what is due. Works without an
-    /// Apple Account, and the Signing page calls it when it opens. False when the lookup failed.
+    /// Looks up the newest build, then prepares what is due. Works without an Apple Account.
+    /// False when the lookup failed.
     @discardableResult
     func checkLatest() async -> Bool {
         let found = await lookUp()
@@ -279,14 +417,16 @@ final class SelfSigner {
     /// One lookup at a time: a caller that comes while one runs gets its answer.
     private var lookup: Task<Bool, Never>?
 
-    private func lookUp() async -> Bool {
+    /// Asks what the newest build is and prepares nothing. False when the lookup failed.
+    @discardableResult
+    func lookUp() async -> Bool {
         if let lookup { return await lookup.value }
         let task = Task { () -> Bool in
             do {
                 var found = Self.screenshotRelease(installedVersion: installedVersion, installedBuild: installedBuild)
-                if found == nil { found = try await SignerBridge.decode(Release.self, ["op": "check_update"]) }
+                if found == nil { found = try await self.decode(Release.self, ["op": "check_update"]) }
                 guard let rel = found else { return false }
-                if rel != latest { log.add("signing", "newest on the channel: \(rel.version) (\(rel.build)), \(rel.channel)") }
+                if rel != latest { log.add("signing", "newest build: \(rel.version) (\(rel.build))") }
                 latest = rel
                 lastCheck = Date()
                 updateCheckError = nil
@@ -294,6 +434,7 @@ final class SelfSigner {
             } catch {
                 latest = nil
                 updateCheckError = error.localizedDescription
+                log.add("signing", "looking up the newest build: \(error.localizedDescription)")
                 return false
             }
         }
@@ -304,16 +445,16 @@ final class SelfSigner {
 
     private var canPrepare: Bool { installFinish == .idle && signedIn && phone() != nil }
 
-    /// Prepares what is due, by itself: an update when the channel has a newer Poki, a refresh when
+    /// Prepares what is due, by itself: an update when there is a newer Poki, a refresh when
     /// the installed profile is close to expiring. Never installs.
     private func prepareDue() async {
-        guard canPrepare, working == nil else { return }
+        guard Self.shouldAllowAutoPrepare(canPrepare: canPrepare, needsCode: needsCode, rateLimited: rateLimited, working: working, lastFailure: lastPrepareFailure) else { return }
         if updateNotReady {
-            await prepare(kind: "update")
+            await prepare(kind: "update", automatic: true)
             return
         }
         if let days = daysLeft, days <= Self.refreshWithDaysLeft, ready["refresh"] == nil, ready["update"] == nil {
-            await prepare(kind: "refresh")
+            await prepare(kind: "refresh", automatic: true)
         }
         remindIfExpiring()
     }
@@ -338,23 +479,35 @@ final class SelfSigner {
         }
     }
 
-    func prepare(kind: String) async {
+    func prepare(kind: String, automatic: Bool = false) async {
         guard var request = phone() else {
             lastError = unreachable
             return
         }
         request["op"] = "prepare"
         request["kind"] = kind
+        request["automatic"] = automatic
         request["app_path"] = Bundle.main.bundlePath
         request["device_name"] = UIDevice.current.name
-        await run(kind == "update" ? "Preparing the update" : "Preparing a refresh") {
-            let p = try await SignerBridge.decode(Prepared.self, request) { [weak self] progress in
-                Task { @MainActor in self?.show(progress) }
+        await run(kind == "update" ? "Preparing the update" : "Preparing a renewal") {
+            let p: Prepared
+            do {
+                p = try await self.decode(Prepared.self, request) { [weak self] progress in
+                    Task { @MainActor in self?.show(progress) }
+                }
+            } catch where kind == "update" && self.step == "release" {
+                // The core's sentence names its servers. It goes to the log; the page says what to do.
+                self.log.add("signing", "getting the update: \(error.localizedDescription)")
+                throw SignerError(message: AppLocalization.text(LocalizedStringResource("Poki couldn’t download the update. Check your internet connection and try again.")), code: (error as? SignerError)?.code ?? "")
             }
+            self.lastPrepareFailure = nil
             self.ready[kind] = p
             self.log.add("signing", "prepared \(kind): \(p.version) (\(p.build)), profile until \(p.expires)")
-            self.notify(title: kind == "update" ? AppLocalization.text(LocalizedStringResource("Poki Update Ready")) : AppLocalization.text(LocalizedStringResource("Poki Refresh Ready")),
-                        body: AppLocalization.text(LocalizedStringResource("Open Settings > Connection > Signing & Updates and install the prepared build when Poki isn't running a task.")))
+            self.notify(title: kind == "update" ? AppLocalization.text(LocalizedStringResource("Poki Update Ready")) : AppLocalization.text(LocalizedStringResource("Poki Renewal Ready")),
+                        body: AppLocalization.text(LocalizedStringResource("Go to Settings > Signing & Updates to install it when Poki isn’t running a task.")))
+        }
+        if lastError != nil, automatic || needsCode || rateLimited {
+            lastPrepareFailure = Date()
         }
     }
 
@@ -398,7 +551,7 @@ final class SelfSigner {
             }
         }
         await run("Installing") {
-            _ = try await SignerBridge.call(request) { [weak self] progress in
+            _ = try await self.call(request) { [weak self] progress in
                 Task { @MainActor in self?.show(progress) }
             }
         }
@@ -437,14 +590,29 @@ final class SelfSigner {
         working = title
         fraction = nil
         lastError = nil
+        step = nil
         defer { working = installMessage; fraction = nil }
         do { try await work() } catch {
             let code = (error as? SignerError)?.code ?? ""
-            lastError = whyUnreachable() == .cellular && ["loopback", "handshake", "unreachable"].contains(code) ? LoopbackMonitor.needsWiFi : error.localizedDescription
-            log.add("signing", "\(title ?? "signer"): \(error.localizedDescription)")
+            let said = error.localizedDescription
+            if whyUnreachable() == .cellular && ["loopback", "handshake", "unreachable"].contains(code) {
+                lastError = LoopbackMonitor.needsWiFi
+            } else if said.localizedCaseInsensitiveContains("anisette") && code != "needs_person" {
+                // The core calls the sign-in server by its own name, with addresses. That stays in the log.
+                lastError = AppLocalization.text(LocalizedStringResource("Poki couldn’t connect to the sign-in server. Check your internet connection and try again, or change the server in Advanced."))
+            } else {
+                lastError = said
+            }
+            log.add("signing", "\(title ?? "signer"): \(said)")
+            if code == "needs_code" {
+                await reload()
+                if needsCode { needsCodeSheet = true }
+            }
         }
     }
 
+    /// The core's step that is running (`phone`, `release`, `sign`, `profiles`, `install`).
+    private var step: String?
     /// The upgrade's progress while it installs, for `install`'s watch.
     private var installFraction: Double?
     private var steppedAside = false
@@ -520,6 +688,7 @@ final class SelfSigner {
         guard !needsReopen else { return }
         switch progress["kind"] as? String {
         case "step":
+            step = progress["id"] as? String
             working = progress["title"] as? String ?? working; fraction = nil
             // This step precedes upload. Only part/install comes from the system upgrade callback.
             if progress["id"] as? String == "install" { stepAside() }
@@ -529,8 +698,15 @@ final class SelfSigner {
                 installFraction = fraction
                 exitIfReady()
             }
-            if let d = progress["detail"] as? String { working = d }
-        case "note", "waiting": if let t = progress["text"] as? String { working = t }
+            // "3.1 of 48.0 MB" reads the same in every language as "3.1 / 48.0 MB".
+            if let d = progress["detail"] as? String { working = d.hasSuffix(" MB") ? d.replacingOccurrences(of: " of ", with: " / ") : d }
+        case "done":
+            if progress["id"] as? String == step { step = nil }
+        case "note", "waiting":
+            // The release steps' only notes say which server the download comes from, in the core's
+            // words. The page says it in the person's when the lookup itself fell back.
+            guard !["release", "update"].contains(progress["id"] as? String ?? "") else { break }
+            if let t = progress["text"] as? String { working = t }
         default: break
         }
     }
@@ -556,7 +732,7 @@ final class SelfSigner {
         UserDefaults.standard.set(Date(), forKey: key)
         let when = expiry.map { $0.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale)) } ?? ""
         notify(title: AppLocalization.text(LocalizedStringResource("Poki Expires Soon")),
-               body: next != nil ? AppLocalization.text(LocalizedStringResource("A refreshed Poki is ready. Open Setup and tap Install before \(when).")) : AppLocalization.text(LocalizedStringResource("Open Setup to refresh Poki before \(when).")))
+               body: next != nil ? AppLocalization.text(LocalizedStringResource("Poki’s renewal is ready. Go to Settings > Signing & Updates and tap Install before \(when).")) : AppLocalization.text(LocalizedStringResource("Go to Settings > Signing & Updates to renew Poki before \(when).")))
     }
 
     /// `-pokiSigningDays 1`: a simulator has no profile, so a screenshot gives Poki one that ends then.
@@ -569,14 +745,14 @@ final class SelfSigner {
         #endif
     }
 
-    /// `-pokiLatest newer|same`: a simulator's screenshots and tests get a channel build one past the
-    /// installed one, or the installed one, as the Beta channel's newest build instead of the network's.
+    /// `-pokiLatest newer|same`: a simulator's screenshots and tests get a build one past the
+    /// installed one, or the installed one, as the newest build instead of the network's.
     nonisolated private static func screenshotRelease(installedVersion: String, installedBuild: String) -> Release? {
         #if targetEnvironment(simulator)
         let build = Int(installedBuild) ?? 0
         switch UserDefaults.standard.string(forKey: "pokiLatest") {
-        case "newer": return Release(tag: "app-\(installedVersion)-beta.\(build + 1)", version: installedVersion, build: String(build + 1), channel: "beta", source: nil, source_notice: nil)
-        case "same": return Release(tag: "app-\(installedVersion)-beta.\(build)", version: installedVersion, build: installedBuild, channel: "beta", source: nil, source_notice: nil)
+        case "newer": return Release(tag: "app-\(installedVersion)-beta.\(build + 1)", version: installedVersion, build: String(build + 1), source: nil, source_notice: nil)
+        case "same": return Release(tag: "app-\(installedVersion)-beta.\(build)", version: installedVersion, build: installedBuild, source: nil, source_notice: nil)
         default: return nil
         }
         #else
@@ -674,6 +850,8 @@ enum SignerBridge {
                         }
                         box.continuation = nil
                         unmanaged.release()
+                    } else if object["event"] as? String == "log", let line = object["line"] as? String {
+                        Task { @MainActor in AppLog.shared.add("signing", line) }
                     } else if let p = object["progress"] as? [String: Any] {
                         box.progress?(p)
                     }
@@ -689,8 +867,11 @@ enum SignerBridge {
 
     private struct Wrapped<T: Decodable>: Decodable { let v: T }
 
+    static func unwrap<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try JSONDecoder().decode(Wrapped<T>.self, from: data).v
+    }
+
     static func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
-        let data = try await call(request, progress: progress)
-        return try JSONDecoder().decode(Wrapped<T>.self, from: data).v
+        try unwrap(type, from: try await call(request, progress: progress))
     }
 }

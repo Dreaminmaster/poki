@@ -9,6 +9,146 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "os-keychain")]
 const SERVICE: &str = "nz.zheha.poki.setup";
+#[cfg(any(feature = "os-keychain", test))]
+const ACCOUNT_V1: &str = "apple-account";
+#[cfg(any(feature = "os-keychain", test))]
+const ACCOUNT_V2: &str = "apple-account-v2";
+
+#[cfg(any(feature = "os-keychain", test))]
+fn secret_key_v2(name: &str) -> String { format!("{name}-v2") }
+
+#[cfg(any(feature = "os-keychain", test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum KeychainErr {
+    NoEntry,
+    Failure(String),
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) trait KeychainBackend {
+    fn get(&self, key: &str) -> std::result::Result<String, KeychainErr>;
+    fn set(&self, key: &str, value: &str) -> std::result::Result<(), KeychainErr>;
+    fn delete(&self, key: &str) -> std::result::Result<(), KeychainErr>;
+}
+
+#[cfg(feature = "os-keychain")]
+struct OsKeychain;
+
+#[cfg(feature = "os-keychain")]
+impl OsKeychain {
+    fn map_err(e: keyring::Error) -> KeychainErr {
+        match e {
+            keyring::Error::NoEntry => KeychainErr::NoEntry,
+            other => KeychainErr::Failure(other.to_string()),
+        }
+    }
+    fn entry(key: &str) -> std::result::Result<keyring::Entry, KeychainErr> {
+        keyring::Entry::new(SERVICE, key).map_err(Self::map_err)
+    }
+}
+
+#[cfg(feature = "os-keychain")]
+impl KeychainBackend for OsKeychain {
+    fn get(&self, key: &str) -> std::result::Result<String, KeychainErr> {
+        Self::entry(key)?.get_password().map_err(Self::map_err)
+    }
+    fn set(&self, key: &str, value: &str) -> std::result::Result<(), KeychainErr> {
+        Self::entry(key)?.set_password(value).map_err(Self::map_err)
+    }
+    fn delete(&self, key: &str) -> std::result::Result<(), KeychainErr> {
+        match Self::entry(key)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(Self::map_err(e)),
+        }
+    }
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+fn keychain_read_error(detail: &str) -> Error {
+    Error::Keychain(format!("Could not read the saved Apple Account from the keychain ({detail}). Enter your Mac login password and choose Always Allow, then retry."))
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+fn keychain_write_error(detail: &str) -> Error {
+    Error::Keychain(format!("Could not write the keychain: {detail}"))
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) fn load_with_keychain(kc: &dyn KeychainBackend) -> Result<Account> {
+    match kc.get(ACCOUNT_V2) {
+        Ok(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
+        Err(KeychainErr::NoEntry) => match kc.get(ACCOUNT_V1) {
+            Ok(json) => {
+                kc.set(ACCOUNT_V2, &json).map_err(|e| match e {
+                    KeychainErr::NoEntry => keychain_write_error("no entry"),
+                    KeychainErr::Failure(m) => keychain_write_error(&m),
+                })?;
+                if let Err(KeychainErr::Failure(m)) = kc.delete(ACCOUNT_V1) {
+                    tracing::warn!("could not delete legacy keychain account entry: {m}");
+                }
+                Ok(serde_json::from_str(&json).unwrap_or_default())
+            }
+            Err(KeychainErr::NoEntry) => Ok(Account::default()),
+            Err(KeychainErr::Failure(m)) => Err(keychain_read_error(&m)),
+        },
+        Err(KeychainErr::Failure(m)) => Err(keychain_read_error(&m)),
+    }
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) fn save_with_keychain(kc: &dyn KeychainBackend, account: &Account) -> Result<()> {
+    let json = serde_json::to_string(account)?;
+    kc.set(ACCOUNT_V2, &json).map_err(|e| match e {
+        KeychainErr::NoEntry => keychain_write_error("no entry"),
+        KeychainErr::Failure(m) => keychain_write_error(&m),
+    })
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) fn clear_with_keychain(kc: &dyn KeychainBackend) -> Result<()> {
+    for key in [ACCOUNT_V2, ACCOUNT_V1] {
+        if let Err(KeychainErr::Failure(m)) = kc.delete(key) {
+            return Err(Error::Keychain(format!("keychain: {m}")));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) fn secret_get_with_keychain(kc: &dyn KeychainBackend, name: &str) -> Option<String> {
+    let v2 = secret_key_v2(name);
+    match kc.get(&v2) {
+        Ok(val) => (!val.is_empty()).then_some(val),
+        Err(KeychainErr::NoEntry) => match kc.get(name) {
+            Ok(val) if !val.is_empty() => {
+                if kc.set(&v2, &val).is_ok() {
+                    let _ = kc.delete(name);
+                }
+                Some(val)
+            }
+            _ => None,
+        },
+        Err(KeychainErr::Failure(_)) => None,
+    }
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) fn secret_set_with_keychain(kc: &dyn KeychainBackend, name: &str, value: &str) -> Result<()> {
+    kc.set(&secret_key_v2(name), value).map_err(|e| match e {
+        KeychainErr::NoEntry => Error::Keychain("keychain: no entry".into()),
+        KeychainErr::Failure(m) => Error::Keychain(format!("keychain: {m}")),
+    })
+}
+
+#[cfg(any(feature = "os-keychain", test))]
+pub(crate) fn secret_delete_with_keychain(kc: &dyn KeychainBackend, name: &str) -> Result<()> {
+    for key in [secret_key_v2(name), name.to_string()] {
+        if let Err(KeychainErr::Failure(m)) = kc.delete(&key) {
+            return Err(Error::Keychain(format!("keychain: {m}")));
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Account {
@@ -17,7 +157,17 @@ pub struct Account {
     pub password: Option<String>,
     pub team_id: Option<String>,
     pub anisette: Option<Source>,
+    #[serde(default)]
+    pub rate_limited_until: Option<i64>,
+    /// Apple accepted a code but never opened the session. Nothing signs in again by itself, with
+    /// the saved password or otherwise, until the person signs in by hand.
+    #[serde(default)]
+    pub needs_reauth: bool,
 }
+
+/// Cooldown window after Apple rate-limits sign-in or code requests ("Wait about an hour").
+pub const RATE_LIMIT_COOLDOWN_SECS: i64 = 3600;
+const PENDING_SECRET: &str = "pending-sign-in";
 
 impl Account {
     pub fn apple_id(&self) -> Option<&str> { self.session.as_ref().map(|s| s.apple_id.as_str()) }
@@ -27,14 +177,64 @@ impl Account {
             if n.is_empty() { s.apple_id.clone() } else { n }
         })
     }
+    pub fn is_rate_limited(&self, now: i64) -> bool {
+        self.rate_limited_until.is_some_and(|until| now < until)
+    }
+    pub fn mark_rate_limited(&mut self, now: i64) {
+        self.rate_limited_until = Some(now + RATE_LIMIT_COOLDOWN_SECS);
+    }
+    pub fn clear_rate_limit(&mut self) {
+        self.rate_limited_until = None;
+    }
+}
+
+pub fn load_pending() -> Option<super::gsa::Pending> {
+    let raw = secret_get(PENDING_SECRET)?;
+    serde_json::from_str(&raw).ok()
+}
+
+pub fn save_pending(pending: &super::gsa::Pending) -> Result<()> {
+    secret_set(PENDING_SECRET, &serde_json::to_string(pending)?)
+}
+
+pub fn clear_pending() -> Result<()> {
+    secret_delete(PENDING_SECRET)
 }
 
 /// The host's vault (Poki on the iPhone) holds the account under this name.
 const VAULT_NAME: &str = "apple-account";
 
+#[cfg(test)]
+std::thread_local! {
+    static TEST_VAULT: std::cell::RefCell<Option<std::sync::Arc<crate::vault::memory::Memory>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_vault<T>(vault: std::sync::Arc<crate::vault::memory::Memory>, f: impl FnOnce() -> T) -> T {
+    struct Guard(Option<std::sync::Arc<crate::vault::memory::Memory>>);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            TEST_VAULT.with(|cell| *cell.borrow_mut() = self.0.take());
+        }
+    }
+    let prev = TEST_VAULT.with(|cell| cell.borrow_mut().replace(vault));
+    let _guard = Guard(prev);
+    f()
+}
+
+#[cfg(test)]
+fn test_vault() -> Option<std::sync::Arc<crate::vault::memory::Memory>> {
+    TEST_VAULT.with(|cell| cell.borrow().clone())
+}
+
 /// A secret of Poki Setup's own: the host's vault when one is installed, else the system keychain
 /// (macOS Keychain, Windows Credential Manager), or a 0600 file in file mode.
 pub fn secret_get(name: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.get(name).ok().flatten().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty());
+    }
     if let Some(v) = crate::vault::installed() {
         return v.get(name).ok().flatten().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty());
     }
@@ -44,10 +244,15 @@ pub fn secret_get(name: &str) -> Option<String> {
     #[cfg(not(feature = "os-keychain"))]
     unreachable!("file_mode is always on without the OS keychain");
     #[cfg(feature = "os-keychain")]
-    keyring::Entry::new(SERVICE, name).ok()?.get_password().ok().filter(|s| !s.is_empty())
+    secret_get_with_keychain(&OsKeychain, name)
 }
 
 pub fn secret_set(name: &str, value: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.set(name, value.as_bytes());
+    }
     if let Some(v) = crate::vault::installed() {
         return v.set(name, value.as_bytes());
     }
@@ -64,10 +269,15 @@ pub fn secret_set(name: &str, value: &str) -> Result<()> {
     #[cfg(not(feature = "os-keychain"))]
     unreachable!("file_mode is always on without the OS keychain");
     #[cfg(feature = "os-keychain")]
-    keyring::Entry::new(SERVICE, name).and_then(|e| e.set_password(value)).map_err(|e| Error::msg(format!("keychain: {e}")))
+    secret_set_with_keychain(&OsKeychain, name, value)
 }
 
 pub fn secret_delete(name: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.delete(name);
+    }
     if let Some(v) = crate::vault::installed() {
         return v.delete(name);
     }
@@ -78,15 +288,7 @@ pub fn secret_delete(name: &str) -> Result<()> {
     #[cfg(not(feature = "os-keychain"))]
     unreachable!("file_mode is always on without the OS keychain");
     #[cfg(feature = "os-keychain")]
-    match keyring::Entry::new(SERVICE, name).and_then(|e| e.delete_credential()) {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(Error::msg(format!("keychain: {e}"))),
-    }
-}
-
-#[cfg(feature = "os-keychain")]
-fn entry() -> Result<keyring::Entry> {
-    keyring::Entry::new(SERVICE, "apple-account").map_err(|e| Error::msg(format!("keychain: {e}")))
+    secret_delete_with_keychain(&OsKeychain, name)
 }
 
 /// Tests and headless machines: POKI_SETUP_FILE_SECRETS=1 keeps the account in a 0600 file.
@@ -95,6 +297,11 @@ fn file_mode() -> bool { !cfg!(feature = "os-keychain") || std::env::var("POKI_S
 fn file_path() -> Result<std::path::PathBuf> { Ok(paths::state_dir()?.join("account.json")) }
 
 pub fn load() -> Result<Account> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return Ok(v.get(VAULT_NAME)?.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default());
+    }
     if let Some(v) = crate::vault::installed() {
         return Ok(v.get(VAULT_NAME)?.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default());
     }
@@ -104,15 +311,37 @@ pub fn load() -> Result<Account> {
     #[cfg(not(feature = "os-keychain"))]
     unreachable!("file_mode is always on without the OS keychain");
     #[cfg(feature = "os-keychain")]
-    match entry()?.get_password() {
-        Ok(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
-        Err(keyring::Error::NoEntry) => Ok(Account::default()),
-        Err(e) => Err(Error::msg(format!("Could not read the keychain: {e}"))),
-    }
+    load_with_keychain(&OsKeychain)
 }
 
 pub fn save(account: &Account) -> Result<()> {
+    write_account(account)?;
+    #[cfg(test)]
+    if test_vault().is_some() {
+        return Ok(());
+    }
+    if let Ok(dir) = paths::state_dir() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let _ = std::fs::write(dir.join(REVISION_FILE), stamp.to_string());
+    }
+    Ok(())
+}
+
+/// Changes on every save, from any client. It holds no account data, so open apps can watch it
+/// for a change without reading the keychain, then ask for the account again.
+const REVISION_FILE: &str = "account.revision";
+
+pub fn revision() -> Option<String> {
+    std::fs::read_to_string(paths::state_dir().ok()?.join(REVISION_FILE)).ok()
+}
+
+fn write_account(account: &Account) -> Result<()> {
     let json = serde_json::to_string(account)?;
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.set(VAULT_NAME, json.as_bytes());
+    }
     if let Some(v) = crate::vault::installed() {
         return v.set(VAULT_NAME, json.as_bytes());
     }
@@ -129,10 +358,16 @@ pub fn save(account: &Account) -> Result<()> {
     #[cfg(not(feature = "os-keychain"))]
     unreachable!("file_mode is always on without the OS keychain");
     #[cfg(feature = "os-keychain")]
-    entry()?.set_password(&json).map_err(|e| Error::msg(format!("Could not write the keychain: {e}")))
+    save_with_keychain(&OsKeychain, account)
 }
 
 pub fn clear() -> Result<()> {
+    let _ = clear_pending();
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.delete(VAULT_NAME);
+    }
     if let Some(v) = crate::vault::installed() {
         return v.delete(VAULT_NAME);
     }
@@ -143,15 +378,34 @@ pub fn clear() -> Result<()> {
     #[cfg(not(feature = "os-keychain"))]
     unreachable!("file_mode is always on without the OS keychain");
     #[cfg(feature = "os-keychain")]
-    match entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(Error::msg(format!("keychain: {e}"))),
-    }
+    clear_with_keychain(&OsKeychain)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemoryKeychain {
+        entries: Mutex<HashMap<String, String>>,
+    }
+
+    impl KeychainBackend for MemoryKeychain {
+        fn get(&self, key: &str) -> std::result::Result<String, KeychainErr> {
+            self.entries.lock().unwrap().get(key).cloned().ok_or(KeychainErr::NoEntry)
+        }
+        fn set(&self, key: &str, value: &str) -> std::result::Result<(), KeychainErr> {
+            self.entries.lock().unwrap().insert(key.to_string(), value.to_string());
+            Ok(())
+        }
+        fn delete(&self, key: &str) -> std::result::Result<(), KeychainErr> {
+            self.entries.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+
     #[test]
     fn file_round_trip() {
         let (_lock, _dir) = crate::paths::test_home();
@@ -163,5 +417,23 @@ mod tests {
         assert_eq!(load().unwrap().team_id.as_deref(), Some("ABC"));
         clear().unwrap();
         assert!(load().unwrap().team_id.is_none());
+    }
+
+    #[test]
+    fn old_entries_migrate_to_v2_keys() {
+        let kc = MemoryKeychain::default();
+        let legacy_account = Account { team_id: Some("OLDTEAM".into()), password: Some("pw".into()), ..Default::default() };
+        kc.set(ACCOUNT_V1, &serde_json::to_string(&legacy_account).unwrap()).unwrap();
+        kc.set("cloudflare-token", "cf-secret").unwrap();
+
+        let loaded = load_with_keychain(&kc).unwrap();
+        assert_eq!(loaded.team_id.as_deref(), Some("OLDTEAM"));
+        assert_eq!(loaded.password.as_deref(), Some("pw"));
+        assert!(kc.get(ACCOUNT_V2).is_ok());
+        assert_eq!(kc.get(ACCOUNT_V1), Err(KeychainErr::NoEntry));
+
+        assert_eq!(secret_get_with_keychain(&kc, "cloudflare-token").as_deref(), Some("cf-secret"));
+        assert_eq!(kc.get("cloudflare-token-v2").as_deref(), Ok("cf-secret"));
+        assert_eq!(kc.get("cloudflare-token"), Err(KeychainErr::NoEntry));
     }
 }

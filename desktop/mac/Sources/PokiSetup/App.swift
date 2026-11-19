@@ -10,6 +10,7 @@ struct PokiSetupApp: App {
         Window("Poki Setup", id: "main") {
             ContentView()
                 .environmentObject(model)
+                .environment(\.locale, SetupLocalization.shared.locale)
                 .frame(minWidth: 760, idealWidth: 900, minHeight: 540, idealHeight: 640)
                 .tint(.pokiBlue)
                 .task { model.start() }
@@ -19,24 +20,28 @@ struct PokiSetupApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Poki") {
-                Button("Set Up an iPhone") { model.page = .setup }.keyboardShortcut("1")
-                Button("iPhones") { model.page = .phones }.keyboardShortcut("2")
-                Button("Apple Account") { model.page = .account }.keyboardShortcut("3")
+                Button(localized("Set Up a Device")) { model.page = .setup }.keyboardShortcut("1")
+                Button(localized("Devices")) { model.page = .phones }.keyboardShortcut("2")
+                Button(localized("Apple Account")) { model.page = .account }.keyboardShortcut("3")
+                Button(localized("Test Builds")) { model.page = model.dev.signedIn ? .testBuilds : .github }.keyboardShortcut("4")
+                Button(localized("GitHub Account")) { model.page = .github }.keyboardShortcut("5")
                 Divider()
-                Button("Renew Signatures Now") { Task { await model.renewDue() } }
+                Button(localized("Renew Signatures Now")) { Task { await model.renewDue() } }
                 Divider()
-                Button("Copy Prompt for Your Agent") { Task { await model.copyAgentPrompt() } }
+                Button(localized("Copy Prompt for Your Agent")) { Task { await model.copyAgentPrompt() } }
             }
         }
 
         Settings {
             SettingsView()
                 .environmentObject(model)
+                .environment(\.locale, SetupLocalization.shared.locale)
                 .tint(.pokiBlue)
         }
 
         MenuBarExtra {
             MenuBarContent().environmentObject(model)
+                .environment(\.locale, SetupLocalization.shared.locale)
         } label: {
             Image(systemName: "iphone.gen3.badge.play")
         }
@@ -60,22 +65,22 @@ struct MenuBarContent: View {
 
     var body: some View {
         if model.records.isEmpty {
-            Text("No iPhones set up yet")
+            Text(localized("No devices set up yet"))
         } else {
             ForEach(model.records) { r in
-                Text("\(r.phoneName): \(r.isExpired ? "expired" : "\(max(r.daysLeft, 0)) days left")")
+                Text("\(r.phoneName): \(relativeDays(r))")
             }
         }
         Divider()
-        Button("Open Poki Setup") {
+        Button(localized("Open Poki Setup")) {
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
-        Button("Renew Now") { Task { await model.renewDue() } }
-        Button("Copy Prompt for Your Agent") { Task { await model.copyAgentPrompt() } }
+        Button(localized("Renew Now")) { Task { await model.renewDue() } }
+        Button(localized("Copy Prompt for Your Agent")) { Task { await model.copyAgentPrompt() } }
             .disabled(model.records.isEmpty)
         Divider()
-        Button("Quit Poki Setup") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        Button(localized("Quit Poki Setup")) { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 }
 

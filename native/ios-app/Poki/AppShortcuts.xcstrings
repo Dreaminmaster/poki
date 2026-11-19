@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "${applicationName} Anytime" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "随时 ${applicationName}"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隨時 ${applicationName}"
+          }
+        }
+      }
+    },
     "Give ${applicationName} a task" : {
       "localizations" : {
         "zh-Hans" : {
@@ -61,6 +77,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "和${applicationName}說話"
+          }
+        }
+      }
+    },
+    "Talk to ${applicationName} without leaving this app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不离开这个 App 和${applicationName}说话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不離開這個 App 和${applicationName}說話"
           }
         }
       }

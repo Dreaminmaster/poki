@@ -16,6 +16,9 @@ final class Bridge {
     /// Progress events, as the core sends them (`job`, `kind`, `id`, ...).
     var onProgress: ((ProgressEvent) -> Void)?
     var onLogLines: (([String]) -> Void)?
+    var onNeedsCode: (() -> Void)?
+    /// Some client (this app, the CLI) saved the account.
+    var onAccountChanged: (() -> Void)?
     /// The helper's own log (stderr), for the Debug page.
     private(set) var helperLog: [String] = []
 
@@ -50,7 +53,7 @@ final class Bridge {
     private func ensureRunning() throws {
         if let p = process, p.isRunning { return }
         guard let url = helperURL() else {
-            throw CoreError(kind: "bridge", message: "Poki Setup is missing its helper (poki-setup-bridge). Reinstall the app.")
+            throw CoreError(kind: "bridge", message: localized("Poki Setup is missing its helper (poki-setup-bridge). Reinstall the app."))
         }
         let p = Process()
         p.executableURL = url
@@ -84,7 +87,7 @@ final class Bridge {
         let pending = waiting
         waiting = [:]
         for (_, c) in pending {
-            c.resume(throwing: CoreError(kind: "bridge", message: "Poki Setup's helper stopped (status \(status)). Try again."))
+            c.resume(throwing: CoreError(kind: "bridge", message: localized("Poki Setup's helper stopped (status \(status)). Try again.")))
         }
         helperLog.append("[helper ended with status \(status)]")
     }
@@ -120,6 +123,8 @@ final class Bridge {
                 }
             case "log_lines":
                 if let lines = obj["data"] as? [String] { onLogLines?(lines) }
+            case "account_changed":
+                onAccountChanged?()
             default:
                 break
             }
@@ -129,7 +134,10 @@ final class Bridge {
         let id = idNum.uint64Value
         guard let c = waiting.removeValue(forKey: id) else { return }
         if let err = obj["err"] as? [String: Any] {
-            c.resume(throwing: CoreError(kind: err["kind"] as? String ?? "error", message: err["message"] as? String ?? "Something went wrong."))
+            let kind = err["kind"] as? String ?? "error"
+            let message = err["message"] as? String ?? localized("Something went wrong.")
+            if kind == "needs_code" { onNeedsCode?() }
+            c.resume(throwing: CoreError(kind: kind, message: message))
         } else {
             let value = obj["ok"] ?? NSNull()
             let raw = (try? JSONSerialization.data(withJSONObject: ["v": value])) ?? Data("{\"v\":null}".utf8)
@@ -157,13 +165,13 @@ final class Bridge {
                 try input?.write(contentsOf: line)
             } catch {
                 waiting.removeValue(forKey: id)
-                c.resume(throwing: CoreError(kind: "bridge", message: "Could not reach Poki Setup's helper: \(error.localizedDescription)"))
+                c.resume(throwing: CoreError(kind: "bridge", message: localized("Could not reach Poki Setup's helper: \(error.localizedDescription)")))
             }
         }
         do {
             return try decoder.decode(Wrapped<T>.self, from: raw).v
         } catch {
-            throw CoreError(kind: "bridge", message: "Poki Setup could not read the helper's answer to \(cmd): \(error)")
+            throw CoreError(kind: "bridge", message: localized("Poki Setup could not read the helper's answer to \(cmd): \(String(describing: error))"))
         }
     }
 

@@ -48,8 +48,9 @@ public struct CoreConfig: Sendable {
     public var humanize: Bool?
     /// The agent's memory (routines and notes); nil uses `RoutineStore.shared`, the app's file.
     public var memory: RoutineStore?
+    public var screenHistory: ScreenHistorySource?
 
-    public init(runnerURL: URL = URL(string: "http://127.0.0.1:8100")!, sensitive: SensitivityRules = SensitivityRules(), approvalWait: Double = 115, toolDeadline: Double = 25, actionCap: Double = 6, readTimeout: Double = 4, busyWait: Double = 2, runnerWait: Double = 15, treeFormat: String = "xml", ownApps: [String] = ["nz.zheha.poki"], accessibilityDeadline: Double = 2, taskGap: Double = 300, humanize: Bool? = nil) {
+    public init(runnerURL: URL = URL(string: "http://127.0.0.1:8100")!, sensitive: SensitivityRules = SensitivityRules(), approvalWait: Double = 115, toolDeadline: Double = 25, actionCap: Double = 6, readTimeout: Double = 4, busyWait: Double = 2, runnerWait: Double = 15, treeFormat: String = "xml", ownApps: [String] = ["nz.zheha.poki"], accessibilityDeadline: Double = 2, taskGap: Double = 300, humanize: Bool? = nil, screenHistory: ScreenHistorySource? = nil) {
         self.accessibilityDeadline = accessibilityDeadline
         self.humanize = humanize
         self.runnerURL = runnerURL
@@ -63,6 +64,7 @@ public struct CoreConfig: Sendable {
         self.treeFormat = treeFormat
         self.ownApps = ownApps
         self.taskGap = taskGap
+        self.screenHistory = screenHistory
     }
 
     /// Whether `app` is Poki itself: one of `ownApps`, or its Live Activity widget or tunnel
@@ -296,7 +298,7 @@ public final class PokiCore: @unchecked Sendable {
 
     /// Replaces the app's tools (none: only look, do and status are listed).
     public func setHostTools(_ tools: [HostTool]) {
-        let own: Set<String> = ["look", "do", "routines", "status"]
+        let own: Set<String> = ["look", "do", "routines", "status", "screen_history"]
         hostTools.value = tools.filter { !own.contains($0.name) }
     }
     /// Told when an MCP client's session starts or ends.
@@ -359,7 +361,7 @@ public final class PokiCore: @unchecked Sendable {
     /// The owner tapped Done on a step the model handed to them (the Live Activity).
     public func handoffDone(id: String) { computer.handoffDone(id: id) }
     /// The step the model handed to the owner that is still waiting, if any.
-    public var handoff: Handoff? { computer.handoff.value.flatMap { $0.done == nil ? $0 : nil } }
+    public var handoff: Handoff? { computer.handoff.active }
 
     public var pendingApproval: Approval? { approvals.pending }
 
@@ -373,18 +375,19 @@ public final class PokiCore: @unchecked Sendable {
         let app = Foreground(bundleID: bundleID, name: name)
         // The approval card is in Poki: a tap there is refused, and the request waiting stays for the owner.
         if config.isPoki(app) { return .refused(CoreConfig.ownAppRefusal) }
-        // Like `do`: a tap withdraws the request still waiting, so two taps never wait side by side.
-        if let pending = approvals.pending { approvals.withdraw(id: pending.id) }
+        // Like `do`: a tap withdraws the request still waiting, so two taps never wait side by side. A
+        // granted approval the agent has not used yet stays for the agent's own `do`.
+        approvals.withdrawPending()
         let element = Element(type: "Other", label: text, value: nil, identifier: nil, frame: Rect(x: 0, y: 0, width: 0, height: 0), depth: 0)
         // No readable text: the rules cannot tell what it does, so the owner is asked.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
         // Never Ask would not stop a tap the rules cannot read, nor one they hold back whatever the way of asking.
         let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false) == nil
-        let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, fingerprint: "tap:\(UUID().uuidString)", stopsWhenOff: stopsWhenOff)
+        let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, scope: ApprovalScope(actions: "tap:\(UUID().uuidString)"), stopsWhenOff: stopsWhenOff)
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:
-            _ = approvals.consumeGrant(fingerprint: approval.fingerprint)
+            _ = approvals.consumeGrant(scope: approval.scope)
             return .approved(reason)
         case .declined?:
             return .declined(reason)
@@ -398,11 +401,12 @@ public final class PokiCore: @unchecked Sendable {
 
     /// look, do or status for another part of the app (the Voice tab), run here on the phone exactly as a
     /// relay call: same gate, approvals, Live Activity and deadlines. `arguments` is the call's JSON object.
+    /// The Voice tab acts for the owner, so a step handed to the owner does not hold its input back.
     public func tool(_ name: String, arguments: String) async -> ToolResult {
         guard let args = try? JSON.parse(arguments.isEmpty ? "{}" : arguments) else {
             return ToolResult(text: "error: the arguments are not JSON; nothing was sent", jpeg: nil, isError: true)
         }
-        return await call(name, args)
+        return await call(name, args, byOwnersVoice: true)
     }
 
     /// The task is over (the app stops an idle runner, or its chat's turn ended): the phone goes back
@@ -494,11 +498,11 @@ public final class PokiCore: @unchecked Sendable {
                 "protocolVersion": .string(version),
                 "capabilities": ["tools": ["listChanged": false]],
                 "serverInfo": ["name": "poki", "version": "1.0"],
-                "instructions": .string(Self.instructions),
+                "instructions": .string(Self.toolInstructions(includeScreenHistory: isScreenHistoryEnabled)),
             ]), newSession)
         case "notifications/initialized", "notifications/cancelled": return (nil, nil)
         case "ping": return (isNotification ? nil : result(.object([:])), nil)
-        case "tools/list": return (result(["tools": .array(Self.tools + hostTools.value.map(\.listing))]), nil)
+        case "tools/list": return (result(["tools": .array(listedTools + hostTools.value.map(\.listing))]), nil)
         case "tools/call":
             let name = message["params"]?["name"]?.string ?? ""
             let args = message["params"]?["arguments"] ?? .object([:])
@@ -571,8 +575,16 @@ public final class PokiCore: @unchecked Sendable {
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the
     /// instructions MCP clients get, for a model loop inside the app.
-    public static var toolCatalogJSON: String { JSON.array(tools).serialized() }
-    public static var toolInstructions: String { instructions }
+    public static var toolCatalogJSON: String { toolCatalogJSON(includeScreenHistory: false) }
+    public static func toolCatalogJSON(includeScreenHistory: Bool) -> String {
+        JSON.array(includeScreenHistory ? tools + [screenHistoryTool] : tools).serialized()
+    }
+    public static var toolInstructions: String { toolInstructions(includeScreenHistory: false) }
+    public static func toolInstructions(includeScreenHistory: Bool) -> String {
+        includeScreenHistory ? instructions + " " + screenHistoryInstructions : instructions
+    }
+    var isScreenHistoryEnabled: Bool { config.screenHistory?.isEnabled() == true }
+    var listedTools: [JSON] { isScreenHistoryEnabled ? Self.tools + [Self.screenHistoryTool] : Self.tools }
 
     /// A cancelled call answers at once, while the action it had sent may still be running on the
     /// phone. True once the runner is through with it, false if it is not within `timeout`.
@@ -604,8 +616,9 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
         if name == "status" { return status() }
+        if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
             // Outside the gate: the app's tool makes its own look and do calls, one at a time as any.
             let answer = await tool.run(args.serialized(), session, answerBy.map { max(0, $0 - now() - 3) })
@@ -619,7 +632,7 @@ public final class PokiCore: @unchecked Sendable {
             computer.lastCallTook = now() - received
             return result
         }
-        guard name == "look" || name == "do" else { return ToolResult(text: "unknown tool \(name); the tools are \((["look", "do", "routines", "status"] + hostTools.value.map(\.name)).joined(separator: ", "))", jpeg: nil, isError: true) }
+        guard name == "look" || name == "do" else { return ToolResult(text: "unknown tool \(name); the tools are \((listedTools.compactMap { $0["name"]?.string } + hostTools.value.map(\.name)).joined(separator: ", "))", jpeg: nil, isError: true) }
         let actions = args["actions"]?.array ?? []
         if name == "do", args["actions"]?.array == nil || actions.count > 20 || actions.contains(where: { $0.object == nil }) {
             return ToolResult(text: "error: actions must be an array of 0 to 20 action objects; nothing was sent.", jpeg: nil, isError: true)
@@ -655,7 +668,7 @@ public final class PokiCore: @unchecked Sendable {
                     }
                     return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy)
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice)
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.

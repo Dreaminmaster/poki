@@ -19,6 +19,7 @@ final class ChatHarnessTests: XCTestCase {
 
     override func setUp() async throws {
         for key in Self.settings { saved[key] = UserDefaults.standard.object(forKey: key) }
+        await SessionStore.shared.waitUntilLoaded()
     }
 
     override func tearDown() async throws {
@@ -42,6 +43,20 @@ final class ChatHarnessTests: XCTestCase {
 
     private static func json(_ object: [String: Any]) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
+    func testExistingConversationUsesTheNewCustomEndpointForTheSameModel() async throws {
+        let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done."])
+        let first = try FakeCompletions(replies: [done, FakeCompletions.text("First endpoint.")])
+        let second = try FakeCompletions(replies: [done, FakeCompletions.text("Second endpoint.")])
+        let chat = chat(on: first)
+        _ = await chat.runDelegated("First request")
+        XCTAssertEqual(first.requests.count, 2)
+
+        ModelKeys.customURL = "http://127.0.0.1:\(second.port)/v1"
+        _ = await chat.runDelegated("Second request")
+        XCTAssertEqual(first.requests.count, 2)
+        XCTAssertEqual(second.requests.count, 2)
     }
 
     func testSplitViewTaskWaitsForOriginalPairAndResumesFromFreshReads() async throws {
@@ -425,6 +440,96 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.answer?.kind, .field)
         XCTAssertEqual(result.answer?.items?.map(\.ref), ["7"])
         XCTAssertEqual(result.details, [TaskResult.Detail(label: "Battery", value: "81%")])
+    }
+
+    /// A result card the app cannot draw costs only the card: the task's result stays, no card appears
+    /// and the model is told to give the whole result in words. A card it can draw appears under the
+    /// task with Poki's suggestion selected and the model adds only a conclusion; the item you select
+    /// comes back with the conversation as it is saved.
+    func testAResultCardTheAppCannotDrawLeavesTheWholeResultToTheReply() async throws {
+        let train = Self.train, finish = Self.finishWithCard
+        let server = try FakeCompletions(replies: [
+            finish([train("G1", "07:00"), ["id": "G3", "title": "G3"]], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 07:00, G3 08:00."),
+            finish([train("G1", "07:00"), train("G3", "08:00")], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 is the earliest."),
+        ])
+        let chat = newChat(on: server)
+        var records: [TaskRecord] = []
+        ChatModel.afterTask = { records.append($0) }
+        let cards = { Self.cards(in: chat) }
+        let ask = { (text: String) in try await Self.ask(chat, text) }
+
+        try await ask("Find trains from Beijing to Shanghai")
+        XCTAssertEqual(records.last?.result?.summary, "Found 2 trains.")
+        XCTAssertEqual(cards(), [])
+        guard server.requests.count == 2 else { return XCTFail("\(server.requests.count) model requests") }
+        XCTAssertTrue(Self.toolAnswer(server.requests[1]).contains("give the whole result in words"), Self.toolAnswer(server.requests[1]))
+
+        try await ask("Find trains from Beijing to Shanghai for tomorrow")
+        let entry = try XCTUnwrap(cards().last)
+        guard case .card(let card) = entry.kind, let next = card.next else { return XCTFail("no card") }
+        guard server.requests.count == 4 else { return XCTFail("\(server.requests.count) model requests") }
+        XCTAssertEqual(card.selected(entry.chosen).fill(next.say), "把 G1 次发到公司差旅群")
+        XCTAssertTrue(Self.toolAnswer(server.requests[3]).contains("one plain sentence"), Self.toolAnswer(server.requests[3]))
+
+        chat.choose("G3", on: entry.id)
+        let saved = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(chat.entries))
+        let reopened = try XCTUnwrap(saved.first { $0.id == entry.id })
+        guard case .card(let again) = reopened.kind else { return XCTFail("the saved card") }
+        XCTAssertEqual(again.selected(reopened.chosen).fill(next.say), "把 G3 次发到公司差旅群")
+    }
+
+    /// A button whose sentence names no field of the item would send the suggested train whichever
+    /// train you select: such a card is not shown, and the model answers in words.
+    func testAResultCardWhoseButtonIgnoresTheSelectionIsNotShown() async throws {
+        let server = try FakeCompletions(replies: [
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 G1 次发到公司差旅群"),
+            FakeCompletions.text("G1 07:00, G3 08:00."),
+        ])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "Find trains from Beijing to Shanghai")
+        XCTAssertEqual(Self.cards(in: chat), [])
+        guard server.requests.count == 2 else { return XCTFail("\(server.requests.count) model requests") }
+        XCTAssertTrue(Self.toolAnswer(server.requests[1]).contains("give the whole result in words"), Self.toolAnswer(server.requests[1]))
+    }
+
+    /// An in-app chat that starts empty: a new one opens on the last conversation saved by an earlier test.
+    private func newChat(on server: FakeCompletions) -> ChatModel {
+        let chat = chat(on: server, kind: .poki)
+        chat.newConversation()
+        return chat
+    }
+
+    private static func train(_ number: String, _ depart: String) -> [String: Any] {
+        ["id": number, "title": number, "date": "11月20日 周四", "from": "北京南", "to": "上海虹桥", "depart": depart,
+         "arrive": "12:28", "price": "¥626", "seats": [["name": "二等座", "left": "有"]]]
+    }
+
+    private static func finishWithCard(_ items: [[String: Any]], _ nextSay: String) -> String {
+        FakeCompletions.tool("finish_task", [
+            "success": true, "summary": "Found 2 trains.", "details": [["label": "G1", "value": "07:00"]], "answer": ["kind": "list"],
+            "card": ["app": "cn.12306.rails12306", "kind": "12306.trains", "recommended": "G1", "items": items,
+                     "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {title} 次"],
+                     "next": ["label": "发到公司差旅群", "say": nextSay]],
+        ])
+    }
+
+    private static func cards(in chat: ChatModel) -> [ChatEntry] {
+        chat.entries.filter { if case .card = $0.kind { true } else { false } }
+    }
+
+    /// Sends a message and waits for its task to end.
+    private static func ask(_ chat: ChatModel, _ text: String) async throws {
+        chat.send(text)
+        for _ in 0..<200 where chat.running { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running)
+    }
+
+    /// The tool answer the model was given last in a request.
+    private static func toolAnswer(_ request: [String: Any]) -> String {
+        let messages = request["messages"] as? [[String: Any]] ?? []
+        guard let tool = messages.last(where: { $0["role"] as? String == "tool" }) else { return "" }
+        return (tool["content"] as? String) ?? json(tool)
     }
 
     /// The model's name for the task comes with its plan and is kept on the task's plan entry, where
@@ -915,6 +1020,8 @@ final class FakeCompletions: @unchecked Sendable {
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
     private var held: [NWConnection] = []
+    /// Replies held back by `holdAfter`, sent by `release()`.
+    private var waiting: [(NWConnection, String)] = []
     private let holdAfter: Int?
     private let onRequest: (@Sendable ([String: Any]) -> Void)?
 
@@ -939,6 +1046,17 @@ final class FakeCompletions: @unchecked Sendable {
     }
 
     deinit { listener.cancel(); held.forEach { $0.cancel() } }
+
+    /// Sends the replies `holdAfter` held back: a model answer that comes in late.
+    func release() {
+        let due = lock.withLock { () -> [(NWConnection, String)] in defer { waiting = [] }; return waiting }
+        queue.async {
+            for (connection, events) in due {
+                let head = "HTTP/1.1 \(self.responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
+                connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+    }
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -980,7 +1098,7 @@ final class FakeCompletions: @unchecked Sendable {
         }
         onRequest?(json)
         if let holdAfter, requests.count > holdAfter {
-            lock.withLock { held.append(connection) }
+            lock.withLock { held.append(connection); waiting.append((connection, events)) }
             return
         }
         let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"

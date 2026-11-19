@@ -271,7 +271,10 @@ private struct TextChatFeature: View {
         loading = true
         problem = nil
         Task {
-            do { _ = try await ModelCatalog.refresh(provider) } catch { problem = AppLocalization.text(LocalizedStringResource("\(provider.name) didn’t return its model list. The built-in models still work.")) }
+            do { _ = try await ModelCatalog.refresh(provider) }
+            catch is CancellationError { /* The account changed while loading. */ }
+            catch let error as ModelCatalog.DiscoveryError { problem = error.message }
+            catch { problem = AppLocalization.text(LocalizedStringResource("\(provider.name) didn’t return its model list. The built-in models still work.")) }
             loading = false
         }
     }
@@ -368,6 +371,7 @@ struct KeyEntry: View {
     @State private var key = ""
     @State private var url = ModelKeys.customURL
     @State private var modelID = ModelKeys.customModel
+    @State private var discovery = CustomModelDiscovery()
     @State private var failed = false
     @State private var testing = false
     @State private var result: ConnectionCheck.Result?
@@ -389,10 +393,33 @@ struct KeyEntry: View {
                 } footer: {
                     if !provider.wired {
                         Text("Poki keeps the key now; chatting with \(provider.name) comes in an update. Until then, choose Anthropic or OpenAI.")
+                    } else if provider == .custom,
+                              ModelCatalog.normalizedAddress(url) != ModelCatalog.normalizedAddress(ModelKeys.customURL),
+                              ModelKeys.hasKey(provider) {
+                        Text("The saved key belongs to the previous address. Enter a key for this service if it needs one.")
                     } else if ModelKeys.hasKey(provider) {
                         Text("A key is saved. Enter a new one to replace it.")
                     } else {
                         Text(verbatim: provider.keyHelp)
+                    }
+                }
+                if provider == .custom {
+                    Section {
+                        Button(action: fetchModels) {
+                            HStack {
+                                Text(discovery.loading ? "Reading the Model List…" : "Fetch Model List")
+                                Spacer()
+                                if discovery.loading { ProgressView() }
+                            }
+                        }
+                        .disabled(discovery.loading || testing || !validCustomAddress)
+                        .accessibilityIdentifier("keyEntry.fetchModels")
+                    } footer: {
+                        if let problem = discovery.problem {
+                            Text(problem.message)
+                        } else {
+                            Text("Choose a model from the service, or enter its ID manually.")
+                        }
                     }
                 }
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
@@ -430,6 +457,12 @@ struct KeyEntry: View {
             }
             .navigationTitle(Text(verbatim: provider.name))
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: url) { _, _ in discovery.reset() }
+            .onChange(of: key) { _, _ in discovery.reset() }
+            .onDisappear { discovery.cancel() }
+            .sheet(isPresented: $discovery.presenting) {
+                CustomModelPicker(models: discovery.models, selection: $modelID)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave || testing) }
@@ -437,13 +470,21 @@ struct KeyEntry: View {
         }
     }
 
+    private var validCustomAddress: Bool {
+        (try? ModelCatalog.customRequest(address: url, key: nil)) != nil
+    }
+
+    private func fetchModels() {
+        discovery.fetch(address: url, key: ModelKeys.customDraftKey(address: url, typedKey: key))
+    }
+
     /// The key a test sends: the one typed, else the saved one. A custom endpoint may have none, but
     /// needs an address and a model.
     private var testKey: String? {
         let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if provider == .custom {
-            let ready = URL(string: url.trimmingCharacters(in: .whitespaces))?.scheme?.hasPrefix("http") == true && !modelID.trimmingCharacters(in: .whitespaces).isEmpty
-            return ready ? (typed.isEmpty ? ModelKeys.key(provider) ?? "" : typed) : nil
+            let ready = validCustomAddress && !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return ready ? (ModelKeys.customDraftKey(address: url, typedKey: key) ?? "") : nil
         }
         return typed.isEmpty ? ModelKeys.key(provider) : typed
     }
@@ -456,7 +497,8 @@ struct KeyEntry: View {
     private func check(_ key: String, closeIfPassed: Bool) {
         testing = true
         result = nil
-        let (url, modelID) = (url, modelID)
+        let url = provider == .custom ? ModelCatalog.normalizedAddress(url) : url
+        let modelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             let outcome = await ConnectionCheck.run(provider, key: key, customURL: url, modelID: modelID)
             result = outcome
@@ -469,20 +511,18 @@ struct KeyEntry: View {
     }
 
     private var canSave: Bool {
-        provider == .custom ? URL(string: url.trimmingCharacters(in: .whitespaces))?.scheme?.hasPrefix("http") == true && !modelID.trimmingCharacters(in: .whitespaces).isEmpty : !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        provider == .custom ? validCustomAddress && !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func save() {
         let tested = testKey
         do {
             if provider == .custom {
-                ModelKeys.customURL = url.trimmingCharacters(in: .whitespaces)
-                ModelKeys.customModel = modelID.trimmingCharacters(in: .whitespaces)
-                if key.isEmpty { ModelKeys.selectedProvider = .custom }
-            }
-            if !key.isEmpty { try ModelKeys.save(key, for: provider) }
+                try ModelKeys.saveCustom(address: url, model: modelID, typedKey: key)
+                discovery.reset()
+            } else if !key.isEmpty { try ModelKeys.save(key, for: provider) }
             // A new key picks its provider; the model page's picker switches between providers with keys.
-            if provider.wired, !key.isEmpty {
+            if provider.wired, !key.isEmpty, provider != .custom {
                 // Ready at once: chat on this account's first fast model, live voice on where it can.
                 ModelKeys.selectedProvider = provider
                 if let first = ModelCatalog.available(provider).first { ModelKeys.selectedModel = first.id }
@@ -495,6 +535,49 @@ struct KeyEntry: View {
             if provider.wired, let tested { check(tested, closeIfPassed: true) } else { dismiss() }
         } catch {
             failed = true
+        }
+    }
+}
+
+
+private struct CustomModelPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let models: [String]
+    @Binding var selection: String
+    @State private var query = ""
+
+    private var matches: [String] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? models : models.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if models.isEmpty {
+                    Text("No chat models were returned. You can enter a model ID manually.")
+                        .foregroundStyle(.secondary)
+                } else if matches.isEmpty {
+                    Text("No matching models.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(matches, id: \.self) { model in
+                        Button {
+                            selection = model
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(verbatim: model).foregroundStyle(.primary)
+                                Spacer()
+                                if model == selection { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search models")
+            .navigationTitle(AppLocalization.text("Choose a Model"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
 }

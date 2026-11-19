@@ -10,6 +10,7 @@ pub mod info;
 pub mod install;
 pub mod logs;
 pub mod pairing;
+pub mod running;
 
 use crate::{Error, Result};
 use idevice::{

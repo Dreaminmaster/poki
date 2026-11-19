@@ -21,12 +21,81 @@ final class AppCapsuleTests: XCTestCase {
 
     /// Old code knew seven apps: of the Chinese pills only WeChat's prompt had a capsule.
     func testEveryHomePillPutsItsAppInTheFieldAsACapsule() {
-        for language in [AppLanguage.simplifiedChinese, .english] {
+        for (preference, language) in [("zh-Hans", AppLanguage.simplifiedChinese), ("en", .english), ("zh-Hant", .traditionalChinese)] {
+            let saved = AppLocalization.shared.preference
+            AppLocalization.shared.preference = preference
+            defer { AppLocalization.shared.preference = saved }
             for pill in HomeIdea.examples(for: language) {
                 XCTAssertEqual(apps(pill.prompt), [pill.app], "\(language) \(pill.prompt)")
                 XCTAssertEqual(joined(pill.prompt), pill.prompt)
             }
         }
+    }
+
+    func testWeChatMiniProgramNameStaysTextInComposerAndRouting() {
+        let weChat = "com.tencent.xin"
+        let diDi = "com.xiaojukeji.didi"
+        XCTAssertEqual(AppIconStore.bundleIDs(namedIn: "打开查找"), ["com.apple.findmy"])
+        for request in [
+            "帮我在微信滴滴充电小程序里查找我附近最便宜的充电桩",
+            "在微信裡的「滴滴充電」小程式找充電樁",
+        ] {
+            XCTAssertEqual(apps(request), [weChat], request)
+            XCTAssertEqual(AppIconStore.bundleIDs(namedIn: request), [weChat], request)
+            XCTAssertEqual(joined(request), request)
+        }
+
+        for request in [
+            "微信滴滴充电小程序里查价格，再打开滴滴出行",
+            "打开微信然后打开滴滴出行查小程序订单",
+            "打开微信和滴滴出行",
+            "打开微信和滴滴出行看小程序订单",
+        ] {
+            XCTAssertEqual(apps(request), [weChat, diDi], request)
+            XCTAssertEqual(AppIconStore.bundleIDs(namedIn: request), [weChat, diDi], request)
+            XCTAssertEqual(joined(request), request)
+        }
+    }
+
+    func testNetEaseCloudMusicRecognizesCommonChineseShortNames() {
+        let music = "com.netease.cloudmusic"
+        for name in ["网易云", "網易雲", "网易云音乐", "網易雲音樂"] {
+            let request = "打开\(name)播放我的歌单"
+            XCTAssertEqual(AppIconStore.bundleID(name), music, name)
+            XCTAssertEqual(AppIconStore.bundleIDs(namedIn: request), [music], request)
+            XCTAssertEqual(apps(request), [music], request)
+            XCTAssertEqual(joined(request), request)
+            let capsuleLabels = CapsuleText.segments(request).compactMap { segment -> String? in
+                if case .app(_, let words) = segment { return words }
+                return nil
+            }
+            XCTAssertEqual(capsuleLabels, [name], request)
+        }
+    }
+
+    func testNetEaseCloudMusicShortNamesDoNotMatchOtherNetEaseProducts() {
+        let music = "com.netease.cloudmusic"
+        let aliases = ["网易云", "網易雲"]
+        let productSuffixes = ["课堂", "課堂", "信", "游戏", "遊戲", "阅读", "閱讀"]
+
+        for alias in aliases {
+            for product in productSuffixes {
+                let request = "打开\(alias)\(product)看内容"
+                XCTAssertFalse(apps(request).contains(music), request)
+                XCTAssertFalse(AppIconStore.bundleIDs(namedIn: request).contains(music), request)
+                XCTAssertEqual(joined(request), request)
+            }
+        }
+
+        let reportedRequest = "打开网易云课堂看课"
+        XCTAssertFalse(apps(reportedRequest).contains(music), reportedRequest)
+        XCTAssertFalse(AppIconStore.bundleIDs(namedIn: reportedRequest).contains(music), reportedRequest)
+        XCTAssertEqual(joined(reportedRequest), reportedRequest)
+
+        let separatedRequest = "打开网易云，查看课堂资料"
+        XCTAssertEqual(apps(separatedRequest), [music], separatedRequest)
+        XCTAssertEqual(AppIconStore.bundleIDs(namedIn: separatedRequest), [music], separatedRequest)
+        XCTAssertEqual(joined(separatedRequest), separatedRequest)
     }
 
     func testTypedNamesBecomeCapsulesWhereTheyNameAnApp() {

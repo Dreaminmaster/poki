@@ -6,10 +6,14 @@
 //! Secrets never touch a file: the app installs a [`Vault`] backed by its Keychain before the
 //! first call (poki_signer_set_vault). One request at a time; see include/poki_launcher.h.
 use crate::device::{Device, Pairing};
-use idevice::{lockdown::LockdownClient, misagent::MisagentClient, utils::installation};
+use idevice::{installation_proxy::InstallationProxyClient, lockdown::LockdownClient, misagent::MisagentClient, utils::installation};
 use poki_setup_core::{
     self as core, Progress, Reporter,
-    apple::{anisette::Source, gsa::Pending, identity},
+    apple::{
+        anisette::Source,
+        gsa::{CodeCaller, Pending},
+        identity,
+    },
     release::{self, Channel},
     setup::{self, Signer},
     sign,
@@ -19,9 +23,23 @@ use serde_json::{Value, json};
 use std::{
     net::IpAddr,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
+
+type EmitFn = Arc<dyn Fn(Value) + Send + Sync>;
+
+tokio::task_local! {
+    static LOG_EMIT: EmitFn;
+}
+
+fn ensure_log_hook() {
+    core::apple::gsa::set_code_request_hook(|line| {
+        let _ = LOG_EMIT.try_with(|cb| {
+            cb(json!({"event": "log", "line": line}));
+        });
+    });
+}
 
 /// Signed in and pending state, shared by the calls.
 struct State {
@@ -41,6 +59,7 @@ pub struct Failure {
 impl From<core::Error> for Failure {
     fn from(e: core::Error) -> Self {
         let code = match &e {
+            core::Error::NeedsCode(_) => "needs_code",
             core::Error::NeedsPerson(_) => "needs_person",
             core::Error::Apple { .. } => "apple",
             _ => e.kind(),
@@ -103,6 +122,9 @@ async fn signer(state: &mut State) -> std::result::Result<&mut Signer, Failure> 
     if state.signer.is_none() {
         state.signer = Some(Signer::open()?);
     }
+    if state.signer.as_mut().unwrap().sync_account() {
+        state.pending = None;
+    }
     Ok(state.signer.as_mut().unwrap())
 }
 
@@ -112,8 +134,14 @@ fn channels() -> Value {
 
 /// Runs one request. `emit` gets progress events while it runs.
 pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> Out {
+    ensure_log_hook();
+    let emit_arc: EmitFn = Arc::new(emit);
+    LOG_EMIT.scope(emit_arc.clone(), handle_inner(request, emit_arc)).await
+}
+
+async fn handle_inner(request: Value, emit_arc: EmitFn) -> Out {
     let op = request["op"].as_str().unwrap_or("");
-    let reporter = Reporter::new(move |p: Progress| emit(json!({"event": "progress", "progress": p})));
+    let reporter = Reporter::new(move |p: Progress| emit_arc(json!({"event": "progress", "progress": p})));
     match op {
         "configure" => {
             // Where the core keeps its non-secret files (release cache, channel, machine id).
@@ -131,15 +159,25 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         }
         "status" => {
             let mut state = STATE.lock().await;
-            let pending = state.pending.is_some();
-            let s = signer(&mut state).await?;
+            signer(&mut state).await?;
+            let mem_pending = state.pending.clone();
+            let s = state.signer.as_mut().unwrap();
+            let active_pending = mem_pending.or_else(|| s.pending().cloned());
+            let pending = active_pending.is_some();
+            let resend_available_at = active_pending.as_ref().map(|p| p.resend_available_at());
+            let rate_limited = s.is_rate_limited();
+            let rate_limited_until = s.rate_limited_until();
             let source = match s.account.anisette.clone().unwrap_or_else(Source::default_for_platform) {
                 Source::Remote { url } => url,
                 Source::System => "system".into(),
             };
             Ok(json!({
                 "signed_in": s.signed_in(),
+                "needs_reauth": s.needs_reauth(),
                 "needs_code": pending,
+                "rate_limited": rate_limited,
+                "rate_limited_until": rate_limited_until,
+                "resend_available_at": resend_available_at,
                 "apple_id": s.account.apple_id(),
                 "name": s.account.display_name(),
                 "team_id": s.account.team_id,
@@ -153,7 +191,7 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
             let mut state = STATE.lock().await;
             let (id, pw) = (str_of(&request, "apple_id")?.to_string(), str_of(&request, "password")?.to_string());
             let keep = request["keep_password"].as_bool().unwrap_or(true);
-            let pending = signer(&mut state).await?.sign_in(&id, &pw, keep).await?;
+            let pending = signer(&mut state).await?.sign_in_as(&id, &pw, keep, CodeCaller::IosSignIn).await?;
             let needs_code = pending.is_some();
             state.pending = pending;
             Ok(json!({"needs_code": needs_code}))
@@ -161,16 +199,37 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "finish_sign_in" => {
             let mut state = STATE.lock().await;
             let code = str_of(&request, "code")?.to_string();
-            let pending = state.pending.take().ok_or_else(|| fail("Sign in again. The verification step has expired.", "needs_person"))?;
-            let keep = pending.clone();
-            let result = signer(&mut state).await?.finish_sign_in(pending, &code).await;
+            signer(&mut state).await?;
+            let mem_pending = state.pending.take();
+            let s = state.signer.as_mut().unwrap();
+            let pending = mem_pending.or_else(|| s.pending().cloned()).ok_or_else(|| fail("Sign in again. The verification step has expired.", "needs_person"))?;
+            let result = s.finish_sign_in(pending, &code).await;
             if let Err(e) = result {
-                // A wrong code: keep the waiting sign-in so the code can be typed again. Starting
-                // over would ask Apple for another code, which replaces this one.
-                state.pending = Some(keep);
+                state.pending = s.pending().cloned();
                 return Err(e.into());
             }
             Ok(json!({}))
+        }
+        "cancel_sign_in" => {
+            let mut state = STATE.lock().await;
+            state.pending = None;
+            signer(&mut state).await?.cancel_sign_in()?;
+            Ok(json!({}))
+        }
+        "resend_code" => {
+            let mut state = STATE.lock().await;
+            let s = signer(&mut state).await?;
+            match s.resend_code().await {
+                Ok(pending) => {
+                    let available_at = pending.resend_available_at();
+                    state.pending = Some(pending);
+                    Ok(json!({"resend_available_at": available_at}))
+                }
+                Err(e) => {
+                    state.pending = s.pending().cloned();
+                    Err(e.into())
+                }
+            }
         }
         "sign_out" => {
             let mut state = STATE.lock().await;
@@ -181,8 +240,15 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
         "teams" => {
             let mut state = STATE.lock().await;
             let s = signer(&mut state).await?;
-            let teams = s.teams().await?;
-            Ok(Value::Array(teams.into_iter().map(|t| json!({"team_id": t.team_id, "name": t.name, "kind": t.kind, "is_free": t.is_free})).collect()))
+            match s.teams().await {
+                Ok(teams) => Ok(Value::Array(teams.into_iter().map(|t| json!({"team_id": t.team_id, "name": t.name, "kind": t.kind, "is_free": t.is_free})).collect())),
+                Err(core::Error::NeedsCode(pending)) => {
+                    let msg = core::Error::NeedsCode(pending.clone()).to_string();
+                    state.pending = Some(*pending);
+                    Err(fail(msg, "needs_code"))
+                }
+                Err(e) => Err(e.into()),
+            }
         }
         "choose_team" => {
             let mut state = STATE.lock().await;
@@ -213,6 +279,11 @@ pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static
             let mut device = phone.open().await?;
             Ok(json!({"udid": udid(&mut device).await?}))
         }
+        "apps" => {
+            let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;
+            let mut device = phone.open().await?;
+            Ok(json!({"apps": installed_apps(&mut device).await?}))
+        }
         "prepare" => prepare(&request, &reporter).await,
         "install" => install(&request, &reporter).await,
         other => Err(fail(format!("unknown request {other:?}"), "config")),
@@ -223,6 +294,37 @@ async fn udid(device: &mut Device) -> std::result::Result<String, Failure> {
     let mut lockdown: LockdownClient = device.connect().await?;
     let v = lockdown.get_value(Some("UniqueDeviceID"), None).await?;
     v.as_string().map(String::from).filter(|s| !s.is_empty()).ok_or_else(|| fail("the phone did not say its UDID", "device"))
+}
+
+/// Every app on the phone, as installation_proxy lists it (the service Poki Runner's lookup used):
+/// its bundle id, its Home Screen name, its bundle name and whether it is a User or a System app. The
+/// chat's agent launches apps by these ids instead of ids a model recalls (a tester's 淘宝 and 美团,
+/// Nov 2026), and the app's icons and capsules know every installed app by name. Only these four
+/// attributes are asked for, so the answer stays small.
+async fn installed_apps(device: &mut Device) -> std::result::Result<Vec<Value>, Failure> {
+    let mut proxy: InstallationProxyClient = device.connect().await?;
+    let mut options = plist::Dictionary::new();
+    options.insert("ApplicationType".into(), plist::Value::String("Any".into()));
+    options.insert(
+        "ReturnAttributes".into(),
+        plist::Value::Array(["CFBundleIdentifier", "CFBundleDisplayName", "CFBundleName", "ApplicationType"].iter().map(|k| plist::Value::String((*k).into())).collect()),
+    );
+    let list = tokio::time::timeout(Duration::from_secs(20), proxy.browse(Some(plist::Value::Dictionary(options))))
+        .await
+        .map_err(|_| fail("The iPhone did not list its apps in time.", "device"))??;
+    Ok(installed_entries(&list))
+}
+
+/// installation_proxy's entries as {id, name, bundle_name, type}; entries without a bundle id are left out.
+fn installed_entries(list: &[plist::Value]) -> Vec<Value> {
+    let text = |d: &plist::Dictionary, k: &str| d.get(k).and_then(|v| v.as_string()).map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+    list.iter()
+        .filter_map(|app| {
+            let d = app.as_dictionary()?;
+            let id = text(d, "CFBundleIdentifier")?;
+            Some(json!({"id": id, "name": text(d, "CFBundleDisplayName"), "bundle_name": text(d, "CFBundleName"), "type": text(d, "ApplicationType")}))
+        })
+        .collect()
 }
 
 /// Takes the signing key Poki Setup left in the container (Documents/PokiSetup/signing-identity.json),
@@ -254,6 +356,26 @@ async fn import_identity(request: &Value) -> Out {
 /// (`app_path`, Bundle.main); kind "update" takes the newest release on the chosen channel.
 /// The result lands in `<home>/ready/<kind>/` with a manifest; nothing is installed.
 async fn prepare(request: &Value, reporter: &Reporter) -> Out {
+    {
+        let mut state = STATE.lock().await;
+        signer(&mut state).await?;
+        let mem_pending = state.pending.clone();
+        let s = state.signer.as_mut().unwrap();
+        if s.needs_reauth() {
+            return Err(core::apple::gsa::incomplete_session().into());
+        }
+        if !s.signed_in() {
+            return Err(fail("Sign in with your Apple Account in Setup first.", "needs_person"));
+        }
+        if s.is_rate_limited() {
+            return Err(core::apple::gsa::rate_limited().into());
+        }
+        if let Some(pending) = mem_pending.or_else(|| s.pending().cloned()) {
+            let msg = core::Error::NeedsCode(Box::new(pending.clone())).to_string();
+            state.pending = Some(pending);
+            return Err(fail(msg, "needs_code"));
+        }
+    }
     let kind = request["kind"].as_str().unwrap_or("refresh");
     let phone: Phone = serde_json::from_value(request.clone()).map_err(|e| fail(e.to_string(), "config"))?;
     let out_dir = home()?.join("ready").join(kind);
@@ -290,17 +412,35 @@ async fn prepare(request: &Value, reporter: &Reporter) -> Out {
         other => return Err(fail(format!("unknown kind {other:?}"), "config")),
     };
 
+    let automatic = request["automatic"].as_bool() == Some(true);
     let mut state = STATE.lock().await;
     let s = signer(&mut state).await?;
     if !s.signed_in() {
         return Err(fail("Sign in with your Apple Account in Setup first.", "needs_person"));
     }
-    let team = s.team().await?;
+    s.set_caller(if automatic { CodeCaller::IosMaintain } else { CodeCaller::IosPrepare });
+    let team = match s.team().await {
+        Ok(team) => team,
+        Err(core::Error::NeedsCode(pending)) => {
+            let msg = core::Error::NeedsCode(pending.clone()).to_string();
+            state.pending = Some(*pending);
+            return Err(fail(msg, "needs_code"));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let out = out_dir.join("Poki-signed.ipa");
     // Unpacking, signing and packing run synchronously inside; block_in_place moves the runtime's
     // other work (the runner's launcher) to another thread meanwhile instead of stalling it.
     let handle = tokio::runtime::Handle::current();
-    let built = tokio::task::block_in_place(|| handle.block_on(setup::sign_for_team(s, &team, Some((&udid, &name)), &ipa, signing_zip.as_deref(), &out, reporter)))?;
+    let built = match tokio::task::block_in_place(|| handle.block_on(setup::sign_for_team(s, &team, Some((&udid, &name)), &ipa, signing_zip.as_deref(), &out, reporter))) {
+        Ok(built) => built,
+        Err(core::Error::NeedsCode(pending)) => {
+            let msg = core::Error::NeedsCode(pending.clone()).to_string();
+            state.pending = Some(*pending);
+            return Err(fail(msg, "needs_code"));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let _ = std::fs::remove_file(out_dir.join("installed.ipa"));
     let mut profiles = vec![];
     for (i, p) in built.profiles.iter().enumerate() {
@@ -369,4 +509,179 @@ async fn install(request: &Value, reporter: &Reporter) -> Out {
     }
     reporter.done("install", None);
     Ok(json!({"installed": true}))
+}
+
+#[cfg(test)]
+mod installed_tests {
+    use super::*;
+
+    #[test]
+    fn entries_keep_id_and_names_and_skip_ones_without_an_id() {
+        let app = |pairs: &[(&str, &str)]| {
+            let mut d = plist::Dictionary::new();
+            for (k, v) in pairs {
+                d.insert((*k).into(), plist::Value::String((*v).into()));
+            }
+            plist::Value::Dictionary(d)
+        };
+        let list = vec![
+            app(&[("CFBundleIdentifier", "com.taobao.taobao4iphone"), ("CFBundleDisplayName", "淘宝"), ("CFBundleName", "Taobao4iPhone"), ("ApplicationType", "User")]),
+            app(&[("CFBundleIdentifier", "com.meituan.imeituan"), ("CFBundleDisplayName", " ")]),
+            app(&[("CFBundleDisplayName", "No id")]),
+        ];
+        let out = installed_entries(&list);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], json!({"id": "com.taobao.taobao4iphone", "name": "淘宝", "bundle_name": "Taobao4iPhone", "type": "User"}));
+        assert_eq!(out[1], json!({"id": "com.meituan.imeituan", "name": null, "bundle_name": null, "type": null}));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[derive(Default)]
+    struct TestVault(Mutex<HashMap<String, Vec<u8>>>);
+
+    impl core::vault::Vault for TestVault {
+        fn get(&self, name: &str) -> core::Result<Option<Vec<u8>>> {
+            Ok(self.0.lock().unwrap().get(name).cloned())
+        }
+        fn set(&self, name: &str, value: &[u8]) -> core::Result<()> {
+            self.0.lock().unwrap().insert(name.to_string(), value.to_vec());
+            Ok(())
+        }
+        fn delete(&self, name: &str) -> core::Result<()> {
+            self.0.lock().unwrap().remove(name);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn concurrent_request_completion_does_not_drop_in_flight_code_request_log() {
+        crate::pin_crypto_provider();
+        let _ = core::vault::install(Box::new(TestVault::default()));
+        let vault = core::vault::installed().expect("vault installed");
+
+        let dir = std::env::temp_dir().join(format!("poki-signer-log-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        rt.block_on(async {
+            handle(json!({"op": "configure", "home": dir.to_string_lossy()}), |_| {}).await.unwrap();
+
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            let entered_srv = entered.clone();
+            let release_srv = release.clone();
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            tokio::spawn(async move {
+                while let Ok((mut stream, _)) = listener.accept().await {
+                    let entered_srv = entered_srv.clone();
+                    let release_srv = release_srv.clone();
+                    tokio::spawn(async move {
+                        let mut buf = [0u8; 2048];
+                        let n = stream.read(&mut buf).await.unwrap_or(0);
+                        let req = String::from_utf8_lossy(&buf[..n]);
+                        let body = if req.starts_with("GET /v3/client_info") {
+                            entered_srv.notify_waiters();
+                            release_srv.notified().await;
+                            r#"{"client_info":"<Mac15,7>","user_agent":"akd/1.0"}"#
+                        } else {
+                            "{\"result\":\"Headers\",\"X-Apple-I-MD-M\":\"mid-1\",\"X-Apple-I-MD\":\"otp\\nbreak\",\"X-Apple-I-MD-RINFO\":\"17106176\"}"
+                        };
+                        let reply = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        let _ = stream.write_all(reply.as_bytes()).await;
+                    });
+                }
+            });
+
+            use sha2::{Digest, Sha256};
+            let mut hash = [0u8; 6];
+            hash.copy_from_slice(&Sha256::digest(url.as_bytes())[..6]);
+            let tag: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+            let client_info = core::apple::anisette::CLIENT_INFO_OVERRIDE.map(|(c, _)| c.to_string());
+            let ani_state = core::apple::anisette::remote::State {
+                keychain_identifier: vec![3u8; 16],
+                adi_pb: Some(b"provisioned-adi".to_vec()),
+                client_info,
+            };
+            vault.set(&format!("anisette-{tag}"), &serde_json::to_vec(&ani_state).unwrap()).unwrap();
+
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+            let pending_json = serde_json::json!({
+                "apple_id": "person@example.com",
+                "password": "synthetic-secret-password",
+                "keep_password": false,
+                "session": {
+                    "apple_id": "person@example.com",
+                    "adsid": "000123-abc",
+                    "gs_idms_token": "idms-tok-1",
+                    "first_name": "Test",
+                    "last_name": "Person",
+                    "sk": "Bw==",
+                    "c": "Yw=="
+                },
+                "via": "trusted_device",
+                "phone_id": 0,
+                "anisette": { "kind": "remote", "url": url },
+                "created_at": now - 120,
+                "last_sent_at": now - 120
+            });
+            vault.set("pending-sign-in", &serde_json::to_vec(&pending_json).unwrap()).unwrap();
+            {
+                let mut st = STATE.lock().await;
+                st.signer = None;
+                st.pending = None;
+            }
+
+            let resend_events: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+            let resend_events_cb = resend_events.clone();
+            let resend_task = tokio::spawn(async move {
+                handle(json!({"op": "resend_code"}), move |ev| {
+                    resend_events_cb.lock().unwrap().push(ev);
+                })
+                .await
+            });
+
+            // Wait until resend_code is mid-flight, then finish an unrelated concurrent request so its guard drops.
+            entered.notified().await;
+            let other_events: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+            let other_events_cb = other_events.clone();
+            handle(json!({"op": "set_channel", "channel": "beta"}), move |ev| {
+                other_events_cb.lock().unwrap().push(ev);
+            })
+            .await
+            .unwrap();
+
+            release.notify_waiters();
+            let _ = resend_task.await.unwrap();
+
+            let _ = std::fs::remove_dir_all(&dir);
+            let logs: Vec<String> = resend_events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|v| v["event"] == "log")
+                .filter_map(|v| v["line"].as_str().map(String::from))
+                .collect();
+            assert_eq!(
+                logs,
+                vec!["2fa-code-request path=ask_trusted_device caller=resend_code".to_string()],
+                "finishing a concurrent request must not clear the in-flight request's log emitter"
+            );
+            assert!(
+                other_events.lock().unwrap().iter().all(|v| v["event"] != "log"),
+                "unrelated concurrent request must not receive another request's 2fa-code-request log"
+            );
+        });
+    }
 }

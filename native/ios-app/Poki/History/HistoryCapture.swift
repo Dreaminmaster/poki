@@ -28,6 +28,15 @@ final class HistoryCapture: ObservableObject {
 
     // MARK: Settings (kept in UserDefaults)
 
+    nonisolated static let enabledKey = "history.enabled"
+    nonisolated static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+
+    @Published var enabled: Bool {
+        didSet {
+            save(enabled, Self.enabledKey)
+            if !enabled { stop() }
+        }
+    }
     @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
     @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
     @Published var included: [String] { didSet { save(included, "history.included") } }
@@ -77,6 +86,7 @@ final class HistoryCapture: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
+        enabled = defaults.bool(forKey: Self.enabledKey)
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
         // Poki's own screens and the suggested apps are left out from the start.
         excluded = defaults.stringArray(forKey: "history.excluded") ?? [Bundle.main.bundleIdentifier ?? "nz.zheha.poki"] + Self.suggested
@@ -95,7 +105,7 @@ final class HistoryCapture: ObservableObject {
     ]
 
     /// Poki's own screens are never kept, whatever the lists say.
-    static func isPoki(_ app: String) -> Bool {
+    nonisolated static func isPoki(_ app: String) -> Bool {
         app.caseInsensitiveCompare(Bundle.main.bundleIdentifier ?? "nz.zheha.poki") == .orderedSame || app.caseInsensitiveCompare("Poki") == .orderedSame
     }
 
@@ -134,8 +144,10 @@ final class HistoryCapture: ObservableObject {
         if lockedOrDark { return .locked }
         // Reading stays out of the way of an agent's task.
         if model.hasOpenInProcessSession { return .task }
+        #if !targetEnvironment(simulator)
         if model.pairingPath == nil { return .notPaired }
         if !model.loopback.isWorking { return .noConnection }
+        #endif
         return nil
     }
 
@@ -150,8 +162,10 @@ final class HistoryCapture: ObservableObject {
     /// Reads once after `waitSeconds`, or every `interval` seconds for `minutes`.
     func start(minutes: Int? = nil, model: AppModel) {
         guard !isRunning else { return }
+        if !enabled { enabled = true }
         watchLock()
         if let refused = refusal(model) { set(refused); return }
+        HistoryLock.shared.readStarting()
         run += 1
         let me = run
         once = minutes == nil
@@ -165,26 +179,33 @@ final class HistoryCapture: ObservableObject {
         let wait = once ? Self.waitSeconds : 0
         set(once ? .waiting : .reading)
         ends = Date().addingTimeInterval(Double(wait + (minutes ?? 0) * 60))
+        let duration = max(10, (minutes ?? 0) * 60)
+        #if !targetEnvironment(simulator)
         let screen = UIScreen.main.bounds
         let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
+        #endif
         Task {
             if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
             guard self.run == me else { return }
             if let refused = self.refusal(model) { self.end(me, refused); return }
             self.set(.reading)
+            #if targetEnvironment(simulator)
+            await self.runOnSimulator(me: me, duration: duration, model: model)
+            #else
             // A single read runs for the launcher's shortest time and ends at the first kept read.
             let request: [String: Any] = [
                 "op": "run", "device_address": "10.7.0.1", "pairing_file": model.pairingPath ?? "", "host_name": "Poki",
-                "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": max(10, (minutes ?? 0) * 60),
+                "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": duration,
                 "include_text": true, "include_tree": true,
             ]
             do {
                 _ = try await HistoryBridge.call(request) { [weak self] line in
-                    Task { @MainActor in self?.took(line, run: me, model: model) }
+                    Task { @MainActor [weak self] in self?.took(line, run: me, model: model) }
                 }
             } catch {
                 AppLog.shared.add("history", "capture stopped: \(error.localizedDescription)")
             }
+            #endif
             self.end(me, .finished)
         }
     }
@@ -267,4 +288,104 @@ final class HistoryCapture: ObservableObject {
         await HistoryStore.shared.delete(from: start, to: end)
         changes += 1
     }
+
+    #if targetEnvironment(simulator)
+    private static let simulatorQueue = DispatchQueue(label: "nz.zheha.poki.history-simulator", qos: .utility)
+
+    private func runOnSimulator(me: Int, duration: Int, model: AppModel) async {
+        let deadline = Date().addingTimeInterval(Double(duration))
+        var lastApp = ""
+        var lastLines: [String] = []
+        var openedSession = false
+        defer {
+            if openedSession {
+                Self.simulatorQueue.async { _ = PKInProcess.shared().close() }
+            }
+        }
+        while self.run == me, self.status == .reading, Date() < deadline {
+            if model.hasOpenInProcessSession { self.end(me, .task); return }
+            let snapshot: (app: String, title: String, lines: [String])? = await withCheckedContinuation { done in
+                Self.simulatorQueue.async {
+                    let probe = PKInProcess.shared()
+                    let ready = (probe.prepare()["ok"] as? Bool) == true
+                    guard ready else { done.resume(returning: nil); return }
+                    let front = probe.frontApp()
+                    let app = (front["bundleId"] as? String) ?? ""
+                    guard !app.isEmpty, !Self.isPoki(app) else { done.resume(returning: nil); return }
+                    guard let xml = probe.sourceXML(nil, maxDepth: 40, maxChildren: 400, code: nil) else {
+                        done.resume(returning: nil)
+                        return
+                    }
+                    let parsed = SimulatorScreenXML.parse(xml)
+                    done.resume(returning: (app, parsed.title, parsed.lines))
+                }
+            }
+            openedSession = true
+            guard self.run == me, self.status == .reading else { return }
+            if let snapshot, !snapshot.lines.isEmpty, (snapshot.app != lastApp || snapshot.lines != lastLines) {
+                lastApp = snapshot.app
+                lastLines = snapshot.lines
+                if let data = try? JSONSerialization.data(withJSONObject: [
+                    "ok": true,
+                    "app": snapshot.app,
+                    "title": snapshot.title,
+                    "text": snapshot.lines,
+                    "changed": true,
+                ]) {
+                    self.took(data, run: me, model: model)
+                }
+            }
+            guard self.run == me, self.status == .reading else { return }
+            try? await Task.sleep(for: .seconds(Self.interval))
+        }
+    }
+    #endif
 }
+
+#if targetEnvironment(simulator)
+private final class SimulatorScreenXML: NSObject, XMLParserDelegate {
+    private var skipDepth = 0
+    private var title = ""
+    private var lines: [String] = []
+    private static let secretTerms = [
+        "password", "passcode", "verification code", "one-time code",
+        "密码", "密碼", "验证码", "驗證碼",
+    ]
+
+    static func parse(_ xml: String) -> (title: String, lines: [String]) {
+        let reader = SimulatorScreenXML()
+        let parser = XMLParser(data: Data(xml.utf8))
+        parser.delegate = reader
+        _ = parser.parse()
+        return (reader.title, reader.lines)
+    }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes: [String: String] = [:]) {
+        if skipDepth > 0 {
+            skipDepth += 1
+            return
+        }
+        let type = attributes["type"] ?? elementName
+        if type == "XCUIElementTypeKeyboard" || type == "XCUIElementTypeKey" || type == "XCUIElementTypeSecureTextField" {
+            skipDepth = 1
+            return
+        }
+        if type == "XCUIElementTypeApplication" { return }
+        let label = (attributes["label"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = (attributes["name"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = (attributes["value"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let descriptor = "\(name) \(label)".lowercased()
+        let isSecret = !value.isEmpty && Self.secretTerms.contains { descriptor.contains($0) }
+        if type == "XCUIElementTypeNavigationBar", title.isEmpty, !label.isEmpty {
+            title = label
+        }
+        for piece in isSecret ? [label] : [label, value] where !piece.isEmpty && lines.last != piece {
+            lines.append(piece)
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if skipDepth > 0 { skipDepth -= 1 }
+    }
+}
+#endif

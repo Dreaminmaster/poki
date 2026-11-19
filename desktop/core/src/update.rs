@@ -151,12 +151,12 @@ impl Prepared {
         let out = crate::paths::cache_dir()?.join(format!("update-{}.ipa", uuid::Uuid::new_v4()));
         let built = signer.sign_update(&self.team, self.unpacked, &self.installed.certificate_sha256, &out, &Reporter::silent()).await
             .map_err(|e| match e {
-                Error::UpdateCheck(_) => e,
+                Error::UpdateCheck(_) | Error::NeedsCode(_) => e,
                 _ => stop("The original signing identity could not prepare this update; keep Poki installed and check the original signing computer."),
             })?;
         device::install::install_profiles(&self.phone, &built.profiles, reporter).await?;
         device::install::install_ipa(&self.phone, &built.ipa, true, reporter).await?;
-        let record = keeper::Record { version: built.version, build: built.build, release_tag: self.release.tag, signed_at: keeper::now(), profile_expires_at: built.profile_expires_at, last_checked_at: Some(keeper::now()), last_error: None, ..self.record };
+        let record = keeper::Record { version: built.version, build: built.build, release_tag: self.release.tag, signed_at: keeper::now(), profile_expires_at: built.profile_expires_at, last_checked_at: Some(keeper::now()), last_error: None, test_build: None, ..self.record };
         keeper::put(record.clone())?;
         Ok(record)
     }
