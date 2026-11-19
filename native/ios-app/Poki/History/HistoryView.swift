@@ -208,7 +208,7 @@ struct ScreenHistorySettingsView: View {
                 } header: {
                     SettingsHeader("On Cellular")
                 } footer: {
-                    Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. In Shortcuts, turn its automation on and set it to Run Immediately.")
+                    Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
                 }
             }
 
@@ -261,7 +261,7 @@ struct HistoryShortcutGuide: View {
                     }
                 }
             } footer: {
-                Text("On iOS 18 and iOS 26 the shared shortcut can arrive without its automation. These steps make the same one.")
+                Text("On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps make the same one.")
             }
         }
         .navigationTitle(AppLocalization.text("Set Up by Hand"))

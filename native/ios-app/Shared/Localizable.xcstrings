@@ -65,18 +65,18 @@
         }
       }
     },
-    "On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. In Shortcuts, turn its automation on and set it to Run Immediately." : {
+    "On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。这个快捷指令会在 Wi-Fi 断开时运行，短暂关闭蜂窝数据，让 Poki 连接，然后重新打开。请在“快捷指令”中打开它的自动化，并设为“立即运行”。"
+            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。这个快捷指令会在 Wi-Fi 断开时运行，短暂关闭蜂窝数据，让 Poki 连接，然后重新打开。添加时，请打开它的自动化，关闭“运行前确认”，并选择你的 VPN App。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。這個捷徑會在 Wi-Fi 中斷時執行，短暫關閉行動數據，讓 Poki 連線，然後重新打開。請在「捷徑」中打開它的自動化，並設為「立即執行」。"
+            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。這個捷徑會在 Wi-Fi 中斷時執行，短暫關閉行動數據，讓 Poki 連線，然後重新打開。加入時，請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
           }
         }
       }
@@ -177,18 +177,18 @@
         }
       }
     },
-    "On iOS 18 and iOS 26 the shared shortcut can arrive without its automation. These steps make the same one." : {
+    "On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps make the same one." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 iOS 18 和 iOS 26 上，共享的快捷指令可能不带自动化。按这些步骤可以做出同样的自动化。"
+            "value" : "在较旧的 iOS 版本上，自动化是“快捷指令”中单独的标签页，不会随共享的快捷指令一起添加。按这些步骤可以做出同样的自动化。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 iOS 18 和 iOS 26 上，分享的捷徑可能不含自動化。按這些步驟可以做出同樣的自動化。"
+            "value" : "在較舊的 iOS 版本上，自動化是「捷徑」中獨立的標籤頁，不會隨分享的捷徑一起加入。按這些步驟可以做出同樣的自動化。"
           }
         }
       }
