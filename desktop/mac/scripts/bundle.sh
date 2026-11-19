@@ -32,12 +32,13 @@ fi
 
 echo "== SwiftUI app"
 (cd "$HERE" && swift build -c release ${SWIFT_ARCHS[@]+"${SWIFT_ARCHS[@]}"})
-BIN="$(cd "$HERE" && swift build -c release ${SWIFT_ARCHS[@]+"${SWIFT_ARCHS[@]}"} --show-bin-path)/PokiSetup"
+BIN_DIR="$(cd "$HERE" && swift build -c release ${SWIFT_ARCHS[@]+"${SWIFT_ARCHS[@]}"} --show-bin-path)"
 
 APP="$OUT/Poki Setup.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/PokiSetup"
+cp -R "$BIN_DIR/PokiSetup_PokiSetup.bundle" "$APP/Contents/Resources/"
+cp "$BIN_DIR/PokiSetup" "$APP/Contents/MacOS/PokiSetup"
 cp "$OUT/poki-setup-bridge" "$APP/Contents/MacOS/poki-setup-bridge"
 cp "$OUT/poki-setup" "$APP/Contents/MacOS/poki-setup"
 cp "$HERE/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"

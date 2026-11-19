@@ -7,13 +7,13 @@ enum Page: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .setup: "Set Up"
-        case .phones: "Devices"
-        case .account: "Apple Account"
-        case .relay: "Relay"
-        case .debug: "Diagnostics"
-        case .testBuilds: "Test Builds"
-        case .github: "GitHub Account"
+        case .setup: localized("Set Up")
+        case .phones: localized("Devices")
+        case .account: localized("Apple Account")
+        case .relay: localized("Relay")
+        case .debug: localized("Diagnostics")
+        case .testBuilds: localized("Test Builds")
+        case .github: localized("GitHub Account")
         }
     }
     var symbol: String {
@@ -38,7 +38,7 @@ final class AppModel: ObservableObject {
     @Published var accountError: CoreError?
     @Published var teams: [Team] = []
     /// Why the team list could not be loaded, shown in place of the spinner.
-    @Published var teamsError: String?
+    @Published var teamsError: SetupMessage?
     @Published var phones: [PhoneRow] = []
     @Published var phonesError: CoreError?
     @Published var selectedUDID: String?
@@ -75,7 +75,7 @@ final class AppModel: ObservableObject {
     @Published var logLines: [String] = []
 
     /// A short message at the bottom of the window.
-    @Published var banner: String?
+    @Published var banner: SetupMessage?
 
     let bridge = Bridge.shared
     private var started = false
@@ -178,13 +178,13 @@ final class AppModel: ObservableObject {
         if done.relaunching {
             NSApp.terminate(nil)
         } else {
-            banner = "Poki Setup could not replace itself here, so its update is open in Finder. Quit Poki Setup, then drag the new one into Applications."
+            banner = .copy("Poki Setup could not replace itself here, so its update is open in Finder. Quit Poki Setup, then drag the new one into Applications.")
         }
     }
 
     // MARK: Refresh
 
-    static let rateLimitedTeams = "Apple has had too many sign-in attempts or codes for this Apple Account. Wait about an hour, then sign in again."
+    static let rateLimitedTeams = SetupMessage.copy("Apple has had too many sign-in attempts or codes for this Apple Account. Wait about an hour, then sign in again.")
 
     func refreshAccount() async {
         if demo { return }
@@ -206,7 +206,7 @@ final class AppModel: ObservableObject {
                     } catch let e as CoreError where e.kind == "needs_code" {
                         await promptForCode()
                     } catch {
-                        teamsError = error.localizedDescription
+                        teamsError = .verbatim(error.localizedDescription)
                     }
                 }
             } else if !state.signedIn {
@@ -377,7 +377,7 @@ final class AppModel: ObservableObject {
     /// Signs a test build with the Apple Account and installs it, like Install Poki does with the
     /// release. The device's record keeps the build, so renewals sign it again.
     func installTestBuild(_ b: TestBuild, udid: String) async throws -> InstallAnswer {
-        guard let ref = b.ref else { throw CoreError(kind: "error", message: "This build is not ready yet.") }
+        guard let ref = b.ref else { throw CoreError(kind: "error", message: localized("This build is not ready yet.")) }
         let answer = try await installClosingPoki(udid: udid, ["udid": udid, "test_build": ref, "hand_off": false])
         await refreshRecords()
         await refreshPhones()
@@ -397,16 +397,16 @@ final class AppModel: ObservableObject {
         if p.autoInstall, let target, account?.signedIn == true {
             do {
                 _ = try await installTestBuild(next, udid: target.id)
-                banner = "Installed test build \(next.runNumber) on \(target.title)."
+                banner = .copy("Installed test build \(next.runNumber) on \(target.title).")
             } catch {
-                banner = "Test build \(next.runNumber) did not install on \(target.title). \(error.localizedDescription)"
+                banner = .copy("Test build \(next.runNumber) did not install on \(target.title). \(error.localizedDescription)")
             }
             dev = (try? await bridge.call("test_build_synced", ["run_id": next.runId])) ?? dev
             return
         }
         if p.autoDownload, !next.downloaded {
             do { try await downloadTestBuild(next) } catch {
-                banner = "Test build \(next.runNumber) did not download. \(error.localizedDescription)"
+                banner = .copy("Test build \(next.runNumber) did not download. \(error.localizedDescription)")
                 dev = (try? await bridge.call("test_build_synced", ["run_id": next.runId])) ?? dev
                 return
             }
@@ -551,7 +551,7 @@ final class AppModel: ObservableObject {
     }
 
     private func deviceName(_ udid: String) -> String {
-        phones.first(where: { $0.id == udid })?.title ?? records.first(where: { $0.udid == udid })?.phoneName ?? "the device"
+        phones.first(where: { $0.id == udid })?.title ?? records.first(where: { $0.udid == udid })?.phoneName ?? localized("the device")
     }
 
     /// Asks whether to close Poki on the device, and waits for the answer.
@@ -586,7 +586,7 @@ final class AppModel: ObservableObject {
     /// opened while Poki Setup signed it.
     func installClosingPoki(udid: String, _ args: [String: Any?]) async throws -> InstallAnswer {
         guard await okToReplacePoki(udid: udid) else {
-            throw CoreError(kind: "cancelled", message: "Nothing was installed. Poki is still open on \(deviceName(udid)).")
+            throw CoreError(kind: "cancelled", message: localized("Nothing was installed. Poki is still open on \(deviceName(udid))."))
         }
         var withClose = args
         withClose["close_poki"] = true
@@ -645,7 +645,7 @@ final class AppModel: ObservableObject {
         do {
             let p: AgentPrompt = try await bridge.call("agent_prompt")
             copyToPasteboard(p.prompt)
-            banner = "Copied. Paste it into your agent (Claude Code, Codex or another one that runs on this Mac)."
+            banner = .copy("Copied. Paste it into your agent (Claude Code, Codex or another one that runs on this Mac).")
         } catch { report(error) }
     }
 
@@ -663,7 +663,7 @@ final class AppModel: ObservableObject {
     }
 
     func report(_ error: Error) {
-        banner = error.localizedDescription
+        banner = .verbatim(error.localizedDescription)
     }
 
     // MARK: Demo data (screenshots only: POKI_SETUP_DEMO=1)

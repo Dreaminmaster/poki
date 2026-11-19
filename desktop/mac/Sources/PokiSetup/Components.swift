@@ -13,7 +13,7 @@ struct StepsView: View {
                 icon(s)
                     .frame(width: 18, height: 18)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(s.title)
+                    Text(s.displayTitle)
                         .foregroundStyle(s.state == .done ? .secondary : .primary)
                     if let f = s.fraction, s.state == .running {
                         ProgressView(value: f).progressViewStyle(.linear).frame(maxWidth: 280)
@@ -64,7 +64,7 @@ struct QRCode: View {
         .frame(width: size, height: size)
         .padding(10)
         .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel("QR code")
+        .accessibilityLabel(localized("QR code"))
     }
 
     static func image(for text: String) -> NSImage? {
@@ -132,12 +132,12 @@ func copyToPasteboard(_ s: String) {
 }
 
 func relativeDays(_ r: Record) -> String {
-    if r.isExpired { return "Expired" }
+    if r.isExpired { return localized("Expired") }
     let d = r.daysLeft
     switch d {
-    case ..<1: return "Expires today"
-    case 1: return "1 day left"
-    default: return "\(d) days left"
+    case ..<1: return localized("Expires today")
+    case 1: return localized("1 day left")
+    default: return localized("\(d) days left")
     }
 }
 
@@ -149,7 +149,7 @@ struct JobProgress: View {
     /// How much of the bar each step takes, for jobs whose steps are known up front. Steps not
     /// named take none. Without weights, every step counts the same.
     var weights: [String: Double]? = nil
-    var doneTitle = "Done"
+    var doneTitle = localized("Done")
     @State private var showSteps = false
 
     /// The install's steps as the core reports them, by how long each usually takes.
@@ -190,7 +190,7 @@ struct JobProgress: View {
                 } else if current?.state == .waiting {
                     Image(systemName: "hand.tap.fill").foregroundStyle(.orange)
                 }
-                Text(finished ? doneTitle : (current?.title ?? "Starting"))
+                Text(finished ? doneTitle : (current?.displayTitle ?? localized("Starting")))
                     .font(.body.weight(.medium))
                     .lineLimit(1)
                 Spacer(minLength: 8)
@@ -214,7 +214,7 @@ struct JobProgress: View {
                 VStack(alignment: .leading, spacing: 4) { StepsView(steps: steps) }
                     .padding(.top, 4)
             } label: {
-                Text(showSteps ? "Hide Details" : "Show Details").font(.callout).foregroundStyle(.secondary)
+                Text(showSteps ? localized("Hide Details") : localized("Show Details")).font(.callout).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
