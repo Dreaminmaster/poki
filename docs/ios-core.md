@@ -361,6 +361,17 @@ on the phone; the next first `look` of a task in that app names the saved routin
   more steps that no routine ran. Any MCP client can list, show, save, edit, rename, forget, export and
   import routines, and `remember`/`forget_note` the owner's notes (`PokiCore.memoryBrief(for:)` gives
   the on-device chat the same brief).
+- **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
+  is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
+  The owner locks a note or a routine: no agent forgets, edits, renames or saves over a locked one
+  (the answer says so), a newer import does not replace it, and the 50-note and 200-routine caps drop
+  the oldest unlocked items instead. An agent's import brings nothing locked and nothing marked as the
+  owner's, and a client named `owner`, `import`, `restore` or `Dream` is still an agent (its changes show
+  as "an MCP client"). Every addition, change and forget is logged (`changes`, the latest
+  100) and can be undone; a forgotten item stays in its entry so undo puts it back with the same id
+  and date. The log stays on the phone: `export` and the backup copy leave it out. These fields came
+  after the first release and are all optional, so an older file opens with everything in it; a file
+  that cannot be read at all is copied aside (`agent-memory.unreadable-<time>.json`), not written over.
 - **Moving and backing up**: `export` answers the whole memory as JSON (schema
   `poki.agent-backup/1`); `import {data}` merges one in (newer wins). The app keeps a copy at
   `Documents/AgentBackup/poki-agent-backup.json`, which Poki Setup copies off and puts back; a copy put

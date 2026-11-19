@@ -415,6 +415,8 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(requests.count, 5)
         XCTAssertFalse(FakeCompletions.system(requests[0]).contains(note))
         XCTAssertTrue(FakeCompletions.system(requests[3]).contains(note), "the second task's prompt has the note the first saved")
+        // The note keeps the conversation it was heard in: the Memory page's source links back to it.
+        XCTAssertEqual(RoutineStore.shared.note(note)?.heard?.session, chat.sessionID)
     }
 
     /// finish_task's requested facts and the kind of answer go back to the agent that handed the task

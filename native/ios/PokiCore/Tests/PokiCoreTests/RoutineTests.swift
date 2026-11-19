@@ -217,4 +217,181 @@ final class RoutineTests: XCTestCase {
         let bad = await core.call("routines", ["action": "show", "name": "nope"])
         XCTAssertTrue(bad.isError)
     }
+
+    // MARK: The Memory page's fields: locks, the app, where a note was heard, Recent Updates
+
+    /// A memory file exactly as Poki wrote it before locks, apps on notes and the change log.
+    static let fileFromBefore = #"""
+    {
+      "notes" : [
+        { "at" : "2026-11-10T08:00:00Z", "by" : "owner", "id" : "a1b2c3d4", "text" : "Mom is the contact Mama" },
+        { "at" : "2026-11-12T09:30:00Z", "by" : "Poki", "id" : "b2c3d4e5", "text" : "Coffee is an iced Americano, light ice" }
+      ],
+      "routines" : [
+        {
+          "created" : "2026-11-11T10:00:00Z", "description" : "read the iOS version in Settings", "expect" : [ "About" ],
+          "failuresInARow" : 0, "lastMs" : 6000, "name" : "iOS version", "ok" : 2, "params" : { }, "read" : [ "iOS Version" ],
+          "runs" : 2, "savedBy" : "Poki", "updated" : "2026-11-11T10:00:00Z",
+          "steps" : [ { "action" : { "tap" : "@" }, "app" : "com.apple.Preferences",
+                        "target" : { "label" : "General", "type" : "Button", "x" : 195, "y" : 122 } } ]
+        }
+      ],
+      "runs" : [ ],
+      "schema" : "poki.agent-backup/1"
+    }
+    """#
+
+    func testAFileFromBeforeTheMemoryPageFieldsOpensWithEverythingInIt() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("poki-memory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("agent-memory.json")
+        try Data(Self.fileFromBefore.utf8).write(to: url)
+
+        let store = RoutineStore(url: url)
+        XCTAssertEqual(store.notes.map(\.text), ["Mom is the contact Mama", "Coffee is an iced Americano, light ice"])
+        XCTAssertEqual(store.notes.map(\.app), [nil, nil], "no app: About You")
+        XCTAssertEqual(store.notes.map(\.heard), [nil, nil], "no conversation to go back to")
+        XCTAssertEqual(store.routine(named: "iOS version")?.runs, 2)
+        // The first change writes the file in the new shape; nothing from before is lost.
+        store.setLocked("b2c3d4e5", true)
+        let reopened = RoutineStore(url: url)
+        XCTAssertEqual(reopened.notes.map(\.id), ["a1b2c3d4", "b2c3d4e5"])
+        XCTAssertEqual(reopened.notes.map(\.isLocked), [false, true])
+        XCTAssertEqual(reopened.routine(named: "iOS version")?.steps.first?.target?.label, "General")
+        // A backup from before imports the same way.
+        let other = RoutineStore(url: nil)
+        _ = try other.importData(Data(Self.fileFromBefore.utf8), by: "import")
+        XCTAssertEqual(other.notes.count, 2)
+        XCTAssertNotNil(other.routine(named: "iOS version"))
+    }
+
+    func testAnAgentsImportDoesNotPassNotesOffAsTheOwnersEditsOrConversations() throws {
+        let source = RoutineStore(url: nil)
+        let heard = source.remember("Coffee is an iced Americano", by: "Poki", heard: NoteOrigin(session: "chat-1", app: "com.apple.mobilesafari"))!
+        let edited = source.remember("Mom is the contact Mama", by: "owner")!
+        source.editNote(edited.id, text: "Mom is the contact Mama (Mom)")
+        let file = try source.exportData()
+
+        // An MCP client's import: its notes are its own, not the owner's edit and not a chat of ours.
+        let fromAgent = RoutineStore(url: nil)
+        try fromAgent.importData(file, by: "Claude Code")
+        let agent = Dictionary(uniqueKeysWithValues: fromAgent.notes.map { ($0.id, $0) })
+        XCTAssertNil(agent[heard.id]?.heard, "a conversation of another phone's is not one to go back to")
+        XCTAssertNil(agent[edited.id]?.edited, "it must not show as the owner's change")
+        XCTAssertNil(agent[edited.id]?.locked)
+        XCTAssertEqual(agent[edited.id]?.by, "Claude Code")
+
+        // The owner restoring their own backup keeps all of it.
+        let restored = RoutineStore(url: nil)
+        try restored.importData(file, by: "restore")
+        XCTAssertNotNil(restored.notes.first { $0.id == edited.id }?.edited)
+        XCTAssertEqual(restored.notes.first { $0.id == heard.id }?.heard?.session, "chat-1")
+    }
+
+    func testAFileThisVersionCannotReadIsSetAsideNotWrittenOver() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("poki-memory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("agent-memory.json")
+        let unreadable = Data(#"{"notes": "not a list", "schema": "poki.agent-backup/1"}"#.utf8)
+        try unreadable.write(to: url)
+
+        let store = RoutineStore(url: url)
+        store.remember("Use the work email", by: "owner")
+        let aside = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix("agent-memory.unreadable-") }
+        XCTAssertEqual(aside.count, 1, "the file it could not read is kept")
+        XCTAssertEqual(try Data(contentsOf: dir.appendingPathComponent(aside[0])), unreadable)
+    }
+
+    func testAnAgentCannotChangeOrForgetWhatTheOwnerLocked() async throws {
+        let store = RoutineStore(url: nil)
+        let (core, _, pages) = core(store)
+        _ = await recordAbout(core)
+        let note = store.remember("Mom is the contact Mama", by: "Poki")!
+        store.setLocked(note.id, true)
+        store.setLocked("iOS version", true)
+        let steps = store.routine(named: "iOS version")!.steps
+
+        let forgetNote = await core.call("routines", ["action": "forget_note", "text": .string(note.id)])
+        XCTAssertTrue(forgetNote.isError && forgetNote.text.contains("locked"), forgetNote.text)
+        XCTAssertFalse(store.forgetNote(note.id, by: "an MCP client"), "the store refuses it too, whoever asks")
+        let forget = await core.call("routines", ["action": "forget", "name": "iOS version"])
+        XCTAssertTrue(forget.isError, forget.text)
+        let edit = await core.call("routines", ["action": "edit", "name": "iOS version", "description": "something else", "rename": "other"])
+        XCTAssertTrue(edit.isError, edit.text)
+        pages.show(0)
+        let saveOver = await recordAbout(core)
+        XCTAssertTrue(saveOver.isError, saveOver.text)
+        // Nor by the side doors: a client that calls itself "owner" importing a file that brings a
+        // locked note of the owner's under the locked note's id, or a rename onto the locked routine's name.
+        func post(_ body: JSON, _ session: String? = nil) async -> RelayResponse {
+            await core.handle(RelayRequest(id: "r", method: "POST", headers: session.map { ["mcp-session-id": $0] } ?? [:], body: body.serialized()))
+        }
+        let hello = await post(["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["protocolVersion": "2025-06-18", "clientInfo": ["name": "owner"]]])
+        let session = try XCTUnwrap(hello.headers["mcp-session-id"])
+        let elsewhere = RoutineStore(url: nil)
+        let planted = try XCTUnwrap(elsewhere.remember("Mom is not a contact", by: RoutineStore.owner, locked: true))
+        let forged = String(decoding: try elsewhere.exportData(), as: UTF8.self).replacingOccurrences(of: planted.id, with: note.id)
+        let imported = try JSON.parse(await post(["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "routines", "arguments": ["action": "import", "data": .string(forged)]]], session).body)
+        XCTAssertEqual(imported["result"]?["isError"], false, "\(imported)")
+        let brought = try XCTUnwrap(store.note("Mom is not a contact"))
+        XCTAssertNotEqual(brought.id, note.id)
+        XCTAssertFalse(brought.isLocked)
+        XCTAssertNotEqual(brought.by, RoutineStore.owner)
+        var copy = try XCTUnwrap(store.routine(named: "iOS version"))
+        copy.name = "Settings check"; copy.locked = nil
+        XCTAssertTrue(store.save(copy))
+        let onto = await core.call("routines", ["action": "edit", "name": "Settings check", "rename": "iOS version"])
+        XCTAssertTrue(onto.isError, onto.text)
+        // Filling the notes past the cap drops the oldest unlocked ones, never the locked one.
+        for i in 0..<60 { store.remember("Fact \(i)", by: "Poki") }
+
+        XCTAssertEqual(store.note(note.id)?.text, "Mom is the contact Mama")
+        XCTAssertEqual(store.routine(named: "iOS version")?.description, "read the iOS version in Settings")
+        XCTAssertEqual(store.routine(named: "iOS version")?.steps, steps)
+        XCTAssertNil(store.routine(named: "other"))
+        XCTAssertNotNil(store.routine(named: "Settings check"))
+    }
+
+    func testUndoingAForgetPutsTheNoteBackAsItWas() async throws {
+        let store = RoutineStore(url: nil)
+        let (core, _, _) = core(store)
+        let said = await core.callTool("routines", arguments: #"{"action":"remember","text":"Lunch is the dumplings place"}"#, conversation: "chat-1")
+        XCTAssertFalse(said.isError, said.text)
+        let note = try XCTUnwrap(store.note("Lunch is the dumplings place"))
+        XCTAssertEqual(note.heard?.session, "chat-1", "the conversation it was heard in")
+
+        XCTAssertTrue(store.forgetNote(note.id, by: RoutineStore.owner))
+        XCTAssertNil(store.note(note.id))
+        let forgot = try XCTUnwrap(store.changes.first)
+        XCTAssertEqual(forgot.action, MemoryChangeRecord.forgot)
+        XCTAssertTrue(store.undo(forgot.id))
+        XCTAssertEqual(store.note(note.id), note, "the same id, date and conversation; not locked, since the owner forgot it")
+        XCTAssertFalse(store.undo(forgot.id), "once")
+
+        // The owner moving it to an app, then changing their mind: it is back as it was, with its
+        // conversation and unlocked, not only its words.
+        store.editNote(note.id, text: note.text, app: .some("com.meituan.itakeaway"))
+        XCTAssertEqual(store.note(note.id)?.isLocked, true)
+        XCTAssertTrue(store.undo(store.changes.first!.id))
+        XCTAssertEqual(store.note(note.id), note)
+
+        // Undoing what an agent did locks the item, so it is not done again.
+        XCTAssertTrue(store.forgetNote(note.id, by: "Poki"))
+        XCTAssertTrue(store.undo(store.changes.first!.id))
+        XCTAssertEqual(store.note(note.id)?.isLocked, true)
+    }
+
+    func testAnExportCarriesNoForgottenText() throws {
+        let store = RoutineStore(url: nil)
+        store.remember("Mom is the contact Mama", by: "owner")
+        let secret = store.remember("The gate code is by the mailbox", by: "Poki")!
+        store.forgetNote(secret.id, by: RoutineStore.owner)
+        XCTAssertNotNil(store.changes.first?.note, "kept on the phone, for undo")
+
+        let exported = String(decoding: try store.exportData(), as: UTF8.self)
+        XCTAssertTrue(exported.contains("Mom is the contact Mama"))
+        XCTAssertFalse(exported.contains("gate code"))
+    }
 }
