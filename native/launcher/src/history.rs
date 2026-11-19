@@ -49,6 +49,13 @@ const DEFAULT_READ_WITHIN: Duration = Duration::from_secs(10);
 
 /// The run in progress. A new run, or `cancel`, moves it on, and the older run ends at its next look.
 static RUN: AtomicU64 = AtomicU64::new(0);
+/// A run that has no tunnel yet tries again every second for its first forty: a run is started
+/// (by the reconnect shortcut) in the few seconds in which a tunnel can be opened, and the proxy
+/// app's own connection may come up only part way through them (phone log, 2026-11-19: "Network is
+/// unreachable" every five seconds, then the loopback answered three seconds after the answer was
+/// given). After that it tries once a round, so a refusing loopback is not hammered.
+const EAGER: Duration = Duration::from_secs(40);
+const EAGER_EVERY: Duration = Duration::from_secs(1);
 /// The run reads nothing while this is set, and keeps its tunnel: on cellular a tunnel that was
 /// closed cannot be opened again, so a wait (an agent's task) must not cost it.
 static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -290,7 +297,8 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             line["tunnel"] = device.is_some().into();
             // One line each round, so the caller can tell a held run from a silent one.
             emit(line);
-            while asked.elapsed() < interval && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
+            let wait = if device.is_none() && since_start() < EAGER { EAGER_EVERY } else { interval };
+            while asked.elapsed() < wait && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
             continue;
@@ -385,9 +393,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             }
         }
         emit(line);
+        let wait = if device.is_none() && since_start() < EAGER { EAGER_EVERY } else { interval };
         // Waits in short pieces, so Stop is answered at once.
-        while asked.elapsed() < interval && RUN.load(Ordering::SeqCst) == me {
-            tokio::time::sleep(interval.saturating_sub(asked.elapsed()).min(Duration::from_millis(250))).await;
+        while asked.elapsed() < wait && RUN.load(Ordering::SeqCst) == me {
+            tokio::time::sleep(wait.saturating_sub(asked.elapsed()).min(Duration::from_millis(250))).await;
         }
     }
     if let Some(mut open) = direct.take() {

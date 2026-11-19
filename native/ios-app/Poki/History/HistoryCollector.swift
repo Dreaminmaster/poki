@@ -114,6 +114,7 @@ final class HistoryCollector {
             if let open = capture.lastTunnelAt, open > asked { return true }
             if !capture.isRunning { evaluate("a reconnect was asked for") }
         }
+        AppLog.shared.add("loopback", "reconnect: no tunnel in \(Int(seconds)) s, last reason: \((capture.lastFailure ?? "none given").prefix(160))")
         return false
     }
 

@@ -64,6 +64,8 @@ final class HistoryCapture: ObservableObject {
     private(set) var lastReadAt: Date?
     /// When the launcher last showed its tunnel open: a read, or a held run's line.
     private(set) var lastTunnelAt: Date?
+    /// The launcher's last reason for a tunnel or a read that failed.
+    private(set) var lastFailure: String?
 
     var isRunning: Bool { status == .waiting || status == .reading }
 
@@ -454,6 +456,7 @@ final class HistoryCapture: ObservableObject {
         guard me == run, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
         // The tunnel is open: a read came through, or a held run says so.
         if line["ok"] as? Bool == true || line["tunnel"] as? Bool == true { lastTunnelAt = Date() }
+        if let error = line["error"] as? String { lastFailure = error }
         if paused {
             // The launcher sends one line a round while it is held: the moment to look again.
             if lockedOrDark || model.hasOpenInProcessSession { return }
