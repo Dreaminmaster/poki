@@ -5,6 +5,10 @@ name: Issue template check
 # so existing issues are never touched. It adds the area: label that matches the
 # "Affected area in Poki" answer. "edited" acts only on issues this check already
 # labeled state:needs-info, to take the label off once they match a form.
+#
+# The labels and the comment come from the Poki Repo Bot GitHub App (secrets POKI_BOT_APP_ID and
+# POKI_BOT_PRIVATE_KEY; it needs Issues write). If its token cannot be made or GitHub rejects it,
+# the workflow's own token is used and they come from github-actions.
 on:
   issues:
     types: [opened, edited]
@@ -25,10 +29,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - id: bot
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.POKI_BOT_APP_ID }}
+          private-key: ${{ secrets.POKI_BOT_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .github
+          sparse-checkout-cone-mode: false
+          sparse-checkout: /.github/
           persist-credentials: false
       - run: node .github/scripts/check-issue-template.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOT_TOKEN: ${{ steps.bot.outputs.token }}

@@ -17,7 +17,7 @@ struct RelayView: View {
     var body: some View {
         Form {
             HeroSection {
-                PageHero(symbol: "point.3.connected.trianglepath.dotted", title: "Relay", subtitle: "Lets AI apps reach your iPhone from anywhere. A small Cloudflare Worker in your own account that passes messages along and stores nothing. The free plan is enough.")
+                PageHero(symbol: "point.3.connected.trianglepath.dotted", title: "Relay", subtitle: "Lets AI apps reach your device from anywhere. A small Cloudflare Worker in your own account that passes messages along and stores nothing. The free plan is enough.")
             }
             if let d = model.relay {
                 Section("Your Relay") {
@@ -37,7 +37,7 @@ struct RelayView: View {
                         QRCode(text: d.phoneLink, size: 130)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Give the address to Poki").font(.headline)
-                            Text("Scan this with the iPhone's Camera. Poki opens and starts using this relay.")
+                            Text("Scan this with the device's Camera. Poki opens and starts using this relay.")
                                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             Button("Copy Link") { copyToPasteboard(d.phoneLink) }
                         }
@@ -60,7 +60,7 @@ struct RelayView: View {
                         if let u = URL(string: w.guideUrl) { Link("Deploy It Yourself…", destination: u) }
                     }
                 } footer: {
-                    Text("Poki Setup deploys the relay from the same release as the Poki on your iPhone, checked against that release's SHA256SUMS.")
+                    Text("Poki Setup deploys the relay from the same release as the Poki on your device, checked against that release's SHA256SUMS.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -80,7 +80,7 @@ struct RelayView: View {
                         ForEach(accounts) { Text($0.name).tag($0.id) }
                     }
                 }
-                if let s = model.steps["relay"], !s.isEmpty { StepsView(steps: s) }
+                if let s = model.steps["relay"], !s.isEmpty { JobProgress(steps: s, running: working, doneTitle: "Relay deployed") }
                 HStack {
                     Link("Create a token…", destination: URL(string: "https://dash.cloudflare.com/profile/api-tokens")!)
                     Spacer()
@@ -162,7 +162,7 @@ struct DiagnosticsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section("iPhone Log") {
+                Section("Device Log") {
                     HStack {
                         TextField("Filter", text: $filter, prompt: Text("Poki"))
                             .frame(maxWidth: 220)
@@ -204,7 +204,7 @@ struct DiagnosticsView: View {
                 .background(Color(nsColor: .textBackgroundColor))
                 .overlay {
                     if (showHelperLog ? model.bridge.helperLog : model.logLines).isEmpty {
-                        Text(showHelperLog ? "The helper has not logged anything yet." : (model.selectedPhone == nil ? "Connect an iPhone to see its log here." : "Press Start to see the iPhone's log here."))
+                        Text(showHelperLog ? "The helper has not logged anything yet." : (model.selectedPhone == nil ? "Connect a device to see its log here." : "Press Start to see the device's log here."))
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }

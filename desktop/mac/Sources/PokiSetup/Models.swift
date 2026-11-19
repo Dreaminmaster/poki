@@ -94,6 +94,8 @@ struct Record: Decodable, Identifiable, Equatable {
     var lastError: String?
     var wifiAddress: String?
     var pairingHandedOff: Bool
+    /// Set when the device has a test build from GitHub Actions.
+    var testBuild: BuildRef? = nil
     var id: String { udid }
 
     var expires: Date { Date(timeIntervalSince1970: TimeInterval(profileExpiresAt)) }
@@ -107,7 +109,7 @@ struct PhoneRow: Decodable, Identifiable {
     var error: String?
     var record: Record?
     var id: String { phone.udid }
-    var title: String { facts?.name ?? "iPhone" }
+    var title: String { facts?.name ?? "Device" }
 }
 
 struct Handoff: Decodable, Equatable {
@@ -225,4 +227,123 @@ struct StepItem: Identifiable, Equatable {
     var fraction: Double?
     var detail: String?
     var notes: [String] = []
+}
+
+/// The SF Symbol for a device: an iPad by its product type ("iPad16,3") or, without one, by name.
+func deviceSymbol(_ productType: String?, name: String? = nil) -> String {
+    if let p = productType { return p.hasPrefix("iPad") ? "ipad" : "iphone.gen3" }
+    return name?.localizedCaseInsensitiveContains("iPad") == true ? "ipad" : "iphone.gen3"
+}
+
+// MARK: Developer (test builds from GitHub Actions)
+
+/// The filters and the automatic sync (`dev_state`, `dev_set_prefs`).
+struct DevPrefs: Decodable, Equatable {
+    var onlyMine = true
+    var branch: String?
+    var withPrOnly = false
+    var autoDownload = false
+    var autoInstall = false
+    var autoInstallUdid: String?
+    var keepOnRenew = true
+    var closeWithoutAsking = false
+
+    var wire: [String: Any] {
+        var d: [String: Any] = ["only_mine": onlyMine, "with_pr_only": withPrOnly, "auto_download": autoDownload, "auto_install": autoInstall, "keep_on_renew": keepOnRenew, "close_without_asking": closeWithoutAsking]
+        if let branch, !branch.isEmpty { d["branch"] = branch }
+        if let autoInstallUdid { d["auto_install_udid"] = autoInstallUdid }
+        return d
+    }
+
+    var syncing: Bool { autoDownload || autoInstall }
+}
+
+/// The GitHub sign-in and the Developer choices.
+struct DevState: Decodable {
+    var signedIn = false
+    var login: String?
+    /// "github", "cli" or "token".
+    var source: String?
+    var cliAvailable = false
+    var canSignIn = false
+    var prefs = DevPrefs()
+    var syncedRun: UInt64?
+    var downloadsBytes: Int64 = 0
+    var repo = "JosssphZhou/poki"
+}
+
+/// GitHub's device sign-in under way (`github_sign_in_start`).
+struct GithubSignIn: Decodable, Equatable {
+    var deviceCode: String
+    var userCode: String
+    var verificationUri: String
+    var interval: Int
+    var expiresIn: Int
+
+    var wire: [String: Any] { ["device_code": deviceCode, "user_code": userCode, "verification_uri": verificationUri, "interval": interval, "expires_in": expiresIn] }
+}
+
+struct PullRef: Decodable, Hashable {
+    var number: Int
+    var title: String
+    var url: String
+    var state: String
+    var draft: Bool
+}
+
+/// One test build, or a run still making one (`test_builds`).
+struct TestBuild: Decodable, Identifiable, Hashable {
+    /// "ready", "building" or "expired".
+    var state: String
+    var runId: UInt64
+    var runNumber: Int
+    var runAttempt: Int
+    var workflow: String
+    var branch: String
+    var sha: String
+    var title: String
+    var actor: String?
+    var event: String
+    var runUrl: String
+    var createdAt: String
+    var pr: PullRef?
+    var artifactId: UInt64?
+    var artifactName: String?
+    var size: Int64
+    var expiresAt: String?
+    var downloaded: Bool
+
+    var id: UInt64 { runId }
+    var shortSha: String { String(sha.prefix(7)) }
+    var isReady: Bool { state == "ready" }
+    var isBuilding: Bool { state == "building" }
+    var created: Date? { ISO8601DateFormatter().date(from: createdAt) }
+    var expires: Date? { expiresAt.flatMap { ISO8601DateFormatter().date(from: $0) } }
+
+    /// What the install keeps in the device's record.
+    var ref: [String: Any]? {
+        guard let artifactId else { return nil }
+        var d: [String: Any] = ["artifact_id": artifactId, "run_id": runId, "run_number": runNumber, "workflow": workflow, "branch": branch, "sha": sha]
+        if let pr { d["pr"] = pr.number }
+        return d
+    }
+}
+
+struct TestBuildListing: Decodable {
+    var builds: [TestBuild]
+    var total: Int
+    var branches: [String]
+    var login: String?
+    var checkedAt: Int
+}
+
+/// The test build a device has, from its record.
+struct BuildRef: Decodable, Equatable {
+    var artifactId: UInt64
+    var runId: UInt64
+    var runNumber: Int
+    var workflow: String
+    var branch: String
+    var sha: String
+    var pr: Int?
 }

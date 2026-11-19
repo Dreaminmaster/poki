@@ -31,8 +31,8 @@ final class Computer: @unchecked Sendable {
     let config: CoreConfig
     let approvals: Approvals
     let emit: @Sendable (CoreEvent) -> Void
-    /// The step the model handed to the owner (`{handoff: {kind, text}}`), until Done is reported once.
-    let handoff = LockedBox<Handoff?>(nil)
+    /// Explicit state machine for steps handed to the owner (`{handoff: {kind, text}}`).
+    let handoff: HandoffTracker
 
     // Kept between calls; one tool call runs at a time (the gate in PokiCore), so no lock is needed.
     /// The numbers of the latest read. An element that is still there in the next read keeps its
@@ -148,6 +148,7 @@ final class Computer: @unchecked Sendable {
         self.config = config
         self.humanize = Humanize(enabled: config.humanize ?? Humanize.envEnabled)
         self.approvals = approvals
+        self.handoff = HandoffTracker(emit: emit)
         self.memory = config.memory ?? RoutineStore.shared
     }
 
@@ -317,15 +318,26 @@ final class Computer: @unchecked Sendable {
         // Numbers: an element still there keeps its number (same text and frame first, then same text).
         let prior = treeRead ? listed : []
         var exact: [String: [Int]] = [:], loose: [String: [Int]] = [:]
+        var inPlace: [String: [(ref: Int, text: String)]] = [:]
+        func place(_ e: Element) -> String { "\(e.type)@\(e.frame.described)" }
         for (r, e) in prior where !e.fromPicture {
             exact["\(e.key)@\(e.frame.described)", default: []].append(r)
+            inPlace[place(e), default: []].append((r, e.text))
             loose[e.key, default: []].append(r)
         }
+        let sinceRead = lastTreeAt.map { now() - $0 } ?? 0
         var used = Set<Int>()
         var assigned = [Int?](repeating: nil, count: shown.count)
         var moved = Set<Int>()
         for (i, e) in shown.enumerated() where !e.fromPicture {
             if let r = exact["\(e.key)@\(e.frame.described)"]?.first(where: { !used.contains($0) }) { assigned[i] = r; used.insert(r) }
+        }
+        // Only a countdown in its text ran on, in the same place: the same control, listed as changed
+        // so the model reads the new text.
+        for (i, e) in shown.enumerated() where !e.fromPicture && assigned[i] == nil {
+            if let r = inPlace[place(e)]?.first(where: { !used.contains($0.ref) && Countdown.sameControl(before: $0.text, after: e.text, elapsed: sinceRead) })?.ref {
+                assigned[i] = r; used.insert(r); moved.insert(r)
+            }
         }
         for (i, e) in shown.enumerated() where !e.fromPicture && assigned[i] == nil {
             if let r = loose[e.key]?.first(where: { !used.contains($0) }) { assigned[i] = r; used.insert(r); moved.insert(r) }
@@ -479,32 +491,17 @@ final class Computer: @unchecked Sendable {
 
     /// The `handoff:` line: a step handed to the owner that is waiting, or just done (reported once).
     func handoffLine(clear: Bool) -> String? {
-        guard let h = handoff.value else { return nil }
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
-        if let done = h.done {
-            if clear { handoff.value = nil }
-            return "handoff: done at \(f.string(from: done)) (\(h.kind), \(Int(done.timeIntervalSince(h.requested))) s after \"\(h.text.prefix(80))\"); inputs are sent again, go on with the task"
-        }
-        return "handoff: waiting (\(h.kind)) since \(f.string(from: h.requested)) (\(Int(Date().timeIntervalSince(h.requested))) s): \"\(h.text.prefix(80))\"; no input is sent until the owner taps Done on the phone or you send {handoff: false}; keep polling with look, or {wait_until: {handoff_done: true, ms: 10000}}"
+        handoff.apply(.readLine(consumeCompleted: clear, now: Date())).line
     }
 
-    var handoffWaiting: Bool { handoff.value.map { $0.done == nil } ?? false }
+    var handoffWaiting: Bool { handoff.isWaiting }
 
     func handoffDone(id: String) {
-        let ended = handoff.update { r -> Bool in
-            guard var current = r, current.id == id, current.done == nil else { return false }
-            current.done = Date(); r = current; return true
-        }
-        if ended { emit(.handoffEnded(id: id, how: "done")) }
+        handoff.apply(.ownerCompleted(id: id, now: Date()))
     }
 
-    private func endWorkspaceHandoff() {
-        guard hasLocalWorkspace else { return }
-        let ended = handoff.update { current in
-            defer { current = nil }
-            return current?.done == nil ? current?.id : nil
-        }
-        if let ended { emit(.handoffEnded(id: ended, how: "taskEnded")) }
+    private func endHandoff() {
+        handoff.apply(.endTask)
     }
 
     func look(full: Bool, pane: String? = nil, session: String? = nil, local: Bool = false, expectedApps: Set<String>? = nil) async -> ToolResult {
@@ -720,15 +717,34 @@ final class Computer: @unchecked Sendable {
         clearPaneRead()
     }
 
-    private func approvalFingerprint(_ actions: [JSON]) -> String {
+    private func referencedTargets(in action: JSON) -> [ApprovalScope.Target] {
+        Self.refs(in: action).sorted().map { n in
+            guard let element = refs[n] else { return .init(ref: n, type: "missing", label: "", identifier: "") }
+            return .init(ref: n, type: element.type, label: element.label ?? "", identifier: element.identifier ?? "")
+        }
+    }
+
+    /// What an approval for these actions covers: the pane, the app in front, the actions and the
+    /// controls they name in the latest read. After actions that change the screen, the controls are
+    /// not read yet.
+    private func approvalScope(_ actions: [JSON], afterPrefix prefix: [JSON] = []) -> ApprovalScope {
         let steps = JSON.array(actions).serialized()
-        return selectedPane.map { "\($0.identity)\n\(steps)" } ?? steps
+        let prefixChangesScreen = prefix.contains { ActionKind($0)?.changesScreen($0) == true }
+        let app = prefixChangesScreen ? "after_change" : "\(lastForeground?.bundleID ?? "")|\(lastForeground?.name ?? "")"
+        let key = "\(app)\n\(steps)"
+        return ApprovalScope(actions: selectedPane.map { "\($0.identity)\n\(key)" } ?? key,
+                             targets: prefixChangesScreen ? [] : actions.flatMap(referencedTargets),
+                             readAt: lastTreeAt ?? now())
     }
 
     /// Drop references on an owner stop without a runner request or a visible app switch.
     func forgetTask() {
-        approvals.discardWorkspaceDecisions(session: workspaceOwner.value)
-        endWorkspaceHandoff()
+        if let ws = workspaceOwner.value {
+            approvals.discardWorkspaceDecisions(session: ws)
+        } else {
+            approvals.discardAll()
+        }
+        endHandoff()
         if selectedPane == nil { workspaceOwner.value = nil }
         origin = nil
         workspaceReads.removeAll()
@@ -813,7 +829,9 @@ final class Computer: @unchecked Sendable {
         return min(max(0, until - now()), actions.reduce(0) { $0 + actionCap($1) } + longestPause + config.readTimeout)
     }
 
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil) async -> ToolResult {
+    /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
+    /// by a step handed to the owner, and it leaves the agent's unused approval in place.
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
         var actions = actions
         var bound: String?
         if config.appNames() {
@@ -837,7 +855,7 @@ final class Computer: @unchecked Sendable {
             }
             if let kept = sessionApp, kept.session == session { bound = kept.bundle }
         }
-        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy))
+        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice))
         if finish { sessionApp = nil }
         else if let bound, let kept = sessionApp, let front = lastForeground?.bundleID, front != bound, !config.isPoki(lastForeground) {
             result.text += "\nthe session's app \(kept.name) (\(bound)) is not in front; \(lastForeground?.describe ?? front) is. app: \"\(kept.name)\" brings it back; app: false lets go of it"
@@ -868,7 +886,7 @@ final class Computer: @unchecked Sendable {
         return action
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
         var started = now()
@@ -908,7 +926,7 @@ final class Computer: @unchecked Sendable {
             return ToolResult(text: "not_sent: \(Self.repeatedDrop)",
                               jpeg: nil, isError: true)
         }
-        if !harmless, handoffWaiting, let h = handoff.value {
+        if !harmless, !byOwnersVoice, let h = handoff.active {
             var result = await withPicture("not_sent: a step is handed to the owner (\(h.kind): \"\(h.text.prefix(80))\"), so no input is sent until they tap Done on the phone or you send {handoff: false}. Keep polling with look, or {wait_until: {handoff_done: true, ms: 10000}}.", timeout: until - now() - 0.5, isErrorWithoutPicture: false)
             result.waitingForOwner = true
             return result
@@ -933,7 +951,7 @@ final class Computer: @unchecked Sendable {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
                 if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy)
+                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice)
                     result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
                     return result
                 }
@@ -969,14 +987,16 @@ final class Computer: @unchecked Sendable {
         let steps = sensitiveSteps(actions)
         let sensitive = firstSensitive(actions)
         let workspaceSession = workspaceOwner.value
-        // Any other actions withdraw a pending request: nothing the automation does can approve it.
-        if let pending = approvals.pending, pending.fingerprint != sensitive.map({ approvalFingerprint(Array(actions[$0.at...])) }) {
-            approvals.withdraw(id: pending.id)
-        }
+        let matchingScope = sensitive.map { approvalScope(Array(actions[$0.at...]), afterPrefix: Array(actions[..<$0.at])) }
+        // Any other actions withdraw an unconsumed request or grant so stale approvals never carry over.
+        // The owner's voice leaves the agent's unused grant in place.
+        approvals.withdrawMismatching(scope: matchingScope, workspaceSession: workspaceSession, keepingGrant: byOwnersVoice)
+        // The gated actions on their own, on the screen the model saw, before anything is sent.
+        let gatedAlone = sensitive.map { approvalScope(Array(actions[$0.at...])) }
         if let (at, reason) = sensitive {
             let tail = Array(actions[at...])
-            let fingerprint = approvalFingerprint(tail)
-            if approvals.consumeGrant(fingerprint: fingerprint, workspaceSession: workspaceSession) != nil {
+            let scope = matchingScope!
+            if approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession) != nil {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
@@ -985,8 +1005,8 @@ final class Computer: @unchecked Sendable {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
                 }
-                let approval = approvals.pending.flatMap { $0.fingerprint == fingerprint && $0.workspaceSession == workspaceSession ? $0 : nil }
-                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, fingerprint: fingerprint, workspaceSession: workspaceSession,
+                let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
+                    ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
                                            stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
@@ -1011,9 +1031,9 @@ final class Computer: @unchecked Sendable {
                 case .approved? where answerBy.map({ now() + timeToFinish(tail, until: until) + Self.relayMargin > $0 }) == true:
                     // Too late for the relay: the actions would run after it answered its caller with a 504, and
                     // the model would send them again. The approval stays; the same actions sent again run at once.
-                    return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner approved on the phone, but too late for this call to send the actions and read the screen before the relay gives up on it.\(sentFirst) The approval is kept: \(again) and they run at once (within \(Int(approvals.lifetime / 60)) minutes).")
+                    return await refusedAwaitingResend(approval, tail: tail, before: gatedAlone!, at: at, until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner approved on the phone, but too late for this call to send the actions and read the screen before the relay gives up on it.\(sentFirst) The approval is kept: \(again) and they run at once (within \(Int(approvals.lifetime / 60)) minutes).")
                 case .approved?:
-                    guard approvals.consumeGrant(fingerprint: fingerprint, workspaceSession: workspaceSession) != nil else {
+                    guard approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession) != nil else {
                         return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The approval went to another call with the same actions, so nothing was sent from this one.\(sentFirst) To run them, \(again) and ask again.")
                     }
                     approvedNote = "approval: approved on the phone after \(Int(waited.rounded())) s (\(reason))"
@@ -1023,7 +1043,7 @@ final class Computer: @unchecked Sendable {
                 case .expired?:
                     return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): the approval request ended unanswered (\(reason)).\(sentFirst)")
                 case nil:
-                    return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner was asked on the phone.\(sentFirst) When they approve, \(again) (within \(Int(approvals.lifetime / 60)) minutes); other actions withdraw the request.")
+                    return await refusedAwaitingResend(approval, tail: tail, before: gatedAlone!, at: at, until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner was asked on the phone.\(sentFirst) When they approve, \(again) (within \(Int(approvals.lifetime / 60)) minutes); other actions withdraw the request.")
                 }
             }
         }
@@ -1192,8 +1212,8 @@ final class Computer: @unchecked Sendable {
     /// Ends the task: the app it began in comes to the front again (the home screen by the Home
     /// button), and nothing is sent when it is in front already. nil when no task was open.
     func returnToOrigin() async -> String? {
+        endHandoff()
         if let selectedPane {
-            endWorkspaceHandoff()
             let exit = await selectPane("auto", session: selectedPane.session, until: now() + 3)
             origin = nil
             if exit != nil {
@@ -1213,6 +1233,7 @@ final class Computer: @unchecked Sendable {
             forgetTask()
             return "finish: the phone stays in its current layout"
         }
+        approvals.discardAll()
         guard let task = origin else { return nil }
         origin = nil
         guard let bundle = task.app.bundleID else { return nil }
@@ -1492,6 +1513,24 @@ final class Computer: @unchecked Sendable {
         } catch {
             return (nil, "the text was typed again once and that failed too: \(error)", "\(state), typed again once and that failed too")
         }
+    }
+
+    /// The approval stays open for the actions the model sends again. After actions before them ran,
+    /// it is matched to those actions on their own against the read this answer makes, so the request
+    /// is not withdrawn by the very call it asks for. When that read shows other controls at their
+    /// numbers than `before` (the same actions on the screen the owner was asked about), or another
+    /// app, the approval is withdrawn instead.
+    private func refusedAwaitingResend(_ approval: Approval, tail: [JSON], before: ApprovalScope, at: Int, until: Double, full: Bool, did: [String], text: String) async -> ToolResult {
+        var result = await refused(until: until, full: full, did: did, text: text)
+        guard at > 0 else { return result }
+        let after = approvalScope(tail)
+        if before.covers(after) {
+            approvals.rekey(id: approval.id, scope: after)
+        } else {
+            approvals.withdraw(id: approval.id)
+            result.text += "\napproval: withdrawn (id \(approval.id)); on this screen the numbers from action \(at + 1) name other controls than the owner was asked about. Choose from the elements above; a sensitive action asks again."
+        }
+        return result
     }
 
     /// The answer when the sensitive part was not sent: text only when nothing went, else the read

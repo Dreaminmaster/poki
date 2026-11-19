@@ -94,8 +94,9 @@ struct DenyActionIntent: LiveActivityIntent {
     }
 }
 
-/// Stop runner on the Live Activity: stops the runner (and with it iOS's automation banner) until an
-/// agent's next request. No authentication: stopping is always safe.
+/// Stop on the Live Activity: stops the talk, the task and the runner (and with it iOS's automation
+/// banner) until an agent's next request, and ends the Live Activity. No authentication: stopping is
+/// always safe.
 struct StopRunnerIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Stop runner"
     static let openAppWhenRun = false

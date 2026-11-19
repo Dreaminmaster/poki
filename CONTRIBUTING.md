@@ -198,9 +198,9 @@ git push -u fork <branch>
 
 and open a pull request from that branch into `main` of `JosssphZhou/poki` on the website.
 
-Before you open it, run `npm test` and fill in the [pull request template](.github/PULL_REQUEST_TEMPLATE.md): what changes, how you tested it, and the two checkboxes. The `PR checks` workflow must pass.
+Before you open it, run `npm test` and fill in the [pull request template](.github/PULL_REQUEST_TEMPLATE.md): what changes and how you tested it. The `PR checks` workflow must pass.
 
-By submitting a contribution, you release it under the [AGPL-3.0-only license](LICENSE).
+By submitting a contribution, you release it under the [AGPL-3.0-only license](LICENSE). You confirm this once: on your first pull request, Poki Repo Bot asks you to agree to the [Poki Contributor Agreement](CONTRIBUTOR_AGREEMENT.md) by commenting `I agree to the Poki Contributor Agreement` from your own account. That covers your later pull requests too, and the `Contributor agreement` status on the pull request turns green.
 
 Use third-party code only if its license is compatible with AGPL-3.0-only. Keep the original copyright notice and list the code in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 

@@ -165,6 +165,7 @@ final class HistoryCapture: ObservableObject {
         if !enabled { enabled = true }
         watchLock()
         if let refused = refusal(model) { set(refused); return }
+        HistoryLock.shared.readStarting()
         run += 1
         let me = run
         once = minutes == nil

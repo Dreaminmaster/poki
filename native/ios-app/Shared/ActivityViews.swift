@@ -77,7 +77,9 @@ enum ActivityMetrics {
     static func sizes(_ face: ActivityFace) -> Sizes {
         switch face.size {
         case .low:
-            Sizes(island: 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
+            // A line over the title (Done over what a run came to, an event's word) takes a run's
+            // height on the island: in 106 the system's clip cut the third line (ESP-954).
+            Sizes(island: face.hasKicker ? 124 : 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
         case .working:
             // Before the run is in an app it has no line yet (the runner waking): the lower island.
             Sizes(island: (face.bottom.hasLine ? 118 : 106) + 18, islandBear: 96, islandLeft: 104,
@@ -110,6 +112,9 @@ extension ActivityFace.Bottom {
 }
 
 extension ActivityFace {
+    /// A small line over the title: the app, a step of the setup, Done, or an event's word.
+    var hasKicker: Bool { kicker != nil || event != nil }
+
     /// Where the outside agent's badge goes (ESP-344 定稿规格, section 14): after the app's name while
     /// Poki works; after the reason while it waits for an answer on the island (on the card the reason
     /// may take two lines, so there it stays left of the countdown); beside the small value otherwise.
@@ -161,7 +166,7 @@ struct LockScreenCard: View {
     private func words(_ palette: ActivityPalette) -> some View {
         let top: CGFloat = switch face.size { case .low: 30; case .working, .asking: 22; case .tall: 20 }
         let bottom: CGFloat = switch face.size { case .low: 0; case .working: 12; case .asking, .tall: 16 }
-        let hasKicker = face.kicker != nil || face.event != nil
+        let hasKicker = face.hasKicker
         // The screenshot stands in the top right corner, over the words' column and outside its
         // flow: the words keep clear of it, and it never pushes the control off the card.
         let shot = Thumbnail.picture
@@ -309,7 +314,7 @@ struct IslandBottom: View {
     }
 
     @ViewBuilder private func words(_ palette: ActivityPalette) -> some View {
-        let hasKicker = face.kicker != nil || face.event != nil
+        let hasKicker = face.hasKicker
         if case .progress(let line, let stop) = face.bottom {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -337,7 +342,9 @@ struct IslandBottom: View {
                 if hasKicker { Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1) }
                 Title(face: face, palette: palette).padding(.top, hasKicker ? 2 : top)
                 HStack(spacing: 6) {
-                    Subtitle(face: face, palette: palette)
+                    // Over a button the island has room for one line under an event's word: two put the
+                    // button under the system's clip (ESP-954). The word goes after a few seconds.
+                    Subtitle(face: face, palette: palette, most: hasKicker && face.size == .tall ? 1 : nil)
                     if face.badgePlace(.island) == .afterReason, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
                 }
                 .padding(.top, face.size == .tall ? 2 : 3)
@@ -616,10 +623,12 @@ private struct Subtitle: View {
     var palette: ActivityPalette
     /// More lines than the state asks for, where the column is narrow.
     var lines: Int?
+    /// Fewer, where the surface is short.
+    var most: Int?
     private let theme = ActivityTheme.current
     var body: some View {
         if let subtitle = face.subtitle {
-            let lines = max(lines ?? 1, face.subtitleLines)
+            let lines = min(max(lines ?? 1, face.subtitleLines), most ?? .max)
             Text(subtitle)
                 .font(theme.subtitle)
                 .foregroundStyle(palette.reason)

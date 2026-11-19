@@ -31,6 +31,10 @@ pub enum Error {
     /// and try again.
     #[error("{0}")]
     CertificateLimit(String),
+    /// Poki is open on the device (in front or in the background) and the update would replace it
+    /// under it. The person decides whether Poki Setup closes it ([`crate::setup::Options::close_poki`]).
+    #[error("{0}")]
+    PokiRunning(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("network: {0}")]
@@ -66,6 +70,7 @@ impl Error {
             Error::NeedsCode(_) => "needs_code",
             Error::Sign(_) => "sign",
             Error::CertificateLimit(_) => "certificate_limit",
+            Error::PokiRunning(_) => "poki_running",
             Error::Io(_) => "io",
             Error::Http(_) => "http",
             Error::Plist(_) => "plist",
