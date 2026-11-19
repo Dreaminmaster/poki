@@ -66,6 +66,7 @@ final class HistoryCollector {
                 Task { @MainActor in self?.evaluate("a regular look") }
             }
         }
+        model.background.onWake = { [weak self] in self?.evaluate("iOS woke Poki") }
         // The shared shortcut's way in, whether or not Screen History is on.
         HistoryReconnect.shared.listen(true, model: model)
         evaluate("Poki came to the front")
@@ -120,11 +121,10 @@ final class HistoryCollector {
         let capture = HistoryCapture.shared
         // Held for as long as the switch is on, a hand-stopped run included: the owner's Stop ends
         // reading, and the next time Poki is opened reading goes on without another start.
-        if !capture.enabled {
-            hold(model, false)
-        } else if UIApplication.shared.applicationState == .active {
-            hold(model, true)
-        }
+        // Taken in the background too: iOS may have started Poki there (a change of place, the
+        // shortcut's action), and the silent audio mixes with other sound, so it may start there.
+        hold(model, capture.enabled)
+        model.background.ensure(reason)
         guard !capture.isRunning else { idle = ""; return }
         let why: String? =
             !capture.enabled ? "Screen History is off"

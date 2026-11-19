@@ -39,6 +39,9 @@ struct PokiApp: App {
         // The three-dimensional bear loads while the app starts, to be there when Poki's picture first shows.
         BearModel.shared.load()
         let model = AppModel()
+        // Started by iOS in the background (a change of place, a shortcut) with Screen History on:
+        // reading starts without waiting for Poki to be opened.
+        if HistoryCapture.isEnabled { Task { @MainActor in HistoryCollector.shared.attach(model) } }
         _model = State(initialValue: model)
         let chat = ChatModel(app: model)
         _chat = State(initialValue: chat)

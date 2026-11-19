@@ -98,10 +98,38 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         apply()
     }
 
+    /// Looked at every few seconds while Poki runs, and whenever iOS wakes it: a silent engine that
+    /// stopped without a word is started again, and location stands in at once if it will not start.
+    /// Without this, a keeper that died stayed dead until Poki was opened.
+    func ensure(_ why: String) {
+        guard isOn, !audioPaused, !audio.isOn else { return }
+        // While it cannot play (a call has the audio), one try a minute is enough.
+        guard !audioLost || Date().timeIntervalSince(lastEnsure) > 60 else { return }
+        lastEnsure = Date()
+        AppLog.shared.add("background", "silent audio was not playing (\(why)): starting it again")
+        audio.stop()
+        startAudio()
+        if !audio.isOn { setAudioLost(true); startLocation() }
+    }
+
+    /// Wakes Poki when the iPhone moves to another cell tower, also after iOS suspended it or ended
+    /// it: a wake is a chance to start the silent audio again. Only under Always Allow, which
+    /// shows no indicator for it, and it asks for nothing. Kept on while a holder wants Poki up.
+    private var lastEnsure = Date.distantPast
+    private var wakesOnMoves = false
+    private func watchMoves(_ on: Bool) {
+        let on = on && always && CLLocationManager.significantLocationChangeMonitoringAvailable()
+        guard on != wakesOnMoves else { return }
+        wakesOnMoves = on
+        if on { manager.startMonitoringSignificantLocationChanges() } else { manager.stopMonitoringSignificantLocationChanges() }
+        AppLog.shared.add("background", on ? "wakes on a change of place: on" : "wakes on a change of place: off")
+    }
+
     /// Brings the keeper to what its holders need now.
     private func apply() {
         guard sessionHold || historyHold else { finish(); return }
         isOn = true
+        watchMoves(true)
         watchInterruptions()
         if !audioPaused, !audio.isOn { startAudio() }
         if !audioLost, !pairingHold { stopLocation() }
@@ -166,6 +194,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     private func finish() {
         guard isOn else { return }
         isOn = false
+        watchMoves(false)
         audioLost = false
         if let interruption { NotificationCenter.default.removeObserver(interruption) }
         interruption = nil
@@ -227,9 +256,19 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
             // Always Allow taken away while location was running: it stops, so no indicator shows.
             if !self.always { self.stopLocation() }
             if self.pairingHold || (self.isOn && self.audioLost) { self.startLocation() }
+            self.watchMoves(self.isOn)
         }
     }
 
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {}
+    /// The place is never read. A delivery is only a moment in which Poki runs.
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        Task { @MainActor in
+            self.ensure("woken by a change of place")
+            self.onWake?()
+        }
+    }
+
+    /// Called when iOS woke Poki, so what should be reading can look again.
+    var onWake: (@MainActor () -> Void)?
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
 }

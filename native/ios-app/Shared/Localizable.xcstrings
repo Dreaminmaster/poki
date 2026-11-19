@@ -177,18 +177,18 @@
         }
       }
     },
-    "On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on and turn Confirm Before Run off. Then open the shortcut and choose your VPN in both Connect to VPN actions." : {
+    "On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。这个快捷指令会在 Wi-Fi 断开时运行，短暂关闭蜂窝数据，让 Poki 连接，然后重新打开。添加时，请打开它的自动化，并关闭“运行前确认”。然后打开这个快捷指令，在两个“连接 VPN”操作中都选择你的 VPN。"
+            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。这个快捷指令会在 Wi-Fi 断开时运行，短暂关闭蜂窝数据，让 Poki 连接，然后重新打开。添加时，请打开它的自动化，关闭“运行前确认”，并选择你的 VPN App。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。這個捷徑會在 Wi-Fi 中斷時執行，短暫關閉行動數據，讓 Poki 連線，然後重新打開。加入時，請打開它的自動化，並關閉「執行前確認」。然後打開這個捷徑，在兩個「連接 VPN」動作中都選擇你的 VPN。"
+            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。這個捷徑會在 Wi-Fi 中斷時執行，短暫關閉行動數據，讓 Poki 連線，然後重新打開。加入時，請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
           }
         }
       }
