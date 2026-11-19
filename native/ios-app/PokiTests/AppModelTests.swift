@@ -785,6 +785,11 @@ final class InProcessPasscodeTests: XCTestCase {
             XCTAssertTrue(field.becomeFirstResponder())
             await drawEntry(window)
         case .dictation:
+            // Repeating the entry first ends the dictation started by the previous activation.
+            if let stop = Self.entryElement(in: window, matching: { $0 == "Stop Dictation" }) {
+                XCTAssertTrue(stop.accessibilityActivate())
+                await drawEntry(window)
+            }
             let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.dictate" }))
             XCTAssertTrue(button.accessibilityActivate(), "activate the actual dictation button")
             await drawEntry(window)
@@ -833,7 +838,7 @@ final class InProcessPasscodeTests: XCTestCase {
             guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
             let selector = NSSelectorFromString("accessibilityIdentifier")
             let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
-            if let identifier, matches(identifier) {
+            if identifier.map(matches) == true || item.accessibilityLabel.map(matches) == true {
                 let frame = item.accessibilityFrame
                 let visible = (root as? UIView).map { $0.convert($0.bounds, to: nil) } ?? .zero
                 let button = item.accessibilityTraits.contains(.button)
