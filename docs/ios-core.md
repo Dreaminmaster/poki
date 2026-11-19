@@ -370,19 +370,26 @@ on the phone; the next first `look` of a task in that app names the saved routin
   screen that holds still; the path's `dismiss: ["Not Now", "Later"]` names controls that are closed
   when they are in the way of a step (each such tap is still held by the approval rules);
   `read: ["label"]` answers values from the last screen. A run or path that ended on a check that
-  passed skips the pause before the final read.
+  passed skips the pause before the final read. A step that would send input while Poki is in front
+  stops the path, as a `do` sending it there is refused; a step not read for itself asks the runner
+  which app is in front first. A swipe in a path takes no `in: n`.
 - **Apps by name, and the session's app** (`CoreConfig.appNames`, on by default; a switch in the
   app's Testing Options). `{launch: "Clock"}` takes the name the iPhone shows as well as a bundle id,
-  resolved by `CoreConfig.resolveApp` (the app backs it with its list of known apps); a name nothing
-  resolves is refused before anything is sent. `do {app: "Clock", actions: […]}` names the app once
-  for the session: it is brought to the front first when it is not there already, and later calls in
+  resolved by `CoreConfig.resolveApp` (the app backs it with the apps it knows, by the edition the
+  phone has, and with the phone's own app list). A name nothing resolves, anywhere in the call or in a
+  path's steps, is refused before the first action is sent; a dotted name shaped like a web address
+  ("Booking.com") is a name, not a bundle id. `do {app: "Clock", actions: […]}` names the app once
+  for the session: it is brought to the front first when it is not there already (the latest read
+  says so, checked with the runner when that read is over 10 s old), and later calls in
   the same session need not name it. The handle outlives every change of screen; an answer says so
   when another app is in front, and nothing is switched on its own. `app: false`, `finish` or a new
-  task lets go of it, which closes nothing.
+  task lets go of it, which closes nothing. With Apps by Name off, a `do` that names an app is
+  refused with nothing sent rather than sent to whatever app is in front.
 - **Reading when the screen settles** (`CoreConfig.quickRead`, on by default; a switch in Testing
   Options). After a launch, a button, a swipe or a pinch (pauses of 0.6 s and up) the read comes as
-  soon as the tree has changed from what it was before the action and two reads in a row agree,
-  bounded by the old fixed pause; the answer says "read after N ms". A tap keeps its fixed 0.45 s,
+  soon as the tree has changed from what it was before the action, lists something, and two reads in
+  a row agree, bounded by the old fixed pause (each read gets only the time left, so a slow tree
+  never makes the pause longer); the answer says "read after N ms". A tap keeps its fixed 0.45 s,
   since two tree reads cost about as much.
 - **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
   is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).

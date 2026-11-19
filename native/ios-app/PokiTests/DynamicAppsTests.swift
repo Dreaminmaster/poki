@@ -56,6 +56,17 @@ final class DynamicAppsTests: XCTestCase {
         XCTAssertTrue(store.icon("Strava Run") === red)
     }
 
+    /// The id an agent's {launch: "name"} opens: the edition of a known app this iPhone has, else the
+    /// known app's own id, else an installed app by its name.
+    func testALaunchByNameOpensTheEditionThisPhoneHas() {
+        XCTAssertEqual(KnownApps.launchID("Bilibili"), "tv.danmaku.bilianime", "no app list yet: the known app's own id")
+        DynamicApps.set([.init(id: "com.bilibili.inter", name: "bilibili", user: true), strava])
+        XCTAssertEqual(KnownApps.launchID("哔哩哔哩"), "com.bilibili.inter", "the international edition is the one installed")
+        XCTAssertEqual(KnownApps.launchID("Strava"), "com.strava.stravaride")
+        XCTAssertEqual(KnownApps.launchID("com.strava.stravaride"), "com.strava.stravaride")
+        XCTAssertNil(KnownApps.launchID("Nonesuch"))
+    }
+
     func testANameWithDotsIsAnAppBeforeItIsAnID() {
         XCTAssertNil(AppIconStore.bundleID("A.B.C"), "initials with dots are not a bundle id")
         XCTAssertNil(AppIconStore.bundleID("U.S.A"))

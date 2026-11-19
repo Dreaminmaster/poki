@@ -109,6 +109,47 @@ final class AppNamesTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, taps)
     }
 
+    func testAnUnknownNameLaterInTheBatchSendsNothingBeforeIt() async {
+        for actions: [JSON] in [
+            [["tap": 1], ["launch": "Nonesuch"]],
+            [["tap": 1], ["path": ["steps": [["tap": "General"], ["launch": ["name": "Nonesuch"]]]]]],
+        ] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("no app named \"Nonesuch\" is known") && result.text.contains("nothing was sent"), result.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "\(actions): the tap before the unknown name was not sent")
+            XCTAssertEqual(launched(wda), [])
+        }
+    }
+
+    func testANameWithADotIsANameUnlessItIsShapedLikeABundleID() async {
+        for id in ["com.apple.mobiletimer", "tv.twitch", "com.example.new-app", "net.whatsapp.WhatsApp"] {
+            XCTAssertTrue(Computer.looksLikeBundleID(id), id)
+        }
+        for name in ["Booking.com", "Twitch.tv", "Mail.ru", "A.B.C", "Clock", "Hotels .com", "com..x", "时钟.app"] {
+            XCTAssertFalse(Computer.looksLikeBundleID(name), name)
+        }
+        let (core, wda) = core()
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["launch": "Booking.com"]]])
+        XCTAssertTrue(result.text.contains("no app named \"Booking.com\" is known"), result.text)
+        XCTAssertEqual(launched(wda), [], "a name the host does not know is not sent to the runner as a bundle id")
+    }
+
+    func testWithNamesOffTheSessionsAppIsRefusedNotIgnored() async {
+        let (core, wda) = core(names: false)
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["tap": 1]], "app": "Clock"])
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("Apps by Name"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "the tap would have gone to Settings")
+        // Letting go of an app is still taken.
+        let letGo = await core.call("do", ["actions": [["wait": 10]], "app": false])
+        XCTAssertFalse(letGo.isError, letGo.text)
+    }
+
     func testAScreenThatChangedAndHoldsStillIsReadBeforeThePauseIsOver() async {
         let (core, wda) = core()
         _ = await core.call("look", [:])
