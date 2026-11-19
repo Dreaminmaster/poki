@@ -67,19 +67,76 @@ struct Target {
     address: IpAddr,
     pairing_file: PathBuf,
     host_name: Option<String>,
+    /// The downloaded developer disk image. After a restart the phone has unmounted it, and the
+    /// accessibility audit service goes with it: a tunnel that finds it missing mounts it again,
+    /// so History does not wait for the owner to open Poki.
+    ddi_dir: Option<String>,
 }
+
+/// Apple's signing server and a ~20 MB upload over the phone's own loopback.
+const DDI_MOUNT_WITHIN: Duration = Duration::from_secs(120);
 
 impl Target {
     fn from(request: &Value) -> Result<Self, Failure> {
         let address = request["device_address"].as_str().unwrap_or("10.7.0.1");
         let address = address.parse().map_err(|_| Failure::new(format!("{address} is not an address")).code("config"))?;
         let pairing_file = request["pairing_file"].as_str().ok_or_else(|| Failure::new("this iPhone is not paired yet").fix(crate::device::PAIRING_FIX).code("pairing"))?;
-        Ok(Self { address, pairing_file: pairing_file.into(), host_name: request["host_name"].as_str().map(String::from) })
+        Ok(Self {
+            address,
+            pairing_file: pairing_file.into(),
+            host_name: request["host_name"].as_str().map(String::from),
+            ddi_dir: request["ddi_dir"].as_str().filter(|d| !d.is_empty()).map(String::from),
+        })
+    }
+
+    /// Mounts the image on a tunnel of its own, on a thread of its own: the mount's futures are
+    /// not all provably Send, and history requests run on the multi-threaded runtime.
+    async fn mount_on_own_thread(&self, dir: &str) -> Result<(), Failure> {
+        let (address, pairing_file, host_name, dir) = (self.address, self.pairing_file.clone(), self.host_name.clone(), dir.to_string());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::Builder::new()
+            .name("poki-history-ddi".into())
+            .stack_size(8 << 20)
+            .spawn(move || {
+                let answer = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    Ok(runtime) => runtime.block_on(async move {
+                        let mut pairing = Pairing::read(&pairing_file, host_name.as_deref())?;
+                        let mut device = Device::open(address, &mut pairing, OPEN_WITHIN).await?;
+                        match tokio::time::timeout(DDI_MOUNT_WITHIN, crate::ddi::mount(&mut device, &dir)).await {
+                            Ok(result) => result,
+                            Err(_) => Err(Failure::new(format!("mounting the developer disk image took over {} s", DDI_MOUNT_WITHIN.as_secs())).fix(crate::device::DDI_TIMEOUT_FIX).code("ddi_timeout")),
+                        }
+                    }),
+                    Err(e) => Err(Failure::new(format!("could not start the disk image mount: {e}"))),
+                };
+                let _ = tx.send(answer);
+            })
+            .map_err(|e| Failure::new(format!("could not start the disk image mount: {e}")))?;
+        rx.await.map_err(|_| Failure::new("the disk image mount ended without an answer"))?
     }
 
     async fn open(&self) -> Result<Device, Failure> {
         let mut pairing = Pairing::read(&self.pairing_file, self.host_name.as_deref())?;
-        let device = Device::open(self.address, &mut pairing, OPEN_WITHIN).await?;
+        let mut device = Device::open(self.address, &mut pairing, OPEN_WITHIN).await?;
+        if !crate::ddi::mounted(&device) {
+            if let Some(dir) = self.ddi_dir.as_deref().filter(|d| crate::ddi::files_present(d)) {
+                // A failure here may only mean the supervisor mounted it meanwhile: the new tunnel tells.
+                drop(device);
+                let failed = self.mount_on_own_thread(dir).await.err();
+                // The services list was fixed when the tunnel opened; a new one shows the image.
+                let mut tries = 0;
+                loop {
+                    device = Device::open(self.address, &mut pairing, OPEN_WITHIN).await?;
+                    if crate::ddi::mounted(&device) { break; }
+                    if tries >= 3 {
+                        return Err(failed.unwrap_or_else(|| Failure::new("the developer disk image was installed but its services did not appear").fix("Restart the phone, then open Poki again.")));
+                    }
+                    tries += 1;
+                    drop(device);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
         if !device.rsd.services.contains_key(ax::SERVICE) {
             return Err(Failure::new("this iPhone does not list the accessibility audit service")
                 .fix("The service comes with the developer disk image. Open Setup and wait until the image is ready, then try again.")
