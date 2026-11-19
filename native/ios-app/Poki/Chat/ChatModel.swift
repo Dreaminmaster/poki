@@ -292,6 +292,19 @@ final class ChatModel {
         greet()
     }
 
+    /// The conversation `id` left the list, archived or deleted, maybe while its task still runs and a
+    /// reply is on the way. When it is this chat's, the task stops, nothing more is written into the
+    /// conversation (not the Stopped line, not a reply that comes in late), and a new one starts.
+    func conversationLeft(_ id: String) {
+        guard id == sessionID else { return }
+        leavingRemoved = true
+        defer { leavingRemoved = false }
+        newConversation()
+    }
+
+    /// Set while `conversationLeft` ends a removed conversation, so its last lines do not save it back.
+    private var leavingRemoved = false
+
     private func applyRestoredSession(_ session: SavedSession) {
         userChoseConversation = true
         loop = nil
@@ -312,7 +325,7 @@ final class ChatModel {
 
     /// The conversation as the Sessions list keeps it. Greeting-only conversations are not saved.
     private func persist() {
-        guard !isSample, hasUserMessages else { return }
+        guard !isSample, !leavingRemoved, hasUserMessages else { return }
         store.save(chat: self)
     }
 

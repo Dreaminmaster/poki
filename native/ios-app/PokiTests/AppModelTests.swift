@@ -869,6 +869,47 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(String(decoding: modelInput, as: UTF8.self).contains("81 percent"), "the real page observation reached the model")
     }
 
+    /// #468 review: the owner sends a message, then deletes that conversation before the model's first
+    /// reply comes in, staying on the chat. The late reply must not bring it back, and the chat moves on
+    /// to a new conversation. (Archiving waits: a conversation whose task runs is not archived.)
+    func testAConversationDeletedBeforeItsFirstReplyStaysDeleted() async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Four.")], holdAfter: 0)
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        await prepareWithoutPhoneTask()
+        model.becameActive()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("DeletedWhileWaiting-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let suite = "DeletedWhileWaiting-\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        let store = SessionStore(folder: folder, defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        let chat = ChatModel(app: model, store: store)
+
+        chat.send("What is two plus two?")
+        let id = chat.sessionID
+        await waitFor("the message reached the model") { !server.requests.isEmpty }
+        XCTAssertTrue(chat.running)
+        XCTAssertNotNil(store.session(id), "the owner's message saved the conversation")
+        store.archive(id)
+        XCTAssertNil(store.session(id)?.archived, "a conversation whose task runs is not archived")
+
+        store.delete(id)
+        XCTAssertEqual(store.removed?.id, id)
+        chat.conversationLeft(id)
+        XCTAssertFalse(chat.running, "the deleted conversation's task stops")
+        XCTAssertNotEqual(chat.sessionID, id, "the chat moves on to a new conversation")
+
+        server.release()
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertNil(store.session(id), "the late reply does not bring the deleted conversation back")
+        XCTAssertFalse(chat.entries.contains { $0.kind == .poki("Four.") }, "the new conversation does not show the late reply")
+    }
+
     private func chatWithoutAutomation(on server: FakeCompletions, request: String) async throws -> ChatModel {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }

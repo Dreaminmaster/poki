@@ -312,6 +312,10 @@ struct RootView: View {
             }
         }
         .onAppear(perform: openLaunchScreen)
+        // A conversation archived or deleted (in the list or in Settings) is not left open on screen.
+        .onChange(of: SessionStore.shared.removed) { _, removed in
+            if let removed { leave(removed.id) }
+        }
         .task {
             #if DEBUG
             // Development builds: `-pokiVoiceLink "poki://voice?…"` at launch starts a silent test run.
@@ -383,6 +387,16 @@ struct RootView: View {
         guard request == .talk, !chat.running, !model.voice.isOn else { return }
         // Without a live voice (no OpenAI key, no voice bridge) Talk opens the message field instead.
         if model.voice.canTalkLive { openLiveVoice() } else { MessageFieldAsk.shared.ask() }
+    }
+
+    /// The conversation `id` left the list. When it is the one in the chat, the chat stops its task and
+    /// starts a new conversation (`ChatModel.conversationLeft`); when an outside agent's session with that
+    /// id is open over the chat (iPhone) or beside the list (iPad), the chat comes back. The drawer stays
+    /// as it is: the owner is in it.
+    private func leave(_ id: String) {
+        chat.conversationLeft(id)
+        if wide == .session(id) { wide = .chat }
+        if home == NavigationPath([HomeRoute.session(id)]) { home = NavigationPath() }
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.
