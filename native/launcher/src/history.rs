@@ -194,6 +194,8 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let include_text = request["include_text"].as_bool().unwrap_or(false);
     let include_tree = request["include_tree"].as_bool().unwrap_or(false);
     let mut ended = "finished";
+    // Reads in a row whose hit tests failed outright.
+    let mut unanswered = 0u32;
     loop {
         if RUN.load(Ordering::SeqCst) != me {
             ended = "stopped";
@@ -230,6 +232,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         let took = milliseconds(asked.elapsed());
         match result {
             Ok(tree) => {
+                unanswered = 0;
                 let summary = summarize(&tree, true);
                 let text = hash_of(&summary["text"]);
                 let changed = last_text != Some(text);
@@ -260,7 +263,19 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             Err(failure) => {
                 // A screen that shows no app (locked or off) is an answer, and the connection stays.
                 // Any other failure ends the tunnel; the next read opens a new one.
-                if !failure.detail.contains("no point of the screen") {
+                if failure.detail.contains(ax::direct::HITS_FAILED) {
+                    // Hit tests that failed (no answer, or a broken socket) may be a dead
+                    // subscription or a dead tunnel, and both would otherwise be kept for good.
+                    // After three in a row the subscription goes; the tunnel stays, and goes only
+                    // when the new subscribe fails on it (on cellular it could not be opened again).
+                    unanswered += 1;
+                    if unanswered >= 3 {
+                        unanswered = 0;
+                        if let Some(mut old) = direct.take() {
+                            let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
+                        }
+                    }
+                } else if !failure.detail.contains("no point of the screen") {
                     if let Some(mut old) = direct.take() {
                         let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
                     }

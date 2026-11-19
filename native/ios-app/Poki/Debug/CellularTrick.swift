@@ -32,6 +32,7 @@ final class CellularTrick {
         lines = []; record = []; lastRead = nil; verdict = ""
         // Screen History's own run would share the launcher: it stands aside until Poki is opened again.
         HistoryCollector.shared.ownerStop()
+        note("Leave Poki after Start: open Settings or another app, and come back to read the log.", ["step": "hint"])
         note("start: \(Self.seconds) s. Switch Wi-Fi off, then Airplane Mode (or Cellular Data) on and off, and watch.", ["step": "begin"])
         let screen = UIScreen.main.bounds
         let points = [0.5, 0.3, 0.7, 0.15].map { [Double(screen.midX), Double(screen.height) * $0] }
@@ -70,7 +71,7 @@ final class CellularTrick {
                 let monitor = model.loopback
                 let network = monitor.wifiUp ? (monitor.cellularUp ? "Wi-Fi and cellular" : "Wi-Fi") : monitor.cellularUp ? "cellular only" : "no network"
                 let read = self.lastRead.flatMap { Date().timeIntervalSince($0.at) < Double(Self.every * 2 + 12) ? $0 : nil }
-                let held = read.map { $0.ok ? "reads" : "FAILS (\($0.error.prefix(60)))" } ?? "no read yet"
+                let held = read.map { $0.ok ? "reads" : "FAILS (\($0.error.replacingOccurrences(of: "no tree at hit test: no point of the screen answered the hit test ", with: "hit test ").prefix(220)))" } ?? "no read yet"
                 let accepted = fresh.outcome == "connected"
                 if !monitor.cellularUp, read?.ok == true { openedWithoutCellular = true }
                 if monitor.cellularUp, !monitor.wifiUp, read?.ok == true, !accepted { heldOnCellular += 1 }

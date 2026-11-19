@@ -6,6 +6,9 @@
 //! A hit test sends no touch, and nothing here is an accessibility action.
 use super::*;
 
+/// In the error of a front read whose hit tests failed, as opposed to answered with no process.
+pub const HITS_FAILED: &str = "hit tests failed";
+
 /// What each step of a direct read did, for the test log.
 #[derive(Default, serde::Serialize)]
 pub struct Trace {
@@ -290,7 +293,18 @@ impl Direct {
                 Err(error) => trace.hits.push(json!({"x": x, "y": y, "error": error.to_string(), "ms": ms})),
             }
         }
-        let pid = trace.pid.ok_or("no point of the screen answered the hit test")?;
+        let pid = match trace.pid {
+            Some(pid) => pid,
+            None => {
+                // A hit that failed is not a hit that found nothing: a dead connection must not
+                // read as a locked screen. The first failure travels with the error.
+                let failed: Vec<&str> = trace.hits.iter().filter_map(|hit| hit["error"].as_str()).collect();
+                return Err(match failed.first() {
+                    Some(first) => format!("no point of the screen answered the hit test ({HITS_FAILED}: {} of {}, first: {first})", failed.len(), trace.hits.len()).into(),
+                    None => "no point of the screen answered the hit test (every point answered with no process)".into(),
+                });
+            }
+        };
         let mut tree = self.tree_of(pid, trace).await?;
         let bundle = bundle_of(&tree);
         if let Some(bundle) = &bundle {
