@@ -338,6 +338,9 @@ struct RootView: View {
             if showsSidebar { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
             openDetails([DetailsRoute.connection])
+        } else if url.host() == "reconnect" {
+            // A shortcut's last resort when Poki was not running: it opens Poki, which reconnects.
+            Task { _ = await HistoryCollector.shared.reconnect(model, by: "a link") }
         } else if url.host() == "log" {
             openDetails([DetailsRoute.history])
         } else if url.host() == "approvals" {

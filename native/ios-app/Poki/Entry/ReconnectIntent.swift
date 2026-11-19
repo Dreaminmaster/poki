@@ -18,8 +18,7 @@ struct ReconnectPokiIntent: AppIntent {
             AppLog.shared.add("loopback", "reconnect from a shortcut: Poki was not ready")
             return .result(value: false)
         }
-        let connected = await HistoryCollector.shared.reconnect(app)
-        AppLog.shared.add("loopback", "reconnect from a shortcut: \(connected ? "connected" : "not connected")")
+        let connected = await HistoryCollector.shared.reconnect(app, by: "the Reconnect Poki action")
         return .result(value: connected)
     }
 }

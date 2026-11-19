@@ -80,7 +80,13 @@ final class HistoryCollector {
     /// worked (`ReconnectPokiIntent`, and the cellular test in Testing Options). With Screen History
     /// on, the run in progress is ended and a new one started, and the answer is its first read. With
     /// it off, the answer is whether the local connection answers a new connection.
-    func reconnect(_ model: AppModel, within seconds: TimeInterval = 25) async -> Bool {
+    func reconnect(_ model: AppModel, by source: String, within seconds: TimeInterval = 25) async -> Bool {
+        let worked = await reopen(model, within: seconds)
+        HistoryReconnect.shared.note(worked: worked, by: source)
+        return worked
+    }
+
+    private func reopen(_ model: AppModel, within seconds: TimeInterval) async -> Bool {
         if self.model == nil { self.model = model }
         let asked = Date()
         let capture = HistoryCapture.shared
@@ -112,6 +118,8 @@ final class HistoryCollector {
         let capture = HistoryCapture.shared
         // Held for as long as the switch is on, a hand-stopped run included: the owner's Stop ends
         // reading, and the next time Poki is opened reading goes on without another start.
+        // The shared shortcut's way in: only while there is something to keep open.
+        HistoryReconnect.shared.listen(capture.enabled, model: model)
         if !capture.enabled {
             hold(model, false)
         } else if UIApplication.shared.applicationState == .active {

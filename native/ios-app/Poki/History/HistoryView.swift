@@ -131,6 +131,14 @@ struct HistoryPage: View {
 
 struct ScreenHistorySettingsView: View {
     @ObservedObject private var capture = HistoryCapture.shared
+    @ObservedObject private var reconnect = HistoryReconnect.shared
+    @Environment(\.openURL) private var openURL
+
+    private var lastRun: String {
+        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
+        if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
+        return at.formatted(.relative(presentation: .named))
+    }
     @ObservedObject private var lock = HistoryLock.shared
     @State private var size: (entries: Int, bytes: Int64) = (0, 0)
     @State private var clearing = false
@@ -182,6 +190,28 @@ struct ScreenHistorySettingsView: View {
                 .accessibilityIdentifier("screenHistory.excludedApps")
             }
 
+            if capture.enabled {
+                Section {
+                    Button {
+                        openURL(HistoryReconnect.shortcut)
+                    } label: {
+                        SettingsRow(title: "Get the Shortcut", symbol: "square.2.layers.3d", accessory: .leaves)
+                    }
+                    .accessibilityIdentifier("screenHistory.shortcut")
+                    NavigationLink {
+                        HistoryShortcutGuide().settingsPage()
+                    } label: {
+                        SettingsRow(title: "Set Up by Hand", symbol: "list.number")
+                    }
+                    SettingsRow(title: "Last Run", symbol: "arrow.triangle.2.circlepath", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
+                        .accessibilityIdentifier("screenHistory.shortcutLastRun")
+                } header: {
+                    SettingsHeader("On Cellular")
+                } footer: {
+                    Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. In Shortcuts, turn its automation on and set it to Run Immediately.")
+                }
+            }
+
             Section {
                 Button("Clear History", role: .destructive) {
                     clearing = true
@@ -206,6 +236,36 @@ struct ScreenHistorySettingsView: View {
             Button("Everything", role: .destructive) { Task { await capture.clearEverything() } }
             Button("Cancel", role: .cancel) {}
         }
+    }
+}
+
+/// The Wi-Fi automation built by hand, for an iPhone where the shared shortcut arrives without it
+/// or without Poki's action.
+struct HistoryShortcutGuide: View {
+    private let steps: [LocalizedStringKey] = [
+        "Open Shortcuts and go to Automation.",
+        "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately.",
+        "Add Set Cellular Data and set it to Off.",
+        "If your VPN or proxy app is not always on, add its action that turns it on.",
+        "Add Reconnect Poki from the actions of Poki.",
+        "Add Set Cellular Data and set it to On.",
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(verbatim: "\(index + 1)").font(.body.monospacedDigit().weight(.semibold)).foregroundStyle(.secondary)
+                        Text(step)
+                    }
+                }
+            } footer: {
+                Text("On iOS 18 and iOS 26 the shared shortcut can arrive without its automation. These steps make the same one.")
+            }
+        }
+        .navigationTitle(AppLocalization.text("Set Up by Hand"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

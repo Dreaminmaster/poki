@@ -134,7 +134,7 @@ struct CellularTrickSection: View {
             ForEach(Array(test.lines.suffix(12).enumerated()), id: \.offset) { _, line in
                 Text(line).font(.caption.monospaced()).textSelection(.enabled)
             }
-            Button("Run Reconnect Now") { Task { _ = await HistoryCollector.shared.reconnect(model) } }
+            Button("Run Reconnect Now") { Task { _ = await HistoryCollector.shared.reconnect(model, by: "Testing Options") } }
                 .disabled(test.running)
         } header: {
             Text("Cellular Connection Test")

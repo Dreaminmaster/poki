@@ -1,6 +1,198 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Get the Shortcut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "获取快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取得捷徑"
+          }
+        }
+      }
+    },
+    "Set Up by Hand" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手動設定"
+          }
+        }
+      }
+    },
+    "Did Not Connect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能連線"
+          }
+        }
+      }
+    },
+    "On Cellular" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用蜂窝网络时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用行動網路時"
+          }
+        }
+      }
+    },
+    "On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. In Shortcuts, turn its automation on and set it to Run Immediately." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。这个快捷指令会在 Wi-Fi 断开时运行，短暂关闭蜂窝数据，让 Poki 连接，然后重新打开。请在“快捷指令”中打开它的自动化，并设为“立即运行”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。這個捷徑會在 Wi-Fi 中斷時執行，短暫關閉行動數據，讓 Poki 連線，然後重新打開。請在「捷徑」中打開它的自動化，並設為「立即執行」。"
+          }
+        }
+      }
+    },
+    "Open Shortcuts and go to Automation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“快捷指令”，进入“自动化”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開「捷徑」，進入「自動化」。"
+          }
+        }
+      }
+    },
+    "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为 Wi-Fi 添加自动化，选择“断开网络连接”，并选择“立即运行”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為 Wi-Fi 加入自動化，選擇「中斷網路連線」，並選擇「立即執行」。"
+          }
+        }
+      }
+    },
+    "Add Set Cellular Data and set it to Off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加“设定蜂窝数据”，并设为“关闭”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入「設定行動數據」，並設為「關閉」。"
+          }
+        }
+      }
+    },
+    "If your VPN or proxy app is not always on, add its action that turns it on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果你的 VPN 或代理 App 不是始终开启，请添加用来开启它的操作。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果你的 VPN 或代理 App 不是一直開啟，請加入用來開啟它的動作。"
+          }
+        }
+      }
+    },
+    "Add Reconnect Poki from the actions of Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从 Poki 的操作中添加“重新连接 Poki”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從 Poki 的動作中加入「重新連接 Poki」。"
+          }
+        }
+      }
+    },
+    "Add Set Cellular Data and set it to On." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加“设定蜂窝数据”，并设为“打开”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入「設定行動數據」，並設為「打開」。"
+          }
+        }
+      }
+    },
+    "On iOS 18 and iOS 26 the shared shortcut can arrive without its automation. These steps make the same one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 iOS 18 和 iOS 26 上，共享的快捷指令可能不带自动化。按这些步骤可以做出同样的自动化。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 iOS 18 和 iOS 26 上，分享的捷徑可能不含自動化。按這些步驟可以做出同樣的自動化。"
+          }
+        }
+      }
+    },
     "Show Ready" : {
       "localizations" : {
         "zh-Hans" : {
