@@ -104,11 +104,23 @@ struct HistoryPage: View {
                 }
             }
         }
-        .task(id: capture.changes) { await load() }
+        .onChange(of: lock.unlocked) { _, unlocked in
+            if !unlocked {
+                layout = BacktapeLayout()
+                loaded = false
+            }
+        }
+        .task(id: LoadKey(changes: capture.changes, unlocked: lock.unlocked)) { await load() }
+    }
+
+    private struct LoadKey: Equatable {
+        let changes: Int
+        let unlocked: Bool
     }
 
     private func load() async {
-        let entries = await HistoryStore.shared.recent()
+        guard let entries = await lock.readIfUnlocked({ await HistoryStore.shared.recent() }) else { return }
+        guard lock.unlocked, !Task.isCancelled else { return }
         layout = BacktapeLayout.build(entries)
         loaded = true
     }

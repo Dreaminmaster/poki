@@ -171,9 +171,20 @@ final class HistoryLock: ObservableObject {
         blockedUntil = nil
     }
 
+    /// A view may read stored history only under its original unlock decision.
+    /// Unlike agent queries, the owner may inspect existing history with capture off.
+    func readIfUnlocked<Value>(_ read: () async -> Value) async -> Value? {
+        guard unlocked, !Task.isCancelled else { return nil }
+        let revision = HistoryCapture.accessRevision
+        let result = await read()
+        guard unlocked, !Task.isCancelled, HistoryCapture.accessRevision == revision else { return nil }
+        return result
+    }
+
     func lock() {
         HistoryCapture.setAgentHistoryUnlocked(false)
         unlocked = false
+        BacktapeNotes.shared.discardOnLock()
     }
 }
 

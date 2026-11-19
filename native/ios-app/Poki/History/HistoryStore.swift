@@ -249,9 +249,10 @@ final class HistoryStore: @unchecked Sendable {
 
     /// Deletion and the generation check share the queue, including when a model ignores cancellation.
     @discardableResult
-    func keep(_ note: BacktapeNote, start: Date, generation: UUID) async -> Bool {
+    func keep(_ note: BacktapeNote, start: Date, generation: UUID, accessRevision: UInt64? = nil) async -> Bool {
         await fetch {
             guard generation == self.generation else { return false }
+            if let accessRevision, HistoryCapture.accessRevision != accessRevision { return false }
             return self.run("INSERT OR REPLACE INTO notes (start, title, body) VALUES (?, ?, ?)", [.real(start.timeIntervalSince1970), .text(note.title), .text(note.body)])
         }
     }

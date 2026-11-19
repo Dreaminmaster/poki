@@ -542,6 +542,44 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(saved, "A summary of pruned text must not be persisted under its old generation")
     }
 
+    func testLockedViewDoesNotStartReadAndRelockDiscardsInFlightSnapshot() async throws {
+        let lock = HistoryLock.shared
+        lock.lock()
+        let store = HistoryStore.shared
+        let canary = "SYNTHETIC_LOCKED_VIEW_TEXT"
+        store.add(at: Date(), app: "com.apple.mobilenotes", title: "Fixture", text: canary)
+        var invoked = false
+        let locked = await lock.readIfUnlocked {
+            invoked = true
+            return await store.recent()
+        }
+        XCTAssertNil(locked)
+        XCTAssertFalse(invoked, "A locked page must not fetch private text")
+        try unlockHistoryForFixture()
+        let valid = await lock.readIfUnlocked { await store.recent() }
+        XCTAssertTrue(valid?.contains { $0.text.contains(canary) } == true)
+        let stale = await lock.readIfUnlocked {
+            let snapshot = await store.recent()
+            XCTAssertTrue(snapshot.contains { $0.text.contains(canary) })
+            lock.lock()
+            XCTAssertTrue(lock.unlock(pin: fixturePIN))
+            return snapshot
+        }
+        XCTAssertNil(stale, "A new unlock cannot revive an older page or clipboard read")
+    }
+
+    func testSummaryWriteRejectsRevokedUnlockRevision() async throws {
+        try unlockHistoryForFixture()
+        let store = HistoryStore.shared
+        let generation = await store.summaryGeneration()
+        let revision = HistoryCapture.accessRevision
+        HistoryLock.shared.lock()
+        XCTAssertTrue(HistoryLock.shared.unlock(pin: fixturePIN))
+        let saved = await store.keep(BacktapeNote(title: "Fixture", body: "SYNTHETIC_LOCKED_SUMMARY"),
+                                    start: Date(), generation: generation, accessRevision: revision)
+        XCTAssertFalse(saved)
+    }
+
     private enum PendingPrivacyChange {
         case turnOff, turnOffThenOn, changeAppScope, clear, lockThenUnlock, deviceLock, changePIN, changeBiometrics, shortenRetention, reduceStorage
     }

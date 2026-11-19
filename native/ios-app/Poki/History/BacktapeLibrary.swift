@@ -371,12 +371,15 @@ final class BacktapeNotes {
     private init() {}
 
     func appeared(_ tile: BacktapeTile) {
+        guard HistoryLock.shared.unlocked else { return }
         wanted[tile.id] = tile
         guard notes[tile.id] == nil else { return }
         let me = generation
+        let revision = HistoryCapture.accessRevision
         Task {
+            guard current(me, revision) else { return }
             let kept = await HistoryStore.shared.note(start: tile.zoom.key(tile.start))
-            guard generation == me else { return }
+            guard current(me, revision) else { return }
             if let kept { notes[tile.id] = kept }
             work()
         }
@@ -400,6 +403,17 @@ final class BacktapeNotes {
         failed = []
     }
 
+    func discardOnLock() {
+        reset()
+        wanted.removeAll()
+        focus = nil
+    }
+
+    private func current(_ me: UUID, _ revision: UInt64) -> Bool {
+        !Task.isCancelled && generation == me && HistoryLock.shared.unlocked &&
+            HistoryCapture.accessRevision == revision
+    }
+
     private func next() -> BacktapeTile? {
         let centre = focus ?? Date()
         return wanted.values
@@ -410,26 +424,28 @@ final class BacktapeNotes {
     private func work() {
         guard worker == nil, BacktapeWriter.available, HistoryLock.shared.unlocked else { return }
         let me = generation
+        let revision = HistoryCapture.accessRevision
         worker = Task {
             defer { if generation == me { worker = nil } }
+            guard current(me, revision) else { return }
             let store = HistoryStore.shared
             let sourceGeneration = await store.summaryGeneration()
-            while !Task.isCancelled, generation == me, HistoryLock.shared.unlocked, let tile = next() {
+            while current(me, revision), let tile = next() {
                 let key = tile.zoom.key(tile.start)
                 let kept = await store.note(start: key)
-                guard !Task.isCancelled, generation == me else { return }
+                guard current(me, revision) else { return }
                 if let kept {
                     notes[tile.id] = kept
                     continue
                 }
                 // A tile may still hold text from before deletion. Reread every span from the store.
                 let entries = await store.entries(from: tile.start, to: tile.end)
-                guard !Task.isCancelled, generation == me else { return }
+                guard current(me, revision) else { return }
                 let written = await BacktapeWriter.write(entries, period: tile.zoom.period)
-                guard !Task.isCancelled, generation == me else { return }
+                guard current(me, revision) else { return }
                 if let written {
-                    let saved = await store.keep(written, start: key, generation: sourceGeneration)
-                    guard !Task.isCancelled, generation == me, saved else { return }
+                    let saved = await store.keep(written, start: key, generation: sourceGeneration, accessRevision: revision)
+                    guard current(me, revision), saved else { return }
                     notes[tile.id] = written
                 } else {
                     failed.insert(tile.id)
@@ -846,7 +862,9 @@ struct BacktapeLibrary: View {
     // MARK: Copy and forget
 
     private func copy(_ tile: BacktapeTile) async {
-        let entries = await HistoryStore.shared.entries(from: tile.start, to: tile.end)
+        guard let entries = await lock.readIfUnlocked({
+            await HistoryStore.shared.entries(from: tile.start, to: tile.end)
+        }), lock.unlocked, !Task.isCancelled else { return }
         let style = Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale)
         UIPasteboard.general.string = entries.map { entry in
             "[\(entry.at.formatted(style))] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text)"
