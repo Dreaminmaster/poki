@@ -830,6 +830,9 @@ extension Computer {
                 }
             case .scrollTo:
                 if o["scroll_to"]?["ref"] != nil || o["scroll_to"]?["in"] != nil { throw refuse("step \(i + 1): scroll_to takes the text to reach") }
+            case .swipe:
+                // in: n names a list of the latest read; a path's swipe goes in the biggest list on its own screen.
+                if o["in"] != nil || o["swipe"]?["in"] != nil { throw refuse("step \(i + 1): a swipe in a path takes a direction and a distance, not in: a number from an earlier read") }
             case .drag, .pinch:
                 if Computer.refs(in: step).isEmpty == false { throw refuse("step \(i + 1) uses a number from an earlier read") }
             default: break

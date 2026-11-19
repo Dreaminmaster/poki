@@ -58,3 +58,15 @@ enum DynamicApps {
         lock.withLock { entries.filter { $0.user && byName[$0.name.lowercased()]?.caseInsensitiveCompare($0.id) == .orderedSame } }
     }
 }
+
+extension KnownApps {
+    /// The bundle id to launch for an app's name or id (PokiCore's `resolveApp`, from any thread): an
+    /// app Poki knows by the edition this iPhone has (Bilibili's international one, say), else its
+    /// main id; past those, an installed app by its Home Screen name. nil when neither knows it.
+    static func launchID(_ name: String) -> String? {
+        if let known = find(name) { return known.ids.first { DynamicApps.name(forID: $0) != nil } ?? known.id }
+        let given = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if DynamicApps.name(forID: given) != nil { return given }
+        return DynamicApps.id(forName: given)
+    }
+}

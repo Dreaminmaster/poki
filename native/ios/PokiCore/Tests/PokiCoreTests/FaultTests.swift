@@ -1597,6 +1597,24 @@ final class GymTests: XCTestCase {
         XCTAssertFalse(result.isError)
     }
 
+    /// The same with the quick read on: Photos comes to the front only after the launch's whole pause,
+    /// so the reads made while the screen settles still see Safari, and the read after the pause is
+    /// made again until Photos is in front.
+    func testWithTheQuickReadOnTheReadIsStillMadeAgainUntilTheLaunchedAppIsInFront() async {
+        let (core, wda, _) = makeCore { $0.quickRead = { true } }
+        _ = await core.call("look", [:])
+        let launchedAt = LockedBox<Date?>(nil)
+        wda.set("POST /wda/apps/activate") { _ in launchedAt.value = Date(); return (200, ["value": .null]) }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            guard let at = launchedAt.value, Date().timeIntervalSince(at) > 1.4 else { return (200, ["value": ["bundleId": "com.apple.mobilesafari", "name": "Safari"]]) }
+            return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+        }
+        let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]]])
+        XCTAssertTrue(result.text.hasPrefix("app: Photos"), result.text)
+        XCTAssertTrue(result.text.contains("com.apple.mobileslideshow was not in front yet"), result.text)
+        XCTAssertFalse(result.isError)
+    }
+
     /// A wait_until asked for 8000 ms and got 6000 (the action cap); the call then took 30 s with
     /// nothing in the answer to account for it. The wait gets the time it asks for, and a long call
     /// says where its time went.
