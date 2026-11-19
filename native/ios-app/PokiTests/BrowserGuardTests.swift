@@ -108,7 +108,13 @@ final class BrowserGuardTests: XCTestCase {
         XCTAssertTrue(phone.answer.contains("sandbox browser"), phone.answer)
         let prompt = FakeCompletions.system(try XCTUnwrap(server.requests.first))
         XCTAssertFalse(prompt.contains("Start the task with a do in your first reply"))
-        XCTAssertTrue(prompt.contains("For a website task, start with web_open"))
+        XCTAssertTrue(prompt.contains("Use web_open and web tools alone for public websites"), "the website route reaches the model")
+        XCTAssertTrue(prompt.contains("Website verification codes also go to the owner through web_handoff"), "a website's sign-in code stays with the owner")
+        // Who Poki is comes first, then the phone's tool rules, then the browser's.
+        XCTAssertTrue(prompt.hasPrefix("You are Poki, the user's personal assistant"), String(prompt.prefix(80)))
+        let phoneRules = try XCTUnwrap(prompt.range(of: "look reads the iPhone's screen")).lowerBound
+        let browserRules = try XCTUnwrap(prompt.range(of: "Poki has its own browser for websites")).lowerBound
+        XCTAssertLessThan(phoneRules, browserRules)
     }
 
     /// Poki's browser is for public websites: this iPhone and its local network are not opened, in

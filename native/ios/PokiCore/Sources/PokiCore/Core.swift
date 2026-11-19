@@ -566,9 +566,11 @@ public final class PokiCore: @unchecked Sendable {
     /// Calls `look`, `do` or `status` from inside the app, the same way an MCP client's `tools/call`
     /// does: one call at a time, the same approval rules, the same events. `arguments` is the JSON
     /// object the model sent.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil) async -> ToolAnswer {
+    /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
+    /// where it was heard.
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner)
     }
@@ -616,7 +618,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -628,7 +630,7 @@ public final class PokiCore: @unchecked Sendable {
             // Memory only: no phone input, so it does not wait for a look or do in progress.
             let received = now()
             computer.lastCallTook = nil
-            let result = routinesCall(args, session: session)
+            let result = routinesCall(args, session: session, conversation: conversation)
             computer.lastCallTook = now() - received
             return result
         }

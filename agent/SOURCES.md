@@ -36,4 +36,4 @@ The BlueBubbles adapter uses the documented [REST API](https://docs.bluebubbles.
 
 Python Telegram Bot, media handling, Markdown rendering, group topics, plugin authorization callbacks and Hermes's general gateway are not runtime dependencies of Poki Agent. The task interface remains `MessageRunner` and `PhoneTask`.
 
-The execution prompts in `prompts/system.md` and `prompts/pi-app.md` are now written for Poki's local acknowledgement, step deadline and tool behavior. The former human-handoff prompt and its separate license have been removed. The iPhone unlock skill and native helper originate in this repository at `5134e1a`; the Agent host adds stdin-only credential transport and screenshot verification.
+The execution prompt in `prompts/pi-app.md` is written for Poki's step deadline and tool behavior. The former human-handoff prompt and its separate license have been removed. The iPhone unlock skill and native helper originate in this repository at `5134e1a`; the Agent host adds stdin-only credential transport and screenshot verification.

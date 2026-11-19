@@ -78,8 +78,6 @@ final class PiLoop {
         // agent/pi-session.mjs: low thinking, one tool call at a time.
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low, tools: agentTools, messages: messages),
-            sessionId: sessionID,
-            identity: provider == .custom ? Self.clientIdentity() : nil,
             streamFn: endpoint.map { client -> StreamFn in
                 { model, context, options in
                     var options = options
@@ -87,6 +85,8 @@ final class PiLoop {
                     return try streamSimple(model: model, context: context, options: options)
                 }
             },
+            sessionId: sessionID,
+            identity: provider == .custom ? Self.clientIdentity() : nil,
             getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
             toolExecution: .sequential
         ))
