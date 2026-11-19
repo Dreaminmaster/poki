@@ -21,13 +21,13 @@ struct ModelSettingsView: View {
     @State private var enteringVoiceKey = false
     @State private var showingLiveVoice = false
     @State private var openedForVoice = false
-    @State private var decision = QuickFixes.picked
+    @State private var decision = QuickFixes.name
 
     var body: some View {
         List {
             // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
             Section {
-                InUseCard(decision: decision.choice == .none ? AppLocalization.text("Off") : decision.name, add: { adding = true })
+                InUseCard(decision: decision ?? AppLocalization.text("Off"), add: { adding = true })
             } header: {
                 Text("In Use").textCase(nil)
             } footer: {
@@ -50,18 +50,6 @@ struct ModelSettingsView: View {
 
             // The models on this iPhone, listed like the accounts.
             LocalModelsSection(version: version)
-
-            // Services made for decisions alone, which are no model account.
-            Section {
-                NavigationLink { QuickFixesView() } label: {
-                    LabeledContent {
-                        Text(verbatim: decision.choice == .provider ? decision.name : AppLocalization.text("Off"))
-                    } label: { SettingsLabel("Decision Model Providers", systemImage: "cloud") }
-                }
-                .accessibilityIdentifier("models.fastDecisions")
-            } footer: {
-                Text("The decision model is a small, fast model that helps a routine go on when a prompt is in the way or a button was renamed. Pick it under an account or a local model above, where it reads Decisions. Services made for decisions alone, such as Cloudflare Workers AI and TypeSafe, are added here.")
-            }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
@@ -72,9 +60,9 @@ struct ModelSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in
             version = ModelKeys.saved
-            decision = QuickFixes.picked
+            decision = QuickFixes.name
         }
-        .onAppear { decision = QuickFixes.picked }
+        .onAppear { decision = QuickFixes.name }
         .sheet(isPresented: $adding) { AddAccount() }
         .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
         .navigationDestination(isPresented: $showingLiveVoice) { LiveVoiceFeature() }

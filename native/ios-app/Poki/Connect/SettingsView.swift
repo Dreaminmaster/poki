@@ -28,7 +28,7 @@ struct SettingsView: View {
 }
 
 enum SettingsRoute: Hashable {
-    case connector(ConnectorSecret), relay, diagnostics, log, activityPreview, memory, quickFixes
+    case connector(ConnectorSecret), relay, diagnostics, log, activityPreview, memory
 }
 
 /// The page for a settings route, in whichever navigation stack pushed it.
@@ -46,7 +46,6 @@ struct SettingsDestination: View {
         }))
         case .log: LogView(back: pop)
         case .memory: MemoryView(back: pop)
-        case .quickFixes: QuickFixesView()
         case .activityPreview: ActivityPreview()
         }
     }
