@@ -82,6 +82,23 @@ final class AppNamesTests: XCTestCase {
         XCTAssertFalse(fourth.text.contains("the session's app"), fourth.text)
     }
 
+    func testTheSessionsAppAlreadyInFrontTakesATapAfterAnOldRead() async {
+        let (core, wda) = core()
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobiletimer", "name": "Clock"]]) }
+        wda.tree([Node("Button", "Start", [16, 100, 358, 44])], app: "Clock")
+        _ = await core.call("look", [:])
+        // The model thought for a while before its first do with the app.
+        core.computer.lastTreeAt = core.computer.lastTreeAt.map { $0 - 15 }
+
+        let result = await core.call("do", ["actions": [["tap": 1]], "app": "Clock"])
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertEqual(launched(wda), [], "Clock was in front: nothing was launched")
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
+        XCTAssertFalse(result.text.contains("approval"), result.text)
+        XCTAssertFalse(result.text.contains("action 2"), result.text)
+    }
+
     func testAnAppNobodyKnowsIsRefusedBeforeAnythingIsSent() async {
         let (core, wda) = core()
         _ = await core.call("look", [:])
@@ -110,6 +127,50 @@ final class AppNamesTests: XCTestCase {
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["launch": "Clock"]]])
         XCTAssertTrue(result.text.contains("paused 9"), result.text)
+    }
+
+    /// Clock in front from its launch on: its screen is drawn `after` seconds later.
+    func clockOnLaunch(_ wda: FakeWDA, drawnAfter after: Double = 0, reads: Double = 0) {
+        wda.set("POST /wda/apps/activate") { [wda] _ in
+            wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobiletimer", "name": "Clock"]]) }
+            let drawn = { wda.tree([Node("Button", "World Clock", [16, 100, 358, 44])], app: "Clock"); if reads > 0 { wda.delay("GET /source", reads) } }
+            if after > 0 {
+                wda.tree([], app: "Clock")
+                DispatchQueue.global().asyncAfter(deadline: .now() + after) { drawn() }
+            } else { drawn() }
+            return (200, ["value": .null])
+        }
+    }
+
+    func testAnEmptyScreenAfterALaunchIsNotTakenForTheSettledOne() async {
+        let (core, wda) = core()
+        _ = await core.call("look", [:])
+        clockOnLaunch(wda, drawnAfter: 0.4)
+
+        let result = await core.call("do", ["actions": [["launch": "Clock"]]])
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("World Clock"), result.text)
+    }
+
+    func testReadsSlowerThanThePauseDoNotMakeItLonger() async throws {
+        let wda = FakeWDA()
+        wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
+        let (core, _, _) = makeCore(wda) {
+            $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.toolDeadline = 25
+            $0.readTimeout = 4
+        }
+        _ = await core.call("look", [:])
+        clockOnLaunch(wda, reads: 1.8)
+
+        let result = await core.call("do", ["actions": [["launch": "Clock"]]])
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("World Clock"), result.text)
+        let waited = try XCTUnwrap(["paused ", "read after "].lazy.compactMap { key in result.text.range(of: key).flatMap { Int(result.text[$0.upperBound...].prefix(while: \.isNumber)) } }.first, result.text)
+        // The launch's fixed pause is 900 ms; a read let run past it made it 1.4 s.
+        XCTAssertLessThanOrEqual(waited, 1200, result.text)
     }
 
     func testWithTheQuickReadOffThePauseIsTheFixedOne() async {

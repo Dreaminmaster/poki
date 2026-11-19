@@ -173,6 +173,57 @@ final class PathTests: XCTestCase {
         XCTAssertEqual(app.page.value, 1)
     }
 
+    func testADismissNamingAPaymentControlDoesNotPressIt() async {
+        let wda = FakeWDA()
+        wda.tree([Node("Button", "Pay", [16, 100, 358, 44])], app: "Shop")
+        let (core, _, _) = makeCore(wda) { $0.actionCap = 1.5 }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "About"]], "dismiss": ["Pay"]]]]])
+
+        XCTAssertTrue(result.text.contains("closing it needs the owner's approval"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "Pay was not pressed")
+    }
+
+    // MARK: Poki's own screen
+
+    /// Poki in front once it is launched, showing its approval settings.
+    func pokiOnLaunch(_ wda: FakeWDA) {
+        wda.set("POST /wda/apps/activate") { [wda] body in
+            if body?["bundleId"]?.string == "nz.zheha.poki" {
+                wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "nz.zheha.poki", "name": "Poki"]]) }
+                wda.tree([Node("Button", "Never Ask", [16, 100, 358, 44])], app: "Poki")
+            }
+            return (200, ["value": .null])
+        }
+    }
+
+    func testAPathSendsNoInputIntoPoki() async {
+        let cases: [(steps: [JSON], dismiss: [JSON], rules: Bool, fromPoki: Bool)] = [
+            ([["launch": "com.example.other"], ["launch": "nz.zheha.poki"], ["tap": "Never Ask"]], [], true, false),
+            ([["launch": "nz.zheha.poki"], ["tap": [200, 122]]], [], false, false),
+            ([["launch": "nz.zheha.poki"], ["tap": "Continue"]], ["Never Ask"], true, false),
+            // A launch that did not open its app leaves Poki in front.
+            ([["launch": "com.example.gone"], ["tap": [200, 122]]], [], false, true),
+        ]
+        for c in cases {
+            let wda = FakeWDA()
+            wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
+            pokiOnLaunch(wda)
+            if c.fromPoki {
+                wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "nz.zheha.poki", "name": "Poki"]]) }
+                wda.tree([Node("Button", "Never Ask", [16, 100, 358, 44])], app: "Poki")
+            }
+            let (core, _, _) = makeCore(wda) { $0.sensitive.enabled = c.rules; $0.actionCap = 1.5 }
+            _ = await core.call("look", [:])
+
+            let result = await core.call("do", ["actions": [["path": ["steps": .array(c.steps), "dismiss": .array(c.dismiss)]]]])
+
+            XCTAssertTrue(result.text.contains("Poki takes no taps or typing inside the Poki app"), "\(c.steps): \(result.text)")
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "\(c.steps): nothing was tapped in Poki")
+        }
+    }
+
     // MARK: Optional extras with a decision model
 
     func testAPathRefusesNumbersFromAnEarlierRead() async {
