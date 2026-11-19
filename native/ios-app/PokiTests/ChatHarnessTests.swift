@@ -983,6 +983,21 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(chat.running, "the task did not end within \(limit)")
     }
 
+    /// When approvals are decided from the chat, the phone takes no tap from the owner inside Poki,
+    /// so a declined step is asked about in words and sent again, never left for the owner to tap.
+    func testDeclinedStepsAreAskedAboutInWordsWhenApprovalsComeFromTheChat() async throws {
+        let mode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
+        defer { UserDefaults.standard.set(mode, forKey: ApprovalClassifier.modeKey) }
+        UserDefaults.standard.set(ApprovalClassifier.Mode.reply.rawValue, forKey: ApprovalClassifier.modeKey)
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Which photo should I send?")])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "Send the latest photo to Alex")
+
+        let prompt = FakeCompletions.system(try XCTUnwrap(server.requests.first))
+        XCTAssertTrue(prompt.contains("When a step is declined, do not tell the owner to tap anything"), "the chat approval rule reaches the model")
+    }
+
     func testThePromptNamesOnlyToolsTheModelHas() throws {
         let tools = Set(Harness.tools.map(\.name))
         let regex = try NSRegularExpression(pattern: "\\b[a-z]+(?:_[a-z]+)+\\b")
