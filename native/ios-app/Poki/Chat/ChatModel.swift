@@ -21,6 +21,8 @@ struct ChatEntry: Identifiable, Equatable, Codable {
         /// Poki's browser, where a task began using it: above the answer the task gives. The live page
         /// while it is this conversation's page in use, then the site it showed.
         case browser(BrowserVisit)
+        /// A finished task's choices in their app's look (finish_task's card).
+        case card(ResultCard)
     }
     let id: UUID
     var kind: Kind
@@ -39,6 +41,8 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var textDocuments: [ChatTextDocument]?
     var continuationChoices: [String]?
     var continuedTask: String?
+    /// The item you selected on a result card; nil while it is the one Poki suggested.
+    var chosen: String?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
 
     /// The same delimited owner request for the model, consent evidence and task routing.
@@ -58,7 +62,7 @@ struct ChatEntry: Identifiable, Equatable, Codable {
         return entries[start..<end].contains { if case .browser = $0.kind { true } else { false } }
     }
 
-    var isPoki: Bool { switch kind { case .poki, .plan: true; default: false } }
+    var isPoki: Bool { switch kind { case .poki, .plan, .card: true; default: false } }
 }
 
 struct PlanStep: Identifiable, Equatable, Codable {
@@ -143,6 +147,8 @@ final class ChatModel {
     private var toolCalls = 0
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
+    /// The task under way as the owner asked it.
+    private var taskText = ""
     private var client: ModelClient?
     private var restoredContext: String?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
@@ -174,6 +180,8 @@ final class ChatModel {
     /// The plan bubble of the task under way.
     private var planID: UUID?
     private var noteID: UUID?
+    /// The result card of the task under way, which a second finish_task replaces.
+    private var cardID: UUID?
 
     /// A ceiling for a runaway model's quota use. On an unchanged screen, PiLoop stops after
     /// `stallSteps` identical calls or `stallPairs` repetitions of a call pair. Waiting for the owner
@@ -279,16 +287,29 @@ final class ChatModel {
         client = nil
         restoredContext = nil
         calls = []
-        planID = nil; noteID = nil; modelPlan = nil
+        planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         sessionID = UUID().uuidString.lowercased()
         greet()
     }
+
+    /// The conversation `id` left the list, archived or deleted, maybe while its task still runs and a
+    /// reply is on the way. When it is this chat's, the task stops, nothing more is written into the
+    /// conversation (not the Stopped line, not a reply that comes in late), and a new one starts.
+    func conversationLeft(_ id: String) {
+        guard id == sessionID else { return }
+        leavingRemoved = true
+        defer { leavingRemoved = false }
+        newConversation()
+    }
+
+    /// Set while `conversationLeft` ends a removed conversation, so its last lines do not save it back.
+    private var leavingRemoved = false
 
     private func applyRestoredSession(_ session: SavedSession) {
         userChoseConversation = true
         loop = nil
         client = nil
-        planID = nil; noteID = nil; modelPlan = nil
+        planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         sessionID = session.id
         calls = session.calls
         restoredContext = session.modelContext
@@ -304,7 +325,7 @@ final class ChatModel {
 
     /// The conversation as the Sessions list keeps it. Greeting-only conversations are not saved.
     private func persist() {
-        guard !isSample, hasUserMessages else { return }
+        guard !isSample, !leavingRemoved, hasUserMessages else { return }
         store.save(chat: self)
     }
 
@@ -520,7 +541,7 @@ final class ChatModel {
             let store = self.store
             Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel) { store.setAutoName(id, name) } }
         }
-        planID = nil; noteID = nil; modelPlan = nil
+        planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         taskApp = nil
         taskApps = TaskApps(); taskRequest = resumedTask ?? text; toolRoute = nil
         let continuation = resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
@@ -551,10 +572,11 @@ final class ChatModel {
         switch prepared.engine {
         case .direct(let client, let instructions):
             client.say(prepared.message)
-            began("direct", prepared.provider, prepared.model)
+            began("direct", prepared.provider, prepared.model, task: prepared.text)
             await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
-            if !current { app.finishTask() }
+            // The direct engine does not say when its task ends: the quiet wait finishes the run.
+            if !current { app.finishTask() } else { app.chatReleasesRun() }
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
             if current { running = false; awaitingModel = false }
         case .pi(let piModel):
@@ -583,7 +605,7 @@ final class ChatModel {
                 }
             }
             let splitSession = splitViewSession
-            began("pi", prepared.provider, prepared.model, splitViewSession: splitSession)
+            began("pi", prepared.provider, prepared.model, task: prepared.text, splitViewSession: splitSession)
             if let splitSession, pair.count == 2 {
                 phoneStepUnderWay = true
                 let confirmed = await openSplitViewPair(pair, session: splitSession, token: token)
@@ -755,11 +777,14 @@ final class ChatModel {
     /// instead; that code goes once the phone acceptance with the owner's OpenAI key has passed on pi.
     private static var direct: Bool { UserDefaults.standard.string(forKey: "chatEngine") == "direct" }
 
-    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, splitViewSession: String? = nil) {
-        taskStart = Date(); toolCalls = 0; taskResult = nil
+    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) {
+        taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
         taskCalls.removeAll()
-        app.prepareForTask()
+        // Split View needs both apps before the first model tool runs.
+        if splitViewSession != nil { app.prepareForTask() }
         app.chatTaskBegan(splitViewSession: splitViewSession)
+        // find_app and the task's icons see the phone's current apps.
+        InstalledApps.shared.refreshSoon()
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
@@ -772,6 +797,11 @@ final class ChatModel {
         let record = TaskRecord(session: session, task: text, calls: taskCalls, result: taskResult,
                                 seconds: Date().timeIntervalSince(taskStart))
         Self.afterTask?(record)
+        if !isSample {
+            ChatDebugLog.add(ChatDebugLog.entry(model: "\(engine), \(ModelKeys.selectedProvider.rawValue)/\(ModelKeys.selectedModel)",
+                                                named: AppIconStore.bundleIDs(namedIn: record.task), calls: record.calls,
+                                                finished: taskResult?.success, seconds: record.seconds))
+        }
         store.taskEnded(session, success: taskResult?.success, stopped: stopAsked)
         if kind == .poki, taskResult?.success == true { Haptics.done() }
     }
@@ -842,7 +872,10 @@ final class ChatModel {
         if case .stopped = outcome {
             if !usesSplitView { app.finishTask() }
         } else {
-            app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView)
+            // A finished run on the Live Activity says what it came to: finish_task's summary when the
+            // task succeeded, else the task itself. A failure's summary under Done would read as success.
+            app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView,
+                              result: taskResult.flatMap { $0.success ? $0.summary : nil }, task: taskText)
         }
     }
 
@@ -1009,11 +1042,17 @@ final class ChatModel {
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting { steps[i].state = result.success ? .done : .failed }
             }
-            return PokiCore.ToolAnswer(text: Harness.resultRecorded, jpeg: nil, isError: false)
+            // An outside agent reads the reply, not the card: its tasks answer in words.
+            let card = result.success && kind == .poki ? result.card : nil
+            if let card { showCard(card) }
+            return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):
             if let refusal = selectRoute(.web) { return refusal }
             showBrowser(opening: name == "web_open")
             return await WebTools.perform(name, arguments: call.arguments)
+        case "find_app":
+            let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
+            return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
             phoneStepUnderWay = true
@@ -1035,7 +1074,8 @@ final class ChatModel {
             }
             return response
         default:
-            return await app.runTool(call.name, arguments: call.arguments)
+            // A note Poki keeps remembers this conversation: the Memory page links back to it.
+            return await app.runTool(call.name, arguments: call.arguments, conversation: call.name == "routines" ? sessionID : nil)
         }
     }
 
@@ -1222,6 +1262,25 @@ final class ChatModel {
         let entry = ChatEntry(.plan(steps))
         planID = entry.id
         entries.append(entry)
+    }
+
+    private func showCard(_ card: ResultCard) {
+        if let id = cardID, let i = entries.firstIndex(where: { $0.id == id }) {
+            entries[i].kind = .card(card)
+            entries[i].chosen = nil
+            return
+        }
+        let entry = ChatEntry(.card(card))
+        cardID = entry.id
+        entries.append(entry)
+    }
+
+    /// You selected another item on a result card: the one thing the card keeps, saved with the chat.
+    func choose(_ item: String, on entry: UUID) {
+        guard let i = entries.firstIndex(where: { $0.id == entry }), case .card(let card) = entries[i].kind,
+              card.items.contains(where: { $0.id == item }) else { return }
+        let chosen = item == card.recommended ? nil : item
+        if entries[i].chosen != chosen { entries[i].chosen = chosen }
     }
 
     /// The task's first browser step puts the browser's card in the conversation at that point, so it
@@ -1492,17 +1551,39 @@ struct TaskResult: Decodable, Equatable {
     var summary: String
     var details: [Detail]
     var answer: Answer?
+    /// The result card, when the model sent one that can be drawn.
+    var card: ResultCard?
+    /// Why the card the model sent cannot be drawn: its reply then gives the whole result in words.
+    var cardProblem: String?
 
-    private enum CodingKeys: String, CodingKey { case success, summary, details, answer }
+    private enum CodingKeys: String, CodingKey { case success, summary, details, answer, card }
 
-    /// success and summary are required, as task-runner.mjs requires them; details and answer are kept
-    /// when they are well formed.
+    /// success and summary are required, as task-runner.mjs requires them; details, answer and card are
+    /// kept when they are well formed. A card that is not loses only itself, never the result.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         success = try c.decode(Bool.self, forKey: .success)
         summary = try c.decode(String.self, forKey: .summary)
         details = (try? c.decodeIfPresent([Detail].self, forKey: .details)) ?? []
         answer = (try? c.decodeIfPresent(Answer.self, forKey: .answer)) ?? nil
+        guard c.contains(.card), (try? c.decodeNil(forKey: .card)) == false else { return }
+        do {
+            let card = try c.decode(ResultCard.self, forKey: .card)
+            if let problem = card.problem { cardProblem = problem } else { self.card = card }
+        } catch {
+            cardProblem = "the card is not in the described form: " + Self.place(error)
+        }
+    }
+
+    /// Where a card stopped decoding ("missing card.items.0.title"), for the model to see what to fix.
+    private static func place(_ error: Error) -> String {
+        func path(_ keys: [CodingKey]) -> String { keys.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".") }
+        switch error as? DecodingError {
+        case .keyNotFound(let key, let context): return "missing " + path(context.codingPath + [key])
+        case .typeMismatch(_, let context), .valueNotFound(_, let context), .dataCorrupted(let context):
+            return path(context.codingPath) + ", " + context.debugDescription
+        default: return "unreadable"
+        }
     }
 
     /// The requested facts for whoever handed the task over, such as "answer (field): Battery: 81%".

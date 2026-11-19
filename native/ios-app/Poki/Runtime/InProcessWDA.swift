@@ -94,7 +94,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     /// When an open may bring up iOS's passcode screen. It does only before the first automation
     /// of a boot, so until then: one open at a time (two at once each showed a screen), never from
     /// the background (the screen then could not be closed), and none after the owner cancelled one,
-    /// until they turn Poki on again.
+    /// until they turn Poki on again. `startedThisBoot` is also set at launch on iOS 27 while the
+    /// boot's allowance lasts (`AutomationAllowance`): then no screen comes.
     struct OpenGate {
         var declined = false
         var inFront = true
@@ -181,7 +182,10 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             },
             // Beside another app, the front app's part of the screen is the screen the agent sees (viewport).
             "GET /wda/screen": { [unowned self] _, _ in
-                let geometry = self.native.displayGeometry()
+                let geometry = self.native.readDisplayGeometry()
+                guard !geometry.routesDisplay.boolValue || !geometry.bounds.isEmpty else {
+                    throw Refusal("unknown error", "target_display_unavailable: read the active screen again")
+                }
                 let viewport = self.native.viewport
                 let size = viewport.isNull ? geometry.bounds.size : viewport.size
                 self.readGeometry.withLock { $0 = (geometry, viewport) }

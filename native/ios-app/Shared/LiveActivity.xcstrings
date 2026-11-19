@@ -1041,52 +1041,6 @@
         }
       }
     },
-    "Finished in %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Done in %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已在“%@”完成"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已在「%@」完成"
-          }
-        }
-      }
-    },
-    "Finished in %@, took %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Done in %1$@, took %2$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已在“%1$@”完成，用时 %2$@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已在「%1$@」完成，用時 %2$@"
-          }
-        }
-      }
-    },
     "General › VPN & Device Management. Trust Poki Runner's developer." : {
       "extractionState" : "manual",
       "localizations" : {

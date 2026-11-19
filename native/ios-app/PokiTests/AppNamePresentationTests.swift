@@ -86,12 +86,14 @@ final class AppNamePresentationTests: XCTestCase {
             XCTAssertNil(state.face.event, "App switches are already named by the kicker")
             state.phase = .done
             XCTAssertEqual(state.face.content, "Open the app", "The completed task keeps its title")
-            XCTAssertTrue(state.face.subtitle?.contains("0:13") == true, "The duration stays visible with no app")
-            if let expected { XCTAssertTrue(state.face.subtitle?.contains(expected) == true) }
-            XCTAssertFalse(state.face.subtitle?.contains(app) == true && app.contains("."))
+            XCTAssertTrue(state.face.subtitle?.contains("0:13") == true, "The duration stays visible")
+            // With nothing else to name the run, the app names it: by its name, never its identifier.
+            state.plan = nil
+            XCTAssertEqual(state.face.content, expected ?? "Done")
+            XCTAssertFalse(state.face.subtitle?.contains(app) == true)
             state.app = nil
             state.headline = "Finished in \(app)"
-            XCTAssertEqual(state.doneTitle, "Open the app")
+            XCTAssertEqual(state.face.content, "Done")
             XCTAssertFalse(state.face.subtitle?.contains(app) == true)
             XCTAssertFalse(ActivityWords.label("Open \(app)").contains(app) && app.contains("."))
             XCTAssertFalse(ActivityWords.reason("input in \(app)").contains(app) && app.contains("."))

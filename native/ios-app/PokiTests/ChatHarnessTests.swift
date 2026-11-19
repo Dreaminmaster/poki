@@ -415,6 +415,8 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(requests.count, 5)
         XCTAssertFalse(FakeCompletions.system(requests[0]).contains(note))
         XCTAssertTrue(FakeCompletions.system(requests[3]).contains(note), "the second task's prompt has the note the first saved")
+        // The note keeps the conversation it was heard in: the Memory page's source links back to it.
+        XCTAssertEqual(RoutineStore.shared.note(note)?.heard?.session, chat.sessionID)
     }
 
     /// finish_task's requested facts and the kind of answer go back to the agent that handed the task
@@ -440,6 +442,129 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.answer?.kind, .field)
         XCTAssertEqual(result.answer?.items?.map(\.ref), ["7"])
         XCTAssertEqual(result.details, [TaskResult.Detail(label: "Battery", value: "81%")])
+    }
+
+    /// A result card the app cannot draw costs only the card: the task's result stays, no card appears
+    /// and the model is told to give the whole result in words. A card it can draw appears under the
+    /// task with Poki's suggestion selected and the model adds only a conclusion; the item you select
+    /// comes back with the conversation as it is saved.
+    func testAResultCardTheAppCannotDrawLeavesTheWholeResultToTheReply() async throws {
+        let train = Self.train, finish = Self.finishWithCard
+        let server = try FakeCompletions(replies: [
+            finish([train("G1", "07:00"), ["id": "G3", "title": "G3"]], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 07:00, G3 08:00."),
+            finish([train("G1", "07:00"), train("G3", "08:00")], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 is the earliest."),
+        ])
+        let chat = newChat(on: server)
+        var records: [TaskRecord] = []
+        ChatModel.afterTask = { records.append($0) }
+        let cards = { Self.cards(in: chat) }
+        let ask = { (text: String) in try await Self.ask(chat, text) }
+
+        try await ask("Find trains from Beijing to Shanghai")
+        XCTAssertEqual(records.last?.result?.summary, "Found 2 trains.")
+        XCTAssertEqual(cards(), [])
+        guard server.requests.count == 2 else { return XCTFail("\(server.requests.count) model requests") }
+        XCTAssertTrue(Self.toolAnswer(server.requests[1]).contains("give the whole result in words"), Self.toolAnswer(server.requests[1]))
+
+        try await ask("Find trains from Beijing to Shanghai for tomorrow")
+        let entry = try XCTUnwrap(cards().last)
+        guard case .card(let card) = entry.kind, let next = card.next else { return XCTFail("no card") }
+        guard server.requests.count == 4 else { return XCTFail("\(server.requests.count) model requests") }
+        XCTAssertEqual(card.selected(entry.chosen).fill(next.say), "把 G1 次发到公司差旅群")
+        XCTAssertTrue(Self.toolAnswer(server.requests[3]).contains("one plain sentence"), Self.toolAnswer(server.requests[3]))
+
+        chat.choose("G3", on: entry.id)
+        let saved = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(chat.entries))
+        let reopened = try XCTUnwrap(saved.first { $0.id == entry.id })
+        guard case .card(let again) = reopened.kind else { return XCTFail("the saved card") }
+        XCTAssertEqual(again.selected(reopened.chosen).fill(next.say), "把 G3 次发到公司差旅群")
+    }
+
+    /// A button whose sentence names no field of the item would send the suggested train whichever
+    /// train you select: such a card is not shown, and the model answers in words.
+    func testAResultCardWhoseButtonIgnoresTheSelectionIsNotShown() async throws {
+        let server = try FakeCompletions(replies: [
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 G1 次发到公司差旅群"),
+            FakeCompletions.text("G1 07:00, G3 08:00."),
+        ])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "Find trains from Beijing to Shanghai")
+        XCTAssertEqual(Self.cards(in: chat), [])
+        guard server.requests.count == 2 else { return XCTFail("\(server.requests.count) model requests") }
+        XCTAssertTrue(Self.toolAnswer(server.requests[1]).contains("give the whole result in words"), Self.toolAnswer(server.requests[1]))
+    }
+
+    /// A query with a single train ("the first high-speed train tomorrow") still gets the train card, as
+    /// on the test phone where the model answered it with fields and no card (ESP-997). The arguments are
+    /// that session's own finish_task, with the card a one-train result now carries; the card tool the
+    /// model sees must not demand two items either.
+    func testASingleTrainResultShowsTheTrainCard() async throws {
+        let finish = FakeCompletions.tool("finish_task", [
+            "success": true,
+            "summary": "明天11月20日最早的高铁是G532，上海虹桥06:31出发，北京南12:18到达，历时5小时47分，576元起；二等座有票。",
+            "details": [
+                ["label": "日期", "value": "11月20日 周五"],
+                ["label": "车次", "value": "复兴号智能动车组G 5 3 2次列车6点31分从上海虹桥出发,12点18分到达北京南,历时5小时47分,,静音车厢，"],
+                ["label": "票价", "value": "576元起"],
+                ["label": "余票", "value": "G 5 3 2次列车二等席位有票"],
+            ],
+            "answer": ["kind": "field", "items": [["field": "label", "ref": "28"], ["field": "label", "ref": "30"], ["field": "label", "ref": "31"]]],
+            "card": ["app": "cn.12306.rails12306", "kind": "12306.trains", "recommended": "G532",
+                     "items": [["id": "G532", "title": "G532", "date": "11月20日 周五", "from": "上海虹桥", "to": "北京南", "depart": "06:31",
+                                "arrive": "12:18", "duration": "5小时47分", "price": "¥576", "seats": [["name": "二等座", "left": "有"]]]],
+                     "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {date} {title} 次（{from} {depart} 开）"]],
+        ])
+        let server = try FakeCompletions(replies: [finish, FakeCompletions.text("这是明天最早的一班。")])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "打开12306看一下明天上海到北京的第一班高铁")
+        let entry = try XCTUnwrap(Self.cards(in: chat).last)
+        guard case .card(let card) = entry.kind else { return XCTFail("no card") }
+        XCTAssertEqual(card.selected(entry.chosen).fill(card.primary.say), "在 12306 打开 11月20日 周五 G532 次（上海虹桥 06:31 开）")
+
+        let items = try XCTUnwrap(((Harness.finishTask.schema["properties"] as? [String: Any])?["card"] as? [String: Any])
+            .flatMap { ($0["properties"] as? [String: Any])?["items"] as? [String: Any] })
+        XCTAssertLessThanOrEqual(items["minItems"] as? Int ?? 0, 1)
+    }
+
+    /// An in-app chat that starts empty: a new one opens on the last conversation saved by an earlier test.
+    private func newChat(on server: FakeCompletions) -> ChatModel {
+        let chat = chat(on: server, kind: .poki)
+        chat.newConversation()
+        return chat
+    }
+
+    private static func train(_ number: String, _ depart: String) -> [String: Any] {
+        ["id": number, "title": number, "date": "11月20日 周四", "from": "北京南", "to": "上海虹桥", "depart": depart,
+         "arrive": "12:28", "price": "¥626", "seats": [["name": "二等座", "left": "有"]]]
+    }
+
+    private static func finishWithCard(_ items: [[String: Any]], _ nextSay: String) -> String {
+        FakeCompletions.tool("finish_task", [
+            "success": true, "summary": "Found 2 trains.", "details": [["label": "G1", "value": "07:00"]], "answer": ["kind": "list"],
+            "card": ["app": "cn.12306.rails12306", "kind": "12306.trains", "recommended": "G1", "items": items,
+                     "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {title} 次"],
+                     "next": ["label": "发到公司差旅群", "say": nextSay]],
+        ])
+    }
+
+    private static func cards(in chat: ChatModel) -> [ChatEntry] {
+        chat.entries.filter { if case .card = $0.kind { true } else { false } }
+    }
+
+    /// Sends a message and waits for its task to end.
+    private static func ask(_ chat: ChatModel, _ text: String) async throws {
+        chat.send(text)
+        for _ in 0..<200 where chat.running { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(chat.running)
+    }
+
+    /// The tool answer the model was given last in a request.
+    private static func toolAnswer(_ request: [String: Any]) -> String {
+        let messages = request["messages"] as? [[String: Any]] ?? []
+        guard let tool = messages.last(where: { $0["role"] as? String == "tool" }) else { return "" }
+        return (tool["content"] as? String) ?? json(tool)
     }
 
     /// The model's name for the task comes with its plan and is kept on the task's plan entry, where
@@ -891,6 +1016,21 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(chat.running, "the task did not end within \(limit)")
     }
 
+    /// When approvals are decided from the chat, the phone takes no tap from the owner inside Poki,
+    /// so a declined step is asked about in words and sent again, never left for the owner to tap.
+    func testDeclinedStepsAreAskedAboutInWordsWhenApprovalsComeFromTheChat() async throws {
+        let mode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
+        defer { UserDefaults.standard.set(mode, forKey: ApprovalClassifier.modeKey) }
+        UserDefaults.standard.set(ApprovalClassifier.Mode.reply.rawValue, forKey: ApprovalClassifier.modeKey)
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Which photo should I send?")])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "Send the latest photo to Alex")
+
+        let prompt = FakeCompletions.system(try XCTUnwrap(server.requests.first))
+        XCTAssertTrue(prompt.contains("When a step is declined, do not tell the owner to tap anything"), "the chat approval rule reaches the model")
+    }
+
     func testThePromptNamesOnlyToolsTheModelHas() throws {
         let tools = Set(Harness.tools.map(\.name))
         let regex = try NSRegularExpression(pattern: "\\b[a-z]+(?:_[a-z]+)+\\b")
@@ -930,6 +1070,8 @@ final class FakeCompletions: @unchecked Sendable {
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
     private var held: [NWConnection] = []
+    /// Replies held back by `holdAfter`, sent by `release()`.
+    private var waiting: [(NWConnection, String)] = []
     private let holdAfter: Int?
     private let onRequest: (@Sendable ([String: Any]) -> Void)?
 
@@ -954,6 +1096,17 @@ final class FakeCompletions: @unchecked Sendable {
     }
 
     deinit { listener.cancel(); held.forEach { $0.cancel() } }
+
+    /// Sends the replies `holdAfter` held back: a model answer that comes in late.
+    func release() {
+        let due = lock.withLock { () -> [(NWConnection, String)] in defer { waiting = [] }; return waiting }
+        queue.async {
+            for (connection, events) in due {
+                let head = "HTTP/1.1 \(self.responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
+                connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+    }
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -995,7 +1148,7 @@ final class FakeCompletions: @unchecked Sendable {
         }
         onRequest?(json)
         if let holdAfter, requests.count > holdAfter {
-            lock.withLock { held.append(connection) }
+            lock.withLock { held.append(connection); waiting.append((connection, events)) }
             return
         }
         let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"

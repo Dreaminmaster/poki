@@ -84,6 +84,38 @@ export function Steps({ steps }: { steps: Step[] }) {
   );
 }
 
+/** How much of the bar each install step takes, by how long it usually runs. */
+export const INSTALL_WEIGHTS: Record<string, number> = { phone: 2, pair: 3, devmode: 2, account: 3, release: 16, sign: 18, profiles: 3, install: 40, pairing_file: 4, seed: 9 };
+export const RENEW_WEIGHTS: Record<string, number> = { release: 16, sign: 18, profiles: 3, install: 40 };
+
+/** A job as one bar: the step under way and its detail under the bar, the steps behind Details. */
+export function JobBar({ steps, running, weights, doneTitle = "Done" }: { steps: Step[]; running: boolean; weights?: Record<string, number>; doneTitle?: string }) {
+  const [open, setOpen] = useState(false);
+  const failed = [...steps].reverse().find((s) => s.state === "failed");
+  const current = failed ?? [...steps].reverse().find((s) => s.state === "active" || s.state === "waiting") ?? [...steps].reverse().find((s) => s.state === "done");
+  const finished = !running && !failed && steps.some((s) => s.state !== "todo");
+  const part = (s: Step) => (s.state === "done" ? 1 : s.state === "todo" ? 0 : Math.min(Math.max(s.fraction ?? 0, 0), 1));
+  let fraction = 0;
+  if (finished) fraction = 1;
+  else if (weights) {
+    const total = Object.values(weights).reduce((a, b) => a + b, 0);
+    fraction = total ? Math.min(steps.reduce((a, s) => a + (weights[s.id] ?? 0) * part(s), 0) / total, 0.99) : 0;
+  } else if (steps.length) fraction = Math.min(steps.reduce((a, s) => a + part(s), 0) / steps.length, 0.99);
+  const line = current?.detail || current?.notes[current.notes.length - 1];
+  return (
+    <div className={`jobbar ${failed ? "failed" : ""} ${current?.state === "waiting" ? "waiting" : ""}`}>
+      <div className="row between">
+        <b className="grow">{finished ? t(doneTitle) : t(current?.title ?? "Starting")}</b>
+        <span className="muted small mono">{Math.round(fraction * 100)}%</span>
+      </div>
+      <div className="bar wide"><i style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
+      {line && <div className="detail">{line}</div>}
+      <button type="button" className="linkish small" onClick={() => setOpen(!open)}>{t(open ? "Hide Details" : "Show Details")}</button>
+      {open && <Steps steps={steps.filter((s) => s.state !== "todo")} />}
+    </div>
+  );
+}
+
 export function useInterval(f: () => void, ms: number, deps: unknown[] = []) {
   useEffect(() => {
     f();

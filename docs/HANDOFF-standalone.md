@@ -135,7 +135,7 @@ merged. Nobody has done that merge yet.
 - Zhehan's rules for it: refresh status and a countdown on the Setup page; updates are
   pre-downloaded and pre-signed for the chosen channel (same code as the desktop, `release.rs`);
   an install never lands by itself. Poki holds a ready build until it is idle and the owner taps
-  Install (buttons "Prepare Refresh Now", then "Install Refresh"; the row "Signed Until").
+  Install (buttons "Prepare Renewal Now", then "Install Renewal"; the row "Signed Until").
 - **TLS gotcha (cost us a night):** the signer's anisette client installed `ring` as rustls'
   process-wide provider, and after that the phone's lockdown TLS failed with "device socket io
   failed". `f5fb69c` pins aws-lc as the process provider in PokiLauncher before anything

@@ -39,9 +39,21 @@ pub async fn read_tree_with_timeout(
     wait: Duration,
 ) -> Result<Json> {
     let deadline = tokio::time::Instant::now() + wait;
+    // Only a phone with a second built-in panel is read element by element; see display::active.
+    let display = super::display::active_within(adapter, rsd, wait).await?;
+    if let Some(display) = display.filter(|d| super::display::route(Some(d)).live_ax) {
+        let wait = deadline.saturating_duration_since(tokio::time::Instant::now());
+        return read_live(adapter, rsd, include_offscreen, wait, &display).await;
+    }
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        let answer = subscribe(adapter, rsd, include_offscreen, remaining.min(ANSWER_WITHIN)).await?;
+        let answer = subscribe(
+            adapter,
+            rsd,
+            include_offscreen,
+            remaining.min(ANSWER_WITHIN),
+        )
+        .await?;
         if let Some(tree) = answer {
             return Ok(tree);
         }
@@ -262,21 +274,24 @@ struct Tree {
 }
 impl Tree {
     fn update(&mut self, a: &Archive) -> Result<()> {
+        self.update_for(a, None)
+    }
+    fn update_for(&mut self, a: &Archive, object: Option<u64>) -> Result<()> {
         let root = a.root();
-        if a.field(root, "associatedRequestType")
+        let responses = if a
+            .field(root, "associatedRequestType")
             .and_then(|v| a.integer(v))
-            != Some(11)
+            == Some(11)
         {
-            return Ok(());
-        }
-        let Some(result) = a.field(root, "resultData") else {
-            return Ok(());
-        };
-        let Some(dump) = a.field(result, "treeDump") else {
-            return Ok(());
+            a.field(root, "resultData")
+                .and_then(|v| a.field(v, "treeDump"))
+                .map(|v| a.array(v))
+                .unwrap_or_default()
+        } else {
+            vec![root]
         };
         let roles: Vec<String> = serde_json::from_str(include_str!("roles.json"))?;
-        for response in a.array(dump) {
+        for response in responses {
             let kind = a
                 .field(response, "associatedRequestType")
                 .and_then(|v| a.integer(v));
@@ -284,7 +299,7 @@ impl Tree {
                 continue;
             };
             match kind {
-                Some(4) => {
+                Some(1 | 4) => {
                     if let Some(id) = a.field(data, "objectID").and_then(|v| a.integer(v)) {
                         let pid = a.field(data, "pid").and_then(|v| a.integer(v));
                         if !self.roots.iter().any(|(r, _)| *r == id) {
@@ -302,6 +317,7 @@ impl Tree {
                         .field(response, "associatedTranslationObject")
                         .and_then(|v| a.field(v, "objectID"))
                         .and_then(|v| a.integer(v))
+                        .or(object)
                     else {
                         continue;
                     };
@@ -583,4 +599,496 @@ async fn acknowledge(socket: &mut impl ReadWrite, message: &Message) -> Result<(
     );
     socket.write_all(&reply.serialize()).await?;
     Ok(())
+}
+
+fn push_object(objects: &mut Vec<Value>, value: Value) -> Value {
+    let index = objects.len();
+    objects.push(value);
+    Value::Uid(plist::Uid::new(index as u64))
+}
+fn archive_value(objects: &mut Vec<Value>, value: Value) -> Value {
+    let value = match value {
+        Value::Dictionary(dict) => {
+            let (mut keys, mut vals) = (vec![], vec![]);
+            for (key, value) in dict {
+                keys.push(archive_value(objects, key.into()));
+                vals.push(archive_value(objects, value));
+            }
+            let class = push_object(
+                objects,
+                Value::Dictionary(plist::Dictionary::from_iter([
+                    ("$classname".to_string(), "NSDictionary".into()),
+                    (
+                        "$classes".to_string(),
+                        Value::Array(vec!["NSDictionary".into(), "NSObject".into()]),
+                    ),
+                ])),
+            );
+            Value::Dictionary(plist::Dictionary::from_iter([
+                ("NS.keys".to_string(), Value::Array(keys)),
+                ("NS.objects".to_string(), Value::Array(vals)),
+                ("$class".to_string(), class),
+            ]))
+        }
+        Value::Array(values) => {
+            let values = values
+                .into_iter()
+                .map(|v| archive_value(objects, v))
+                .collect();
+            let class = push_object(
+                objects,
+                Value::Dictionary(plist::Dictionary::from_iter([
+                    ("$classname".to_string(), "NSArray".into()),
+                    (
+                        "$classes".to_string(),
+                        Value::Array(vec!["NSArray".into(), "NSObject".into()]),
+                    ),
+                ])),
+            );
+            Value::Dictionary(plist::Dictionary::from_iter([
+                ("NS.objects".to_string(), Value::Array(values)),
+                ("$class".to_string(), class),
+            ]))
+        }
+        value => value,
+    };
+    push_object(objects, value)
+}
+fn live_request(
+    kind: u64,
+    mut params: Value,
+    source: Option<(&Archive, &Value)>,
+) -> Result<Vec<u8>> {
+    let mut value = source.map(|(a, _)| a.value.clone()).unwrap_or_else(|| {
+        Value::Dictionary(plist::Dictionary::from_iter([
+            ("$archiver".to_string(), "NSKeyedArchiver".into()),
+            ("$version".to_string(), Value::from(100000)),
+            ("$objects".to_string(), Value::Array(vec!["$null".into()])),
+        ]))
+    });
+    let dict = value.as_dictionary_mut().unwrap();
+    let objects = dict
+        .get_mut("$objects")
+        .and_then(Value::as_array_mut)
+        .unwrap();
+    let translation = source
+        .map(|(_, v)| push_object(objects, v.clone()))
+        .unwrap_or(Value::Uid(plist::Uid::new(0)));
+    let point = if kind == 6 {
+        Some(
+            params
+                .as_dictionary_mut()
+                .and_then(|d| d.remove("point"))
+                .ok_or("Hit-test point missing")?,
+        )
+    } else {
+        None
+    };
+    let params = archive_value(objects, params);
+    if let Some(point) = point {
+        let point = archive_value(objects, point);
+        let class = push_object(
+            objects,
+            Value::Dictionary(plist::Dictionary::from_iter([
+                ("$classname".to_string(), "NSValue".into()),
+                (
+                    "$classes".to_string(),
+                    Value::Array(vec!["NSValue".into(), "NSObject".into()]),
+                ),
+            ])),
+        );
+        let point = push_object(
+            objects,
+            Value::Dictionary(plist::Dictionary::from_iter([
+                ("NS.pointval".to_string(), point),
+                ("NS.special".to_string(), Value::from(1)),
+                ("$class".to_string(), class),
+            ])),
+        );
+        let key = archive_value(objects, "point".into());
+        let d = objects[params.as_uid().unwrap().get() as usize]
+            .as_dictionary_mut()
+            .unwrap();
+        d.get_mut("NS.keys")
+            .and_then(Value::as_array_mut)
+            .unwrap()
+            .push(key);
+        d.get_mut("NS.objects")
+            .and_then(Value::as_array_mut)
+            .unwrap()
+            .push(point);
+    }
+    let class = push_object(
+        objects,
+        Value::Dictionary(plist::Dictionary::from_iter([
+            ("$classname".to_string(), "AXPTranslatorRequest".into()),
+            (
+                "$classes".to_string(),
+                Value::Array(vec!["AXPTranslatorRequest".into(), "NSObject".into()]),
+            ),
+        ])),
+    );
+    let root = push_object(
+        objects,
+        Value::Dictionary(plist::Dictionary::from_iter([
+            ("$class".to_string(), class),
+            ("requestType".to_string(), Value::from(kind)),
+            ("clientType".to_string(), Value::from(0)),
+            ("attributeType".to_string(), Value::from(0)),
+            ("actionType".to_string(), Value::from(0)),
+            ("parameters".to_string(), params),
+            ("translation".to_string(), translation),
+        ])),
+    );
+    dict.insert(
+        "$top".to_string(),
+        Value::Dictionary(plist::Dictionary::from_iter([("root".to_string(), root)])),
+    );
+    let mut bytes = vec![];
+    value.to_writer_binary(&mut bytes)?;
+    Ok(bytes)
+}
+async fn live_query(
+    socket: &mut impl ReadWrite,
+    id: &mut u32,
+    kind: u64,
+    params: Value,
+    source: Option<(&Archive, &Value)>,
+) -> Result<Archive> {
+    *id += 1;
+    call(
+        socket,
+        *id,
+        "processDataFromHost:",
+        Value::Data(live_request(kind, params, source)?),
+        true,
+    )
+    .await?;
+    loop {
+        let message = Message::from_reader(socket).await?;
+        acknowledge(socket, &message).await?;
+        let Some(AuxValue::Array(bytes)) = message.aux.as_ref().and_then(|a| a.values.first())
+        else {
+            continue;
+        };
+        let outer = Archive::parse(bytes)?;
+        let Some(bytes) = outer.data(outer.root()) else {
+            continue;
+        };
+        let a = Archive::parse(bytes)?;
+        if a.field(a.root(), "associatedRequestType")
+            .and_then(|v| a.integer(v))
+            != Some(kind)
+        {
+            continue;
+        }
+        if a.field(a.root(), "error").and_then(|v| a.integer(v)) != Some(0) {
+            return Err("AX live query failed".into());
+        }
+        return Ok(a);
+    }
+}
+async fn read_live(
+    adapter: &mut AdapterHandle,
+    rsd: &RsdHandshake,
+    include_offscreen: bool,
+    wait: Duration,
+    display: &super::display::Display,
+) -> Result<Json> {
+    let port = rsd
+        .services
+        .get("com.apple.accessibility.axAuditDaemon.remoteAXService")
+        .ok_or("AX service unavailable")?
+        .port;
+    let mut socket = adapter.connect(port).await?;
+    let caps = plist::Dictionary::from_iter([
+        (
+            "com.apple.private.DTXBlockCompression".to_string(),
+            Value::from(0),
+        ),
+        (
+            "com.apple.private.DTXConnection".to_string(),
+            Value::from(1),
+        ),
+    ]);
+    call(
+        &mut socket,
+        1,
+        "_notifyOfPublishedCapabilities:",
+        Value::Dictionary(caps),
+        false,
+    )
+    .await?;
+    call(
+        &mut socket,
+        2,
+        "clientNeedsAccessibility:",
+        true.into(),
+        true,
+    )
+    .await?;
+    let result = tokio::time::timeout(wait, async {
+        let mut id = 2;
+        let pid = live_application(&mut socket, &mut id, display).await?;
+        let app = live_query(
+            &mut socket,
+            &mut id,
+            1,
+            Value::Dictionary(plist::Dictionary::from_iter([(
+                "pid".to_string(),
+                Value::from(pid),
+            )])),
+            None,
+        )
+        .await?;
+        let root = app
+            .field(app.root(), "resultData")
+            .ok_or("AX application reference missing")?
+            .clone();
+        let mut pending = vec![(app, root)];
+        let mut visited = HashSet::new();
+        let mut tree = Tree {
+            include_offscreen,
+            orientation: display.orientation,
+            ..Tree::default()
+        };
+        tree.update(&pending[0].0)?;
+        let attrs = Value::Dictionary(plist::Dictionary::from_iter([(
+            "attributes".to_string(),
+            Value::Array(
+                [
+                    1u64, 3, 6, 8, 9, 21, 23, 25, 26, 27, 28, 30, 32, 33, 42, 45, 53, 61, 77, 129,
+                ]
+                .into_iter()
+                .map(Value::from)
+                .collect(),
+            ),
+        )]));
+        while let Some((source, translation)) = pending.pop() {
+            let object = source
+                .field(&translation, "objectID")
+                .and_then(|v| source.integer(v))
+                .ok_or("AX reference missing identity")?;
+            if !visited.insert(object) {
+                continue;
+            }
+            // shortcut: bound live walks to 256 elements; use a display-aware cached service for larger trees.
+            if visited.len() > 256 {
+                return Err("AX tree exceeded 256 elements".into());
+            }
+            let a = live_query(
+                &mut socket,
+                &mut id,
+                5,
+                attrs.clone(),
+                Some((&source, &translation)),
+            )
+            .await?;
+            tree.update_for(&a, Some(object))?;
+            let data = a
+                .field(a.root(), "resultData")
+                .ok_or("AX attributes missing")?;
+            let children_for = |attribute| {
+                a.entries(data)
+                    .into_iter()
+                    .find(|(k, _)| a.integer(k) == Some(attribute))
+                    .map(|(_, v)| a.array(v))
+                    .unwrap_or_default()
+            };
+            let mut children = children_for(if include_offscreen { 8 } else { 9 });
+            if children.is_empty() {
+                children = children_for(8);
+            }
+            for child in children {
+                pending.push((
+                    Archive {
+                        value: a.value.clone(),
+                    },
+                    child.clone(),
+                ));
+            }
+        }
+        if live_application(&mut socket, &mut id, display).await? != pid {
+            return Err("AX app changed during read".into());
+        }
+        let after = super::display::active(adapter, rsd)
+            .await?
+            .ok_or("Active display information disappeared during AX read")?;
+        if after.id != display.id || after.width != display.width || after.height != display.height
+        {
+            return Err("Active display changed during AX read".into());
+        }
+        if !tree.ready() {
+            return Err("AX tree has no controls".into());
+        }
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(tree.json())
+    })
+    .await;
+    let _ = call(
+        &mut socket,
+        1000,
+        "clientNeedsAccessibility:",
+        false.into(),
+        true,
+    )
+    .await;
+    let _ = socket.shutdown().await;
+    result.map_err(|_| "Live AX tree timed out")?
+}
+
+async fn live_application(
+    socket: &mut impl ReadWrite,
+    id: &mut u32,
+    display: &super::display::Display,
+) -> Result<u64> {
+    let mut selected = None;
+    for fraction in [0.25, 0.5, 0.75] {
+        let params = Value::Dictionary(plist::Dictionary::from_iter([
+            ("displayId", Value::from(display.id)),
+            (
+                "point",
+                Value::from(format!(
+                    "{{{}, {}}}",
+                    display.width * fraction,
+                    display.height / 2.0
+                )),
+            ),
+        ]));
+        let a = live_query(socket, id, 6, params, None).await?;
+        let pid = a
+            .field(a.root(), "resultData")
+            .and_then(|v| a.field(v, "pid"))
+            .and_then(|v| a.integer(v))
+            .filter(|pid| *pid > 0)
+            .ok_or("AX hit test returned no application")?;
+        if selected.is_some_and(|before| before != pid) {
+            return Err(
+                "Multiple applications on the active display; refusing ambiguous AX input".into(),
+            );
+        }
+        selected = Some(pid);
+    }
+    selected.ok_or_else(|| "AX application not found".into())
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    #[test]
+    fn live_requests_preserve_opaque_translation_references() {
+        let empty = Value::Dictionary(plist::Dictionary::new());
+        let mut source = Archive::parse(&live_request(1, empty.clone(), None).unwrap()).unwrap();
+        let objects = source
+            .value
+            .as_dictionary_mut()
+            .unwrap()
+            .get_mut("$objects")
+            .and_then(Value::as_array_mut)
+            .unwrap();
+        let raw = push_object(objects, Value::Data(vec![0, 255, 7, 42]));
+        let translation = Value::Dictionary(plist::Dictionary::from_iter([
+            ("objectID", Value::from(9001u64)),
+            ("pid", Value::from(42)),
+            ("rawElementData", raw),
+        ]));
+        let params = Value::Dictionary(plist::Dictionary::from_iter([(
+            "attributes",
+            Value::Array(vec![53.into(), 77.into()]),
+        )]));
+        let a = Archive::parse(&live_request(5, params, Some((&source, &translation))).unwrap())
+            .unwrap();
+        let reference = a.field(a.root(), "translation").unwrap();
+        assert_eq!(
+            a.field(reference, "objectID").and_then(|v| a.integer(v)),
+            Some(9001)
+        );
+        assert_eq!(
+            a.field(reference, "rawElementData").and_then(|v| a.data(v)),
+            Some([0, 255, 7, 42].as_slice())
+        );
+        let attrs = a
+            .field(a.root(), "parameters")
+            .and_then(|v| a.field(v, "attributes"))
+            .unwrap();
+        assert_eq!(
+            a.array(attrs)
+                .iter()
+                .map(|v| a.integer(v))
+                .collect::<Vec<_>>(),
+            vec![Some(53), Some(77)]
+        );
+        assert!(live_request(6, empty, None).is_err());
+    }
+
+    #[test]
+    fn live_hit_tests_archive_the_selected_display_and_point() {
+        let params = Value::Dictionary(plist::Dictionary::from_iter([
+            ("displayId", Value::from(2)),
+            ("point", Value::from("{334.5, 475.5}")),
+        ]));
+        let a = Archive::parse(&live_request(6, params, None).unwrap()).unwrap();
+        let params = a.field(a.root(), "parameters").unwrap();
+        assert_eq!(
+            a.field(params, "displayId").and_then(|v| a.integer(v)),
+            Some(2)
+        );
+        let point = a.field(params, "point").unwrap();
+        assert_eq!(
+            a.field(point, "NS.special").and_then(|v| a.integer(v)),
+            Some(1)
+        );
+        assert_eq!(
+            a.field(point, "NS.pointval")
+                .and_then(|v| a.string(v))
+                .as_deref(),
+            Some("{334.5, 475.5}")
+        );
+    }
+
+    #[test]
+    fn live_attributes_use_the_requested_identity_when_reply_omits_it() {
+        let archive = |root: Value| Archive {
+            value: Value::Dictionary(plist::Dictionary::from_iter([
+                ("$objects", Value::Array(vec!["$null".into(), root])),
+                (
+                    "$top",
+                    Value::Dictionary(plist::Dictionary::from_iter([(
+                        "root",
+                        Value::Uid(plist::Uid::new(1)),
+                    )])),
+                ),
+            ])),
+        };
+        let app = archive(Value::Dictionary(plist::Dictionary::from_iter([
+            ("associatedRequestType", Value::from(1)),
+            (
+                "resultData",
+                Value::Dictionary(plist::Dictionary::from_iter([
+                    ("objectID", Value::from(9)),
+                    ("pid", Value::from(42)),
+                ])),
+            ),
+        ])));
+        let attrs = archive(Value::Dictionary(plist::Dictionary::from_iter([
+            ("associatedRequestType", Value::from(5)),
+            (
+                "resultData",
+                Value::Dictionary(plist::Dictionary::from_iter([
+                    ("NS.keys", Value::Array(vec![61.into(), 77.into()])),
+                    (
+                        "NS.objects",
+                        Value::Array(vec![15.into(), Value::from(1u64 << 21)]),
+                    ),
+                ])),
+            ),
+        ])));
+        let mut tree = Tree::default();
+        tree.update(&app).unwrap();
+        tree.update_for(&attrs, Some(10)).unwrap();
+        assert!(tree.nodes.contains_key(&10));
+        assert!(!tree.nodes[&10].fields.contains_key("focused"));
+        tree.roots = vec![(10, Some(42))];
+        assert_eq!(tree.json()["elements"][0]["focused"], true);
+    }
 }

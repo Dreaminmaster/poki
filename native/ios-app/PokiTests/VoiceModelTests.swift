@@ -120,7 +120,7 @@ final class VoiceModelTests: XCTestCase {
         private(set) var microphone: [Bool] = []
         var link: FakeConnection { links.last! }
 
-        @MainActor init(phoneTool: @escaping @MainActor (String, String) async -> (String, Bool) = { _, _ in ("", false) }) {
+        @MainActor init(phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
             let time = FakeTime()
             self.time = time
             var made: (() -> FakeConnection)!
@@ -235,7 +235,7 @@ final class VoiceModelTests: XCTestCase {
     /// A step that finishes while its request's answer is still out: the conversation stays until the
     /// answer that carries the result has played.
     func testAStepsResultIsSaidBeforeTheConversationEnds() async {
-        let h = Harness(phoneTool: { _, _ in ("Settings is open", false) })
+        let h = Harness(phoneTool: { _, _ in ("Settings is open", false, nil) })
         await h.talk()
         h.link.play(["type": "response.created", "response": ["id": "r1"]],
                     ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]])
@@ -289,7 +289,7 @@ final class VoiceModelTests: XCTestCase {
     func testOnlyAnErrorForTheAnswerRequestGivesUpOnTheAnswer() async {
         for ownError in [false, true] {
             let (step, stepDone) = AsyncStream<Void>.makeStream()
-            let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false) })
+            let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false, nil) })
             await h.talk()
             h.link.play(["type": "response.created", "response": ["id": "r1"]],
                         ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
@@ -331,7 +331,7 @@ final class VoiceModelTests: XCTestCase {
     /// no request, so Poki cannot tell it is about this one): the conversation does not wait for ever.
     /// 60 s without a word from the server in the foreground ends it.
     func testAnAnswerThatNeverComesEndsTheConversationAfterSixtySecondsInTheForeground() async {
-        let h = Harness(phoneTool: { _, _ in ("Settings is open", false) })
+        let h = Harness(phoneTool: { _, _ in ("Settings is open", false, nil) })
         await h.talk()
         h.link.play(["type": "response.created", "response": ["id": "r1"]],
                     ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
@@ -349,7 +349,7 @@ final class VoiceModelTests: XCTestCase {
     /// from going there and not from the start of the conversation. Speech whose end never arrives is the
     /// same wait.
     func testAnAnswerThatNeverComesEndsTheConversationThirtySecondsAfterTheBackground() async {
-        let h = Harness(phoneTool: { _, _ in ("Settings is open", false) })
+        let h = Harness(phoneTool: { _, _ in ("Settings is open", false, nil) })
         await h.talk()
         h.link.play(["type": "response.created", "response": ["id": "r1"]],
                     ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
@@ -379,7 +379,7 @@ final class VoiceModelTests: XCTestCase {
     /// off, and its result is still said.
     func testAStepRunningLongerThanTheCapInTheBackgroundIsNotCutOff() async {
         let (step, stepDone) = AsyncStream<Void>.makeStream()
-        let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false) })
+        let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false, nil) })
         await h.talk()
         h.link.play(["type": "response.created", "response": ["id": "r1"]],
                     ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
@@ -449,6 +449,38 @@ extension VoiceModelTests {
         return (activity, TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false }))
     }
 
+    /// ESP-954: a talk's run of steps finishes when the talk's turn is over, not by the quiet wait while
+    /// Poki is still on the request. Between two steps it thinks and speaks, often longer than that
+    /// wait, and the island said Done in the middle of a task that went on.
+    func testATalksRunFinishesWhenItsTurnIsOverNotWhilePokiStillWorks() async throws {
+        let h = Harness(phoneTool: { _, _ in ("WeChat is open", false, nil) })
+        let (activity, watcher) = following(h)
+        activity.finishAfter = .milliseconds(20)
+        await h.talk()
+        h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
+                    ["type": "conversation.item.input_audio_transcription.completed", "transcript": "Tell Mom I'm late"],
+                    ["type": "response.created", "response": ["id": "r1"]],
+                    ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]])
+        await h.time.settle()
+        // The step on the phone, as AppModel reports it to the Live Activity.
+        activity.update { $0.phase = .working; $0.headline = "Open WeChat" }
+        activity.record(step: "Open WeChat", ok: true)
+        h.link.play(["type": "response.done", "response": ["id": "r1"]], ["type": "response.created", "response": ["id": "r2"]],
+                    ["type": "output_audio_buffer.started"])
+        try await Task.sleep(for: .milliseconds(150))
+        await h.time.settle()
+        XCTAssertEqual(activity.state.phase, .working, "Poki is still answering: the run goes on")
+
+        h.link.play(["type": "response.output_audio_transcript.done", "transcript": "I told Mom you're late."],
+                    ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
+        await h.time.settle()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(activity.state.phase, .done)
+        XCTAssertEqual(activity.state.face.content, "I told Mom you're late.")
+        withExtendedLifetime(watcher) {}
+        activity.end()
+    }
+
     func testTheLiveActivitySaysWhatTheTalkIsDoing() async {
         let h = Harness()
         let (activity, watcher) = following(h)
@@ -458,6 +490,7 @@ extension VoiceModelTests {
         XCTAssertEqual(activity.state.face.content, StatusWord.listening.text)
         XCTAssertTrue(activity.state.face.endsTalk)
         XCTAssertTrue(activity.state.face.talkGlow, "the island's brand band shows while a talk is on")
+        XCTAssertTrue(activity.state.face.shieldsTaps, "a tap on the expanded island during a talk keeps the owner in their app")
 
         h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
                     ["type": "conversation.item.input_audio_transcription.completed", "transcript": "What iOS version is this?"],
@@ -541,7 +574,7 @@ extension VoiceModelTests {
     /// and a dropped connection is still a state, with its reason, until it is put away.
     func testATalkSaysWhenPokiIsOnThePhoneIsSpokenOverOrIsCutOff() async {
         let (step, stepDone) = AsyncStream<Void>.makeStream()
-        let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false) })
+        let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false, nil) })
         XCTAssertNil(h.voice.talkState)
         await h.talk()
         XCTAssertEqual(h.voice.talkState, .listening)
@@ -584,7 +617,7 @@ extension VoiceModelTests {
         ]
         for words in expected {
             AppLocalization.shared.preference = words.language
-            let h = Harness(phoneTool: { _, _ in ("done", false) })
+            let h = Harness(phoneTool: { _, _ in ("done", false, nil) })
             var said: [VoiceLine] = []
             h.voice.onConversationEnded = { lines, _ in said = lines }
             await h.connect()
@@ -670,5 +703,48 @@ extension VoiceModelTests {
         h.voice.stop()
         await h.time.settle()
         XCTAssertFalse(activity.isRunning, "the Live Activity goes with the talk")
+    }
+
+    /// The screenshot behind a step reaches the model as an image right after the step's output and before
+    /// the answer is asked for (a function_call_output carries text only); the next step's replaces it.
+    func testWhatAStepSawReachesTheModelAsAnImage() async {
+        let h = Harness(phoneTool: { _, arguments in ("app: Photos", false, Data(arguments.utf8)) })
+        await h.talk()
+        h.link.play(["type": "response.created", "response": ["id": "r1"]],
+                    ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "look", "arguments": "{}"]])
+        await h.time.settle()
+        h.link.play(["type": "response.done", "response": ["id": "r1"]],
+                    ["type": "response.created", "response": ["id": "r2"]],
+                    ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c2", "name": "look", "arguments": #"{"full":true}"#]])
+        await h.time.settle()
+        h.link.play(["type": "response.done", "response": ["id": "r2"]])
+
+        let sent = h.link.sent
+        func image(_ event: [String: Any]) -> (id: String, url: String)? {
+            guard let item = event["item"] as? [String: Any], item["role"] as? String == "user",
+                  let part = (item["content"] as? [[String: Any]])?.first, part["type"] as? String == "input_image" else { return nil }
+            return (item["id"] as? String ?? "", part["image_url"] as? String ?? "")
+        }
+        let output = { (call: String) in sent.firstIndex { ($0["item"] as? [String: Any])?["call_id"] as? String == call }! }
+        let images = sent.indices.compactMap { i in image(sent[i]).map { (index: i, id: $0.id, url: $0.url) } }
+        let asks = sent.indices.filter { sent[$0]["type"] as? String == "response.create" }
+        XCTAssertEqual(images.map(\.url), ["data:image/jpeg;base64,e30=", "data:image/jpeg;base64,eyJmdWxsIjp0cnVlfQ=="])
+        guard images.count == 2, asks.count == 2 else { return XCTFail("two screenshots and two answers asked for, got \(images.count) and \(asks.count)") }
+        XCTAssertTrue(output("c1") < images[0].index && images[0].index < asks[0])
+        XCTAssertTrue(output("c2") < images[1].index && images[1].index < asks[1])
+        let deleted = sent.filter { $0["type"] as? String == "conversation.item.delete" }.compactMap { $0["item_id"] as? String }
+        XCTAssertEqual(deleted, [images[0].id], "the earlier screenshot leaves the conversation")
+    }
+
+    /// Poki speaks the language chosen in Poki from its first sentence, whatever the iPhone's language
+    /// (the owner, 2026-11-18: with Poki in Chinese, the first sentence came in English).
+    func testTheLiveVoiceSpeaksTheLanguageChosenInPoki() {
+        let saved = AppLocalization.shared.preference
+        defer { AppLocalization.shared.preference = saved }
+        for (language, name) in [("zh-Hans", "Chinese, Simplified"), ("en", "English")] {
+            AppLocalization.shared.preference = language
+            let instructions = VoiceDirect.session["instructions"] as? String ?? ""
+            XCTAssertTrue(instructions.contains("Speak \(name), the language of Poki's interface, from your first sentence on."), language)
+        }
     }
 }

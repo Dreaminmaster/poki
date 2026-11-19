@@ -221,7 +221,7 @@ export class PhoneTask extends EventEmitter {
   async #startModel(definitions) {
     this.modelStarted = performance.now();
     this.modelToolMilliseconds = this.snapshot.metrics.toolMilliseconds;
-    const instructions = [this.poki.instructions, await readFile(new URL('./skills/iphone-unlock/SKILL.md', import.meta.url), 'utf8'), await readFile(new URL('./prompts/call-draft.md', import.meta.url), 'utf8'), await readFile(new URL('./prompts/pi-app.md', import.meta.url), 'utf8')].join('\n\n');
+    const instructions = [await readFile(new URL('./prompts/pi-app.md', import.meta.url), 'utf8'), this.poki.instructions, await readFile(new URL('./prompts/call-draft.md', import.meta.url), 'utf8'), await readFile(new URL('./skills/iphone-unlock/SKILL.md', import.meta.url), 'utf8')].join('\n\n');
     const dynamicTools = definitions.filter(tool => allowedTools.has(tool.name) && !['poki_mcp_status', 'get_foreground_app'].includes(tool.name)).map(tool => ({
       type: 'function', name: tool.name, description: tool.description + (!observations.has(tool.name) ? '\nA successful action also returns a fresh structured observation, including foreground and element refs. Use it before requesting another observation.' : ''), inputSchema: tool.inputSchema,
     }));

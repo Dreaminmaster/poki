@@ -170,7 +170,7 @@ jobs:
             echo
             if [ -n "$prev" ] && git merge-base --is-ancestor "$prev" HEAD 2>/dev/null; then
               echo "### Changes since $prev"
-              git log --no-merges --format='- %s (%h)' "$prev..HEAD" | head -80
+              git log --no-merges --max-count=80 --format='- %s (%h)' "$prev..HEAD"
             fi
           } > notes.md
           cat notes.md

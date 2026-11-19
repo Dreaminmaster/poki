@@ -13,6 +13,12 @@ import Foundation
 // Notes are short facts the agent or the owner saves ("Mom is the contact Mama"). Both live in one
 // JSON file in the app's own storage; a copy in Documents/AgentBackup is what Poki Setup backs up.
 // Typed text is a parameter of the routine; text typed into a password field is never stored.
+//
+// The owner can lock a note or a routine on the Memory page: no agent changes, replaces or forgets a
+// locked one, and the caps never drop it. Every addition, change and forget is logged (the page's
+// Recent Updates), and a change can be undone; a forgotten item is kept in its log entry so undo puts
+// it back exactly. Fields added after the first release are optional, so a file written before them
+// opens with everything in it.
 
 /// What a step acts on, as it was found when the step was recorded.
 public struct RoutineTarget: Codable, Equatable, Sendable {
@@ -128,8 +134,11 @@ public struct Routine: Codable, Equatable, Sendable {
     public var savedBy: String
     public var created: Date
     public var updated: Date
+    /// Locked by the owner: no agent saves over it, edits, renames or forgets it.
+    public var locked: Bool? = nil
 
     public var stale: Bool { failuresInARow >= 2 }
+    public var isLocked: Bool { locked == true }
     public var summary: String {
         "\(name): \(description.isEmpty ? "" : description + "; ")\(app.map { "in \($0), " } ?? "")\(steps.count) steps, \(runs) runs, \(ok) ok\((fixes ?? 0) > 0 ? ", \(fixes ?? 0) fixed on the way" : "")\(stale ? ", STALE (stopped \(failuresInARow) times in a row\(lastStop.map { " at step \($0.step): \($0.why)" } ?? ""))" : "")\(params.isEmpty ? "" : ", with: " + params.keys.sorted().map { "\($0) (recorded \"\(params[$0]!.prefix(30))\")" }.joined(separator: ", "))"
     }
@@ -140,6 +149,47 @@ public struct MemoryNote: Codable, Equatable, Sendable {
     public var text: String
     public var by: String
     public var at: Date
+    /// Locked by the owner: no agent changes or forgets it.
+    public var locked: Bool? = nil
+    /// The app it is about (the Memory page's Used In); nil: no one app.
+    public var app: String? = nil
+    /// The conversation Poki's chat heard it in.
+    public var heard: NoteOrigin? = nil
+    /// When the owner last changed it.
+    public var edited: Date? = nil
+
+    public var isLocked: Bool { locked == true }
+}
+
+/// Where a note was heard: a saved conversation, and the app in front then.
+public struct NoteOrigin: Codable, Equatable, Sendable {
+    public var session: String
+    public var app: String?
+    public init(session: String, app: String?) { self.session = session; self.app = app }
+}
+
+/// One addition, change or forget, for Recent Updates and undo.
+public struct MemoryChangeRecord: Codable, Equatable, Sendable {
+    /// "added", "edited" or "forgot" (a string, so a later kind never makes the file unreadable).
+    public var action: String
+    public var id: String
+    public var at: Date
+    /// "owner", or the agent's name ("Poki", an MCP client's).
+    public var by: String
+    /// The note after the change, or as it was when forgotten.
+    public var note: MemoryNote?
+    /// A routine's name after the change (and `app`); `routine` is the whole routine as it was before
+    /// a forget or a change, to put back.
+    public var routineName: String?
+    public var routineApp: String?
+    public var routine: Routine?
+    /// An edit's text, or a rename's name, before.
+    public var previous: String?
+    /// The note as it was before an edit (its app, source and lock too), to put back.
+    public var before: MemoryNote?
+    public var undone: Bool?
+
+    public static let added = "added", edited = "edited", forgot = "forgot"
 }
 
 /// One routine run, for the maintainers' log bundle.
@@ -162,13 +212,20 @@ struct MemoryFile: Codable {
     var runs: [RoutineRunLog] = []
     /// What the app adds to a backup (its saved sessions), opaque here.
     var extras: [String: JSON]?
+    /// The latest changes, newest first. Kept on the phone only: an export leaves them out, since a
+    /// forgotten note's text lives on in its entry until it falls off the end.
+    var changes: [MemoryChangeRecord]? = nil
 }
 
 /// The agent's memory: thread-safe, saved to one file after every change.
 public final class RoutineStore: @unchecked Sendable {
     public static let schema = "poki.agent-backup/1"
     public static let backupName = "poki-agent-backup.json"
-    static let maxNotes = 50, maxRoutines = 200, maxRuns = 50, maxNoteLength = 300
+    static let maxNotes = 50, maxRoutines = 200, maxRuns = 50, maxNoteLength = 300, maxChanges = 100
+    /// Who the Memory page writes as.
+    public static let owner = "owner"
+    /// The names that are not an agent's: the owner, a file the owner imported or restored, and Dream.
+    static func isReserved(_ name: String) -> Bool { [owner, "import", "restore", "dream"].contains(name.lowercased()) }
 
     private let lock = NSLock()
     private var file = MemoryFile()
@@ -181,8 +238,14 @@ public final class RoutineStore: @unchecked Sendable {
     public init(url: URL?, backupDirectory: URL? = nil) {
         self.url = url
         self.backupDirectory = backupDirectory
-        if let url, let data = try? Data(contentsOf: url), let saved = try? Self.decoder.decode(MemoryFile.self, from: data) {
-            file = saved
+        if let url, let data = try? Data(contentsOf: url) {
+            if let saved = try? Self.decoder.decode(MemoryFile.self, from: data) {
+                file = saved
+            } else {
+                // A file this version cannot read is set aside, not written over with an empty memory.
+                let aside = url.deletingPathExtension().appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970)).json")
+                try? FileManager.default.copyItem(at: url, to: aside)
+            }
         }
         if let backupDirectory { lastBackupHash = try? String(contentsOf: backupDirectory.appendingPathComponent(".last-written"), encoding: .utf8) }
     }
@@ -261,6 +324,11 @@ public final class RoutineStore: @unchecked Sendable {
 
     public var routines: [Routine] { withFile { $0.routines } }
     public var notes: [MemoryNote] { withFile { $0.notes } }
+    /// The latest changes, newest first.
+    public var changes: [MemoryChangeRecord] { withFile { $0.changes ?? [] } }
+    public func note(_ idOrText: String) -> MemoryNote? {
+        withFile { f in f.notes.first { $0.id == idOrText || $0.text.caseInsensitiveCompare(idOrText) == .orderedSame } }
+    }
     public var runLog: [RoutineRunLog] { withFile { $0.runs } }
     public func routine(named name: String) -> Routine? {
         withFile { f in f.routines.first { $0.name.caseInsensitiveCompare(name) == .orderedSame } }
@@ -268,75 +336,193 @@ public final class RoutineStore: @unchecked Sendable {
 
     // MARK: Changing
 
-    public func save(_ routine: Routine) {
+    /// Saves a routine, over one with the same name unless that one is locked and this is not the
+    /// owner's. False when it was not saved.
+    @discardableResult
+    public func save(_ routine: Routine) -> Bool {
         withFile(true) { f in
             var r = routine
             if let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(routine.name) == .orderedSame }) {
                 let old = f.routines[i]
+                guard !old.isLocked || routine.savedBy == Self.owner else { return false }
                 r.created = old.created
+                r.locked = old.locked
                 // A routine saved again after it stopped is the path that worked: its record starts over.
                 if old.steps == r.steps { r.runs = old.runs; r.ok = old.ok; r.failuresInARow = old.failuresInARow; r.lastStop = old.lastStop }
                 f.routines[i] = r
+                Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.edited, id: Self.newID(), at: Date(), by: routine.savedBy,
+                                                routineName: r.name, routineApp: r.app, routine: old))
             } else {
                 f.routines.append(r)
-                if f.routines.count > Self.maxRoutines { f.routines.removeFirst(f.routines.count - Self.maxRoutines) }
+                Self.trim(&f.routines, to: Self.maxRoutines, keeping: \.isLocked)
+                Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.added, id: Self.newID(), at: Date(), by: routine.savedBy,
+                                                routineName: r.name, routineApp: r.app))
             }
-        }
-    }
-
-    @discardableResult
-    public func forget(_ name: String) -> Bool {
-        withFile(true) { f in
-            let before = f.routines.count
-            f.routines.removeAll { $0.name.caseInsensitiveCompare(name) == .orderedSame }
-            return f.routines.count != before
-        }
-    }
-
-    @discardableResult
-    public func rename(_ name: String, to new: String) -> Bool {
-        withFile(true) { f in
-            guard let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { return false }
-            f.routines[i].name = new
-            f.routines[i].updated = Date()
             return true
         }
     }
 
-    public func update(_ name: String, _ change: (inout Routine) -> Void) {
+    /// Forgets a routine; an agent cannot forget a locked one. The log keeps it for undo.
+    @discardableResult
+    public func forget(_ name: String, by: String = RoutineStore.owner) -> Bool {
         withFile(true) { f in
-            guard let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { return }
-            change(&f.routines[i])
+            guard let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }),
+                  !f.routines[i].isLocked || by == Self.owner else { return false }
+            let old = f.routines.remove(at: i)
+            Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.forgot, id: Self.newID(), at: Date(), by: by,
+                                            routineName: old.name, routineApp: old.app, routine: old))
+            return true
         }
     }
 
+    /// Renames a routine; an agent cannot rename a locked one, and the owner's rename locks it.
     @discardableResult
-    public func remember(_ text: String, by: String) -> MemoryNote? {
+    public func rename(_ name: String, to new: String, by: String = RoutineStore.owner) -> Bool {
+        withFile(true) { f in
+            guard let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }),
+                  !f.routines[i].isLocked || by == Self.owner,
+                  // Not onto another routine's name, which would hide that one.
+                  !f.routines.indices.contains(where: { $0 != i && f.routines[$0].name.caseInsensitiveCompare(new) == .orderedSame }) else { return false }
+            let old = f.routines[i]
+            f.routines[i].name = new
+            f.routines[i].updated = Date()
+            if by == Self.owner { f.routines[i].locked = true }
+            Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.edited, id: Self.newID(), at: Date(), by: by,
+                                            routineName: new, routineApp: old.app, routine: old, previous: old.name))
+            return true
+        }
+    }
+
+    /// Changes a routine in place. With `by`, it is an edit: logged, and refused for an agent when
+    /// the routine is locked. Without, it is the run's own bookkeeping (counts, the last stop).
+    @discardableResult
+    public func update(_ name: String, by: String? = nil, _ change: (inout Routine) -> Void) -> Bool {
+        withFile(true) { f in
+            guard let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { return false }
+            guard let by else { change(&f.routines[i]); return true }
+            guard !f.routines[i].isLocked || by == Self.owner else { return false }
+            let old = f.routines[i]
+            change(&f.routines[i])
+            Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.edited, id: Self.newID(), at: Date(), by: by,
+                                            routineName: f.routines[i].name, routineApp: f.routines[i].app, routine: old))
+            return true
+        }
+    }
+
+    /// Locks or unlocks a note (by id) or a routine (by name). Only the Memory page calls it.
+    public func setLocked(_ idOrName: String, _ locked: Bool) {
+        withFile(true) { f in
+            if let i = f.notes.firstIndex(where: { $0.id == idOrName }) { f.notes[i].locked = locked ? true : nil }
+            else if let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(idOrName) == .orderedSame }) { f.routines[i].locked = locked ? true : nil }
+        }
+    }
+
+    /// Keeps a note. The same text again answers the note already kept. `heard` is the conversation
+    /// it came up in; the owner's own notes come locked.
+    @discardableResult
+    public func remember(_ text: String, by: String, app: String? = nil, heard: NoteOrigin? = nil, locked: Bool = false) -> MemoryNote? {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return nil }
         return withFile(true) { f in
             if let same = f.notes.first(where: { $0.text.caseInsensitiveCompare(clean) == .orderedSame }) { return same }
-            let note = MemoryNote(id: String(UUID().uuidString.prefix(8)).lowercased(), text: String(clean.prefix(Self.maxNoteLength)), by: by, at: Date())
+            let note = MemoryNote(id: String(UUID().uuidString.prefix(8)).lowercased(), text: String(clean.prefix(Self.maxNoteLength)), by: by, at: Date(),
+                                  locked: locked ? true : nil, app: app, heard: heard)
             f.notes.append(note)
-            if f.notes.count > Self.maxNotes { f.notes.removeFirst(f.notes.count - Self.maxNotes) }
+            Self.trim(&f.notes, to: Self.maxNotes, keeping: \.isLocked)
+            Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.added, id: Self.newID(), at: Date(), by: by, note: note))
             return note
         }
     }
 
+    /// Forgets a note; an agent cannot forget a locked one. The log keeps it for undo.
     @discardableResult
-    public func forgetNote(_ idOrText: String) -> Bool {
+    public func forgetNote(_ idOrText: String, by: String = RoutineStore.owner) -> Bool {
         withFile(true) { f in
-            let before = f.notes.count
-            f.notes.removeAll { $0.id == idOrText || $0.text.caseInsensitiveCompare(idOrText) == .orderedSame }
-            return f.notes.count != before
+            guard let i = f.notes.firstIndex(where: { $0.id == idOrText || $0.text.caseInsensitiveCompare(idOrText) == .orderedSame }),
+                  !f.notes[i].isLocked || by == Self.owner else { return false }
+            let old = f.notes.remove(at: i)
+            Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.forgot, id: Self.newID(), at: Date(), by: by, note: old))
+            return true
         }
     }
 
-    public func editNote(_ id: String, text: String) {
+    /// The owner's change to a note: its text and app. It locks, and no longer links to where it was
+    /// heard, since the words are now the owner's.
+    public func editNote(_ id: String, text: String, app: String?? = .none) {
         withFile(true) { f in
             guard let i = f.notes.firstIndex(where: { $0.id == id }) else { return }
+            let old = f.notes[i]
             f.notes[i].text = String(text.prefix(Self.maxNoteLength))
+            if case .some(let app) = app { f.notes[i].app = app }
+            f.notes[i].locked = true
+            f.notes[i].heard = nil
+            f.notes[i].edited = Date()
+            Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.edited, id: Self.newID(), at: Date(), by: Self.owner, note: f.notes[i],
+                                            previous: old.text == f.notes[i].text ? nil : old.text, before: old))
         }
+    }
+
+    /// Puts back what a change took away or changed, and marks it undone. Undoing an agent's change
+    /// locks the item, so the agent does not make it again. False when there is nothing to put back
+    /// (already undone, or the item is gone or its place taken).
+    @discardableResult
+    public func undo(_ changeID: String) -> Bool {
+        withFile(true) { f in
+            guard var changes = f.changes, let c = changes.firstIndex(where: { $0.id == changeID }), changes[c].undone != true else { return false }
+            let change = changes[c]
+            let locks: Bool? = change.by == Self.owner ? nil : true
+            func routineIndex(_ name: String?) -> Int? { name.flatMap { n in f.routines.firstIndex { $0.name.caseInsensitiveCompare(n) == .orderedSame } } }
+            switch (change.action, change.note, change.routine) {
+            case (MemoryChangeRecord.forgot, var note?, _):
+                guard !f.notes.contains(where: { $0.id == note.id || $0.text.caseInsensitiveCompare(note.text) == .orderedSame }) else { return false }
+                if let locks { note.locked = locks }
+                f.notes.append(note)
+            case (MemoryChangeRecord.forgot, nil, var routine?):
+                guard routineIndex(routine.name) == nil else { return false }
+                if let locks { routine.locked = locks }
+                f.routines.append(routine)
+            case (MemoryChangeRecord.added, let note?, _):
+                guard let i = f.notes.firstIndex(where: { $0.id == note.id }) else { return false }
+                f.notes.remove(at: i)
+            case (MemoryChangeRecord.added, nil, _):
+                guard let i = routineIndex(change.routineName) else { return false }
+                f.routines.remove(at: i)
+            case (MemoryChangeRecord.edited, let note?, _):
+                guard let i = f.notes.firstIndex(where: { $0.id == note.id }) else { return false }
+                if var old = change.before {
+                    if let locks { old.locked = locks }
+                    f.notes[i] = old
+                } else {
+                    // An entry with only the text before (an agent's edit).
+                    guard let previous = change.previous else { return false }
+                    f.notes[i].text = previous
+                    if let locks { f.notes[i].locked = locks }
+                }
+            case (MemoryChangeRecord.edited, nil, var routine?):
+                guard let i = routineIndex(change.routineName) else { return false }
+                routine.locked = locks ?? f.routines[i].locked
+                f.routines[i] = routine
+            default:
+                return false
+            }
+            changes[c].undone = true
+            f.changes = changes
+            return true
+        }
+    }
+
+    private static func log(_ f: inout MemoryFile, _ change: MemoryChangeRecord) {
+        var changes = f.changes ?? []
+        changes.insert(change, at: 0)
+        if changes.count > maxChanges { changes.removeLast(changes.count - maxChanges) }
+        f.changes = changes
+    }
+
+    private static func newID() -> String { UUID().uuidString.lowercased() }
+
+    /// Drops the oldest unlocked items over the cap; locked ones are never dropped.
+    private static func trim<T>(_ items: inout [T], to cap: Int, keeping kept: (T) -> Bool) {
+        while items.count > cap, let i = items.firstIndex(where: { !kept($0) }) { items.remove(at: i) }
     }
 
     func logRun(_ log: RoutineRunLog) {
@@ -360,6 +546,7 @@ public final class RoutineStore: @unchecked Sendable {
         snapshot.schema = Self.schema
         snapshot.exported = Date()
         snapshot.extras = includeExtras ? extrasProvider?() : nil
+        snapshot.changes = nil
         return try Self.encoder.encode(snapshot)
     }
 
@@ -373,16 +560,25 @@ public final class RoutineStore: @unchecked Sendable {
         guard incoming.schema.hasPrefix("poki.agent-backup/") else { throw ImportError("not a Poki agent backup (schema \(incoming.schema))") }
         guard incoming.schema == Self.schema else { throw ImportError("a backup of a newer Poki (\(incoming.schema)); update Poki to import it") }
         var added = 0, replaced = 0, kept = 0, notes = 0
+        // An agent's import brings what it says, but not the owner's say: nothing comes locked, and
+        // nothing claims to be the owner's, an import's or Dream's. A note's "edited" and "heard"
+        // are the owner's change and one of our own conversations, so they are not carried either.
+        let agent = !Self.isReserved(by)
         withFile(true) { f in
-            for r in incoming.routines where !r.name.isEmpty {
+            for var r in incoming.routines where !r.name.isEmpty {
+                if agent { r.locked = nil; if Self.isReserved(r.savedBy) { r.savedBy = by } }
                 if let i = f.routines.firstIndex(where: { $0.name.caseInsensitiveCompare(r.name) == .orderedSame }) {
-                    if r.updated > f.routines[i].updated { f.routines[i] = r; replaced += 1 } else { kept += 1 }
+                    // The owner locked ours: a newer copy from elsewhere does not replace it.
+                    if r.updated > f.routines[i].updated, !f.routines[i].isLocked { f.routines[i] = r; replaced += 1 } else { kept += 1 }
                 } else { f.routines.append(r); added += 1 }
             }
-            for n in incoming.notes where !f.notes.contains(where: { $0.text.caseInsensitiveCompare(n.text) == .orderedSame }) {
+            for var n in incoming.notes where !f.notes.contains(where: { $0.text.caseInsensitiveCompare(n.text) == .orderedSame }) {
+                if agent { n.locked = nil; n.edited = nil; n.heard = nil; if Self.isReserved(n.by) { n.by = by } }
+                // Another note's id would make forgetting or undoing by id reach the wrong one.
+                if f.notes.contains(where: { $0.id == n.id }) { n.id = String(UUID().uuidString.prefix(8)).lowercased() }
                 f.notes.append(n); notes += 1
             }
-            if f.notes.count > Self.maxNotes { f.notes.removeFirst(f.notes.count - Self.maxNotes) }
+            Self.trim(&f.notes, to: Self.maxNotes, keeping: \.isLocked)
         }
         if let extras = incoming.extras, !extras.isEmpty { extrasRestorer?(extras) }
         return "imported: \(added) routines added, \(replaced) replaced by newer ones, \(kept) kept (ours were newer), \(notes) notes added\(incoming.extras?.isEmpty == false ? ", and the app's saved sessions" : "")"
@@ -732,6 +928,10 @@ extension Computer {
             } catch { throw stop(0, "\(app) could not be launched (\(error))") }
         }
 
+        /// No input goes into Poki, where the approval card and the approval settings are: a step that
+        /// would send it there stops the run, as a do sending it there is refused.
+        let inPoki = "Poki is in front, and \(CoreConfig.ownAppRefusal). Leave Poki first ({button: \"home\"} or {launch: \"bundle id\"})"
+
         var previous: String?
         /// What may be closed when it is in the way: what the step remembers, then what the path allows.
         let allowed = (routine.dismiss ?? []).map { RoutineTarget(type: RoutineTarget.anyType, label: $0) }
@@ -746,6 +946,8 @@ extension Computer {
             // Each step is held by the rules a do is held by, on the screen it lands on: a step the owner
             // must approve is theirs, and the run hands it back rather than send it.
             var scan: SensitiveScan?
+            /// The screen this step lands on was read for it, so `front` is the app really in front.
+            var read = false
             if let target = step.target {
                 // Wait for the target, alone, on screen; after a step that changed nothing yet, give the
                 // screen a moment to move on so the same label on the old screen is not taken for it.
@@ -847,6 +1049,7 @@ extension Computer {
                         found = element
                         break attempts
                     case .clear(let element):
+                        if config.isPoki(lastForeground) { throw stop(index, "\(why); \(inPoki)") }
                         // Closing it is a tap like any other: what the owner must approve stays theirs.
                         refs[Self.runRef] = element
                         let tap: JSON = ["tap": .number(Double(Self.runRef))]
@@ -906,6 +1109,7 @@ extension Computer {
                 refs[Self.runRef] = element
                 action = Self.replacingTarget(action, with: Self.runRef)
                 front = lastForeground
+                read = true
                 scan = SensitiveScan(front: lastForeground, secureOnScreen: lastAll.contains(where: \.isSecure))
             } else if config.sensitive.enabled, ActionKind(action)?.movesScreen == true {
                 // A step recorded without an element (a point, a key, a swipe) is judged on the screen read
@@ -915,8 +1119,19 @@ extension Computer {
                     lastAll = tree.elements
                     lastForeground = tree.foreground
                     front = tree.foreground ?? front
+                    read = true
                     let elements = listable(tree.elements, screen)
                     scan = SensitiveScan(front: front, secureOnScreen: elements.contains(where: \.isSecure), elements: elements)
+                }
+            }
+            if ActionKind(action)?.movesScreen == true {
+                // Not read for this step: a launch may not have opened what it named, so the runner says.
+                if !read, let info = try? await runner.raw("GET", "/wda/activeAppInfo", timeout: 1.5, countsAsMiss: false), let bundle = info["bundleId"]?.string, !bundle.isEmpty {
+                    front = Foreground(bundleID: bundle, name: info["name"]?.string)
+                }
+                if config.isPoki(front) {
+                    refs[Self.runRef] = nil
+                    throw stop(index, inPoki)
                 }
             }
             if var scan, let reason = sensitive(action, &scan) {
@@ -1102,19 +1317,24 @@ extension PokiCore {
         ], "required": ["action"], "additionalProperties": false],
     ]
 
-    func routinesCall(_ args: JSON, session: String?) -> ToolResult {
+    /// `conversation` is the app's saved conversation the call came from (Poki's own chat), kept with a
+    /// note as where it was heard.
+    func routinesCall(_ args: JSON, session: String?, conversation: String? = nil) -> ToolResult {
         guard let store = computer.memory else { return ToolResult(text: "routines: no memory on this phone", jpeg: nil, isError: true) }
         let action = args["action"]?.string ?? "list"
         let name = args["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let by = session == nil ? "Poki" : (clientNames.value[session!].flatMap { $0.isEmpty ? nil : $0 } ?? "an MCP client")
+        // A client's own name never passes for the owner, an import or Dream: those are the app's own.
+        let named = session.flatMap { clientNames.value[$0] }.flatMap { $0.isEmpty || RoutineStore.isReserved($0) ? nil : $0 }
+        let by = session == nil ? "Poki" : named ?? "an MCP client"
         func fail(_ text: String) -> ToolResult { ToolResult(text: "routines \(action): \(text)", jpeg: nil, isError: true) }
+        let locked = "is locked by the owner: only they change or forget it, on Poki's Memory page"
         switch action {
         case "list":
             let routines = store.routines, notes = store.notes
-            var lines = ["routines (\(routines.count)):"] + routines.map { "- \($0.summary)" }
+            var lines = ["routines (\(routines.count)):"] + routines.map { "- \($0.summary)\($0.isLocked ? " (locked)" : "")" }
             if routines.isEmpty { lines = ["routines: none saved yet. After a task that worked, routines {action: \"save\", name, description} keeps its steps so do {run: name} repeats them in one call."] }
             lines.append(notes.isEmpty ? "notes: none" : "notes (\(notes.count)):")
-            lines += notes.map { "- [\($0.id)] \($0.text) (by \($0.by))" }
+            lines += notes.map { "- [\($0.id)] \($0.text) (by \($0.by)\($0.isLocked ? ", locked" : ""))" }
             if !computer.trace.isEmpty { lines.append("this task has \(computer.trace.count) recorded steps so far (save keeps them)") }
             return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil)
         case "show":
@@ -1136,33 +1356,42 @@ extension PokiCore {
             let (routine, note) = computer.routine(named: name, description: args["description"]?.string ?? store.routine(named: name)?.description ?? "", read: read, expect: expect, by: by)
             guard let routine else { return fail(note) }
             let replacing = store.routine(named: name) != nil
-            store.save(routine)
+            guard store.save(routine) else { return fail("\"\(name)\" \(locked); save this one under another name") }
             return ToolResult(text: "routines: \(replacing ? "saved over" : "saved") \"\(routine.name)\" (\(routine.steps.count) steps\(routine.app.map { " in \($0)" } ?? "")\(routine.params.isEmpty ? "" : "; it types " + routine.params.keys.sorted().joined(separator: ", ") + ", which with: changes")\(routine.expect.isEmpty ? "" : "; end check: " + routine.expect.map { "\"\($0)\"" }.joined(separator: ", "))). do {run: \"\(routine.name)\"} repeats it.\(note.isEmpty ? "" : " Note: \(note).")", jpeg: nil)
         case "edit":
-            guard store.routine(named: name) != nil else { return fail("no routine named \"\(name)\"") }
+            guard let current = store.routine(named: name) else { return fail("no routine named \"\(name)\"") }
+            guard !current.isLocked else { return fail("\"\(name)\" \(locked)") }
             var newSteps: [RoutineStep]?
             if let text = args["steps"]?.string {
                 guard let steps = try? RoutineStore.decoder.decode([RoutineStep].self, from: Data(text.utf8)), !steps.isEmpty else { return fail("steps must be the JSON array show gives") }
                 newSteps = steps
             }
-            store.update(name) { r in
+            store.update(name, by: by) { r in
                 if let d = args["description"]?.string { r.description = d }
                 if let e = args["expect"]?.array { r.expect = e.compactMap(\.string) }
                 if let e = args["read"]?.array { r.read = e.compactMap(\.string) }
                 if let steps = newSteps { r.steps = steps; r.failuresInARow = 0; r.lastStop = nil }
                 r.updated = Date()
             }
-            if let rename = args["rename"]?.string, !rename.isEmpty { store.rename(name, to: rename) }
+            if let rename = args["rename"]?.string, !rename.isEmpty, !store.rename(name, to: rename, by: by) {
+                return fail("edited \"\(name)\", but kept its name: \"\(rename)\" is another routine's")
+            }
             return ToolResult(text: "routines: edited \"\(args["rename"]?.string ?? name)\"", jpeg: nil)
         case "forget":
-            guard store.forget(name) else { return fail("no routine named \"\(name)\"") }
+            if store.routine(named: name)?.isLocked == true { return fail("\"\(name)\" \(locked)") }
+            guard store.forget(name, by: by) else { return fail("no routine named \"\(name)\"") }
             return ToolResult(text: "routines: forgot \"\(name)\"", jpeg: nil)
         case "remember":
             let text = args["text"]?.string ?? ""
-            guard let note = store.remember(text, by: by) else { return fail("give the text to remember") }
+            // Heard in a conversation of Poki's own: kept with it, and with the app in front then.
+            let front = computer.lastForeground.flatMap { f in computer.config.isPoki(f) || f.bundleID == "com.apple.springboard" ? nil : f.bundleID }
+            let heard = conversation.map { NoteOrigin(session: $0, app: front) }
+            guard let note = store.remember(text, by: by, heard: heard) else { return fail("give the text to remember") }
             return ToolResult(text: "routines: remembered [\(note.id)] \(note.text)", jpeg: nil)
         case "forget_note":
-            guard store.forgetNote(args["text"]?.string ?? name) else { return fail("no such note") }
+            let which = args["text"]?.string ?? name
+            if store.note(which)?.isLocked == true { return fail("that note \(locked)") }
+            guard store.forgetNote(which, by: by) else { return fail("no such note") }
             return ToolResult(text: "routines: note forgotten", jpeg: nil)
         case "export":
             guard let data = try? store.exportData() else { return fail("could not be made") }

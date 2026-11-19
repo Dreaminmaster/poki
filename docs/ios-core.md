@@ -171,7 +171,7 @@ public enum CoreEvent: Sendable {
     case approvalRequested(Approval)          // id, app, summary, expires
     case approvalEnded(id: String, approved: Bool?)  // nil: expired
     case handoffRequested(id: String, kind: String, text: String?, app: String?)  // kind: passcode | password | verification | payment | other
-    case handoffEnded(id: String, how: String)       // "done" (the owner tapped Done) or "takenBack" ({handoff: false})
+    case handoffEnded(id: String, how: String)       // "done" (the owner tapped Done), "takenBack" ({handoff: false}), "replaced" (a new handoff), "taskEnded"
 }
 ```
 
@@ -184,9 +184,17 @@ there.
 
 The app shell maps `events` to the Live Activity and resolves approvals from the Live Activity's
 buttons (App Intents). The automation can never grant an approval. A `do` with other actions first
-withdraws the pending request, before anything of it is sent, so a tap on the Live Activity's Approve
-button lands on a request that is already gone. Only the same actions, sent again, wait for the
-decision.
+withdraws the pending request, and a grant not used yet, before anything of it is sent, so a tap on
+the Live Activity's Approve button lands on a request that is already gone. Only the same actions,
+sent again, wait for the decision. An approval covers those actions in the app in front and on the
+controls they named as the owner saw them: another app, or another type or text at the same number,
+asks again. Only a countdown in a label may run on: each time reading that changed (0:59, 1:02:03,
+59 s, 59 秒) must be lower than before and have gone down by the seconds between the read the owner
+was asked on and the latest read, within 2 s. A reading that went up by any amount asks again. Words such as left, remaining or in do not make a reading a countdown. A
+count, an amount, an account number, or a time of day that moved (10:30 to 14:30) asks again. The
+Voice tab (`clearTap`, and `tool` for its own `look` and `do`) withdraws only another request still
+waiting and leaves the agent's unused grant; the same actions it sends again keep their card. Ending the task (`finishTask`) releases any request,
+grant and handoff still open.
 
 ### Tools
 
@@ -212,6 +220,9 @@ Each answer is facts only: the app in front, numbered elements, what each action
   picture-only change says how much and where (`in 3 % of it, within [372, 110, 13, 690]`), so the
   long scroll indicator iOS draws beside a two-page list fading out (seen on the simulator after a
   drag: 2-3 % in a strip at the right edge) reads as what it is without a look at the picture.
+  When a single tap or long press is sent and the next read of the same app shows no change,
+  the answer also says `touch effect: unconfirmed`. Check the expected UI state before repeating
+  the action or moving on. The `sent` receipt is about the input request.
 - **The picture and the tree are of the same moment.** The screenshot is taken first (served apart
   from WDA's queue) and the tree after it; when the tree came over 0.6 s later and time is left, the
   picture is taken again after it (`note: the picture was taken again after the tree, which came
@@ -289,8 +300,8 @@ Each answer is facts only: the app in front, numbered elements, what each action
   passcode, password, verification, payment, other): a step the model will not do itself (a password,
   a human verification, a checkout it was told to leave) is shown on the phone in the Live Activity
   with a Done button (`handoffRequested`). Until the owner taps Done (`handoffDone(id:)`) or the model
-  sends `{handoff: false}`, no input is sent (`not_sent`, with the picture, so the model is never
-  blind), every `look` works, `status` shows `handoff: waiting (kind) since …`, and `{wait_until:
+  sends `{handoff: false}`, no input of the agent's is sent (`not_sent`, with the picture, so the
+  model is never blind; the Voice tab acts for the owner and is not held back), every `look` works, `status` shows `handoff: waiting (kind) since …`, and `{wait_until:
   {handoff_done: true, ms?}}` waits up to 10 s. The model is told to keep polling and go on with the
   task rather than end its work; the `handoff: done at …` line is reported once. When the model
   stands down is its own call (the owner, Nov 7 2026); PokiCore decides nothing but the sensitive
@@ -397,6 +408,17 @@ on the phone; the next first `look` of a task in that app names the saved routin
   soon as the tree has changed from what it was before the action and two reads in a row agree,
   bounded by the old fixed pause; the answer says "read after N ms". A tap keeps its fixed 0.45 s,
   since two tree reads cost about as much.
+- **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
+  is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
+  The owner locks a note or a routine: no agent forgets, edits, renames or saves over a locked one
+  (the answer says so), a newer import does not replace it, and the 50-note and 200-routine caps drop
+  the oldest unlocked items instead. An agent's import brings nothing locked and nothing marked as the
+  owner's, and a client named `owner`, `import`, `restore` or `Dream` is still an agent (its changes show
+  as "an MCP client"). Every addition, change and forget is logged (`changes`, the latest
+  100) and can be undone; a forgotten item stays in its entry so undo puts it back with the same id
+  and date. The log stays on the phone: `export` and the backup copy leave it out. These fields came
+  after the first release and are all optional, so an older file opens with everything in it; a file
+  that cannot be read at all is copied aside (`agent-memory.unreadable-<time>.json`), not written over.
 - **Moving and backing up**: `export` answers the whole memory as JSON (schema
   `poki.agent-backup/1`); `import {data}` merges one in (newer wins). The app keeps a copy at
   `Documents/AgentBackup/poki-agent-backup.json`, which Poki Setup copies off and puts back; a copy put
