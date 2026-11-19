@@ -173,6 +173,26 @@ final class PathTests: XCTestCase {
         XCTAssertEqual(app.page.value, 1)
     }
 
+    func testAPathReadsAsItsGoalOrItsSteps() {
+        let (core, _, _) = makeCore()
+        XCTAssertEqual(core.computer.label(["path": ["goal": "check the version", "steps": [["tap": "General"]]]]), "Run “check the version”")
+        XCTAssertEqual(core.computer.label(["path": ["steps": [["tap": "General"], ["tap": ["label": "About", "type": "Cell"]], ["swipe": "up"]]]]),
+                       "Tap “General”, then tap “About”, then swipe up")
+        XCTAssertEqual(core.computer.label(["path": [["long_press": "Photo"], ["tap": [200, 122]]]]), "Press and hold “Photo”, then tap at 200, 122")
+    }
+
+    func testASwipeInAPathTakesNoListNumber() async {
+        for step: JSON in [["swipe": ["direction": "up", "in": 3]], ["swipe": "up", "in": 3]] {
+            let wda = FakeWDA()
+            wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
+            let (core, _, _) = makeCore(wda)
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "General"], step]]]]])
+            XCTAssertTrue(result.text.contains("not in: a number from an earlier read"), "\(step): \(result.text)")
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "\(step): nothing was sent")
+        }
+    }
+
     func testADismissNamingAPaymentControlDoesNotPressIt() async {
         let wda = FakeWDA()
         wda.tree([Node("Button", "Pay", [16, 100, 358, 44])], app: "Shop")
