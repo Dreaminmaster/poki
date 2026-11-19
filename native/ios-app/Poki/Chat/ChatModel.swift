@@ -780,7 +780,8 @@ final class ChatModel {
     private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
         taskCalls.removeAll()
-        app.prepareForTask()
+        // Split View needs both apps before the first model tool runs.
+        if splitViewSession != nil { app.prepareForTask() }
         app.chatTaskBegan(splitViewSession: splitViewSession)
         // find_app and the task's icons see the phone's current apps.
         InstalledApps.shared.refreshSoon()
