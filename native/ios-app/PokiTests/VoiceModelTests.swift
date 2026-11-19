@@ -453,7 +453,7 @@ extension VoiceModelTests {
     /// Poki is still on the request. Between two steps it thinks and speaks, often longer than that
     /// wait, and the island said Done in the middle of a task that went on.
     func testATalksRunFinishesWhenItsTurnIsOverNotWhilePokiStillWorks() async throws {
-        let h = Harness(phoneTool: { _, _ in ("WeChat is open", false) })
+        let h = Harness(phoneTool: { _, _ in ("WeChat is open", false, nil) })
         let (activity, watcher) = following(h)
         activity.finishAfter = .milliseconds(20)
         await h.talk()
