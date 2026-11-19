@@ -208,7 +208,7 @@ struct ScreenHistorySettingsView: View {
                 } header: {
                     SettingsHeader("On Cellular")
                 } footer: {
-                    Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
+                    Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on and turn Confirm Before Run off. Then open the shortcut and choose your VPN in both Connect to VPN actions.")
                 }
             }
 
@@ -245,8 +245,9 @@ struct HistoryShortcutGuide: View {
     private let steps: [LocalizedStringKey] = [
         "Open Shortcuts and go to Automation.",
         "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately.",
+        "Add Set VPN, choose Connect and your VPN.",
         "Add Set Cellular Data and set it to Off.",
-        "If your VPN or proxy app is not always on, add its action that turns it on.",
+        "Add Set VPN again with the same VPN. With no network at all the first one may not start.",
         "Add Reconnect Poki from the actions of Poki.",
         "Add Set Cellular Data and set it to On.",
     ]

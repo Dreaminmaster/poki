@@ -14,7 +14,7 @@ final class HistoryReconnect: ObservableObject {
 
     static let port: UInt16 = 47684
     /// The shared shortcut with its Wi-Fi automation. The owner's link (2026-11-19).
-    static let shortcut = URL(string: "https://www.icloud.com/shortcuts/80f4a198196f45adbdc9b470816b8b23")!
+    static let shortcut = URL(string: "https://www.icloud.com/shortcuts/2895cc538ad14052beec392035796cac")!
 
     /// When a shortcut last asked, and whether a read came through.
     @Published private(set) var lastAt: Date? = UserDefaults.standard.object(forKey: "history.reconnect.at") as? Date
