@@ -112,8 +112,13 @@ struct ActivityPreview: View {
         case "code": AppLocalization.text(LocalizedStringResource("Pairing Code"))
         case "setup": AppLocalization.text(LocalizedStringResource("Setup"))
         case "voice": AppLocalization.text(LocalizedStringResource("Voice"))
+        case "voicethinking": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(StatusWord.thinking.text)"
+        case "voicespeaking": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(StatusWord.speaking.text)"
         case "voiceworking": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(AppLocalization.text(LocalizedStringResource("Working")))"
         case "voiceapproval": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(AppLocalization.text(LocalizedStringResource("Approval")))"
+        case "voicedeciding": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(AppLocalization.text(LocalizedStringResource("Approved")))"
+        case "voicehandoff": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(AppLocalization.text(LocalizedStringResource("Your Turn")))"
+        case "voicedone": "\(AppLocalization.text(LocalizedStringResource("Voice"))) › \(AppLocalization.text(LocalizedStringResource("Done")))"
         default: name.capitalized
         }
     }
@@ -225,17 +230,28 @@ struct ActivityPreview: View {
 
         var voice = PokiState(phase: .idle, headline: "Listening", thumbnailVersion: 0)
         voice.voice = .listening
+        var voiceThinking = PokiState(phase: .idle, headline: "Thinking", thumbnailVersion: 0)
+        voiceThinking.voice = .thinking
+        var voiceSpeaking = PokiState(phase: .idle, headline: "Speaking", thumbnailVersion: 0)
+        voiceSpeaking.voice = .speaking
         // A step of the talk has Poki in another app: Stop for the step, End for the talk.
         var voiceWorking = working
         voiceWorking.voice = .thinking
         // An approval during a talk keeps the card and the island to itself.
         var voiceApproval = approval
         voiceApproval.voice = .listening
+        var voiceDeciding = deciding
+        voiceDeciding.voice = .listening
+        var voiceHandoff = yourTurn
+        voiceHandoff.voice = .listening
+        var voiceDone = doneResult
+        voiceDone.voice = .listening
 
         let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice),
-                   ("voiceworking", voiceWorking), ("voiceapproval", voiceApproval),
+                   ("voicethinking", voiceThinking), ("voicespeaking", voiceSpeaking),
+                   ("voiceworking", voiceWorking), ("voiceapproval", voiceApproval), ("voicedeciding", voiceDeciding), ("voicehandoff", voiceHandoff), ("voicedone", voiceDone),
                    ("donejust", doneJust), ("donelong", doneLong), ("doneresult", doneResult), ("donetask", doneTask), ("yourturnjust", yourTurnJust), ("problemjust", problemJust),
                    ("codejust", codeJust), ("pairedjust", pairedJust)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.

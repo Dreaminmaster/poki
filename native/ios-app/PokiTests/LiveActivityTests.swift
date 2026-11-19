@@ -1,5 +1,6 @@
 import ActivityKit
 import Darwin
+import SwiftUI
 import UIKit
 import UserNotifications
 import XCTest
@@ -201,6 +202,71 @@ final class LiveActivityTests: XCTestCase {
             XCTAssertEqual(face.kicker, "Done")
             XCTAssertNil(face.event)
             XCTAssertEqual(face.subtitle, "Took 0:00")
+        }
+    }
+
+    /// ESP-981: in every voice state on the expanded Dynamic Island (listening, thinking, speaking,
+    /// working, approval, deciding, hand-off, done), both the bear and the words and controls stay
+    /// above the 12.33-point bottom strip that iOS clips away.
+    func testEveryVoiceStatesExpandedIslandKeepsTheBearAndControlsInsideTheSystemClip() throws {
+        let samples = ActivityPreview.makeSamples().filter { $0.0.hasPrefix("voice") }
+        XCTAssertEqual(samples.map(\.0), ["voice", "voicethinking", "voicespeaking", "voiceworking", "voiceapproval", "voicedeciding", "voicehandoff", "voicedone"])
+        let width = 374
+        let clip = Int(ActivityMetrics.islandClip)
+        let space = CGColorSpaceCreateDeviceRGB()
+
+        for locale in ["en", "zh-Hans"] {
+            AppLocalization.shared.preference = locale
+            for (name, sample) in samples {
+                var variants = [(name, sample)]
+                if sample.phase == .idle {
+                    var withEvent = sample
+                    withEvent.event = .init(kind: .started, text: "Started")
+                    variants.append(("\(name)+event", withEvent))
+                } else if sample.phase == .approval {
+                    var withStopAsking = sample
+                    withStopAsking.approval?.stopsWhenOff = true
+                    variants.append(("\(name)+stopAsking", withStopAsking))
+                }
+                for (label, state) in variants {
+                    let face = state.face
+                    let sizes = ActivityMetrics.sizes(face)
+                    let height = Int(sizes.island - ActivityMetrics.cameraRow)
+                    let split = Int(sizes.islandLeft)
+                    let view = IslandBottom(face: face)
+                        .dynamicTypeSize(...ActivityMetrics.largestType)
+                        .environment(\.isLuminanceReduced, true)
+                        .frame(width: CGFloat(width), height: CGFloat(height))
+                    let renderer = ImageRenderer(content: view)
+                    renderer.scale = 1
+                    let cgImage = try XCTUnwrap(renderer.cgImage, "\(locale) \(label)")
+                    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+                    let context = try XCTUnwrap(CGContext(
+                        data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                        space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    ))
+                    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+                    var bearVisible = 0, bearClipped = 0
+                    var wordsVisible = 0, wordsClipped = 0
+                    for y in 0..<height {
+                        let inBottomClip = y >= height - clip
+                        for x in 0..<width {
+                            let alpha = pixels[(y * width + x) * 4 + 3]
+                            guard alpha > 16 else { continue }
+                            if x < split {
+                                if inBottomClip { bearClipped += 1 } else { bearVisible += 1 }
+                            } else {
+                                if inBottomClip { wordsClipped += 1 } else { wordsVisible += 1 }
+                            }
+                        }
+                    }
+                    XCTAssertGreaterThan(bearVisible, 0, "\(locale) \(label): bear must render above the bottom clip")
+                    XCTAssertGreaterThan(wordsVisible, 0, "\(locale) \(label): words and controls must render above the bottom clip")
+                    XCTAssertEqual(wordsClipped, 0, "\(locale) \(label): words or buttons extend into the bottom \(clip)pt clip")
+                    XCTAssertEqual(bearClipped, 0, "\(locale) \(label): bear extends into the bottom \(clip)pt clip")
+                }
+            }
         }
     }
 

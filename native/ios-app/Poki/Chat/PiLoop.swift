@@ -25,6 +25,9 @@ final class PiLoop {
     private let agent: Agent
     private let allTools: [AgentTool]
     private let gate = StopGate()
+    /// A custom address's HTTP client, which repairs a doubled `data:` stream and keeps what the address
+    /// answered for the log.
+    private let endpoint: CustomEndpointClient?
     private let stall = StallWatch()
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
@@ -36,6 +39,8 @@ final class PiLoop {
         self.model = model
         self.inSplitView = inSplitView
         let gate = self.gate
+        let endpoint = provider == .custom ? CustomEndpointClient() : nil
+        self.endpoint = endpoint
         let stall = self.stall
         let grants = HistoryDeliveryGrants()
         let agentTools = tools.map { spec in
@@ -87,6 +92,8 @@ final class PiLoop {
                 if !allowed, getCurrentTools(messages).contains(where: { $0.name == "screen_history" }) {
                     messages.append(.system(SystemMessage(content: .text(""), toolsRemoved: [ToolReference(name: "screen_history")])))
                 }
+                var options = options
+                if let endpoint { options.httpClient = endpoint }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
             getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
@@ -164,6 +171,10 @@ final class PiLoop {
             }
         }
         if let message = failure.value {
+            if let seen = endpoint?.seen {
+                let key = ModelKeys.key(provider)
+                AppLog.shared.add("model", seen.summary(key: key) + ", failed: " + CustomEndpointClient.redacted(message, key: key))
+            }
             // The owner's message goes again with the next one, as with the direct clients.
             _ = agent.dropTrailingErroredAssistant()
             return .failed(Self.words(message, provider: provider))

@@ -3,8 +3,9 @@ import PiSwiftAI
 
 /// Test Connection on the key page: the smallest real request (a few tokens) through pi, the code and
 /// provider definitions the chat runs on, with the key, address and model on the page, saved or not.
-/// It writes nothing and logs nothing. The key goes only to its provider and never into the words: a
-/// server that repeats it has it replaced.
+/// It writes nothing. A failed test of a custom address logs what the address answered (its status and
+/// the start of its error, see `CustomEndpointClient`). The key goes only to its provider and never into
+/// the words or the log: a server that repeats it has it replaced.
 enum ConnectionCheck {
     /// How the test ended, in the owner's words.
     enum Result: Equatable {
@@ -56,7 +57,10 @@ enum ConnectionCheck {
             return .failed(status: nil, reason: nil)
         }
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let probe = Probe()
+        // A custom address goes through the client the chat uses for it, which repairs a doubled
+        // `data:` stream, so the test passes or fails as the chat would.
+        let endpoint = provider == .custom ? CustomEndpointClient() : nil
+        let probe = Probe(inner: endpoint ?? DefaultProviderHTTPClient())
         let cancel = CancellationToken()
         var options = SimpleStreamOptions()
         options.apiKey = key.isEmpty && provider == .custom ? "none" : key
@@ -88,15 +92,23 @@ enum ConnectionCheck {
             }
         }
         let seen = probe.seen
+        let ending = result(of: outcome, seen: seen, key: key, model: id, custom: provider == .custom)
+        if !ending.passed, let answered = endpoint?.seen {
+            AppLog.shared.add("model", "Test Connection, " + answered.summary(key: key))
+        }
+        return ending
+    }
+
+    private static func result(of outcome: Outcome, seen: Probe.Seen, key: String, model id: String, custom: Bool) -> Result {
         switch outcome {
         case .late:
             return .timedOut
         case .reply(let reply) where reply.stopReason != .error && reply.stopReason != .aborted:
             return .works(model: seen.servedModel ?? reply.responseModel ?? reply.model)
         case .reply(let reply):
-            return classify(seen, message: reply.errorMessage ?? "", key: key, model: id, custom: provider == .custom)
+            return classify(seen, message: reply.errorMessage ?? "", key: key, model: id, custom: custom)
         case .thrown(let message):
-            return classify(seen, message: message, key: key, model: id, custom: provider == .custom)
+            return classify(seen, message: message, key: key, model: id, custom: custom)
         }
     }
 
@@ -179,11 +191,15 @@ enum ConnectionCheck {
             }
         }
 
-        private let inner = DefaultProviderHTTPClient()
+        private let inner: any ProviderHTTPClient
         private let lock = NSLock()
         private var status: Int?
         private var failure: URLError.Code?
         private var head = Data()
+
+        init(inner: any ProviderHTTPClient = DefaultProviderHTTPClient()) {
+            self.inner = inner
+        }
 
         var seen: Seen {
             lock.withLock { Seen(status: status, failure: failure, body: String(decoding: head, as: UTF8.self)) }

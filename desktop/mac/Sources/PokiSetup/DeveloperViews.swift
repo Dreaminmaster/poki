@@ -15,7 +15,7 @@ struct GitHubAccountView: View {
     var body: some View {
         Form {
             HeroSection {
-                PageHero(symbol: "person.badge.key", title: "GitHub Account", subtitle: "Optional, for people developing Poki. Signed in, Poki Setup lists the test builds GitHub Actions makes and installs them.")
+                PageHero(symbol: "person.badge.key", title: localized("GitHub Account"), subtitle: localized("Optional, for people developing Poki. Signed in, Poki Setup lists the test builds GitHub Actions makes and installs them."))
             }
             if model.dev.signedIn {
                 signedIn
@@ -31,10 +31,10 @@ struct GitHubAccountView: View {
     }
 
     @ViewBuilder private var signedIn: some View {
-        Section("Account") {
-            LabeledContent("Signed In As") { Text(model.dev.login ?? "GitHub").foregroundStyle(.secondary).textSelection(.enabled) }
-            LabeledContent("Signed In With") { Text(sourceTitle).foregroundStyle(.secondary) }
-            LabeledContent("Repository") {
+        Section(localized("Account")) {
+            LabeledContent(localized("Signed In As")) { Text(model.dev.login ?? "GitHub").foregroundStyle(.secondary).textSelection(.enabled) }
+            LabeledContent(localized("Signed In With")) { Text(sourceTitle).foregroundStyle(.secondary) }
+            LabeledContent(localized("Repository")) {
                 if let url = URL(string: "https://github.com/\(model.dev.repo)") {
                     Link(model.dev.repo, destination: url)
                 }
@@ -42,76 +42,76 @@ struct GitHubAccountView: View {
         }
         Section {
             HStack {
-                Button("Sign Out…", role: .destructive) { confirmSignOut = true }
+                Button(localized("Sign Out…"), role: .destructive) { confirmSignOut = true }
                 Spacer()
-                Button("Open Test Builds") { model.page = .testBuilds }
+                Button(localized("Open Test Builds")) { model.page = .testBuilds }
                     .pokiProminentButton()
             }
         } footer: {
-            Text("Poki Setup keeps the GitHub sign-in in your Keychain and uses it only to read this repository's builds and pull requests.")
+            Text(localized("Poki Setup keeps the GitHub sign-in in your Keychain and uses it only to read this repository's builds and pull requests."))
                 .font(.footnote).foregroundStyle(.secondary)
         }
-        .confirmationDialog("Sign out of GitHub?", isPresented: $confirmSignOut) {
-            Button("Sign Out", role: .destructive) { Task { await model.signOutOfGitHub() } }
+        .confirmationDialog(localized("Sign out of GitHub?"), isPresented: $confirmSignOut) {
+            Button(localized("Sign Out"), role: .destructive) { Task { await model.signOutOfGitHub() } }
         } message: {
-            Text("Test builds stay on your devices. Renewals keep signing them while they are downloaded.")
+            Text(localized("Test builds stay on your devices. Renewals keep signing them while they are downloaded."))
         }
     }
 
     private var sourceTitle: String {
         switch model.dev.source {
-        case "cli": "GitHub CLI on this Mac"
-        case "token": "Token"
-        default: "GitHub sign-in"
+        case "cli": localized("GitHub CLI on this Mac")
+        case "token": localized("Token")
+        default: localized("GitHub sign-in")
         }
     }
 
     @ViewBuilder private var signIn: some View {
         Section {
             if let code = model.githubCode {
-                LabeledContent("Code") {
+                LabeledContent(localized("Code")) {
                     Text(code.userCode).font(.system(.title3, design: .monospaced).weight(.semibold)).textSelection(.enabled)
                 }
-                LabeledContent("Enter the code on GitHub") {
+                LabeledContent(localized("Enter the code on GitHub")) {
                     HStack {
                         ProgressView().controlSize(.small)
-                        Button("Copy Code and Open GitHub") {
+                        Button(localized("Copy Code and Open GitHub")) {
                             copyToPasteboard(code.userCode)
                             if let url = URL(string: code.verificationUri) { NSWorkspace.shared.open(url) }
                         }
-                        Button("Cancel") { model.cancelGitHubSignIn() }
+                        Button(localized("Cancel")) { model.cancelGitHubSignIn() }
                     }
                 }
             } else {
                 LabeledContent {
-                    Button("Sign In with GitHub") { Task { await model.signInToGitHub() } }
+                    Button(localized("Sign In with GitHub")) { Task { await model.signInToGitHub() } }
                         .pokiProminentButton()
                         .disabled(!model.dev.canSignIn)
                 } label: {
                     Text("GitHub")
-                    Text("Opens github.com to confirm a code")
+                    Text(localized("Opens github.com to confirm a code"))
                 }
                 if model.dev.cliAvailable {
                     LabeledContent {
-                        Button("Use GitHub CLI") { Task { await model.useGitHubCLI() } }
+                        Button(localized("Use GitHub CLI")) { Task { await model.useGitHubCLI() } }
                     } label: {
                         Text("GitHub CLI")
-                        Text("Uses the account gh is signed in to on this Mac")
+                        Text(localized("Uses the account gh is signed in to on this Mac"))
                     }
                 }
             }
         } header: {
-            Text("Sign In")
+            Text(localized("Sign In"))
         } footer: {
-            Text("The GitHub sign-in runs through Poki Preview Sign-in, a GitHub app that can only read the builds and pull requests of the Poki repository.")
+            Text(localized("The GitHub sign-in runs through Poki Preview Sign-in, a GitHub app that can only read the builds and pull requests of the Poki repository."))
                 .font(.footnote).foregroundStyle(.secondary)
         }
         Section {
-            SecureField("Token", text: $token, prompt: Text("github_pat_"))
+            SecureField(localized("Token"), text: $token, prompt: Text("github_pat_"))
             HStack {
                 Spacer()
                 if savingToken { ProgressView().controlSize(.small) }
-                Button("Use Token") {
+                Button(localized("Use Token")) {
                     Task {
                         savingToken = true
                         if await model.useGitHubToken(token) { token = "" }
@@ -121,9 +121,9 @@ struct GitHubAccountView: View {
                 .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty || savingToken)
             }
         } header: {
-            Text("Or Use a Token")
+            Text(localized("Or Use a Token"))
         } footer: {
-            Text("A fine-grained token with read access to Actions on the Poki repository is enough.")
+            Text(localized("A fine-grained token with read access to Actions on the Poki repository is enough."))
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
@@ -138,7 +138,7 @@ struct TestBuildsView: View {
     @EnvironmentObject var model: AppModel
     @State private var search = ""
     @State private var choosingIPA = false
-    @State private var failed: String?
+    @State private var failed: SetupMessage?
     @State private var confirmDelete = false
 
     private var installing: Bool { model.busyJobs.contains("install") }
@@ -147,19 +147,19 @@ struct TestBuildsView: View {
     var body: some View {
         Form {
             HeroSection {
-                PageHero(symbol: "hammer", title: "Test Builds", subtitle: "Builds of Poki from GitHub Actions, newest first. Install one on a device the way Install Poki installs a release.")
+                PageHero(symbol: "hammer", title: localized("Test Builds"), subtitle: localized("Builds of Poki from GitHub Actions, newest first. Install one on a device the way Install Poki installs a release."))
             }
             TestBuildTarget()
             if let steps = model.steps["install"], !steps.isEmpty, installing || failedStep(steps) {
-                Section("Installing") {
-                    JobProgress(steps: steps, running: installing, weights: JobProgress.install, doneTitle: "Poki is installed")
+                Section(localized("Installing")) {
+                    JobProgress(steps: steps, running: installing, weights: JobProgress.install, doneTitle: localized("Poki is installed"))
                 }
             }
             if let steps = model.steps["download"], !steps.isEmpty, downloading {
-                Section("Downloading") { JobProgress(steps: steps, running: downloading, doneTitle: "Downloaded") }
+                Section(localized("Downloading")) { JobProgress(steps: steps, running: downloading, doneTitle: localized("Downloaded")) }
             }
             if let failed {
-                Section { Text(failed).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+                Section { Text(failed.text).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             }
             TestBuildFilters(search: $search)
             buildsSection
@@ -183,16 +183,16 @@ struct TestBuildsView: View {
                 Button {
                     choosingIPA = true
                 } label: {
-                    Label("Install IPA File", systemImage: "doc.badge.arrow.up")
+                    Label(localized("Install IPA File"), systemImage: "doc.badge.arrow.up")
                 }
-                .help("Sign an IPA file from this Mac and install it on the device")
+                .help(localized("Sign an IPA file from this Mac and install it on the device"))
                 .disabled(installing || model.selectedPhone?.facts == nil || model.account?.signedIn != true)
                 Button {
                     Task { await model.refreshTestBuilds(fresh: true) }
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Label(localized("Refresh"), systemImage: "arrow.clockwise")
                 }
-                .help("Look for new builds on GitHub")
+                .help(localized("Look for new builds on GitHub"))
                 .keyboardShortcut("r")
                 .disabled(model.loadingTestBuilds)
             }
@@ -200,10 +200,10 @@ struct TestBuildsView: View {
         .fileImporter(isPresented: $choosingIPA, allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]) { r in
             if case .success(let url) = r { Task { await installFile(url) } }
         }
-        .confirmationDialog("Delete downloaded test builds?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { Task { await model.deleteTestBuildDownloads() } }
+        .confirmationDialog(localized("Delete downloaded test builds?"), isPresented: $confirmDelete) {
+            Button(localized("Delete"), role: .destructive) { Task { await model.deleteTestBuildDownloads() } }
         } message: {
-            Text("Installed builds stay on your devices. A renewal downloads its build again while GitHub still has it.")
+            Text(localized("Installed builds stay on your devices. A renewal downloads its build again while GitHub still has it."))
         }
     }
 
@@ -224,12 +224,12 @@ struct TestBuildsView: View {
             if model.testBuilds == nil, model.loadingTestBuilds {
                 HStack {
                     ProgressView().controlSize(.small)
-                    Text("Asking GitHub for builds").foregroundStyle(.secondary)
+                    Text(localized("Asking GitHub for builds")).foregroundStyle(.secondary)
                 }
             } else if let error = model.testBuildsError, model.testBuilds == nil {
                 Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
             } else if filtered.isEmpty {
-                Text(model.testBuilds?.total ?? 0 > 0 ? "No build matches the filters." : "GitHub has no test builds right now.")
+                Text(model.testBuilds?.total ?? 0 > 0 ? localized("No build matches the filters.") : localized("GitHub has no test builds right now."))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(filtered) { b in
@@ -238,11 +238,13 @@ struct TestBuildsView: View {
             }
         } header: {
             HStack {
-                Text("Builds")
+                Text(localized("Builds"))
                 Spacer()
                 if model.loadingTestBuilds { ProgressView().controlSize(.mini) }
                 if let l = model.testBuilds {
-                    Text("\(filtered.count) of \(l.total), checked \(Date(timeIntervalSince1970: TimeInterval(l.checkedAt)).formatted(date: .omitted, time: .shortened))")
+                    let checkedAt = Date(timeIntervalSince1970: TimeInterval(l.checkedAt))
+                    let time = checkedAt.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(SetupLocalization.shared.locale))
+                    Text(localized("\(filtered.count) of \(l.total), checked \(time)"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -250,17 +252,17 @@ struct TestBuildsView: View {
     }
 
     @ViewBuilder private var downloadsSection: some View {
-        Section("Downloads") {
-            LabeledContent("Downloaded Builds") {
+        Section(localized("Downloads")) {
+            LabeledContent(localized("Downloaded Builds")) {
                 HStack {
-                    Text(ByteCountFormatter.string(fromByteCount: model.dev.downloadsBytes, countStyle: .file)).foregroundStyle(.secondary)
-                    Button("Show in Finder") {
+                    Text(model.dev.downloadsBytes, format: .byteCount(style: .file)).foregroundStyle(.secondary)
+                    Button(localized("Show in Finder")) {
                         if let d = model.info?.dataDir {
                             let url = URL(fileURLWithPath: d).appendingPathComponent("cache/test-builds")
                             NSWorkspace.shared.open(FileManager.default.fileExists(atPath: url.path) ? url : URL(fileURLWithPath: d))
                         }
                     }
-                    Button("Delete…", role: .destructive) { confirmDelete = true }
+                    Button(localized("Delete…"), role: .destructive) { confirmDelete = true }
                         .disabled(model.dev.downloadsBytes == 0)
                 }
             }
@@ -270,35 +272,35 @@ struct TestBuildsView: View {
     private func install(_ b: TestBuild) async {
         failed = nil
         guard let target = model.selectedPhone, target.facts != nil else {
-            failed = "Connect the device to install on, and choose it above."
+            failed = .copy("Connect the device to install on, and choose it above.")
             return
         }
         do {
             let r = try await model.installTestBuild(b, udid: target.id)
-            model.banner = "Test build \(b.runNumber) is on \(r.record.phoneName). Open Poki to try it."
+            model.banner = .copy("Test build \(b.runNumber) is on \(r.record.phoneName). Open Poki to try it.")
         } catch {
-            failed = error.localizedDescription
+            failed = .verbatim(error.localizedDescription)
         }
     }
 
     private func download(_ b: TestBuild) async {
         failed = nil
-        do { try await model.downloadTestBuild(b) } catch { failed = error.localizedDescription }
+        do { try await model.downloadTestBuild(b) } catch { failed = .verbatim(error.localizedDescription) }
     }
 
     private func installFile(_ url: URL) async {
         failed = nil
         guard let target = model.selectedPhone, target.facts != nil else {
-            failed = "Connect the device to install on, and choose it above."
+            failed = .copy("Connect the device to install on, and choose it above.")
             return
         }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
             let r = try await model.install(udid: target.id, ipa: url, handOff: false)
-            model.banner = "\(url.lastPathComponent) is on \(r.record.phoneName)."
+            model.banner = .copy("\(url.lastPathComponent) is on \(r.record.phoneName).")
         } catch {
-            failed = error.localizedDescription
+            failed = .verbatim(error.localizedDescription)
         }
     }
 }
@@ -308,29 +310,29 @@ private struct TestBuildTarget: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        Section("Install On") {
+        Section(localized("Install On")) {
             if model.phones.isEmpty {
-                Label("Connect an iPhone or iPad with a cable to install a build.", systemImage: "cable.connector")
+                Label(localized("Connect an iPhone or iPad with a cable to install a build."), systemImage: "cable.connector")
                     .foregroundStyle(.secondary)
             } else {
-                Picker("Device", selection: Binding(get: { model.selectedPhone?.id ?? "" }, set: { model.selectedUDID = $0 })) {
+                Picker(localized("Device"), selection: Binding(get: { model.selectedPhone?.id ?? "" }, set: { model.selectedUDID = $0 })) {
                     ForEach(model.phones) { Text($0.title).tag($0.id) }
                 }
                 if let row = model.selectedPhone {
-                    LabeledContent("Has Now") { Text(current(row)).foregroundStyle(.secondary) }
+                    LabeledContent(localized("Has Now")) { Text(current(row)).foregroundStyle(.secondary) }
                 }
             }
             if model.account?.signedIn != true {
-                LabeledContent("Sign in with the Apple Account that signs Poki") {
-                    Button("Sign In…") { model.page = .account }
+                LabeledContent(localized("Sign in with the Apple Account that signs Poki")) {
+                    Button(localized("Sign In…")) { model.page = .account }
                 }
             }
         }
     }
 
     private func current(_ row: PhoneRow) -> String {
-        guard let r = row.record ?? model.records.first(where: { $0.udid == row.id }) else { return "No Poki from this Mac" }
-        if let t = r.testBuild { return "Test build \(t.runNumber) from \(t.branch), \(String(t.sha.prefix(7)))" }
+        guard let r = row.record ?? model.records.first(where: { $0.udid == row.id }) else { return localized("No Poki from this Mac") }
+        if let t = r.testBuild { return localized("Test build \(t.runNumber) from \(t.branch), \(String(t.sha.prefix(7)))") }
         return "Poki \(r.version) (\(r.build))"
     }
 }
@@ -341,21 +343,21 @@ private struct TestBuildFilters: View {
     @Binding var search: String
 
     var body: some View {
-        Section("Filters") {
+        Section(localized("Filters")) {
             Toggle(isOn: pref(\.onlyMine)) {
-                Text("Only Builds I Started")
-                if let login = model.dev.login { Text("Runs started by \(login)") }
+                Text(localized("Only Builds I Started"))
+                if let login = model.dev.login { Text(localized("Runs started by \(login)")) }
             }
-            Picker("Branch", selection: Binding(get: { model.dev.prefs.branch ?? "" }, set: { v in
+            Picker(localized("Branch"), selection: Binding(get: { model.dev.prefs.branch ?? "" }, set: { v in
                 var p = model.dev.prefs
                 p.branch = v.isEmpty ? nil : v
                 Task { await model.setDevPrefs(p) }
             })) {
-                Text("All Branches").tag("")
+                Text(localized("All Branches")).tag("")
                 ForEach(branches, id: \.self) { Text(verbatim: $0).tag($0) }
             }
-            Toggle("Only Builds with a Pull Request", isOn: pref(\.withPrOnly))
-            TextField("Search", text: $search, prompt: Text("Commit, branch, pull request or build number"))
+            Toggle(localized("Only Builds with a Pull Request"), isOn: pref(\.withPrOnly))
+            TextField(localized("Search"), text: $search, prompt: Text(localized("Commit, branch, pull request or build number")))
         }
     }
 
@@ -381,44 +383,44 @@ private struct TestBuildSync: View {
     var body: some View {
         Section {
             Toggle(isOn: pref(\.autoDownload)) {
-                Text("Download New Builds")
-                Text("As soon as GitHub has them, so installing takes less time")
+                Text(localized("Download New Builds"))
+                Text(localized("As soon as GitHub has them, so installing takes less time"))
             }
             Toggle(isOn: pref(\.autoInstall)) {
-                Text("Install New Builds")
-                Text("On the device below whenever it is connected")
+                Text(localized("Install New Builds"))
+                Text(localized("On the device below whenever it is connected"))
             }
             if model.dev.prefs.autoInstall {
-                Picker("Device", selection: Binding(get: { model.dev.prefs.autoInstallUdid ?? "" }, set: { v in
+                Picker(localized("Device"), selection: Binding(get: { model.dev.prefs.autoInstallUdid ?? "" }, set: { v in
                     var p = model.dev.prefs
                     p.autoInstallUdid = v.isEmpty ? nil : v
                     Task { await model.setDevPrefs(p) }
                 })) {
-                    Text("Choose").tag("")
+                    Text(localized("Choose")).tag("")
                     ForEach(devices) { Text(verbatim: $0.name).tag($0.id) }
                 }
             }
             Toggle(isOn: pref(\.closeWithoutAsking)) {
-                Text("Close Poki Without Asking")
-                Text("When Poki is open on the device and an install or renewal replaces it")
+                Text(localized("Close Poki Without Asking"))
+                Text(localized("When Poki is open on the device and an install or renewal replaces it"))
             }
             Toggle(isOn: pref(\.keepOnRenew)) {
-                Text("Renewals Keep the Test Build")
-                Text("Otherwise renewing a device installs the release again")
+                Text(localized("Renewals Keep the Test Build"))
+                Text(localized("Otherwise renewing a device installs the release again"))
             }
         } header: {
-            Text("Automatic")
+            Text(localized("Automatic"))
         } footer: {
             Text(footer).font(.footnote).foregroundStyle(.secondary)
         }
     }
 
     private var footer: String {
-        guard model.dev.prefs.syncing else { return "Poki Setup checks GitHub every two minutes while it is open or in the menu bar." }
+        guard model.dev.prefs.syncing else { return localized("Poki Setup checks GitHub every two minutes while it is open or in the menu bar.") }
         if let n = model.dev.syncedRun, let b = model.testBuilds?.builds.first(where: { $0.runId == n }) {
-            return "Poki Setup checks GitHub every two minutes and takes builds newer than build \(b.runNumber) that match the filters."
+            return localized("Poki Setup checks GitHub every two minutes and takes builds newer than build \(b.runNumber) that match the filters.")
         }
-        return "Poki Setup checks GitHub every two minutes and takes new builds that match the filters."
+        return localized("Poki Setup checks GitHub every two minutes and takes new builds that match the filters.")
     }
 
     struct Choice: Identifiable, Hashable {
@@ -430,7 +432,7 @@ private struct TestBuildSync: View {
     private var devices: [Choice] {
         var out = model.phones.map { Choice(id: $0.id, name: $0.title) }
         for r in model.records where !out.contains(where: { $0.id == r.udid }) { out.append(Choice(id: r.udid, name: r.phoneName)) }
-        if let id = model.dev.prefs.autoInstallUdid, !out.contains(where: { $0.id == id }) { out.append(Choice(id: id, name: "Device not connected")) }
+        if let id = model.dev.prefs.autoInstallUdid, !out.contains(where: { $0.id == id }) { out.append(Choice(id: id, name: localized("Device not connected"))) }
         return out
     }
 
@@ -462,10 +464,10 @@ private struct TestBuildRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(build.title.isEmpty ? build.branch : build.title).font(.body.weight(.medium)).lineLimit(1)
-                    if onDevice { Badge(text: "On Device", color: .green) }
-                    if build.isBuilding { Badge(text: "Building", color: .orange) }
-                    if build.state == "expired" { Badge(text: "Expired", color: .secondary) }
-                    if build.downloaded, !onDevice { Badge(text: "Downloaded", color: Color.pokiBlue) }
+                    if onDevice { Badge(text: localized("On Device"), color: .green) }
+                    if build.isBuilding { Badge(text: localized("Building"), color: .orange) }
+                    if build.state == "expired" { Badge(text: localized("Expired"), color: .secondary) }
+                    if build.downloaded, !onDevice { Badge(text: localized("Downloaded"), color: Color.pokiBlue) }
                 }
                 facts
                 if let pr = build.pr, let url = URL(string: pr.url) {
@@ -485,12 +487,12 @@ private struct TestBuildRow: View {
     private var number: some View {
         VStack(spacing: 0) {
             Text(verbatim: "\(build.runNumber)").font(.system(.title3, design: .rounded).weight(.semibold)).monospacedDigit()
-            if build.runAttempt > 1 { Text("try \(build.runAttempt)").font(.caption2).foregroundStyle(.secondary) }
+            if build.runAttempt > 1 { Text(localized("try \(build.runAttempt)")).font(.caption2).foregroundStyle(.secondary) }
         }
         .frame(minWidth: 44)
         .padding(.vertical, 4)
         .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .help("Run \(build.runNumber) of \(build.workflow)")
+        .help(localized("Run \(build.runNumber) of \(build.workflow)"))
     }
 
     private var facts: some View {
@@ -499,7 +501,7 @@ private struct TestBuildRow: View {
             Label { Text(verbatim: build.shortSha).monospaced() } icon: { Image(systemName: "number") }
             if let a = build.actor { Label { Text(verbatim: a) } icon: { Image(systemName: "person") } }
             if let d = build.created { Label { Text(d, format: .relative(presentation: .named)) } icon: { Image(systemName: "clock") } }
-            if build.size > 0 { Text(ByteCountFormatter.string(fromByteCount: build.size, countStyle: .file)) }
+            if build.size > 0 { Text(build.size, format: .byteCount(style: .file)) }
             if build.workflow != "iOS IPA" { Text(verbatim: build.workflow) }
         }
         .font(.caption)
@@ -518,43 +520,43 @@ private struct TestBuildRow: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                Button(onDevice ? "Reinstall" : "Install") { Task { await install() } }
+                Button(onDevice ? localized("Reinstall") : localized("Install")) { Task { await install() } }
                     .disabled(model.busyJobs.contains("install") || model.selectedPhone?.facts == nil || model.account?.signedIn != true)
             }
         } else if build.isBuilding {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                if let u = URL(string: build.runUrl) { Link("View Run", destination: u).font(.callout) }
+                if let u = URL(string: build.runUrl) { Link(localized("View Run"), destination: u).font(.callout) }
             }
         } else if let u = URL(string: build.runUrl) {
-            Link("View Run", destination: u).font(.callout)
+            Link(localized("View Run"), destination: u).font(.callout)
         }
     }
 
     @ViewBuilder private var menuItems: some View {
         if build.isReady, !build.downloaded {
-            Button("Download Only") { Task { await download() } }
+            Button(localized("Download Only")) { Task { await download() } }
                 .disabled(model.busyJobs.contains("download"))
         }
         if let u = URL(string: build.runUrl) {
-            Button("Open Run on GitHub") { NSWorkspace.shared.open(u) }
+            Button(localized("Open Run on GitHub")) { NSWorkspace.shared.open(u) }
         }
         if let pr = build.pr, let u = URL(string: pr.url) {
-            Button("Open Pull Request \(pr.number)") { NSWorkspace.shared.open(u) }
+            Button(localized("Open Pull Request \(pr.number)")) { NSWorkspace.shared.open(u) }
         }
         if let u = URL(string: "https://github.com/\(model.dev.repo)/commit/\(build.sha)") {
-            Button("Open Commit") { NSWorkspace.shared.open(u) }
+            Button(localized("Open Commit")) { NSWorkspace.shared.open(u) }
         }
         Divider()
-        Button("Copy Commit") { copyToPasteboard(build.sha) }
-        Button("Copy Branch") { copyToPasteboard(build.branch) }
-        Button("Copy Build Details") { copyToPasteboard(details) }
+        Button(localized("Copy Commit")) { copyToPasteboard(build.sha) }
+        Button(localized("Copy Branch")) { copyToPasteboard(build.branch) }
+        Button(localized("Copy Build Details")) { copyToPasteboard(details) }
     }
 
     /// For a bug report or a message to whoever made the build.
     private var details: String {
-        var lines = ["Build \(build.runNumber) (\(build.workflow))", "Branch \(build.branch)", "Commit \(build.sha)", build.runUrl]
-        if let pr = build.pr { lines.insert("Pull request \(pr.number) \(pr.title)", at: 3) }
+        var lines = [localized("Build \(build.runNumber) (\(build.workflow))"), localized("Branch \(build.branch)"), localized("Commit \(build.sha)"), build.runUrl]
+        if let pr = build.pr { lines.insert(localized("Pull request \(pr.number) \(pr.title)"), at: 3) }
         return lines.joined(separator: "\n")
     }
 }

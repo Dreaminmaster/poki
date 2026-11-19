@@ -14,6 +14,13 @@ uploads an installer, it mounts the DMG and checks that every Mach-O file contai
 
     desktop/mac/scripts/check-universal.sh dist/*.dmg
 
+## Interface language
+
+Open **Poki Setup → Settings… → Language** (⌘,) to choose **Follow System**, **English**, or
+**简体中文**. The selection takes effect in the open app and is remembered on the next launch.
+
+![Language picker in Poki Setup for Mac](../../docs/images/poki-setup-mac-language.png)
+
 ## Developer ID signing and notarization
 
 Without secrets the app is signed ad hoc, and macOS asks people to right-click > Open the first time.

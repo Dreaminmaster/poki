@@ -63,7 +63,7 @@ struct ResultCard: Codable, Equatable {
         guard let look = ResultCardLooks.all[kind] else {
             return "kind \(kind) has no card; use one of: \(ResultCardLooks.all.keys.sorted().joined(separator: ", "))"
         }
-        guard items.count >= 2 else { return "a card needs at least two items to choose from" }
+        guard !items.isEmpty else { return "a card needs at least one item" }
         guard Set(items.map(\.id)).count == items.count else { return "item ids must be unique" }
         guard items.contains(where: { $0.id == recommended }) else { return "recommended must be one of the item ids" }
         for action in [primary] + (next.map { [$0] } ?? []) {

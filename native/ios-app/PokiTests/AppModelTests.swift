@@ -607,6 +607,44 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertFalse(model.hasOpenInProcessSession)
     }
 
+    func testCellularPreparationWaitsForTheImageWithoutOpeningAutomation() async {
+        let opened = expectation(description: "Cellular preparation only mounts the developer image")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .ready)
+        model.prepareForCellular()
+        XCTAssertFalse(model.runnerPaused)
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .preparing)
+
+        model.checkIdle(now: Date().addingTimeInterval(600))
+        XCTAssertFalse(model.runnerPaused, "mounting can take longer than the idle interval")
+        await finishPreparing()
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .retry, "a running launcher is not evidence of a mounted image")
+        XCTAssertEqual(model.cellularPreparation(imageMounted: true), .mounted)
+
+        model.prepareForCellular()
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .preparing)
+        await finishPreparing()
+        await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+    }
+
+    func testCellularPreparationRequiresLocalConnectionAndRespectsOwnerPause() {
+        model.loopback.simulate(.noAnswer)
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .needsLocalConnection)
+        model.prepareForCellular()
+        XCTAssertTrue(model.runnerPaused)
+
+        model.loopback.simulate(.working(ms: 9))
+        model.pauseByOwner()
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .automationOff)
+        model.prepareForCellular()
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertTrue(model.ownerPaused)
+        XCTAssertEqual(session.prepares, 0)
+    }
+
     func testRemoteInitializationAndStatusWaitForPhoneReadToEnableAutomation() async {
         let opened = expectation(description: "Connecting an agent does not enable Automation Mode")
         opened.isInverted = true
@@ -747,6 +785,11 @@ final class InProcessPasscodeTests: XCTestCase {
             XCTAssertTrue(field.becomeFirstResponder())
             await drawEntry(window)
         case .dictation:
+            // Repeating the entry first ends the dictation started by the previous activation.
+            if let stop = Self.entryElement(in: window, matching: { $0 == "Stop Dictation" }) {
+                XCTAssertTrue(stop.accessibilityActivate())
+                await drawEntry(window)
+            }
             let button = try XCTUnwrap(Self.entryElement(in: window, matching: { $0 == "composer.dictate" }))
             XCTAssertTrue(button.accessibilityActivate(), "activate the actual dictation button")
             await drawEntry(window)
@@ -795,7 +838,7 @@ final class InProcessPasscodeTests: XCTestCase {
             guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
             let selector = NSSelectorFromString("accessibilityIdentifier")
             let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
-            if let identifier, matches(identifier) {
+            if identifier.map(matches) == true || item.accessibilityLabel.map(matches) == true {
                 let frame = item.accessibilityFrame
                 let visible = (root as? UIView).map { $0.convert($0.bounds, to: nil) } ?? .zero
                 let button = item.accessibilityTraits.contains(.button)
@@ -829,6 +872,47 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(call.answer.contains("81 percent"))
         let modelInput = try JSONSerialization.data(withJSONObject: server.requests)
         XCTAssertTrue(String(decoding: modelInput, as: UTF8.self).contains("81 percent"), "the real page observation reached the model")
+    }
+
+    /// #468 review: the owner sends a message, then deletes that conversation before the model's first
+    /// reply comes in, staying on the chat. The late reply must not bring it back, and the chat moves on
+    /// to a new conversation. (Archiving waits: a conversation whose task runs is not archived.)
+    func testAConversationDeletedBeforeItsFirstReplyStaysDeleted() async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Four.")], holdAfter: 0)
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        await prepareWithoutPhoneTask()
+        model.becameActive()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("DeletedWhileWaiting-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let suite = "DeletedWhileWaiting-\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        let store = SessionStore(folder: folder, defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        let chat = ChatModel(app: model, store: store)
+
+        chat.send("What is two plus two?")
+        let id = chat.sessionID
+        await waitFor("the message reached the model") { !server.requests.isEmpty }
+        XCTAssertTrue(chat.running)
+        XCTAssertNotNil(store.session(id), "the owner's message saved the conversation")
+        store.archive(id)
+        XCTAssertNil(store.session(id)?.archived, "a conversation whose task runs is not archived")
+
+        store.delete(id)
+        XCTAssertEqual(store.removed?.id, id)
+        chat.conversationLeft(id)
+        XCTAssertFalse(chat.running, "the deleted conversation's task stops")
+        XCTAssertNotEqual(chat.sessionID, id, "the chat moves on to a new conversation")
+
+        server.release()
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertNil(store.session(id), "the late reply does not bring the deleted conversation back")
+        XCTAssertFalse(chat.entries.contains { $0.kind == .poki("Four.") }, "the new conversation does not show the late reply")
     }
 
     private func chatWithoutAutomation(on server: FakeCompletions, request: String) async throws -> ChatModel {
@@ -1654,7 +1738,7 @@ final class FrontendSubtractionTests: XCTestCase {
     }
 
     /// Every setup step done and a connection chosen, with the loopback not yet checked.
-    private func modelWithLoopbackChosen(launcher: FakeLauncher) throws -> (model: AppModel, restore: () -> Void) {
+    private func modelWithLoopbackChosen(launcher: FakeLauncher, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) throws -> (model: AppModel, restore: () -> Void) {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel", "relayAddress", "relayEnabled", "wantsOn"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
 
@@ -1669,7 +1753,7 @@ final class FrontendSubtractionTests: XCTestCase {
         ModelKeys.customModel = "fake-model"
         ModelKeys.selectedProvider = .custom
 
-        let model = AppModel(launcher: launcher, pairer: FakePairing(), automation: FakeAutomation())
+        let model = AppModel(launcher: launcher, pairer: FakePairing(), automation: FakeAutomation(), imageMounted: imageMounted)
         model.setup.runnerInstalled = true
         model.setup.developerMode = true
         model.setup.uiAutomation = true
@@ -1785,6 +1869,61 @@ final class FrontendSubtractionTests: XCTestCase {
         let labels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
         XCTAssertFalse(labels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "\(labels)")
         XCTAssertTrue(labels.contains { $0.contains("Set Up Again") }, "\(labels)")
+    }
+
+    /// A task on the mounted image ends and the runner stands by, as after every chat or agent task:
+    /// `local_ddi` is gone from the runner, but the next task is handed to the image again, so no
+    /// screen asks to turn the loopback on. Only a pairing the hand-over cannot use keeps the prompt.
+    func testAfterATaskOnTheMountedImageNoScreenAsksForTheLoopback() async throws {
+        let pairing = AppFiles.phonePairingFile
+        let saved = try? Data(contentsOf: pairing)
+        defer { if let saved { try? saved.write(to: pairing) } else { try? FileManager.default.removeItem(at: pairing) } }
+        let phonePairing: [String: Any] = ["identifier": "test-host", "public_key": Data(repeating: 1, count: 32), "private_key": Data(repeating: 2, count: 32)]
+        try PropertyListSerialization.data(fromPropertyList: phonePairing, format: .xml, options: 0).write(to: pairing)
+
+        // The loopback page probes 10.7.0.1 when it appears, and this Mac may answer there: every probe says no answer.
+        let forced = UserDefaults.standard.object(forKey: "pokiLoopback")
+        UserDefaults.standard.set("noanswer", forKey: "pokiLoopback")
+        defer { UserDefaults.standard.set(forced, forKey: "pokiLoopback") }
+        let (model, restore) = try modelWithLoopbackChosen(launcher: FakeLauncher(), imageMounted: { true })
+        defer { restore() }
+        model.loopback.simulate(.noAnswer)
+        model.startSession()
+        model.wakeRunner()
+        await waitOnMain { ["failed", "running"].contains(model.runner.state) }
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        XCTAssertNil(SetupIssueHint.first(model: model), "during the task")
+
+        model.pauseRunner(reason: "Stopped after 1 min without agent activity", byOwner: false)
+        XCTAssertEqual(model.runner.state, "standby")
+        XCTAssertNil(SetupIssueHint.first(model: model), "the chat after the task")
+        XCTAssertNil(SetupIssueHint.homeLine(model: model), "Home after the task")
+        XCTAssertFalse(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues after the task")
+        XCTAssertTrue(model.setupReadyForUse, "the Settings entry after the task")
+        let connection = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
+        XCTAssertFalse(connection.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "Connection after the task: \(connection)")
+        model.setup.proxyApp = "localdevvpn"
+        let page = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
+        XCTAssertTrue(page.contains { $0.contains("Local automation ready") }, "the loopback page's status after the task: \(page)")
+        XCTAssertFalse(page.contains { $0.contains("No Answer") || $0.contains("with the loopback on") }, "the loopback page after the task: \(page)")
+        let chat = try await renderedLabels(
+            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            model: model
+        )
+        XCTAssertFalse(chat.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") }, "Chat after the task: \(chat)")
+
+        // Another open step is named as itself, not as the loopback.
+        model.setup.uiAutomation = false
+        XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.automation))
+        model.setup.uiAutomation = true
+
+        // A pairing file from a computer is never handed to the image: the loopback is still needed.
+        let lockdown: [String: Any] = ["HostID": "test-host", "SystemBUID": "test"]
+        try PropertyListSerialization.data(fromPropertyList: lockdown, format: .xml, options: 0).write(to: pairing)
+        XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "a computer's pairing file")
+        XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, a computer's pairing file")
+        let refused = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
+        XCTAssertTrue(refused.contains { $0.contains("with the loopback on") }, "the loopback page, a computer's pairing file: \(refused)")
     }
 
     private func waitOnMain(_ condition: @escaping () -> Bool) async {

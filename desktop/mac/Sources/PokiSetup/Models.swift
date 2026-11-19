@@ -109,7 +109,7 @@ struct PhoneRow: Decodable, Identifiable {
     var error: String?
     var record: Record?
     var id: String { phone.udid }
-    var title: String { facts?.name ?? "Device" }
+    var title: String { facts?.name ?? localized("Device") }
 }
 
 struct Handoff: Decodable, Equatable {
@@ -203,6 +203,16 @@ struct ChannelInfo: Decodable, Identifiable, Hashable {
     var selected: Bool
     var latest: Release?
 
+    var displayTitle: String {
+        switch id {
+        case "stable": localized("Stable")
+        case "beta": localized("Beta")
+        case "alpha": localized("Alpha")
+        case "pre-alpha": localized("Pre-alpha")
+        default: title
+        }
+    }
+
     static func == (a: ChannelInfo, b: ChannelInfo) -> Bool { a.id == b.id && a.selected == b.selected && a.latest?.tag == b.latest?.tag }
     func hash(into h: inout Hasher) { h.combine(id) }
 }
@@ -227,6 +237,20 @@ struct StepItem: Identifiable, Equatable {
     var fraction: Double?
     var detail: String?
     var notes: [String] = []
+
+    // Only step headings have translations. Details and notes are the original diagnostic output.
+    var displayTitle: String {
+        let localization = SetupLocalization.shared
+        if id == "sign", title.hasPrefix("Signing Poki for ") {
+            let team = String(title.dropFirst("Signing Poki for ".count))
+            return localization.text("Signing Poki for \(team)", table: "Progress")
+        }
+        if id == "release", title.hasPrefix("Downloading test build ") {
+            let build = String(title.dropFirst("Downloading test build ".count))
+            return localization.text("Downloading test build \(build)", table: "Progress")
+        }
+        return localization.text(String.LocalizationValue(stringLiteral: title), table: "Progress")
+    }
 }
 
 /// The SF Symbol for a device: an iPad by its product type ("iPad16,3") or, without one, by name.
