@@ -27,7 +27,7 @@ struct AccountPage: View {
                 Text("Apple sent a six-digit code to your trusted devices or phone number.")
             }
             VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
-        } else if signer.signedIn {
+        } else if signer.signedIn, !signer.sessionExpired {
             Section {
                 LabeledContent("Apple Account", value: signer.status?.apple_id ?? "")
                 if let name = signer.status?.name, name != signer.status?.apple_id { LabeledContent("Name", value: name) }
@@ -53,6 +53,12 @@ struct AccountPage: View {
             if signer.needsReauth, signer.lastError != SelfSigner.reauthMessage {
                 Section { Label(SelfSigner.localizedErrorText(SelfSigner.reauthMessage), systemImage: "exclamationmark.triangle").foregroundStyle(Tint.amberInk) }
             }
+            if signer.sessionExpired {
+                Section { SessionExpiredLabel() }
+                    // Apple may take the sign-in again by now (its developer service turned one token
+                    // away, then took the next). Opening the page checks once, as it does when signed in.
+                    .task { if signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
+            }
             Section {
                 TextField("Apple ID", text: $appleID)
                     .textContentType(.username)
@@ -69,8 +75,29 @@ struct AccountPage: View {
                 Button("Sign In") { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } }
                     .disabled(appleID.isEmpty || password.isEmpty || signer.working != nil)
             }
+            // Signing in again is for the same account, so its Apple ID is already there.
+            .onAppear { if appleID.isEmpty, signer.sessionExpired { appleID = signer.status?.apple_id ?? "" } }
+            // The account is still stored, so it can be signed out here as when its sign-in works.
+            if signer.sessionExpired, signer.signedIn {
+                Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
+            }
         }
-        SignerActivityRows(signer: signer)
+        SignerActivityRows(signer: signer, offersSignIn: false)
+    }
+}
+
+/// Why Poki needs the Apple Account again, in the owner's language.
+struct SessionExpiredLabel: View {
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Apple Sign-In Expired").font(Prominent.font(.headline, .semibold))
+                Text("Poki signs itself with your Apple Account to renew and update without a Mac. Sign in again to keep that working.")
+                    .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+            }
+        } icon: {
+            Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
+        }
     }
 }
 
@@ -87,13 +114,28 @@ struct AppleAccountPage: View {
 /// What the signer is doing, or why it stopped.
 struct SignerActivityRows: View {
     let signer: SelfSigner
+    /// Off where the sign-in form is already on screen, or would be a step away from a sheet.
+    var offersSignIn = true
     var body: some View {
         if let working = signer.working {
             Section {
                 if let f = signer.fraction { ProgressView(value: f) { Text(verbatim: local(working)) } } else { LabeledContent { ProgressView() } label: { Text(verbatim: local(working)) } }
             }
         }
-        if let error = signer.lastError {
+        // Apple's sign-in ran out: say so plainly, with the way back right under it. Where the sign-in
+        // form is already on screen, the page says this above the form instead.
+        if signer.sessionExpired, offersSignIn {
+            Section {
+                SessionExpiredLabel()
+                NavigationLink { AppleAccountPage() } label: {
+                    SettingsLabel("Sign In Again", systemImage: "person.crop.circle.badge.checkmark")
+                }
+                .disabled(signer.working != nil)
+            }
+        }
+        // Every failure but Apple's expired sentence itself, which the row above or the form says.
+        if let error = signer.shownError {
+            // The signer's words are English; those the strings table knows are shown in the owner's language.
             Section { problem(Text(verbatim: local(error))) }
         }
         // The core's own sentences name its servers. They are in the log; the page says what to do.
@@ -437,7 +479,7 @@ struct VerificationCodeSheet: View {
                     Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
                 }
                 VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
-                SignerActivityRows(signer: signer)
+                SignerActivityRows(signer: signer, offersSignIn: false)
             }
             .navigationTitle(AppLocalization.text("Verification Code"))
             .navigationBarTitleDisplayMode(.inline)

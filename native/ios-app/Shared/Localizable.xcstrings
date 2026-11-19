@@ -1,6 +1,72 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Your Apple session has expired. Sign in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Apple session has expired. Sign in again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Apple 账户登录已过期。请重新登录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Apple 帳號登入已過期。請重新登入。"
+          }
+        }
+      }
+    },
+    "Apple Sign-In Expired" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Sign-In Expired"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 账户登录已过期"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 帳號登入已過期"
+          }
+        }
+      }
+    },
+    "Poki signs itself with your Apple Account to renew and update without a Mac. Sign in again to keep that working." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki signs itself with your Apple Account to renew and update without a Mac. Sign in again to keep that working."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 用你的 Apple 账户为自己签名，无需 Mac 即可续签和更新。请重新登录以继续使用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 用你的 Apple 帳號為自己簽名，無需 Mac 即可續簽和更新。請重新登入以繼續使用。"
+          }
+        }
+      }
+    },
     "You said" : {
       "extractionState" : "manual",
       "localizations" : {

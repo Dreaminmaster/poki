@@ -234,9 +234,13 @@ struct PokiDetailsView: View {
         return AppLocalization.text(LocalizedStringResource(on ? "On" : "Off"))
     }
 
-    private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
-    /// The version is the page's last line, so the row only speaks up when an update waits.
-    private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
+    private var updateWaits: Bool { !isSample && (model.signer.sessionExpired || model.signer.updateNotReady || model.signer.next?.kind == "update") }
+    /// The version is the page's last line, so the row only speaks up when an update waits, or when
+    /// Apple's sign-in ran out and nothing renews until the owner signs in again.
+    private var updatesValue: String? {
+        if !isSample, model.signer.sessionExpired { return AppLocalization.text(LocalizedStringResource("Sign In Again")) }
+        return updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil
+    }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
