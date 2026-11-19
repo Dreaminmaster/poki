@@ -24,8 +24,9 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
-        // Apps by name, from the apps Poki knows; the two speed-ups read their Testing Options switch.
-        config.resolveApp = { KnownApps.find($0)?.id }
+        // Apps by name, from the apps Poki knows and the phone's own app list; the two speed-ups read
+        // their Testing Options switch.
+        config.resolveApp = { KnownApps.launchID($0) }
         config.appNames = { SpeedOptions.appNames }
         config.quickRead = { SpeedOptions.quickRead }
         config.screenHistory = HistoryStore.agentSource
