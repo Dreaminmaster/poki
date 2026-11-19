@@ -220,6 +220,9 @@ Each answer is facts only: the app in front, numbered elements, what each action
   picture-only change says how much and where (`in 3 % of it, within [372, 110, 13, 690]`), so the
   long scroll indicator iOS draws beside a two-page list fading out (seen on the simulator after a
   drag: 2-3 % in a strip at the right edge) reads as what it is without a look at the picture.
+  When a single tap or long press is sent and the next read of the same app shows no change,
+  the answer also says `touch effect: unconfirmed`. Check the expected UI state before repeating
+  the action or moving on. The `sent` receipt is about the input request.
 - **The picture and the tree are of the same moment.** The screenshot is taken first (served apart
   from WDA's queue) and the tree after it; when the tree came over 0.6 s later and time is left, the
   picture is taken again after it (`note: the picture was taken again after the tree, which came
