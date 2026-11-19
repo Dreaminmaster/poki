@@ -58,7 +58,8 @@ struct LoopbackPrompt: ViewModifier {
     }
 
     private var action: Action {
-        if model.loopback.cellularOnly { return HistoryReconnect.shared.lastAt == nil ? .shortcut : .wiFi }
+        if model.loopback.cellularOnly { let reconnect = HistoryReconnect.shared
+            return reconnect.lastAt == nil && !reconnect.asked ? .shortcut : .wiFi }
         if let app = ProxyApps.all.first(where: { $0.id == model.setup.proxyApp }), app.isInstalled, let url = URL(string: "\(app.scheme)://") {
             return .proxy(name: app.name, url: url)
         }
@@ -89,6 +90,7 @@ struct LoopbackPrompt: ViewModifier {
         case .wiFi:
             shown = false
         case .shortcut:
+            HistoryReconnect.shared.asked = true
             UIApplication.shared.open(HistoryReconnect.shortcut)
         }
     }
