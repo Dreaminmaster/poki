@@ -2029,7 +2029,6 @@ mod rate_limit_regressions {
                     last_error: None,
                     wifi_address: None,
                     pairing_handed_off: false,
-                    test_build: None,
                 };
                 crate::keeper::put(due_rec).unwrap();
                 assert_eq!(crate::keeper::due().unwrap().len(), 1);
@@ -2172,7 +2171,6 @@ mod rate_limit_regressions {
                     last_error: None,
                     wifi_address: None,
                     pairing_handed_off: false,
-                    test_build: None,
                 };
                 crate::keeper::put(due_rec).unwrap();
             }
