@@ -238,7 +238,7 @@ final class HistoryCapture: ObservableObject {
                     }
                     return
                 }
-                AppLog.shared.add("history", "iOS ended the background time")
+                AppLog.shared.add("history", "iOS ended the background time; keeper on: \(model.background.isOn), silent audio lost: \(model.background.audioLost)")
                 // Not the owner's doing, and not the run's time being up.
                 if let self, self.run == me, self.isRunning, !self.once { self.notice() }
                 self?.end(me, .stopped)
@@ -440,7 +440,18 @@ final class HistoryCapture: ObservableObject {
         }
         if line["paused"] as? Bool == true { return }
         // A read the launcher could not make: its tunnel is down and it is opening another.
-        if line["ok"] as? Bool == true { lastReadAt = Date(); working() } else if !model.loopback.cellularRefused { failing() }
+        if line["ok"] as? Bool == true {
+            lastReadAt = Date()
+            working()
+        } else if (line["error"] as? String ?? "").contains("no point of the screen") {
+            // The connection answered and found no app at the points read (a system screen over
+            // the app, the Home Screen mid-swipe), or the hit tests got no answer. Neither is a
+            // lost connection, and the launcher reopens what it must by itself: no notice for it.
+            AppLog.shared.add("history", "read skipped: \((line["error"] as? String ?? "").suffix(140))")
+        } else if !model.loopback.cellularRefused {
+            AppLog.shared.add("history", "read failed: \((line["error"] as? String ?? "").prefix(200))")
+            failing()
+        }
         if keep(line), once { end(me, .finished) }
     }
 

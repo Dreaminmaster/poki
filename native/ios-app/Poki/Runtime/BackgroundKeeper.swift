@@ -9,11 +9,14 @@ import Foundation
 /// accuracy, only under Always Allow where iOS shows no indicator, and it stops again as soon as the audio is back.
 /// The location is never read or sent anywhere.
 ///
-/// Screen History holds the keeper too, whether or not Poki is on (the owner, 2026-11-18). Held for
-/// Screen History alone, it must not touch what the owner hears or show anything: under Always
-/// Allow it is location only, with no audio session opened at all, and otherwise the silent audio,
-/// which mixes with other apps' sound. It never asks for a location permission and never shows the
-/// location indicator.
+/// Screen History holds the keeper too, whether or not Poki is on (the owner, 2026-11-18), and is
+/// kept running the same way as a session: the silent audio, which mixes with other apps' sound.
+/// Location alone was tried for it and did not hold (build 54, iOS 27: Poki was suspended a few
+/// minutes into the background). Since iOS 16.4 an app that asks for coarse, distance-filtered
+/// location is suspended anyway, and on iOS 27 deliveries are reported to stop after a few minutes
+/// even with the settings Apple asks for (developer forums 726945, 844579). So location is only
+/// ever the backup beside the audio, with those settings. It never asks for a location permission
+/// and never shows the location indicator.
 @MainActor
 @Observable
 final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
@@ -26,8 +29,10 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         authorization = manager.authorizationStatus
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
-        manager.distanceFilter = CLLocationDistanceMax
+        // What iOS 16.4 and later need to keep an app running on location: a hundred metres or
+        // better and no distance filter. Coarser than that, the app is suspended all the same.
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = kCLDistanceFilterNone
         manager.pausesLocationUpdatesAutomatically = false
     }
 
@@ -66,8 +71,6 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     /// The keeper runs while either does.
     private var sessionHold = false
     private(set) var historyHold = false
-    /// Held for Screen History alone under Always Allow: location only, no audio session.
-    private var quiet: Bool { historyHold && !sessionHold && always }
 
     /// Poki turned on. Called while Poki is in front (iOS only starts background location from the foreground).
     func start() {
@@ -86,7 +89,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         guard !historyHold else { return }
         historyHold = true
         apply()
-        AppLog.shared.add("background", "Screen History keeps Poki running (\(quiet ? "location only" : "silent audio"))")
+        AppLog.shared.add("background", "Screen History keeps Poki running (silent audio\(audio.isOn ? "" : ", not playing"))")
     }
 
     func releaseHistory() {
@@ -99,12 +102,6 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     private func apply() {
         guard sessionHold || historyHold else { finish(); return }
         isOn = true
-        if quiet {
-            audio.stop()
-            audioLost = false
-            startLocation()
-            return
-        }
         watchInterruptions()
         if !audioPaused, !audio.isOn { startAudio() }
         if !audioLost, !pairingHold { stopLocation() }
@@ -133,7 +130,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         if recovered == nil {
             recovered = NotificationCenter.default.addObserver(forName: KeepAlive.changed, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, self.isOn, !self.audioPaused, !self.quiet else { return }
+                    guard let self, self.isOn, !self.audioPaused else { return }
                     self.setAudioLost(!self.audio.isOn)
                 }
             }
@@ -142,7 +139,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         interruption = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
             Task { @MainActor in
-                guard let self, self.isOn, !self.audioPaused, !self.quiet else { return }
+                guard let self, self.isOn, !self.audioPaused else { return }
                 switch type {
                 case .began: self.setAudioLost(true)
                 case .ended:
@@ -162,7 +159,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     func pauseAudio() { audioPaused = true; audio.stop() }
     func resumeAudio() {
         audioPaused = false
-        guard isOn, !quiet else { return }
+        guard isOn else { return }
         startAudio()
     }
 
@@ -196,7 +193,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     func releasePairing() {
         guard pairingHold else { return }
         pairingHold = false
-        if isOn && (audioLost || quiet) { startLocation() } else { stopLocation() }
+        if isOn && audioLost { startLocation() } else { stopLocation() }
     }
 
     private func startPairingLocation() {
@@ -208,7 +205,7 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
 
     private func startLocation() {
         if pairingHold, always { startPairingLocation(); return }
-        guard audioLost || quiet, always else { stopLocation(); return }
+        guard audioLost, always else { stopLocation(); return }
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = false
         manager.startUpdatingLocation()
@@ -229,8 +226,6 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
             }
             // Always Allow taken away while location was running: it stops, so no indicator shows.
             if !self.always { self.stopLocation() }
-            // Always Allow given or taken away changes how Screen History alone is kept running.
-            if self.isOn { self.apply() }
             if self.pairingHold || (self.isOn && self.audioLost) { self.startLocation() }
         }
     }
