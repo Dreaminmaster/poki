@@ -36273,6 +36273,22 @@
         }
       }
     },
+    "Lock Screen History Now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即锁定屏幕历史"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即鎖定螢幕歷史"
+          }
+        }
+      }
+    },
     "Screen History Lock" : {
       "localizations" : {
         "zh-Hans" : {
@@ -36349,6 +36365,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "解鎖螢幕歷史"
+          }
+        }
+      }
+    },
+    "Unlocking allows Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Lock Screen History or turn it off to revoke access." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解锁后，Poki 和已连接的代理可在最多 5 分钟内查询屏幕历史，即使你切换到其他应用。锁定或关闭屏幕历史即可撤销访问权限。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解鎖後，Poki 和已連線的代理程式可在最多 5 分鐘內查詢螢幕歷史，即使你切換到其他應用程式。鎖定或關閉螢幕歷史即可撤銷存取權限。"
           }
         }
       }

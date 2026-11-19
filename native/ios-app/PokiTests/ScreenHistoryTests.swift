@@ -451,7 +451,7 @@ final class ScreenHistoryTests: XCTestCase {
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
         let revision = HistoryCapture.agentQueryRevision
         XCTAssertNotNil(revision)
-        lock.enteredBackground()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         XCTAssertFalse(lock.unlocked, "The private UI must lock immediately")
         lock.refresh()
         XCTAssertEqual(HistoryCapture.agentQueryRevision, revision, "Background and foreground refresh must not renew the grant")

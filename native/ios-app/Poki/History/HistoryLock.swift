@@ -654,6 +654,8 @@ struct BacktapeLockScreen: View {
                         Text("Screen History Is Locked").font(.title2.weight(.semibold))
                         Text("Unlock to view what Screen History kept on this iPhone.")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Text("Unlocking allows Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Lock Screen History or turn it off to revoke access.")
+                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 32)
                     if lock.usesBiometrics {
@@ -817,6 +819,9 @@ struct HistoryUnlockSections: View {
                         }
                     }
                 }
+            }
+            Section {
+                Text("Unlocking allows Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Lock Screen History or turn it off to revoke access.").font(.footnote).foregroundStyle(.secondary)
             }
         }
         .task { await lock.unlockWithBiometrics() }

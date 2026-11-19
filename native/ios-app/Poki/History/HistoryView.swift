@@ -167,6 +167,10 @@ struct ScreenHistorySettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("screenHistory.excludedApps")
+                if capture.enabled {
+                    Button("Lock Screen History Now") { lock.lock() }
+                        .accessibilityIdentifier("screenHistory.revokeGrant")
+                }
             }
 
             Section {
