@@ -10,8 +10,10 @@ private final class HistoryQueryPermissionLease: @unchecked Sendable {
     private let lock = NSLock()
     private var value: UInt64 = 0
     private var deletions = 0
-    private var enabled = UserDefaults.standard.bool(forKey: "history.enabled")
+    private var enabled: Bool
     private var unlocked = false
+
+    init(enabled: Bool) { self.enabled = enabled }
 
     var revision: UInt64 {
         lock.lock()
@@ -71,7 +73,7 @@ private final class HistoryQueryPermissionLease: @unchecked Sendable {
 /// to `HistoryStore`. Nothing leaves the phone.
 @MainActor
 final class HistoryCapture: ObservableObject {
-    static let shared = HistoryCapture()
+    static let shared = HistoryCapture(lease: productionLease, persistSettings: true)
 
     /// What the short run is doing, or why the last one ended or did not start, as Testing Options
     /// and the observing record say it.
@@ -88,11 +90,15 @@ final class HistoryCapture: ObservableObject {
 
     nonisolated static let enabledKey = "history.enabled"
     nonisolated static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
-    nonisolated private static let queryLease = HistoryQueryPermissionLease()
-    nonisolated static var accessRevision: UInt64 { queryLease.revision }
+    // The synchronous Core bridge is explicitly bound to the production instance.
+    // A separate capture fixture owns its own lease and cannot change this gate.
+    nonisolated private static let productionLease = HistoryQueryPermissionLease(enabled: UserDefaults.standard.bool(forKey: "history.enabled"))
+    private let queryLease: HistoryQueryPermissionLease
+    private let persistSettings: Bool
+    nonisolated static var accessRevision: UInt64 { productionLease.revision }
     nonisolated static var agentQueryRevision: UInt64? {
         guard isEnabled else { return nil }
-        return queryLease.grant
+        return productionLease.grant
     }
     nonisolated static var agentQueryAllowed: Bool { agentQueryRevision != nil }
     nonisolated static var agentQueryUnavailableMessage: String {
@@ -102,7 +108,7 @@ final class HistoryCapture: ObservableObject {
 
     /// HistoryLock owns authentication; publish its decision to the synchronous agent gate.
     nonisolated static func setAgentHistoryUnlocked(_ unlocked: Bool) {
-        queryLease.setUnlocked(unlocked)
+        productionLease.setUnlocked(unlocked)
     }
 
     nonisolated static func validateAgentAnswer(_ answer: PokiCore.ToolAnswer, revision: UInt64?) -> PokiCore.ToolAnswer {
@@ -115,19 +121,19 @@ final class HistoryCapture: ObservableObject {
 
     @Published var enabled: Bool {
         didSet {
-            Self.queryLease.setEnabled(enabled)
+            queryLease.setEnabled(enabled)
             save(enabled, Self.enabledKey)
             if !enabled { stop() }
         }
     }
     @Published var listMode: ListMode {
-        didSet { Self.queryLease.revoke(); save(listMode.rawValue, "history.listMode") }
+        didSet { queryLease.revoke(); save(listMode.rawValue, "history.listMode") }
     }
     @Published var excluded: [String] {
-        didSet { Self.queryLease.revoke(); save(excluded, "history.excluded") }
+        didSet { queryLease.revoke(); save(excluded, "history.excluded") }
     }
     @Published var included: [String] {
-        didSet { Self.queryLease.revoke(); save(included, "history.included") }
+        didSet { queryLease.revoke(); save(included, "history.included") }
     }
     @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); prune() } }
     /// How long the hour, day and week summaries outlive the tape, in days. 0 is as long as the tape.
@@ -139,10 +145,10 @@ final class HistoryCapture: ObservableObject {
         guard !loading else { return }
         // Pruning may forget text already fetched by a query, just like an explicit clear.
         // Revoke now, before dispatching to the store, and deny new reads until it finishes.
-        Self.queryLease.beginDeletion()
+        Self.productionLease.beginDeletion()
         BacktapeNotes.shared.reset()
         HistoryStore.shared.prune(days: retentionDays, summaryDays: summaryDays, megabytes: storageMegabytes) { [weak self] in
-            Self.queryLease.endDeletion()
+            Self.productionLease.endDeletion()
             Task { @MainActor in
                 self?.changes += 1
             }
@@ -182,7 +188,16 @@ final class HistoryCapture: ObservableObject {
         "com.paypal.PPClient", "com.apple.MobileSMS", "com.tencent.xin", "net.whatsapp.WhatsApp", "ph.telegra.Telegraph",
     ]
 
-    init() {
+    // Separate capture instances are non-persisting fixtures. They can inspect the
+    // same initial defaults without writing production settings or revoking its lease.
+    convenience init() {
+        self.init(lease: HistoryQueryPermissionLease(enabled: UserDefaults.standard.bool(forKey: Self.enabledKey)),
+                  persistSettings: false)
+    }
+
+    private init(lease: HistoryQueryPermissionLease, persistSettings: Bool) {
+        self.queryLease = lease
+        self.persistSettings = persistSettings
         let defaults = UserDefaults.standard
         enabled = defaults.bool(forKey: Self.enabledKey)
         listMode = ListMode(rawValue: defaults.string(forKey: "history.listMode") ?? "") ?? .exclude
@@ -208,7 +223,7 @@ final class HistoryCapture: ObservableObject {
     }
 
     private func save(_ value: Any?, _ key: String) {
-        guard !loading else { return }
+        guard !loading, persistSettings else { return }
         if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
     }
 
@@ -381,8 +396,8 @@ final class HistoryCapture: ObservableObject {
     // MARK: Deleting
 
     func clear(last seconds: TimeInterval) async {
-        Self.queryLease.beginDeletion()
-        defer { Self.queryLease.endDeletion() }
+        Self.productionLease.beginDeletion()
+        defer { Self.productionLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.delete(from: Date().addingTimeInterval(-seconds), to: Date().addingTimeInterval(60))
         HistoryStore.shared.note("cleared", "\(Int(seconds))")
@@ -390,16 +405,16 @@ final class HistoryCapture: ObservableObject {
     }
 
     func clearEverything() async {
-        Self.queryLease.beginDeletion()
-        defer { Self.queryLease.endDeletion() }
+        Self.productionLease.beginDeletion()
+        defer { Self.productionLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.deleteEverything()
         changes += 1
     }
 
     func delete(from start: Date, to end: Date) async {
-        Self.queryLease.beginDeletion()
-        defer { Self.queryLease.endDeletion() }
+        Self.productionLease.beginDeletion()
+        defer { Self.productionLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.delete(from: start, to: end)
         changes += 1

@@ -580,6 +580,32 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(saved)
     }
 
+    func testIndependentCaptureSettingsDoNotRevokeProductionGrant() async throws {
+        try unlockHistoryForFixture()
+        let live = HistoryCapture.shared
+        live.enabled = true
+        let canary = "SYNTHETIC_ISOLATED_CAPTURE"
+        HistoryStore.shared.add(at: Date().addingTimeInterval(-60), app: "com.apple.mobilenotes", title: "Fixture", text: canary)
+        let initialRevision = try XCTUnwrap(HistoryCapture.agentQueryRevision)
+        let other = HistoryCapture()
+        other.enabled = false
+        other.listMode = .include
+        other.included = ["com.example.other"]
+        other.excluded = ["com.apple.mobilenotes"]
+        XCTAssertTrue(live.enabled)
+        XCTAssertTrue(HistoryCapture.isEnabled)
+        XCTAssertEqual(HistoryCapture.agentQueryRevision, initialRevision)
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
+        let answer = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertFalse(answer.isError, answer.text)
+        XCTAssertTrue(answer.text.contains(canary))
+        // The store really is shared: deleting it through any instance must still revoke live reads.
+        await other.clearEverything()
+        XCTAssertNotEqual(HistoryCapture.agentQueryRevision, initialRevision)
+        let after = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertFalse(after.text.contains(canary))
+    }
+
     private enum PendingPrivacyChange {
         case turnOff, turnOffThenOn, changeAppScope, clear, lockThenUnlock, deviceLock, changePIN, changeBiometrics, shortenRetention, reduceStorage
     }
