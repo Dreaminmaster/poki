@@ -7,6 +7,10 @@ struct AppCapsule: Hashable, Identifiable {
     let id: String
     let names: [String]
 
+    /// An installed app Poki does not list (DynamicApps): its one name counts only as written, in its own
+    /// case, and a Chinese one only where an app goes, as an everyday word does.
+    var installedOnly = false
+
     /// The name this iPhone shows the app by.
     var name: String { KnownApps.byID[id.lowercased()]?.name(in: .current) ?? names[0] }
 
@@ -15,7 +19,25 @@ struct AppCapsule: Hashable, Identifiable {
         names.first { $0.caseInsensitiveCompare(typed) == .orderedSame } ?? typed
     }
 
-    static let catalog: [AppCapsule] = KnownApps.all.map { AppCapsule(id: $0.id, names: $0.names) }
+    /// Every app Poki knows by name, then the User apps installed on this iPhone that it does not
+    /// (DynamicApps, from the phone's own list), so any installed app turns into a capsule with its icon.
+    /// A name two installed apps share makes no capsule: it would show one of them by guess.
+    static var catalog: [AppCapsule] {
+        let version = DynamicApps.version
+        if let cached = cache, cached.version == version { return cached.apps }
+        let known = Set(KnownApps.byID.keys)
+        var taken = Set(KnownApps.byName.keys)
+        var apps = listed
+        for entry in DynamicApps.uniquelyNamedUserApps where !known.contains(entry.id.lowercased()) {
+            let name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name.count >= 2, taken.insert(name.lowercased()).inserted else { continue }
+            apps.append(AppCapsule(id: entry.id, names: [name], installedOnly: true))
+        }
+        cache = (version, apps)
+        return apps
+    }
+    private static let listed: [AppCapsule] = KnownApps.all.map { AppCapsule(id: $0.id, names: $0.names) }
+    nonisolated(unsafe) private static var cache: (version: Int, apps: [AppCapsule])?
 
     /// App names that are also everyday English words. These turn into a capsule only when written
     /// with a capital first letter, as a name; every other Latin name turns into one in any case,
@@ -103,17 +125,27 @@ enum CapsuleText {
 
         static func starting(with unit: unichar) -> [Name] { table[fold(unit)] ?? [] }
 
-        private static let table: [unichar: [Name]] = {
+        /// Built again when the installed apps change (DynamicApps.version).
+        private static var table: [unichar: [Name]] {
+            let version = DynamicApps.version
+            if let built, built.version == version { return built.table }
             var table: [unichar: [Name]] = [:]
             for app in AppCapsule.catalog {
                 for name in app.names {
-                    let options: NSString.CompareOptions = AppCapsule.everydayWords.contains(name) ? .literal : .caseInsensitive
-                    let entry = Name(app: app, text: name as NSString, options: options, onlyAsApp: AppCapsule.everydayChinese.contains(name))
+                    // A name in a script written without spaces (Chinese, Japanese, Korean) can sit inside
+                    // a sentence; any other ("Strava", "Café") is a word of its own.
+                    let spaced = !name.unicodeScalars.contains(where: CapsuleText.isUnspaced)
+                    let options: NSString.CompareOptions = AppCapsule.everydayWords.contains(name) || app.installedOnly ? .literal : .caseInsensitive
+                    let onlyAsApp = AppCapsule.everydayChinese.contains(name) || (app.installedOnly && !spaced)
+                    let entry = Name(app: app, text: name as NSString, options: options, onlyAsApp: onlyAsApp)
                     table[fold((name as NSString).character(at: 0)), default: []].append(entry)
                 }
             }
-            return table.mapValues { $0.sorted { $0.text.length > $1.text.length } }
-        }()
+            let sorted = table.mapValues { $0.sorted { $0.text.length > $1.text.length } }
+            built = (version, sorted)
+            return sorted
+        }
+        nonisolated(unsafe) private static var built: (version: Int, table: [unichar: [Name]])?
 
         private static func fold(_ unit: unichar) -> unichar {
             (0x41...0x5A).contains(unit) ? unit + 0x20 : unit
@@ -133,10 +165,19 @@ enum CapsuleText {
         "\(name) \(sentence)"
     }
 
+    /// Han, kana and Hangul: scripts whose words are not set apart by spaces.
+    static func isUnspaced(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x2E80...0x9FFF, 0xAC00...0xD7AF, 0xF900...0xFAFF, 0xFF66...0xFF9F, 0x20000...0x3FFFF: true
+        default: false
+        }
+    }
+
     private static func wholeWord(_ name: NSString, at i: Int, in text: NSString) -> Bool {
         let wordy = CharacterSet.alphanumerics
+        // A letter or digit of a spaced script, accented ones too: "Café" does not end inside "Cafés".
         func isLatinWordChar(_ unit: unichar) -> Bool {
-            unit < 0x80 && UnicodeScalar(unit).map(wordy.contains) == true
+            UnicodeScalar(unit).map { wordy.contains($0) && !isUnspaced($0) } == true
         }
         if isLatinWordChar(name.character(at: 0)), i > 0, isLatinWordChar(text.character(at: i - 1)) { return false }
         let end = i + name.length

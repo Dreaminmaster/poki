@@ -56,6 +56,14 @@ bears() {
   for png in "$HERE"/Poki/ActivityBears/*.png; do
     name="$(basename "$png" .png)"
     mkdir -p "$1/$name.imageset"
+    # Dedicated compact assets keep the source resolution within the small presentation.
+    for spec in Compact:81 Small:66; do
+      suffix="${spec%:*}"
+      pixels="${spec#*:}"
+      mkdir -p "$1/${name}${suffix}.imageset"
+      sips -Z "$pixels" "$png" --out "$1/${name}${suffix}.imageset/bear@3x.png" >/dev/null
+      echo '{"images":[{"filename":"bear@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$1/${name}${suffix}.imageset/Contents.json"
+    done
     cp "$png" "$1/$name.imageset/bear@3x.png"
     echo '{"images":[{"filename":"bear@3x.png","idiom":"universal","scale":"3x"}],"info":{"version":1,"author":"poki"}}' > "$1/$name.imageset/Contents.json"
   done

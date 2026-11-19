@@ -173,6 +173,11 @@ final class ConnectionCheckTests: XCTestCase {
         let late = await check(nil)
         XCTAssertEqual(late.words, "No answer within 10 seconds. Check the address and the network, then try again.")
 
+        // A gateway that doubles the prefix (issue #344) works as the chat now reads it.
+        let doubled = await check((200, "data:data: \(chunk)\n\ndata:\n\ndata:data: [DONE]\n\n"))
+        XCTAssertTrue(doubled.passed)
+        XCTAssertEqual(doubled.words, "Connection works. Model: house-model-2026-11")
+
         AppLocalization.shared.preference = "zh-Hant"
         XCTAssertEqual(works.words, "連線正常，回應模型：house-model-2026-11")
         XCTAssertEqual(rejected.words, "金鑰無效，請確認金鑰已完整複製。")

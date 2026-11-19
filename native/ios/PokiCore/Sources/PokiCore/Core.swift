@@ -361,7 +361,7 @@ public final class PokiCore: @unchecked Sendable {
     /// The owner tapped Done on a step the model handed to them (the Live Activity).
     public func handoffDone(id: String) { computer.handoffDone(id: id) }
     /// The step the model handed to the owner that is still waiting, if any.
-    public var handoff: Handoff? { computer.handoff.value.flatMap { $0.done == nil ? $0 : nil } }
+    public var handoff: Handoff? { computer.handoff.active }
 
     public var pendingApproval: Approval? { approvals.pending }
 
@@ -375,18 +375,19 @@ public final class PokiCore: @unchecked Sendable {
         let app = Foreground(bundleID: bundleID, name: name)
         // The approval card is in Poki: a tap there is refused, and the request waiting stays for the owner.
         if config.isPoki(app) { return .refused(CoreConfig.ownAppRefusal) }
-        // Like `do`: a tap withdraws the request still waiting, so two taps never wait side by side.
-        if let pending = approvals.pending { approvals.withdraw(id: pending.id) }
+        // Like `do`: a tap withdraws the request still waiting, so two taps never wait side by side. A
+        // granted approval the agent has not used yet stays for the agent's own `do`.
+        approvals.withdrawPending()
         let element = Element(type: "Other", label: text, value: nil, identifier: nil, frame: Rect(x: 0, y: 0, width: 0, height: 0), depth: 0)
         // No readable text: the rules cannot tell what it does, so the owner is asked.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
         // Never Ask would not stop a tap the rules cannot read, nor one they hold back whatever the way of asking.
         let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false) == nil
-        let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, fingerprint: "tap:\(UUID().uuidString)", stopsWhenOff: stopsWhenOff)
+        let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, scope: ApprovalScope(actions: "tap:\(UUID().uuidString)"), stopsWhenOff: stopsWhenOff)
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:
-            _ = approvals.consumeGrant(fingerprint: approval.fingerprint)
+            _ = approvals.consumeGrant(scope: approval.scope)
             return .approved(reason)
         case .declined?:
             return .declined(reason)
@@ -400,11 +401,12 @@ public final class PokiCore: @unchecked Sendable {
 
     /// look, do or status for another part of the app (the Voice tab), run here on the phone exactly as a
     /// relay call: same gate, approvals, Live Activity and deadlines. `arguments` is the call's JSON object.
+    /// The Voice tab acts for the owner, so a step handed to the owner does not hold its input back.
     public func tool(_ name: String, arguments: String) async -> ToolResult {
         guard let args = try? JSON.parse(arguments.isEmpty ? "{}" : arguments) else {
             return ToolResult(text: "error: the arguments are not JSON; nothing was sent", jpeg: nil, isError: true)
         }
-        return await call(name, args)
+        return await call(name, args, byOwnersVoice: true)
     }
 
     /// The task is over (the app stops an idle runner, or its chat's turn ended): the phone goes back
@@ -564,9 +566,11 @@ public final class PokiCore: @unchecked Sendable {
     /// Calls `look`, `do` or `status` from inside the app, the same way an MCP client's `tools/call`
     /// does: one call at a time, the same approval rules, the same events. `arguments` is the JSON
     /// object the model sent.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil) async -> ToolAnswer {
+    /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
+    /// where it was heard.
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner)
     }
@@ -614,7 +618,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -626,7 +630,7 @@ public final class PokiCore: @unchecked Sendable {
             // Memory only: no phone input, so it does not wait for a look or do in progress.
             let received = now()
             computer.lastCallTook = nil
-            let result = routinesCall(args, session: session)
+            let result = routinesCall(args, session: session, conversation: conversation)
             computer.lastCallTook = now() - received
             return result
         }
@@ -666,7 +670,7 @@ public final class PokiCore: @unchecked Sendable {
                     }
                     return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy)
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice)
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
