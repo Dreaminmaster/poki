@@ -55,7 +55,9 @@ struct SetupView: View {
         // opening finds it already on (a proxy app set up before Poki: the page opened on `checking`),
         // and when Poki's own session opens without it (ESP-448).
         .onChange(of: model.isDone(.loopback)) { was, now in
-            if step == .loopback, !was, now { advanceSoon() }
+            // Not past the cellular shortcut the first time: it is asked for on this page (the
+            // owner, 2026-11-19), and the button below still goes on.
+            if step == .loopback, !was, now, HistoryReconnect.shared.asked { advanceSoon() }
         }
         .onAppear { model.loopback.resume(); reconnectBuiltIn() }
         .onChange(of: step) { _, now in if now == .loopback { reconnectBuiltIn() } }
@@ -320,6 +322,9 @@ private struct LoopbackPage: View {
                 Text("10.7.0.1 takes the connection, but the phone's remote pairing service does not answer through it, so this page can show Working while Poki cannot connect. Reconnect your proxy app or LocalDevVPN, then pair again in Setup › Pairing.")
             }
         }
+
+        // The loopback on cellular is set up with the loopback itself.
+        CellularShortcutSection()
 
         // The external app is the way (ESP-168): every app's steps can be read at any time.
         Section {

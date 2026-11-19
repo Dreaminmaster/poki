@@ -20,6 +20,12 @@ final class HistoryReconnect: ObservableObject {
     @Published private(set) var lastAt: Date? = UserDefaults.standard.object(forKey: "history.reconnect.at") as? Date
     @Published private(set) var lastWorked = UserDefaults.standard.bool(forKey: "history.reconnect.ok")
 
+    /// The owner was shown the shortcut in Setup and opened it or its steps: the loopback step no
+    /// longer waits on this page for it.
+    @Published var asked = UserDefaults.standard.bool(forKey: "loopback.cellularAsked") {
+        didSet { UserDefaults.standard.set(asked, forKey: "loopback.cellularAsked") }
+    }
+
     private var listener: NWListener?
     private nonisolated let queue = DispatchQueue(label: "nz.zheha.poki.history.reconnect")
 
@@ -31,7 +37,7 @@ final class HistoryReconnect: ObservableObject {
         AppLog.shared.add("loopback", "reconnect asked by \(source): \(worked ? "connected" : "not connected")")
     }
 
-    /// Listens while Screen History is on, and only on this iPhone's own address.
+    /// Listens while Poki runs, and only on this iPhone's own address.
     func listen(_ on: Bool, model: AppModel) {
         guard on != (listener != nil) else { return }
         guard on else {

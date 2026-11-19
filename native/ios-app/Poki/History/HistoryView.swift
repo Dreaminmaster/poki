@@ -131,14 +131,6 @@ struct HistoryPage: View {
 
 struct ScreenHistorySettingsView: View {
     @ObservedObject private var capture = HistoryCapture.shared
-    @ObservedObject private var reconnect = HistoryReconnect.shared
-    @Environment(\.openURL) private var openURL
-
-    private var lastRun: String {
-        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
-        if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
-        return at.formatted(.relative(presentation: .named))
-    }
     @ObservedObject private var lock = HistoryLock.shared
     @State private var size: (entries: Int, bytes: Int64) = (0, 0)
     @State private var clearing = false
@@ -190,27 +182,7 @@ struct ScreenHistorySettingsView: View {
                 .accessibilityIdentifier("screenHistory.excludedApps")
             }
 
-            if capture.enabled {
-                Section {
-                    Button {
-                        openURL(HistoryReconnect.shortcut)
-                    } label: {
-                        SettingsRow(title: "Get the Shortcut", symbol: "square.2.layers.3d", accessory: .leaves)
-                    }
-                    .accessibilityIdentifier("screenHistory.shortcut")
-                    NavigationLink {
-                        HistoryShortcutGuide().settingsPage()
-                    } label: {
-                        SettingsRow(title: "Set Up by Hand", symbol: "list.number")
-                    }
-                    SettingsRow(title: "Last Run", symbol: "arrow.triangle.2.circlepath", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
-                        .accessibilityIdentifier("screenHistory.shortcutLastRun")
-                } header: {
-                    SettingsHeader("On Cellular")
-                } footer: {
-                    Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on and turn Confirm Before Run off. Then open the shortcut and choose your VPN in both Connect to VPN actions.")
-                }
-            }
+            if capture.enabled { CellularShortcutSection() }
 
             Section {
                 Button("Clear History", role: .destructive) {
@@ -235,6 +207,43 @@ struct ScreenHistorySettingsView: View {
             Button("Last Day", role: .destructive) { Task { await capture.clear(last: 86_400) } }
             Button("Everything", role: .destructive) { Task { await capture.clearEverything() } }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
+/// The shortcut that keeps the loopback on cellular: its link, the same automation by hand, and when
+/// it last ran. Shown where the loopback is set up (the owner, 2026-11-19: asked for in the same
+/// step) and in Screen History's settings.
+struct CellularShortcutSection: View {
+    @ObservedObject private var reconnect = HistoryReconnect.shared
+    @Environment(\.openURL) private var openURL
+
+    private var lastRun: String {
+        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
+        if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
+        return at.formatted(.relative(presentation: .named))
+    }
+
+    var body: some View {
+        Section {
+            Button {
+                reconnect.asked = true
+                openURL(HistoryReconnect.shortcut)
+            } label: {
+                SettingsRow(title: "Get the Shortcut", symbol: "square.2.layers.3d", accessory: .leaves)
+            }
+            .accessibilityIdentifier("cellularShortcut.get")
+            NavigationLink {
+                HistoryShortcutGuide().settingsPage().onAppear { reconnect.asked = true }
+            } label: {
+                SettingsRow(title: "Set Up by Hand", symbol: "list.number")
+            }
+            SettingsRow(title: "Last Run", symbol: "arrow.triangle.2.circlepath", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
+                .accessibilityIdentifier("cellularShortcut.lastRun")
+        } header: {
+            SettingsHeader("On Cellular")
+        } footer: {
+            Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on and turn Confirm Before Run off. Then open the shortcut and choose your VPN in both Connect to VPN actions.")
         }
     }
 }
