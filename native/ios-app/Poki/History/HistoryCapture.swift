@@ -6,16 +6,36 @@ import notify
 
 /// A process-local lease for screen text already fetched by asynchronous agent queries.
 /// Revoking a lease does not try to undo an answer already delivered to the caller.
-private final class HistoryQueryPermissionLease: @unchecked Sendable {
+final class HistoryQueryPermissionLease: @unchecked Sendable {
     private let lock = NSLock()
     private var value: UInt64 = 0
     private var deletions = 0
-    private var enabled = UserDefaults.standard.bool(forKey: "history.enabled")
-    private var unlocked = false
+    private var enabled: Bool
+    private var deadline: ContinuousClock.Instant?
+    private let now: @Sendable () -> ContinuousClock.Instant
+    // Provisional policy, to be agreed with the maintainer. Never extended by a query.
+    private let duration: Duration
+
+    init(enabled: Bool = UserDefaults.standard.bool(forKey: "history.enabled"),
+         duration: Duration = .seconds(300),
+         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock().now }) {
+        self.enabled = enabled
+        self.duration = duration
+        self.now = now
+    }
+
+    /// Called under lock: use a continuous clock so sleep and wall-clock adjustments cannot extend access.
+    private func expireIfNeeded() {
+        if let deadline, now() >= deadline {
+            self.deadline = nil
+            value &+= 1
+        }
+    }
 
     var revision: UInt64 {
         lock.lock()
         defer { lock.unlock() }
+        expireIfNeeded()
         return value
     }
 
@@ -23,19 +43,21 @@ private final class HistoryQueryPermissionLease: @unchecked Sendable {
     var grant: UInt64? {
         lock.lock()
         defer { lock.unlock() }
-        return enabled && unlocked && deletions == 0 ? value : nil
+        expireIfNeeded()
+        return enabled && deadline != nil && deletions == 0 ? value : nil
     }
 
     func setEnabled(_ enabled: Bool) {
         lock.lock()
         self.enabled = enabled
+        if !enabled { deadline = nil }
         value &+= 1
         lock.unlock()
     }
 
     func setUnlocked(_ unlocked: Bool) {
         lock.lock()
-        self.unlocked = unlocked
+        deadline = unlocked && enabled ? now().advanced(by: duration) : nil
         value &+= 1
         lock.unlock()
     }
@@ -100,7 +122,7 @@ final class HistoryCapture: ObservableObject {
         return "Screen History is locked or temporarily unavailable. Unlock it in Poki before querying."
     }
 
-    /// HistoryLock owns authentication; publish its decision to the synchronous agent gate.
+    /// HistoryLock owns authentication; true starts a fresh, bounded grant. False revokes it.
     nonisolated static func setAgentHistoryUnlocked(_ unlocked: Bool) {
         queryLease.setUnlocked(unlocked)
     }

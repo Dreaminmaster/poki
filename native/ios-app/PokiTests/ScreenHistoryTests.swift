@@ -54,8 +54,9 @@ final class ScreenHistoryTests: XCTestCase {
     /// Run these destructive history fixtures only on a disposable simulator.
     private func unlockHistoryForFixture() throws {
         #if targetEnvironment(simulator)
+        HistoryCapture.shared.enabled = true
         let lock = HistoryLock.shared
-        if lock.unlocked { return }
+        if lock.unlocked { lock.lock() }
         if lock.hasPIN {
             guard lock.unlock(pin: fixturePIN) else {
                 throw XCTSkip("An existing non-fixture history PIN is configured; use a disposable simulator.")
@@ -433,9 +434,36 @@ final class ScreenHistoryTests: XCTestCase {
 
         capture.enabled = false
         capture.enabled = true
+        let denied = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertTrue(denied.isError, "Re-enabling must not restore an old grant")
+        XCTAssertFalse(denied.text.contains(canary))
+        XCTAssertTrue(lock.unlock(pin: fixturePIN))
         let fresh = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertFalse(fresh.isError, fresh.text)
         XCTAssertTrue(fresh.text.contains(canary), fresh.text)
+    }
+
+    func testBackgroundLocksUIButAllowsExistingAgentGrantUntilExplicitLock() async throws {
+        try unlockHistoryForFixture()
+        let lock = HistoryLock.shared
+        let canary = "SYNTHETIC_BACKGROUND_GRANT_CANARY"
+        HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
+        let revision = HistoryCapture.agentQueryRevision
+        XCTAssertNotNil(revision)
+        lock.enteredBackground()
+        XCTAssertFalse(lock.unlocked, "The private UI must lock immediately")
+        lock.refresh()
+        XCTAssertEqual(HistoryCapture.agentQueryRevision, revision, "Background and foreground refresh must not renew the grant")
+        let permitted = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertFalse(permitted.isError, permitted.text)
+        XCTAssertTrue(permitted.text.contains(canary))
+        lock.lock()
+        XCTAssertNil(HistoryCapture.agentQueryRevision)
+        let denied = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertTrue(denied.isError)
+        XCTAssertFalse(denied.text.contains(canary))
+        XCTAssertTrue(HistoryCapture.validateAgentAnswer(permitted, revision: revision).isError)
     }
 
     /// The chat uses this same validation after its core await and before persisting a call.
@@ -471,6 +499,7 @@ final class ScreenHistoryTests: XCTestCase {
             for (key, value) in zip(settings, saved) { UserDefaults.standard.set(value, forKey: key) }
         }
         let requestsSeen = HistoryFixtureCounter()
+        let pin = fixturePIN
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("screen_history", ["period": "last_hour"]),
             FakeCompletions.tool("report_plan", ["steps": ["Check note", "Answer"], "currentStep": 1]),
@@ -482,7 +511,10 @@ final class ScreenHistoryTests: XCTestCase {
             // The fake server invokes this on its own serial network queue, before
             // it sends a reply, so the next model turn observes a deterministic change.
             DispatchQueue.main.sync {
-                MainActor.assumeIsolated { HistoryCapture.shared.enabled = turn == 3 }
+                MainActor.assumeIsolated {
+                    HistoryCapture.shared.enabled = turn == 3
+                    if turn == 3 { _ = HistoryLock.shared.unlock(pin: pin) }
+                }
             }
         })
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
@@ -510,7 +542,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(hasHistoryTool(requests[2]), "An active Pi loop must not keep its stale tool list")
         XCTAssertFalse(FakeCompletions.system(requests[2]).contains(PokiCore.screenHistoryInstructions))
         XCTAssertFalse(payload(requests[2]).contains(canary), "Do not resend the revoked raw tool result")
-        XCTAssertTrue(hasHistoryTool(requests[3]), "Re-enabling should restore the tool within the same loop")
+        XCTAssertTrue(hasHistoryTool(requests[3]), "Fresh authentication should restore the tool within the same loop")
         XCTAssertTrue(FakeCompletions.system(requests[3]).contains(PokiCore.screenHistoryInstructions))
         XCTAssertFalse(payload(requests[3]).contains(canary), "A new grant does not revive old evidence")
     }

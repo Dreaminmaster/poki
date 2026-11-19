@@ -248,11 +248,14 @@ final class HistoryLockTests: XCTestCase {
         XCTAssertEqual(grants.last, true)
         phone.onPINWrite = { XCTAssertEqual(grants.last, false, "Revoke before replacing the PIN") }
         XCTAssertTrue(lock.setPIN("1357"))
-        XCTAssertEqual(Array(grants.suffix(2)), [false, true])
+        XCTAssertEqual(grants.last, false, "PIN replacement requires fresh authentication")
+        XCTAssertTrue(lock.unlock(pin: "1357"))
+        XCTAssertEqual(grants.last, true)
 
         phone.biometrics = .usable
         XCTAssertTrue(lock.setBiometrics(true))
-        XCTAssertEqual(Array(grants.suffix(2)), [false, true])
+        XCTAssertEqual(grants.last, false, "Changing authentication settings must revoke the grant")
+        XCTAssertTrue(lock.unlock(pin: "1357"))
         phone.failPINWrite = true
         XCTAssertFalse(lock.setPIN("8642"))
         XCTAssertFalse(lock.unlocked)
@@ -277,6 +280,39 @@ final class HistoryLockTests: XCTestCase {
         XCTAssertEqual(grants.last, false)
         XCTAssertTrue(lock.unlock(pin: "2468"))
         XCTAssertEqual(grants.last, true)
+    }
+
+    func testTimedGrantExpiresAtDeadlineAndCannotBeRenewedByReads() {
+        let clock = GrantTestClock()
+        let lease = HistoryQueryPermissionLease(enabled: true, duration: .seconds(300), now: { clock.now })
+        lease.setUnlocked(true)
+        let start = lease.grant
+        XCTAssertNotNil(start)
+        clock.advance(.seconds(299))
+        XCTAssertEqual(lease.grant, start)
+        XCTAssertEqual(lease.revision, start)
+        clock.advance(.seconds(1))
+        XCTAssertNil(lease.grant)
+        XCTAssertNotEqual(lease.revision, start)
+        let expired = lease.revision
+        XCTAssertEqual(lease.revision, expired, "Expiration only invalidates the revision once")
+        lease.setUnlocked(true)
+        XCTAssertNotNil(lease.grant)
+        XCTAssertNotEqual(lease.grant, start)
+    }
+
+    func testTurningFeatureOffDoesNotRestoreTimedGrantWhenEnabledAgain() {
+        let lease = HistoryQueryPermissionLease(enabled: true)
+        lease.setUnlocked(true)
+        XCTAssertNotNil(lease.grant)
+        lease.setEnabled(false)
+        XCTAssertNil(lease.grant)
+        lease.setEnabled(true)
+        XCTAssertNil(lease.grant)
+        lease.setUnlocked(true)
+        XCTAssertNotNil(lease.grant)
+        lease.setUnlocked(false)
+        XCTAssertNil(lease.grant)
     }
 
     // MARK: Helpers
@@ -373,4 +409,12 @@ private extension HistoryLock.Biometrics {
     static let usable = Self(ready: true, name: "Face ID", blockedOrDeniedOnHardware: false)
     static let unavailable = Self(ready: false, name: "Face ID", blockedOrDeniedOnHardware: false)
     static let deniedForPoki = Self(ready: false, name: "Face ID", blockedOrDeniedOnHardware: true)
+}
+
+/// Deterministically models elapsed continuous time without sleeping or changing the system clock.
+private final class GrantTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant = ContinuousClock().now
+    var now: ContinuousClock.Instant { lock.withLock { instant } }
+    func advance(_ duration: Duration) { lock.withLock { instant = instant.advanced(by: duration) } }
 }
