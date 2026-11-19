@@ -45,6 +45,8 @@ targets:
     platform: iOS
     sources:
       - path: Poki
+        # The launch screen's sources; scripts/make-assets.sh puts them in the asset catalogue.
+        excludes: [LaunchArt/**]
       - path: Shared
       # The gym scorecard (native/ios-gym/check), run in-process by the Debug probe's `gym` mode.
       - path: ../ios-gym/check/GymScorecard.swift

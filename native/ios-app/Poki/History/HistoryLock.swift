@@ -10,7 +10,7 @@ import notify
 /// Either one can be turned off, but never both.
 @MainActor
 final class HistoryLock: ObservableObject {
-    static let shared = HistoryLock(boundary: .live)
+    static let shared = HistoryLock(boundary: .live, agentGrantChanged: HistoryCapture.setAgentHistoryUnlocked)
 
     enum AuthMethods: Equatable {
         case biometricsOnly
@@ -79,6 +79,8 @@ final class HistoryLock: ObservableObject {
     private enum Event {
         case refresh
         case enteredBackground
+        case protectedDataUnavailable
+        case protectedDataAvailable
         case beginBiometrics(UUID)
         case finishBiometrics(attempt: UUID, passed: Bool)
         case setPIN(String)
@@ -96,6 +98,11 @@ final class HistoryLock: ObservableObject {
     @Published private(set) var biometrics: Biometrics
 
     private let boundary: Boundary
+    /// Only the live lock owns the production grant. Test boundaries may observe their own grants.
+    private let agentGrantChanged: ((Bool) -> Void)?
+    private var agentGrantOpen = false
+    /// The will-become-unavailable event precedes the keychain losing access.
+    private var protectedDataUnavailable = false
     private static let pinAccount = "pin"
     private static let armedAccount = "armed"
     private static let biometricsKey = "history.lock.biometrics"
@@ -115,21 +122,25 @@ final class HistoryLock: ObservableObject {
         }
     }
 
-    init(boundary: Boundary) {
+    init(boundary: Boundary, agentGrantChanged: ((Bool) -> Void)? = nil) {
         self.boundary = boundary
+        self.agentGrantChanged = agentGrantChanged
         biometricsOn = boundary.defaults.object(forKey: Self.biometricsKey) as? Bool ?? true
         biometrics = boundary.biometrics()
         _ = transition(.refresh)
         let center = NotificationCenter.default
         subscriptions.observers = [
             center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.lock() }
+                MainActor.assumeIsolated { self?.lock() }
+            },
+            center.addObserver(forName: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { _ = self?.transition(.protectedDataUnavailable) }
             },
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.refresh() }
             },
             center.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.refresh() }
+                MainActor.assumeIsolated { _ = self?.transition(.protectedDataAvailable) }
             },
         ]
         // Not documented for apps; coming back to the foreground reads Face ID again either way.
@@ -227,16 +238,40 @@ final class HistoryLock: ObservableObject {
 
     @discardableResult
     private func transition(_ event: Event) -> Bool {
+        // Revoke synchronously before credential I/O and before the device loses protected data.
+        // Only this transition may restore a grant, once the final state is known.
+        defer { publishAgentGrant(unlocked) }
+        switch event {
+        case .enteredBackground, .setPIN, .removePIN, .setBiometrics:
+            publishAgentGrant(false)
+        case .protectedDataUnavailable:
+            protectedDataUnavailable = true
+            publishAgentGrant(false)
+            apply(.deviceLocked)
+            return true
+        case .protectedDataAvailable:
+            protectedDataUnavailable = false
+        default: break
+        }
+        guard !protectedDataUnavailable else {
+            apply(.deviceLocked)
+            return false
+        }
         let now = boundary.now()
         var env = readEnvironment()
         let current = Self.reconcile(state, env: env, now: now)
+        apply(current)
 
         let next: State
         let accepted: Bool
 
         switch event {
-        case .refresh:
+        case .refresh, .protectedDataAvailable:
             next = current
+            accepted = true
+
+        case .protectedDataUnavailable:
+            next = .deviceLocked
             accepted = true
 
         case .enteredBackground:
@@ -276,9 +311,13 @@ final class HistoryLock: ObservableObject {
             case .unconfigured, .unlocked: true
             case .locked, .biometricsUnavailable, .deviceLocked: false
             }
-            guard Self.valid(pin), allowed, let sealed = Self.seal(pin),
-                  boundary.writeKeychain(Self.pinAccount, sealed, kSecAttrAccessibleWhenUnlockedThisDeviceOnly) else {
+            guard Self.valid(pin), allowed, let sealed = Self.seal(pin) else {
                 return refuse(current)
+            }
+            guard boundary.writeKeychain(Self.pinAccount, sealed, kSecAttrAccessibleWhenUnlockedThisDeviceOnly) else {
+                // The keychain replacement may have removed the old PIN before failing.
+                // Never restore an unlocked grant on the strength of that old credential.
+                return refuse(Self.reconcile(Self.closed(current), env: readEnvironment(), now: now))
             }
             markArmed()
             env = readEnvironment()
@@ -346,13 +385,34 @@ final class HistoryLock: ObservableObject {
             accepted = true
         }
 
-        if state != next { state = next }
+        apply(next)
         return accepted
+    }
+
+    /// The single state publication boundary. Revoke before changing any authorization state;
+    /// transition's defer restores a grant only if the final state is unlocked.
+    private func apply(_ next: State) {
+        guard state != next else { return }
+        publishAgentGrant(false)
+        state = next
+    }
+
+    private func publishAgentGrant(_ open: Bool) {
+        guard agentGrantOpen != open else { return }
+        agentGrantOpen = open
+        agentGrantChanged?(open)
+    }
+
+    private static func closed(_ state: State) -> State {
+        if case .unlocked(let methods) = state {
+            return .locked(methods: methods, evaluatingBiometrics: nil, cooldown: PINCooldown())
+        }
+        return state
     }
 
     /// Refuses an event: the state catches up with what was just read, and nothing else changes.
     private func refuse(_ current: State) -> Bool {
-        if state != current { state = current }
+        apply(current)
         return false
     }
 
@@ -378,19 +438,17 @@ final class HistoryLock: ObservableObject {
         case .inaccessibleWhileDeviceLocked: knownHasPIN
         }
         let usesBiometrics = env.biometricsOn && env.biometrics.ready
-        if case .inaccessibleWhileDeviceLocked = env.storedPIN, !usesBiometrics, !hasPIN {
-            if case .unlocked(let methods) = state { return .unlocked(methods: methods) }
-            return .deviceLocked
-        }
+        if case .inaccessibleWhileDeviceLocked = env.storedPIN { return .deviceLocked }
         guard let methods = AuthMethods(biometrics: usesBiometrics, pin: hasPIN) else {
             return env.armed ? .biometricsUnavailable : .unconfigured
         }
         switch state {
         case .unlocked:
             return .unlocked(methods: methods)
-        case .locked(_, let activeAttempt, var cooldown):
+        case .locked(let previousMethods, let activeAttempt, var cooldown):
             if let until = cooldown.blockedUntil, until <= now { cooldown.blockedUntil = nil }
-            return .locked(methods: methods, evaluatingBiometrics: methods.usesBiometrics ? activeAttempt : nil, cooldown: cooldown)
+            // A callback from a previous authentication-method configuration is stale.
+            return .locked(methods: methods, evaluatingBiometrics: methods.usesBiometrics && previousMethods == methods ? activeAttempt : nil, cooldown: cooldown)
         case .unconfigured, .biometricsUnavailable, .deviceLocked:
             return .locked(methods: methods, evaluatingBiometrics: nil, cooldown: PINCooldown())
         }
