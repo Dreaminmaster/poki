@@ -278,6 +278,7 @@ struct RootView: View {
             Text("The update is almost in. Poki will close to finish it. Open Poki again afterwards.")
         }
         .modifier(AutomationNotices(enabled: !detailsOpen))
+        .modifier(LoopbackPrompt(enabled: !detailsOpen && !welcoming && model.signer.installMessage == nil))
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active { model.becameActive(); HistoryCollector.shared.attach(model); AskPoki.refresh(); model.startSigner(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
         }
