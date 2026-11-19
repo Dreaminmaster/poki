@@ -17,11 +17,16 @@ struct AccountPage: View {
                 TextField("Verification Code", text: $code)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
+                    .onChange(of: code) { _, new in
+                        let digits = String(new.filter(\.isNumber).prefix(6))
+                        if digits != new { code = digits }
+                    }
                 Button("Verify") { Task { await signer.finishSignIn(code: code); code = "" } }
                     .disabled(code.count != 6 || signer.working != nil)
             } footer: {
                 Text("Apple sent a six-digit code to your trusted devices or phone number.")
             }
+            VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
         } else if signer.signedIn {
             Section {
                 LabeledContent("Apple Account", value: signer.status?.apple_id ?? "")
@@ -40,9 +45,12 @@ struct AccountPage: View {
                      ? "Poki keeps the password in this iPhone’s Keychain to sign itself again every week."
                      : "Poki signs in again when its signing is due, and asks you for the password then.")
             }
-            .task { if signer.teams.isEmpty { await signer.loadTeams() } }
+            .task { if signer.teams.isEmpty, signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
             Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
         } else {
+            if signer.needsReauth, signer.lastError != SelfSigner.reauthMessage {
+                Section { Label(SelfSigner.localizedErrorText(SelfSigner.reauthMessage), systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+            }
             Section {
                 TextField("Apple ID", text: $appleID)
                     .textContentType(.username)
@@ -75,7 +83,7 @@ struct SignerActivityRows: View {
         }
         if let error = signer.lastError {
             // The signer's words are English; those the strings table knows are shown in the owner's language.
-            Section { Label(Bundle.main.localizedString(forKey: error, value: error, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+            Section { Label(SelfSigner.localizedErrorText(error), systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
         }
         if let error = signer.updateCheckError {
             Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
@@ -372,6 +380,7 @@ struct VerificationCodeSheet: View {
                 } footer: {
                     Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
                 }
+                VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
                 SignerActivityRows(signer: signer)
             }
             .navigationTitle(AppLocalization.text("Verification Code"))
@@ -392,5 +401,28 @@ struct VerificationCodeSheet: View {
         let entered = code
         code = ""
         Task { await signer.finishSignIn(code: entered) }
+    }
+}
+
+struct VerificationCodeRecoverySection: View {
+    let signer: SelfSigner
+    let clearCode: () -> Void
+
+    var body: some View {
+        Section {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Button {
+                    Task { await signer.resendCode(now: context.date) }
+                } label: {
+                    Text(signer.resendButtonTitle(at: context.date))
+                }
+                .disabled(!signer.canResendCode(at: context.date))
+            }
+            Button("Cancel Sign-In", role: .destructive) {
+                clearCode()
+                Task { await signer.cancelSignIn() }
+            }
+            .disabled(signer.working != nil)
+        }
     }
 }

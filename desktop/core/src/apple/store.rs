@@ -157,7 +157,17 @@ pub struct Account {
     pub password: Option<String>,
     pub team_id: Option<String>,
     pub anisette: Option<Source>,
+    #[serde(default)]
+    pub rate_limited_until: Option<i64>,
+    /// Apple accepted a code but never opened the session. Nothing signs in again by itself, with
+    /// the saved password or otherwise, until the person signs in by hand.
+    #[serde(default)]
+    pub needs_reauth: bool,
 }
+
+/// Cooldown window after Apple rate-limits sign-in or code requests ("Wait about an hour").
+pub const RATE_LIMIT_COOLDOWN_SECS: i64 = 3600;
+const PENDING_SECRET: &str = "pending-sign-in";
 
 impl Account {
     pub fn apple_id(&self) -> Option<&str> { self.session.as_ref().map(|s| s.apple_id.as_str()) }
@@ -167,14 +177,64 @@ impl Account {
             if n.is_empty() { s.apple_id.clone() } else { n }
         })
     }
+    pub fn is_rate_limited(&self, now: i64) -> bool {
+        self.rate_limited_until.is_some_and(|until| now < until)
+    }
+    pub fn mark_rate_limited(&mut self, now: i64) {
+        self.rate_limited_until = Some(now + RATE_LIMIT_COOLDOWN_SECS);
+    }
+    pub fn clear_rate_limit(&mut self) {
+        self.rate_limited_until = None;
+    }
+}
+
+pub fn load_pending() -> Option<super::gsa::Pending> {
+    let raw = secret_get(PENDING_SECRET)?;
+    serde_json::from_str(&raw).ok()
+}
+
+pub fn save_pending(pending: &super::gsa::Pending) -> Result<()> {
+    secret_set(PENDING_SECRET, &serde_json::to_string(pending)?)
+}
+
+pub fn clear_pending() -> Result<()> {
+    secret_delete(PENDING_SECRET)
 }
 
 /// The host's vault (Poki on the iPhone) holds the account under this name.
 const VAULT_NAME: &str = "apple-account";
 
+#[cfg(test)]
+std::thread_local! {
+    static TEST_VAULT: std::cell::RefCell<Option<std::sync::Arc<crate::vault::memory::Memory>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_vault<T>(vault: std::sync::Arc<crate::vault::memory::Memory>, f: impl FnOnce() -> T) -> T {
+    struct Guard(Option<std::sync::Arc<crate::vault::memory::Memory>>);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            TEST_VAULT.with(|cell| *cell.borrow_mut() = self.0.take());
+        }
+    }
+    let prev = TEST_VAULT.with(|cell| cell.borrow_mut().replace(vault));
+    let _guard = Guard(prev);
+    f()
+}
+
+#[cfg(test)]
+fn test_vault() -> Option<std::sync::Arc<crate::vault::memory::Memory>> {
+    TEST_VAULT.with(|cell| cell.borrow().clone())
+}
+
 /// A secret of Poki Setup's own: the host's vault when one is installed, else the system keychain
 /// (macOS Keychain, Windows Credential Manager), or a 0600 file in file mode.
 pub fn secret_get(name: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.get(name).ok().flatten().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty());
+    }
     if let Some(v) = crate::vault::installed() {
         return v.get(name).ok().flatten().and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty());
     }
@@ -188,6 +248,11 @@ pub fn secret_get(name: &str) -> Option<String> {
 }
 
 pub fn secret_set(name: &str, value: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.set(name, value.as_bytes());
+    }
     if let Some(v) = crate::vault::installed() {
         return v.set(name, value.as_bytes());
     }
@@ -208,6 +273,11 @@ pub fn secret_set(name: &str, value: &str) -> Result<()> {
 }
 
 pub fn secret_delete(name: &str) -> Result<()> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.delete(name);
+    }
     if let Some(v) = crate::vault::installed() {
         return v.delete(name);
     }
@@ -227,6 +297,11 @@ fn file_mode() -> bool { !cfg!(feature = "os-keychain") || std::env::var("POKI_S
 fn file_path() -> Result<std::path::PathBuf> { Ok(paths::state_dir()?.join("account.json")) }
 
 pub fn load() -> Result<Account> {
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return Ok(v.get(VAULT_NAME)?.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default());
+    }
     if let Some(v) = crate::vault::installed() {
         return Ok(v.get(VAULT_NAME)?.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default());
     }
@@ -240,7 +315,33 @@ pub fn load() -> Result<Account> {
 }
 
 pub fn save(account: &Account) -> Result<()> {
+    write_account(account)?;
+    #[cfg(test)]
+    if test_vault().is_some() {
+        return Ok(());
+    }
+    if let Ok(dir) = paths::state_dir() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let _ = std::fs::write(dir.join(REVISION_FILE), stamp.to_string());
+    }
+    Ok(())
+}
+
+/// Changes on every save, from any client. It holds no account data, so open apps can watch it
+/// for a change without reading the keychain, then ask for the account again.
+const REVISION_FILE: &str = "account.revision";
+
+pub fn revision() -> Option<String> {
+    std::fs::read_to_string(paths::state_dir().ok()?.join(REVISION_FILE)).ok()
+}
+
+fn write_account(account: &Account) -> Result<()> {
     let json = serde_json::to_string(account)?;
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.set(VAULT_NAME, json.as_bytes());
+    }
     if let Some(v) = crate::vault::installed() {
         return v.set(VAULT_NAME, json.as_bytes());
     }
@@ -261,6 +362,12 @@ pub fn save(account: &Account) -> Result<()> {
 }
 
 pub fn clear() -> Result<()> {
+    let _ = clear_pending();
+    #[cfg(test)]
+    if let Some(v) = test_vault() {
+        use crate::vault::Vault;
+        return v.delete(VAULT_NAME);
+    }
     if let Some(v) = crate::vault::installed() {
         return v.delete(VAULT_NAME);
     }

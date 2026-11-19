@@ -17,6 +17,8 @@ final class Bridge {
     var onProgress: ((ProgressEvent) -> Void)?
     var onLogLines: (([String]) -> Void)?
     var onNeedsCode: (() -> Void)?
+    /// Some client (this app, the CLI) saved the account.
+    var onAccountChanged: (() -> Void)?
     /// The helper's own log (stderr), for the Debug page.
     private(set) var helperLog: [String] = []
 
@@ -121,6 +123,8 @@ final class Bridge {
                 }
             case "log_lines":
                 if let lines = obj["data"] as? [String] { onLogLines?(lines) }
+            case "account_changed":
+                onAccountChanged?()
             default:
                 break
             }

@@ -21,6 +21,7 @@ const zh: Record<string, string> = {
   "Apple refused the Mac identity Poki signs in with (it asks for macOS 10.13 or later). Update Poki and Poki Setup to the latest version, then try again.":
     "Apple 拒绝了 Poki 登录时使用的 Mac 身份（要求 macOS 10.13 或更高版本）。请把 Poki 和 Poki Setup 更新到最新版本后再试。",
   "Sign in": "登录",
+  "Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session.": "Apple 已验证该验证码，但未完成会话建立。请重新登录以发起新会话。",
   "Sign out": "退出登录",
   "Password": "密码",
   "Keep me signed in for weekly renewal": "保持登录以便每周自动续签",
