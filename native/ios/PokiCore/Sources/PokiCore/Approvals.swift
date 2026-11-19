@@ -113,24 +113,115 @@ public struct Approval: Sendable, Equatable {
     /// can be offered Don't Ask Again. False where a payment, a deletion, Wallet or a screen not read yet
     /// would still ask.
     public var stopsWhenOff = false
-    /// The actions it covers, as a fingerprint: the same actions sent again run once it is granted.
-    var fingerprint: String
+    /// What it covers: the same actions sent again on the same controls run once it is granted.
+    var scope: ApprovalScope
     var workspaceSession: String?
+
+    func covers(_ other: ApprovalScope, workspaceSession session: String?) -> Bool {
+        workspaceSession == session && scope.covers(other)
+    }
 }
 
-/// Pending and granted approvals. At most one is pending; it is granted or declined only from the app
-/// (the Live Activity). Every `do` and every voice tap (`PokiCore.clearTap`) withdraws it first, so a
-/// press the automation lands afterwards finds nothing to grant. Both also refuse to tap in Poki when
-/// they can tell it is in front.
+/// What an approval covers: the actions with the pane and app they were for, and the controls they
+/// name as the read at `readAt` showed them. A control's label may differ in a later read only by a
+/// countdown that ran on with the time between the two reads (`Countdown.sameControl`); a count, an
+/// amount, an account or a time of day that changed is another control.
+struct ApprovalScope: Sendable, Equatable {
+    struct Target: Sendable, Equatable {
+        var ref: Int
+        var type: String
+        var label: String
+        var identifier: String
+    }
+    var actions: String
+    var targets: [Target] = []
+    /// When the targets were read (`now()`).
+    var readAt: Double = 0
+
+    func covers(_ other: ApprovalScope) -> Bool {
+        actions == other.actions && Self.sameTargets(targets, other.targets, elapsed: other.readAt - readAt)
+    }
+
+    static func sameTargets(_ before: [Target], _ after: [Target], elapsed: Double) -> Bool {
+        before.count == after.count && zip(before, after).allSatisfy { b, a in
+            b.ref == a.ref && b.type == a.type && b.identifier == a.identifier
+                && Countdown.sameControl(before: b.label, after: a.label, elapsed: elapsed)
+        }
+    }
+}
+
+/// Time readings in a label (0:59, 1:02:03, 59 s, 59 秒) and whether a change in them is a countdown
+/// running on. Only the form of a reading makes it one; words around it (left, remaining, in) do not.
+enum Countdown {
+    /// A private-use character, so it cannot be part of a label.
+    private static let mark = "\u{E000}"
+    private static let reading = try! NSRegularExpression(pattern: "(?<![0-9.,:])(?:[0-9]{1,2}(?::[0-9]{2}){1,2}|[0-9]+ ?(?:s|sec|secs|seconds|秒)(?![A-Za-z]))(?![0-9:])")
+    /// How far a countdown may be off the time that passed: the reads' own time and a second's rounding.
+    static let slack = 2.0
+
+    /// The label with each reading replaced by a mark, and the readings in seconds.
+    static func readings(_ label: String) -> (masked: String, seconds: [Int]) {
+        let ns = label as NSString
+        var masked = "", seconds: [Int] = [], last = 0
+        for match in reading.matches(in: label, range: NSRange(location: 0, length: ns.length)) {
+            masked += ns.substring(with: NSRange(location: last, length: match.range.location - last)) + mark
+            let text = ns.substring(with: match.range)
+            seconds.append(text.contains(":")
+                ? text.split(separator: ":").reduce(0) { $0 * 60 + (Int($1) ?? 0) }
+                : Int(text.prefix { $0.isNumber }) ?? 0)
+            last = match.range.location + match.range.length
+        }
+        return (masked + ns.substring(from: last), seconds)
+    }
+
+    /// The same control read again `elapsed` seconds later: the same text, or text whose readings
+    /// that changed are each lower and went down by the time that passed, within `slack`. A reading
+    /// that went up by any amount, went down faster or slower than the clock, or a time of day that
+    /// moved (10:30 to 14:30) makes it another control.
+    static func sameControl(before: String, after: String, elapsed: Double) -> Bool {
+        guard before != after else { return true }
+        let b = readings(before), a = readings(after)
+        guard b.masked == a.masked else { return false }
+        return zip(b.seconds, a.seconds).allSatisfy { old, new in old == new || (new < old && abs(Double(old - new) - elapsed) <= slack) }
+    }
+}
+
+/// Pending and granted approvals. At most one approval is pending or granted at a time, and all
+/// transitions go through `transition(_:now:)` so pending waiters and granted tickets cannot coexist.
 final class Approvals: @unchecked Sendable {
     enum Decision: Sendable { case approved, declined, expired }
-    private struct Entry {
-        var approval: Approval
-        var decision: Decision?
-        var waiters: [UUID: CheckedContinuation<Decision?, Never>] = [:]
+
+    private enum State {
+        case idle
+        case pending(approval: Approval, waiters: [UUID: CheckedContinuation<Decision?, Never>])
+        case granted(approval: Approval)
     }
+
+    private enum Event {
+        case inspectPending
+        case request(Approval)
+        case withdraw(id: String)
+        case withdrawPending
+        case rekey(id: String, scope: ApprovalScope)
+        case withdrawIfMismatch(scope: ApprovalScope?, workspaceSession: String?, keepingGrant: Bool)
+        case discardWorkspace(session: String)
+        case discardAll
+        case resolve(id: String, approved: Bool)
+        case consumeGrant(scope: ApprovalScope, workspaceSession: String?)
+        case registerWaiter(id: String, token: UUID, continuation: CheckedContinuation<Decision?, Never>, cancelled: Bool)
+        case cancelWaiter(id: String, token: UUID)
+    }
+
+    private struct Effects {
+        var pending: Approval?
+        var consumed: Approval?
+        var immediate: (CheckedContinuation<Decision?, Never>, Decision?)?
+        var resumed: [(CheckedContinuation<Decision?, Never>, Decision?)] = []
+        var events: [CoreEvent] = []
+    }
+
     private let lock = NSLock()
-    private var entries: [String: Entry] = [:]
+    private var state: State = .idle
     let lifetime: Double
     let emit: @Sendable (CoreEvent) -> Void
 
@@ -139,57 +230,184 @@ final class Approvals: @unchecked Sendable {
         self.emit = emit
     }
 
-    /// Drops expired entries (under the lock); returns the pending ones that expired, for events.
-    private func sweep(at date: Date = Date()) -> [Approval] {
-        var expired: [Approval] = []
-        for (id, entry) in entries where entry.approval.expires <= date {
-            entries[id] = nil
-            if entry.decision == nil {
-                expired.append(entry.approval)
-                entry.waiters.values.forEach { $0.resume(returning: .expired) }
+    @discardableResult
+    private func apply(_ event: Event, now: Date = Date()) -> Effects {
+        lock.lock()
+        let effects = transition(event, now: now)
+        lock.unlock()
+        if let (continuation, value) = effects.immediate {
+            continuation.resume(returning: value)
+        }
+        for (continuation, value) in effects.resumed {
+            continuation.resume(returning: value)
+        }
+        for coreEvent in effects.events {
+            emit(coreEvent)
+        }
+        return effects
+    }
+
+    private func expireIfNeeded(now: Date, into effects: inout Effects) {
+        switch state {
+        case .idle:
+            break
+        case .pending(let approval, let waiters) where approval.expires <= now:
+            state = .idle
+            effects.resumed.append(contentsOf: waiters.values.map { ($0, .expired) })
+            effects.events.append(.approvalEnded(id: approval.id, approved: nil))
+        case .granted(let approval) where approval.expires <= now:
+            state = .idle
+        case .pending, .granted:
+            break
+        }
+    }
+
+    private func clearCurrent(into effects: inout Effects) {
+        switch state {
+        case .idle:
+            break
+        case .pending(let old, let waiters):
+            state = .idle
+            effects.resumed.append(contentsOf: waiters.values.map { ($0, .expired) })
+            effects.events.append(.approvalEnded(id: old.id, approved: nil))
+        case .granted:
+            state = .idle
+        }
+    }
+
+    private func transition(_ event: Event, now: Date) -> Effects {
+        var effects = Effects()
+        expireIfNeeded(now: now, into: &effects)
+
+        switch event {
+        case .inspectPending:
+            if case .pending(let approval, _) = state {
+                effects.pending = approval
+            }
+
+        case .request(let approval):
+            clearCurrent(into: &effects)
+            state = .pending(approval: approval, waiters: [:])
+            effects.events.append(.approvalRequested(approval))
+
+        case .withdraw(let id):
+            if case .pending(let approval, _) = state, approval.id == id {
+                clearCurrent(into: &effects)
+            } else if case .granted(let approval) = state, approval.id == id {
+                state = .idle
+            }
+
+        case .withdrawPending:
+            if case .pending = state {
+                clearCurrent(into: &effects)
+            }
+
+        case .rekey(let id, let scope):
+            switch state {
+            case .pending(var approval, let waiters) where approval.id == id:
+                approval.scope = scope
+                state = .pending(approval: approval, waiters: waiters)
+            case .granted(var approval) where approval.id == id:
+                approval.scope = scope
+                state = .granted(approval: approval)
+            case .idle, .pending, .granted:
+                break
+            }
+
+        case .withdrawIfMismatch(let scope, let workspaceSession, let keepingGrant):
+            func matches(_ approval: Approval) -> Bool {
+                scope.map { approval.covers($0, workspaceSession: workspaceSession) } ?? false
+            }
+            switch state {
+            case .pending(let approval, _) where !matches(approval):
+                clearCurrent(into: &effects)
+            case .granted(let approval) where !keepingGrant && !matches(approval):
+                state = .idle
+            case .idle, .pending, .granted:
+                break
+            }
+
+        case .discardWorkspace(let session):
+            switch state {
+            case .idle:
+                break
+            case .pending(let approval, _) where approval.workspaceSession == session:
+                clearCurrent(into: &effects)
+            case .granted(let approval) where approval.workspaceSession == session:
+                state = .idle
+            case .pending, .granted:
+                break
+            }
+
+        case .discardAll:
+            clearCurrent(into: &effects)
+
+        case .resolve(let id, let approved):
+            guard case .pending(let approval, let waiters) = state, approval.id == id else { break }
+            let decision: Decision = approved ? .approved : .declined
+            state = approved ? .granted(approval: approval) : .idle
+            effects.resumed.append(contentsOf: waiters.values.map { ($0, decision) })
+            effects.events.append(.approvalEnded(id: id, approved: approved))
+
+        case .consumeGrant(let scope, let workspaceSession):
+            if case .granted(let approval) = state,
+               approval.covers(scope, workspaceSession: workspaceSession) {
+                state = .idle
+                effects.consumed = approval
+            }
+
+        case .registerWaiter(let id, let token, let continuation, let cancelled):
+            switch state {
+            case .pending(let approval, var waiters) where approval.id == id:
+                if cancelled {
+                    effects.immediate = (continuation, nil)
+                } else {
+                    waiters[token] = continuation
+                    state = .pending(approval: approval, waiters: waiters)
+                }
+            case .granted(let approval) where approval.id == id:
+                effects.immediate = (continuation, .approved)
+            case .idle, .pending, .granted:
+                effects.immediate = (continuation, .expired)
+            }
+
+        case .cancelWaiter(let id, let token):
+            if case .pending(let approval, var waiters) = state, approval.id == id,
+               let continuation = waiters.removeValue(forKey: token) {
+                state = .pending(approval: approval, waiters: waiters)
+                effects.immediate = (continuation, nil)
             }
         }
-        return expired
+
+        if case .pending(let approval, _) = state {
+            effects.pending = approval
+        }
+        return effects
     }
 
     var pending: Approval? {
-        lock.lock()
-        let expired = sweep()
-        let p = entries.values.first { $0.decision == nil }?.approval
-        lock.unlock()
-        expired.forEach { emit(.approvalEnded(id: $0.id, approved: nil)) }
-        return p
+        apply(.inspectPending).pending
     }
 
-    /// A granted approval for exactly these actions, used up by this call.
-    func consumeGrant(fingerprint: String, workspaceSession: String? = nil) -> Approval? {
-        lock.lock()
-        let expired = sweep()
-        let found = entries.first {
-            $0.value.approval.fingerprint == fingerprint && $0.value.approval.workspaceSession == workspaceSession && $0.value.decision == .approved
-        }
-        if let found { entries[found.key] = nil }
-        lock.unlock()
-        expired.forEach { emit(.approvalEnded(id: $0.id, approved: nil)) }
-        return found?.value.approval
+    /// A granted approval for these exact actions and screen context, consumed once.
+    func consumeGrant(scope: ApprovalScope, workspaceSession: String? = nil) -> Approval? {
+        apply(.consumeGrant(scope: scope, workspaceSession: workspaceSession)).consumed
     }
 
-    func request(app: String, summary: String, reason: String, fingerprint: String, workspaceSession: String? = nil, stopsWhenOff: Bool = false) -> Approval {
+    func request(app: String, summary: String, reason: String, scope: ApprovalScope, workspaceSession: String? = nil, stopsWhenOff: Bool = false) -> Approval {
         let date = Date()
-        let approval = Approval(id: String(UUID().uuidString.prefix(8)).lowercased(), app: app, summary: summary, reason: reason, requested: date, expires: date.addingTimeInterval(lifetime), stopsWhenOff: stopsWhenOff, fingerprint: fingerprint, workspaceSession: workspaceSession)
-        lock.lock()
-        // One pending at a time: a new request replaces an older one, which ends unanswered.
-        let replaced = entries.values.filter { $0.decision == nil }
-        for old in replaced {
-            old.waiters.values.forEach { $0.resume(returning: .expired) }
-            entries[old.approval.id] = nil
-        }
-        entries[approval.id] = Entry(approval: approval)
-        lock.unlock()
-        replaced.forEach { emit(.approvalEnded(id: $0.approval.id, approved: nil)) }
-        emit(.approvalRequested(approval))
-        // The request ends when its time is up even if no call comes to sweep it: the app holds its
-        // card, the idle stop and Stop Runner until it hears so.
+        let approval = Approval(
+            id: String(UUID().uuidString.prefix(8)).lowercased(),
+            app: app,
+            summary: summary,
+            reason: reason,
+            requested: date,
+            expires: date.addingTimeInterval(lifetime),
+            stopsWhenOff: stopsWhenOff,
+            scope: scope,
+            workspaceSession: workspaceSession
+        )
+        apply(.request(approval), now: date)
         Task { [weak self, lifetime] in
             await sleep(seconds: lifetime + 0.05)
             _ = self?.pending
@@ -197,67 +415,158 @@ final class Approvals: @unchecked Sendable {
         return approval
     }
 
-    /// Withdraws a pending approval (the agent moved on to something else).
     func withdraw(id: String) {
-        lock.lock()
-        guard let entry = entries[id], entry.decision == nil else { lock.unlock(); return }
-        entries[id] = nil
-        lock.unlock()
-        entry.waiters.values.forEach { $0.resume(returning: .expired) }
-        emit(.approvalEnded(id: id, approved: nil))
+        apply(.withdraw(id: id))
     }
 
-    /// A local Split View task cannot carry a pending or granted decision across panes or tasks.
+    /// Withdraws the request still waiting for the owner, if any. A granted approval that has not
+    /// been used stays: it belongs to the agent's next `do`, not to whoever asks next.
+    func withdrawPending() {
+        apply(.withdrawPending)
+    }
+
+    /// Points an open request or unused grant at the actions as the agent will send them again: on
+    /// their own, after the read that follows the actions sent before them.
+    func rekey(id: String, scope: ApprovalScope) {
+        apply(.rekey(id: id, scope: scope))
+    }
+
+    /// Withdraws a request, and unless `keepingGrant` an unused grant, for other actions than these.
+    func withdrawMismatching(scope: ApprovalScope?, workspaceSession: String?, keepingGrant: Bool = false) {
+        apply(.withdrawIfMismatch(scope: scope, workspaceSession: workspaceSession, keepingGrant: keepingGrant))
+    }
+
     func discardWorkspaceDecisions(session: String?) {
         guard let session else { return }
-        lock.lock()
-        let discarded = entries.values.filter { $0.approval.workspaceSession == session }
-        for entry in discarded { entries[entry.approval.id] = nil }
-        lock.unlock()
-        for entry in discarded where entry.decision == nil {
-            entry.waiters.values.forEach { $0.resume(returning: .expired) }
-            emit(.approvalEnded(id: entry.approval.id, approved: nil))
-        }
+        apply(.discardWorkspace(session: session))
+    }
+
+    func discardAll() {
+        apply(.discardAll)
     }
 
     func resolve(id: String, approved: Bool) {
-        lock.lock()
-        guard var entry = entries[id], entry.decision == nil else { lock.unlock(); return }
-        let decision: Decision = approved ? .approved : .declined
-        let waiters = entry.waiters
-        entry.decision = decision
-        entry.waiters = [:]
-        entries[id] = approved ? entry : nil
-        lock.unlock()
-        waiters.values.forEach { $0.resume(returning: decision) }
-        emit(.approvalEnded(id: id, approved: approved))
+        apply(.resolve(id: id, approved: approved))
     }
 
-    /// Waits for the decision, at most `seconds`; nil when it is still pending then, or when the
-    /// waiting task is cancelled (the caller gave up): the request itself stays for the owner.
     func wait(id: String, seconds: Double) async -> Decision? {
         let token = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Decision?, Never>) in
-                lock.lock()
-                guard var entry = entries[id] else { lock.unlock(); continuation.resume(returning: .expired); return }
-                if let decision = entry.decision { lock.unlock(); continuation.resume(returning: decision); return }
-                guard !Task.isCancelled else { lock.unlock(); continuation.resume(returning: nil); return }
-                entry.waiters[token] = continuation
-                entries[id] = entry
-                lock.unlock()
+                apply(.registerWaiter(id: id, token: token, continuation: continuation, cancelled: Task.isCancelled))
                 Task {
                     await sleep(seconds: seconds)
-                    self.takeWaiter(id: id, token: token)?.resume(returning: nil)
+                    self.apply(.cancelWaiter(id: id, token: token))
                 }
             }
         } onCancel: {
-            takeWaiter(id: id, token: token)?.resume(returning: nil)
+            apply(.cancelWaiter(id: id, token: token))
         }
     }
+}
 
-    private func takeWaiter(id: String, token: UUID) -> CheckedContinuation<Decision?, Never>? {
-        lock.lock(); defer { lock.unlock() }
-        return entries[id]?.waiters.removeValue(forKey: token)
+/// Explicit state machine for steps handed to the phone's owner (`{handoff: ...}`).
+final class HandoffTracker: @unchecked Sendable {
+    private enum State {
+        case idle
+        case waiting(Handoff)
+        case completedUnread(Handoff, completedAt: Date)
     }
+
+    enum Event {
+        case inspectWaiting
+        case request(id: String, kind: String, text: String, app: String?, now: Date)
+        case ownerCompleted(id: String, now: Date)
+        case takeBack
+        case endTask
+        case readLine(consumeCompleted: Bool, now: Date)
+    }
+
+    struct Outcome {
+        var active: Handoff?
+        var takenBack: Handoff?
+        var line: String?
+        var events: [CoreEvent] = []
+    }
+
+    private let lock = NSLock()
+    private var state: State = .idle
+    private let emit: @Sendable (CoreEvent) -> Void
+
+    init(emit: @escaping @Sendable (CoreEvent) -> Void) {
+        self.emit = emit
+    }
+
+    @discardableResult
+    func apply(_ event: Event) -> Outcome {
+        lock.lock()
+        let outcome = transition(event)
+        lock.unlock()
+        for coreEvent in outcome.events {
+            emit(coreEvent)
+        }
+        return outcome
+    }
+
+    private func transition(_ event: Event) -> Outcome {
+        var outcome = Outcome()
+        switch event {
+        case .inspectWaiting:
+            if case .waiting(let handoff) = state {
+                outcome.active = handoff
+            }
+
+        case .request(let id, let kind, let text, let app, let now):
+            if case .waiting(let previous) = state {
+                outcome.events.append(.handoffEnded(id: previous.id, how: "replaced"))
+            }
+            let handoff = Handoff(id: id, kind: kind, text: text, requested: now)
+            state = .waiting(handoff)
+            outcome.active = handoff
+            outcome.events.append(.handoffRequested(id: id, kind: kind, text: text, app: app))
+
+        case .ownerCompleted(let id, let now):
+            guard case .waiting(var handoff) = state, handoff.id == id else { break }
+            handoff.done = now
+            state = .completedUnread(handoff, completedAt: now)
+            outcome.events.append(.handoffEnded(id: id, how: "done"))
+
+        case .takeBack:
+            guard case .waiting(let handoff) = state else { break }
+            state = .idle
+            outcome.takenBack = handoff
+            outcome.events.append(.handoffEnded(id: handoff.id, how: "takenBack"))
+
+        case .endTask:
+            switch state {
+            case .idle:
+                break
+            case .waiting(let handoff):
+                state = .idle
+                outcome.events.append(.handoffEnded(id: handoff.id, how: "taskEnded"))
+            case .completedUnread:
+                state = .idle
+            }
+
+        case .readLine(let consumeCompleted, let now):
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss"
+            switch state {
+            case .idle:
+                break
+            case .waiting(let handoff):
+                outcome.active = handoff
+                outcome.line = "handoff: waiting (\(handoff.kind)) since \(formatter.string(from: handoff.requested)) (\(Int(now.timeIntervalSince(handoff.requested))) s): \"\(handoff.text.prefix(80))\"; no input is sent until the owner taps Done on the phone or you send {handoff: false}; keep polling with look, or {wait_until: {handoff_done: true, ms: 10000}}"
+            case .completedUnread(let handoff, let completedAt):
+                if consumeCompleted {
+                    state = .idle
+                }
+                outcome.line = "handoff: done at \(formatter.string(from: completedAt)) (\(handoff.kind), \(Int(completedAt.timeIntervalSince(handoff.requested))) s after \"\(handoff.text.prefix(80))\"); inputs are sent again, go on with the task"
+            }
+        }
+        return outcome
+    }
+
+    var active: Handoff? { apply(.inspectWaiting).active }
+    var isWaiting: Bool { active != nil }
 }
