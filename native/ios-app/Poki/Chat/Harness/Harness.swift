@@ -138,7 +138,7 @@ enum Harness {
         let item = object(["id": string, "title": string, "date": string, "from": string, "to": string, "depart": string, "arrive": string,
                            "duration": string, "price": string, "note": string, "seats": ["type": "array", "items": seat]], ["id", "title"])
         var card = object(["app": string, "kind": ["type": "string", "enum": [RailwayTrains.kind]],
-                           "items": ["type": "array", "items": item, "minItems": 2], "recommended": string,
+                           "items": ["type": "array", "items": item, "minItems": 1], "recommended": string,
                            "primary": action, "next": action], ["app", "kind", "items", "recommended", "primary"])
         card["description"] = cardDescription
         return card
@@ -147,8 +147,8 @@ enum Harness {
     // The fixed words and the reply's examples are agy's (from its copy record), except the main button,
     // which says 查看 as the card's rules require, not agy's 预订.
     private static let cardDescription = """
-        Only when the owner is choosing among two or more results of one app (trains, flights, products): those results as a card in the app's own look under the task card, which replaces listing them in the reply. Leave it out otherwise. Write its words in the owner's language; the examples are for a Chinese conversation.
-        kind 12306.trains, Railway 12306's train list: app "cn.12306.rails12306". Each item is one train as 12306 shows it: id and title the train number ("G1234"), date ("11月20日 周四"), from and to stations, depart and arrive times ("07:00"), duration ("4小时28分"), price ("¥626"), seats [{name: "二等座", left: "有", "候补", "无" or "5张"}], and note only for a fact that bears on the choice ("15:00 有冲突").
+        When the result is items of one app that the owner can pick from or act on (trains, flights, products): those items as a card in the app's own look under the task card, which replaces listing them in the reply. A single result is still a card with one item, such as the one earliest train asked for. Leave it out when the result is not a list of such items. Write its words in the owner's language; the examples are for a Chinese conversation.
+        kind 12306.trains, Railway 12306's train list: app "cn.12306.rails12306". Always send it when the owner asked about trains in 12306, for one train or several; never report a train only as details or in the reply. Each item is one train as 12306 shows it: id and title the train number ("G1234"), date ("11月20日 周四"), from and to stations, depart and arrive times ("07:00"), duration ("4小时28分"), price ("¥626"), seats [{name: "二等座", left: "有", "候补", "无" or "5张"}], and note only for a fact that bears on the choice ("15:00 有冲突").
         recommended is the id of the item that best fits the request; the card selects it until the owner taps another. primary and next are the card's buttons for the selected item: in label and say, {field} becomes that item's field. A tap sends say as the owner's message, so say stands alone with the item's key facts, written as {field}s so they follow the selection. primary: {label: "在 12306 查看", say: "在 12306 打开 {date} {title} 次（{from} {depart} 开）"}. next is the one obvious next step, or left out. To send the train to someone, name the recipient the long-term notes give: {label: "发到公司差旅群", say: "把这趟车发到公司差旅群：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}; when the notes name none: {label: "发送车次", say: "把这趟车发出去：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}. Never offer paying, booking or choosing seats.
         """
 

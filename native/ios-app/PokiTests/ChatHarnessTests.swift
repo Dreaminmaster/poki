@@ -495,6 +495,39 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(Self.toolAnswer(server.requests[1]).contains("give the whole result in words"), Self.toolAnswer(server.requests[1]))
     }
 
+    /// A query with a single train ("the first high-speed train tomorrow") still gets the train card, as
+    /// on the test phone where the model answered it with fields and no card (ESP-997). The arguments are
+    /// that session's own finish_task, with the card a one-train result now carries; the card tool the
+    /// model sees must not demand two items either.
+    func testASingleTrainResultShowsTheTrainCard() async throws {
+        let finish = FakeCompletions.tool("finish_task", [
+            "success": true,
+            "summary": "明天11月20日最早的高铁是G532，上海虹桥06:31出发，北京南12:18到达，历时5小时47分，576元起；二等座有票。",
+            "details": [
+                ["label": "日期", "value": "11月20日 周五"],
+                ["label": "车次", "value": "复兴号智能动车组G 5 3 2次列车6点31分从上海虹桥出发,12点18分到达北京南,历时5小时47分,,静音车厢，"],
+                ["label": "票价", "value": "576元起"],
+                ["label": "余票", "value": "G 5 3 2次列车二等席位有票"],
+            ],
+            "answer": ["kind": "field", "items": [["field": "label", "ref": "28"], ["field": "label", "ref": "30"], ["field": "label", "ref": "31"]]],
+            "card": ["app": "cn.12306.rails12306", "kind": "12306.trains", "recommended": "G532",
+                     "items": [["id": "G532", "title": "G532", "date": "11月20日 周五", "from": "上海虹桥", "to": "北京南", "depart": "06:31",
+                                "arrive": "12:18", "duration": "5小时47分", "price": "¥576", "seats": [["name": "二等座", "left": "有"]]]],
+                     "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {date} {title} 次（{from} {depart} 开）"]],
+        ])
+        let server = try FakeCompletions(replies: [finish, FakeCompletions.text("这是明天最早的一班。")])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "打开12306看一下明天上海到北京的第一班高铁")
+        let entry = try XCTUnwrap(Self.cards(in: chat).last)
+        guard case .card(let card) = entry.kind else { return XCTFail("no card") }
+        XCTAssertEqual(card.selected(entry.chosen).fill(card.primary.say), "在 12306 打开 11月20日 周五 G532 次（上海虹桥 06:31 开）")
+
+        let items = try XCTUnwrap(((Harness.finishTask.schema["properties"] as? [String: Any])?["card"] as? [String: Any])
+            .flatMap { ($0["properties"] as? [String: Any])?["items"] as? [String: Any] })
+        XCTAssertLessThanOrEqual(items["minItems"] as? Int ?? 0, 1)
+    }
+
     /// An in-app chat that starts empty: a new one opens on the last conversation saved by an earlier test.
     private func newChat(on server: FakeCompletions) -> ChatModel {
         let chat = chat(on: server, kind: .poki)
