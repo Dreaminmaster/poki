@@ -221,6 +221,8 @@ final class ApprovalTests: XCTestCase {
         let delete: [Double] = [8, 44, 60, 40]
         let samples: [ActionKind: [JSON]] = [
             .run: [["run": "checkout"]],
+            .path: [["path": ["goal": "pay", "steps": [["tap": "Pay"]]]], ["path": ["goal": "clear", "steps": [["tap": "Delete"]]]], ["path": [["tap": [195, 122]]]],
+                    ["path": ["steps": [["long_press": "Delete"], ["tap": ["label": "Pay", "type": "Button"]]]]], ["path": ["steps": [["swipe": "left"], ["tap": "Pay"]]]]],
             .tap: [["tap": 1], ["tap": [195, 122]], ["tap": ["x": 40, "y": 64]]],
             .type: [["type": "x", "ref": 1], ["type": "x", "ref": 2]],
             .back: [["back": true]],
@@ -1687,7 +1689,7 @@ final class ReturnToOriginTests: XCTestCase {
     /// front, so the read is made again until it is (cdebb5d), and only then does the phone go back
     /// to the app the task began in (ESP-176). The answer shows the work's screen, not the origin's.
     func testALaunchThatFinishesReadsTheLaunchedAppBeforeGoingBack() async {
-        let (core, wda, _) = makeCore()
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }  // the fixed pause: the reads of a quick read would already see the app arrive
         let front = LockedBox("ai.x.grok"), pending = LockedBox<String?>(nil), lagging = LockedBox(0)
         wda.set("GET /wda/activeAppInfo") { _ in
             if let target = pending.value {

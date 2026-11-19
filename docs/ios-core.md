@@ -361,6 +361,29 @@ on the phone; the next first `look` of a task in that app names the saved routin
   more steps that no routine ran. Any MCP client can list, show, save, edit, rename, forget, export and
   import routines, and `remember`/`forget_note` the owner's notes (`PokiCore.memoryBrief(for:)` gives
   the on-device chat the same brief).
+- **A path is a routine sent once.** `do {actions: [{path: {goal, steps: [{tap: "Compose"}, {type: "…",
+  into: "Search"}, …]}}]}` runs up to 20 steps across screens in one call, each target named by the
+  text it shows (or `{label, type}`, or a point), never by a number from an earlier read. Each step
+  waits for its target as a routine's does and is held by the same approval rules. Nothing is saved.
+  With no model at all: a step's `expect: "text"` must be on screen after it (read from the tree, up
+  to 3 s) or the path stops there; `optional: true` leaves a step out when its target is not on a
+  screen that holds still; the path's `dismiss: ["Not Now", "Later"]` names controls that are closed
+  when they are in the way of a step (each such tap is still held by the approval rules);
+  `read: ["label"]` answers values from the last screen. A run or path that ended on a check that
+  passed skips the pause before the final read.
+- **Apps by name, and the session's app** (`CoreConfig.appNames`, on by default; a switch in the
+  app's Testing Options). `{launch: "Clock"}` takes the name the iPhone shows as well as a bundle id,
+  resolved by `CoreConfig.resolveApp` (the app backs it with its list of known apps); a name nothing
+  resolves is refused before anything is sent. `do {app: "Clock", actions: […]}` names the app once
+  for the session: it is brought to the front first when it is not there already, and later calls in
+  the same session need not name it. The handle outlives every change of screen; an answer says so
+  when another app is in front, and nothing is switched on its own. `app: false`, `finish` or a new
+  task lets go of it, which closes nothing.
+- **Reading when the screen settles** (`CoreConfig.quickRead`, on by default; a switch in Testing
+  Options). After a launch, a button, a swipe or a pinch (pauses of 0.6 s and up) the read comes as
+  soon as the tree has changed from what it was before the action and two reads in a row agree,
+  bounded by the old fixed pause; the answer says "read after N ms". A tap keeps its fixed 0.45 s,
+  since two tree reads cost about as much.
 - **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
   is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
   The owner locks a note or a routine: no agent forgets, edits, renames or saves over a locked one
