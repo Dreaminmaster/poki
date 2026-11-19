@@ -268,6 +268,12 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    /// iOS woke Poki some other way (Background App Refresh).
+    func woke(_ why: String) {
+        ensure(why)
+        onWake?()
+    }
+
     /// Called when iOS woke Poki, so what should be reading can look again.
     var onWake: (@MainActor () -> Void)?
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
