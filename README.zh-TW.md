@@ -1,28 +1,30 @@
 <p align="center">
-  <img src="docs/images/poki-icon.png" width="64" height="64" alt="Poki icon">
+  <a href="https://poki.bot"><img src="docs/images/poki-hero.gif" width="100%" alt="Poki 像你一樣使用你的 iPhone：在實機上替你點按、打字、滑動的代理程式"></a>
 </p>
 
 <h1 align="center">Poki 用你的 iPhone，就像你自己在用</h1>
 
+<h3 align="center">複製這段話，傳給你的編碼代理程式</h3>
+
+```text
+從 https://github.com/JosssphZhou/poki 把 Poki 安裝到我的 iPhone 上
+```
+
+<p align="center"><sub>先用 USB 傳輸線連接並解鎖 iPhone，免費 Apple 帳號即可。</sub></p>
+
+<!-- badges:start -->
 <p align="center">
-  <img src="docs/images/poki-home.gif" width="500" alt="Poki 官網首頁動畫">
+  <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.4_Beta-blue" alt="Poki App 0.4.4 Beta"></a>
+  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
+<!-- badges:end -->
 
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 繁體中文 | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.es.md">Español</a><br>
   <a href="https://poki.bot">poki.bot</a>
 </p>
-
-<!-- badges:start -->
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
-  <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/forks"><img src="https://img.shields.io/github/forks/JosssphZhou/poki" alt="GitHub forks"></a>
-  <a href="https://github.com/JosssphZhou/poki/issues"><img src="https://img.shields.io/github/issues/JosssphZhou/poki" alt="GitHub issues"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.4_Beta-blue" alt="Poki App 0.4.4 Beta"></a>
-  <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
-</p>
-<!-- badges:end -->
 
 <p align="center">
   <strong>如果 Poki 對你有幫助，請點擊 ★ Star 支持這個專案。</strong>
@@ -32,7 +34,17 @@
 
 Poki 是開源的 iPhone agent，能替你操作整台 iPhone。Poki 應用程式直接執行在你的 iPhone 上，會讀取畫面，並在真實應用程式中點選、輸入和捲動，使用你自己的模型帳號。你可以選擇它如何徵求許可；付款、刪除和錢包中的操作始終需要你的確認。
 
+<p align="center">
+  <img src="docs/images/poki-order-demo.gif" width="280" alt="Poki 自己在 Uber Eats 上點餐">
+</p>
+
 ## 為什麼用 Poki
+
+<p align="center">
+  <img src="docs/images/why-1-errands.gif" width="32%" alt="Poki 在聊天中接收點餐指令，並在 Uber Eats 中將餐點加入購物車">
+  <img src="docs/images/why-2-routines.gif" width="32%" alt="Poki 在真實的 Uber 應用程式中預約叫車">
+  <img src="docs/images/why-3-standalone.gif" width="32%" alt="Poki 回報上車地點與預估車資">
+</p>
 
 - **日常瑣事不必在多個應用程式之間來回點選。** 直接在對話裡告訴 Poki，或長按動作按鈕、呼叫 Siri，就能透過內建瀏覽器查資料、查看明天天氣或建立備忘錄。在 iPhone Duo 上，Poki 還能在分割畫面中同時操作兩個應用程式。
 - **重複任務點一下或說一句話就完成。** 不必每天重複相同的步驟，直接在首頁點選儲存的技能，或使用「與 Poki 對話」進行語音互動，每一步進度都會顯示在動態島上。
@@ -69,13 +81,14 @@ Poki 是開源的 iPhone agent，能替你操作整台 iPhone。Poki 應用程�
 | 連線 | 將 `10.7.0.1` 路由回 iPhone 的外部代理通道（LocalDevVPN、Karing 或 Shadowrocket）。 |
 | 模型帳號 | ChatGPT Plus/Pro 登入、API 金鑰（Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter、OpenCode Go）或 OpenAI 相容服務。 |
 
-- 完整安裝細節、更新、常見問題、已知限制與路線圖：[Poki iPhone 使用指南](docs/iphone-guide.zh-TW.md)
-- 版本變更紀錄：[CHANGELOG.md](CHANGELOG.md)
 - 代理程式安裝技能與桌面工具：[install-poki 技能](skills/install-poki/SKILL.md) 與 [Poki Setup](desktop/README.md)
 - 測試驗證、平台限制與發佈通道：[驗證與限制](docs/verification.md) 與 [發佈通道](docs/release-channels.md)
 - 早期電腦端連線工具（已停止更新）：[Poki MCP 與 Poki Agent](docs/poki-mcp.md)
 
 </details>
+
+- 完整安裝細節、更新、常見問題、已知限制與路線圖：[Poki iPhone 使用指南](docs/iphone-guide.zh-TW.md)
+- 版本變更紀錄：[CHANGELOG.md](CHANGELOG.md)
 
 ## 社群
 
@@ -85,4 +98,8 @@ Poki 是開源的 iPhone agent，能替你操作整台 iPhone。Poki 應用程�
 
 查看所有貢獻者：[CONTRIBUTING.md](CONTRIBUTING.md#contributors)。
 
-Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. 依據 [AGPL-3.0-only](LICENSE) 開源。品牌素材受 [BRAND.md](BRAND.md) 規範。詳見 [Poki iPhone 使用指南](docs/iphone-guide.zh-TW.md)、[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 與 [免責聲明](docs/iphone-guide.zh-TW.md#免責聲明)。
+<br>
+
+<p align="center"><img src="docs/images/poki-icon.png" width="40" height="40" alt="Poki"></p>
+
+<p align="center"><sub>Copyright (c) 2026 Joseph Zhou (周瑟夫) and contributors. 依據 <a href="LICENSE">AGPL-3.0-only</a> 開源。品牌素材受 <a href="BRAND.md">BRAND.md</a> 規範。詳見 <a href="docs/iphone-guide.zh-TW.md">Poki iPhone 使用指南</a>、<a href="THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a> 與 <a href="docs/iphone-guide.zh-TW.md#免責聲明">免責聲明</a>。</sub></p>
