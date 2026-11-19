@@ -862,9 +862,10 @@ struct BacktapeLibrary: View {
     // MARK: Copy and forget
 
     private func copy(_ tile: BacktapeTile) async {
+        let revision = HistoryCapture.accessRevision
         guard let entries = await lock.readIfUnlocked({
             await HistoryStore.shared.entries(from: tile.start, to: tile.end)
-        }), lock.unlocked, !Task.isCancelled else { return }
+        }), lock.unlocked, !Task.isCancelled, HistoryCapture.accessRevision == revision else { return }
         let style = Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale)
         UIPasteboard.general.string = entries.map { entry in
             "[\(entry.at.formatted(style))] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text)"

@@ -119,8 +119,9 @@ struct HistoryPage: View {
     }
 
     private func load() async {
+        let revision = HistoryCapture.accessRevision
         guard let entries = await lock.readIfUnlocked({ await HistoryStore.shared.recent() }) else { return }
-        guard lock.unlocked, !Task.isCancelled else { return }
+        guard lock.unlocked, !Task.isCancelled, HistoryCapture.accessRevision == revision else { return }
         layout = BacktapeLayout.build(entries)
         loaded = true
     }
