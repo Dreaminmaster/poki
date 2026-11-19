@@ -134,6 +134,7 @@ struct ScreenHistorySettingsView: View {
     @ObservedObject private var lock = HistoryLock.shared
     @State private var size: (entries: Int, bytes: Int64) = (0, 0)
     @State private var clearing = false
+    @State private var needsShortcut = false
 
     private var permissionsValue: String? {
         if capture.listMode == .include {
@@ -146,10 +147,15 @@ struct ScreenHistorySettingsView: View {
     var body: some View {
         List {
             Section {
-                Toggle(isOn: $capture.enabled) {
+                Toggle(isOn: HistoryReconnect.gated($capture.enabled, refused: $needsShortcut)) {
                     SettingsRow(title: "Screen History", symbol: "rectangle.stack")
                 }
                 .accessibilityIdentifier("screenHistory.enabled")
+                .alert("Set Up the Shortcut First", isPresented: $needsShortcut) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on.")
+                }
             } footer: {
                 Text("When on, Poki can answer questions from text kept on this iPhone. Excluded apps and password fields are left out, and nothing leaves this iPhone.")
             }
@@ -182,7 +188,8 @@ struct ScreenHistorySettingsView: View {
                 .accessibilityIdentifier("screenHistory.excludedApps")
             }
 
-            if capture.enabled { CellularShortcutSection() }
+            // Always here: Screen History cannot be turned on before the shortcut ran once.
+            CellularShortcutSection()
 
             Section {
                 Button("Clear History", role: .destructive) {
@@ -289,7 +296,7 @@ struct BacktapeSettingsPage: View {
     var body: some View {
         List {
             Section {
-                Toggle("Screen History", isOn: $capture.enabled)
+                Toggle("Screen History", isOn: HistoryReconnect.gated($capture.enabled, refused: .constant(false)))
                 NavigationLink { HistoryGate { HistoryPermissionsPage().settingsPage() } } label: {
                     LabeledContent("Permissions") {
                         Text(LocalizedStringKey(capture.listMode == .exclude ? "Exclude These Apps" : "Include Only These Apps"))

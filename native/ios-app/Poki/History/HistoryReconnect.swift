@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SwiftUI
 
 /// The ways a shortcut asks Poki to open its connection again, and the note of the last time one did.
 ///
@@ -24,6 +25,25 @@ final class HistoryReconnect: ObservableObject {
     /// longer waits on this page for it.
     @Published var asked = UserDefaults.standard.bool(forKey: "loopback.cellularAsked") {
         didSet { UserDefaults.standard.set(asked, forKey: "loopback.cellularAsked") }
+    }
+
+    /// The shortcut asked Poki to reconnect at least once on this iPhone: it is set up. Screen
+    /// History cannot be turned on before that (the owner, 2026-11-19: optional in Setup, needed
+    /// for Screen History). A switch that is already on stays on.
+    var isSetUp: Bool { lastAt != nil }
+
+    /// The Screen History switch, which turns on only once the shortcut is set up.
+    static func gated(_ enabled: Binding<Bool>, refused: Binding<Bool>) -> Binding<Bool> {
+        Binding(
+            get: { enabled.wrappedValue },
+            set: { on in
+                if on, !shared.isSetUp {
+                    refused.wrappedValue = true
+                } else {
+                    enabled.wrappedValue = on
+                }
+            }
+        )
     }
 
     private var listener: NWListener?

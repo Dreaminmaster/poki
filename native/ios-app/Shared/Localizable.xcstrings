@@ -1,6 +1,38 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Set Up the Shortcut First" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先设置快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先設定捷徑"
+          }
+        }
+      }
+    },
+    "Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史需要让 Poki 在蜂窝网络下保持连接的快捷指令。请在下方添加并运行一次，然后再打开屏幕历史。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史需要讓 Poki 在行動網路下保持連線的捷徑。請在下方加入並執行一次，然後再打開螢幕歷史。"
+          }
+        }
+      }
+    },
     "Add Set VPN again with the same VPN. With no network at all the first one may not start." : {
       "localizations" : {
         "zh-Hans" : {
