@@ -1084,7 +1084,8 @@ final class ChatModel {
             }
             return response
         default:
-            return await app.runTool(call.name, arguments: call.arguments)
+            // A note Poki keeps remembers this conversation: the Memory page links back to it.
+            return await app.runTool(call.name, arguments: call.arguments, conversation: call.name == "routines" ? sessionID : nil)
         }
     }
 
