@@ -29,6 +29,8 @@ struct SettingsView: View {
 
 enum SettingsRoute: Hashable {
     case connector(ConnectorSecret), relay, diagnostics, log, activityPreview, memory
+    /// A page under Memory: About You, an app, Recent Updates.
+    case memoryPage(MemoryPage)
 }
 
 /// The page for a settings route, in whichever navigation stack pushed it.
@@ -46,6 +48,7 @@ struct SettingsDestination: View {
         }))
         case .log: LogView(back: pop)
         case .memory: MemoryView(back: pop)
+        case .memoryPage(let page): MemoryDestination(page: page)
         case .activityPreview: ActivityPreview()
         }
     }

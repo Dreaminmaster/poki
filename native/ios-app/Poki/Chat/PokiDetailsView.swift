@@ -90,7 +90,7 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                     NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
+                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                     NavigationLink(value: DetailsRoute.screenHistory) {
@@ -384,6 +384,9 @@ enum ConversationSearchIndex {
                 .filter { !$0.isEmpty }.joined(separator: " ")
         case .browser(let visit):
             return [visit.title, visit.host].filter { !$0.isEmpty }.joined(separator: " ")
+        case .card(let card):
+            // Index the user-visible app and item titles, not action templates or opaque fields.
+            return ([card.app] + card.items.map(\.title)).joined(separator: " ")
         case .time, .note:
             return nil
         }
@@ -394,7 +397,7 @@ enum ConversationSearchIndex {
         case .you: return .you
         case .request(_, let from): return .agent(from)
         case .poki: return .poki
-        case .plan, .step, .note: return .task
+        case .plan, .step, .note, .card: return .task
         case .browser: return .browser
         case .time: return nil
         }

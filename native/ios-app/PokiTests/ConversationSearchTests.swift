@@ -141,6 +141,17 @@ final class ConversationSearchTests: XCTestCase {
                        note.id)
     }
 
+    func testResultCardTitlesRemainSearchable() throws {
+        let data = Data(#"{"app":"Rail","kind":"railway","items":[{"id":"a","title":"Harbour Express","hidden":"internal-only-marker"}],"recommended":"a","primary":{"label":"Select","say":"Pick {title}"}}"#.utf8)
+        let card = try JSONDecoder().decode(ResultCard.self, from: data)
+        let entry = ChatEntry(.card(card))
+        let session = sample(entries: [entry, ChatEntry(.poki("Done"))])
+        let hits = find(in: [session], query: "Harbour Express")
+        XCTAssertEqual(hits.first?.entryID, entry.id)
+        XCTAssertEqual(hits.first?.author, .task)
+        XCTAssertTrue(find(in: [session], query: "internal-only-marker").isEmpty)
+    }
+
     func testMetadataAndLastLineMatchHaveOneStableResultID() {
         let session = sample("waiting", name: "Waiting", entries: [ChatEntry(.note(.waiting))])
         XCTAssertTrue(session.lastLine.localizedStandardContains("waiting"))

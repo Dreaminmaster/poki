@@ -1,20 +1,7 @@
-// The chat's prompt and tools are the Mac Poki Agent's, copied from this repository at main 729c77e:
-// - agent-system.md is agent/prompts/system.md (the same text as agent/prompts/pi-app.md, which
-//   agent/task-runner.mjs loads), except two sentences that named tools the app lacks: a locked phone
-//   is the owner's to unlock and a password prompt is handed to them, and a purchase is a plain tap;
-//   and, for ESP-465, the Return sentence names the type answer's read-back as the check before
-//   Return, an action's check lines (the send check after Return) count as evidence, and finish_task
-//   comes in the reply right after the observation that verifies the result; and a last paragraph on
-//   when a reply uses a Markdown table, which the chat draws as a table (the terminal and message
-//   channels the Mac agent answers in do not);
-// - the instructions put PokiCore's own MCP instructions first, as task-runner.mjs puts the MCP server's
-//   instructions first;
-// - look, do and status are PokiCore's tools with their MCP descriptions;
-// - report_plan and finish_task are task-runner.mjs's harness tools (#startModel), descriptions and
-//   schemas unchanged, except finish_task's card: the chat draws a result card, the Mac agent's
-//   terminal and message channels do not.
-// Not copied, because the app has none of their tools: agent/prompts/call-draft.md and
-// agent/skills/iphone-unlock/SKILL.md, unlock_device and handle_alert.
+// Poki's chat harness shares its core execution rules and harness tools (report_plan, finish_task)
+// with agent/task-runner.mjs and agent/prompts/pi-app.md, adapted to the app's in-process tools
+// (look, do, routines, status) and sandbox browser tools (WebTools). finish_task also takes a result
+// card, which the chat draws and the Mac agent's terminal and message channels do not.
 import Foundation
 import PokiCore
 
@@ -32,14 +19,14 @@ enum Harness {
     }()
 
     static var instructions: String {
-        [PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.isEnabled), system, WebTools.instructions].joined(separator: "\n\n")
+        [system, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.isEnabled), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
-    You are Poki, completing the owner's task in two visible iPhone Split View apps while Poki stays in the background. Reply in the owner's language. Publish a short plan with report_plan before acting.
-    Start with look and choose pane left or right. Check the app identity and screen before acting. Choose the other pane with a fresh look before using it. The screenshot, element references and points belong to the selected pane. Use only these two apps and leave both windows in place. If the layout changes, look again to confirm it before acting. If the two apps cannot be confirmed, ask the owner to restore them.
-    To drag between panes, read the destination first, then select the source with look. Send one do action with drag: {from: source element number or [x,y], to: [x,y], to_pane: left or right}. Use the screenshot of the destination to choose its local drop point. Read the destination again and compare it with the previous evidence. For a photo, verify that the image itself appeared. Sending a gesture does not prove the item arrived. If the result is unclear, report it as unconfirmed and avoid duplicates.
-    Before entering text, check the intended field and its content. Verify the result in the same pane and keep further actions within the request. When a tool requests the owner's approval, wait for their decision. If a password, verification or system prompt needs the owner, ask them to take over with handoff and wait for them. Call finish_task after checking the last result. Set success=false when the requested outcome has not been verified.
+    You are Poki, the owner's personal assistant, completing their task across two visible iPhone Split View apps while Poki stays in the background. Keep replies brief and reply in the owner's language. Publish a short plan with report_plan before acting.
+    Start with look on pane left or right, and confirm the app identity and screen before acting. Call a fresh look when switching panes or after any layout change; restore both windows with the owner's help if the pair cannot be confirmed. Keep actions within these two apps and leave both windows in place.
+    For cross-pane drag, read the destination pane first, then select the source pane with look and send do with {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} using destination-local coordinates. Read the destination again to verify arrival, including the image itself for photos, and report unconfirmed transfers rather than risking duplicates.
+    Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
     """
 
     /// The instructions for a task: the above, then the saved notes and the routines that fit it.
@@ -52,14 +39,11 @@ enum Harness {
         }
         let brief = PokiCore.memoryBrief(for: task)
         var parts = [instructions]
-        parts.append("When the owner asks to continue or resume, identify the task from this conversation or an explicitly selected saved task. If no task matches or more than one could match, ask the owner which task before calling any action tool. Long-term notes and saved routines describe preferences and reusable steps; they are not pending tasks and never authorize choosing a different task.")
-        // Poki learns the owner's repeated tasks: a saved routine runs them in one call next time.
-        // The routines that fit are in the brief below, so the first call can be the routine itself:
-        // listing them first cost a whole model turn before anything happened on the phone. Poki is in
-        // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
-        // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
-        // step more; the save rides in the same reply instead of a turn before it.
-        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
+        parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved routines strictly as preferences and reusable steps, never pending tasks.")
+        // Matching routines sit in the brief below, so the first call can invoke the routine directly.
+        // Poki is in front when a task starts, and finish_task brings Poki back when the task ends,
+        // so saving a new routine happens in the same reply as finish_task.
+        parts.append("Start an app task with do {run: name} when a routine below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. After a new app task succeeds, call finish_task together with routines {action: \"save\", name, description} named as the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
@@ -74,7 +58,7 @@ enum Harness {
     /// A result card's send button names the recipient only when the notes do (the card's description).
     private static let recipients = "When the owner asks to send something and neither the request nor the long-term notes name the recipient, ask the owner who to send it to before acting."
 
-    private static let replyApprovals = "Approvals here are decided from what the owner said in this chat. When a step is refused (declined), do not tell the owner to tap anything: ask them in plain words whether they want that step done, naming the step, and if they say yes, send the same step again."
+    private static let replyApprovals = "Approvals in this chat come from the owner's messages. When a step is declined, do not tell the owner to tap anything: ask in plain words whether to run that named step, and resend the identical step once confirmed."
 
     /// The iPhone bundle ids of the apps the owner's request names, from the list behind the app pills
     /// (KnownApps). Without them the model guessed: a tester's 淘宝 and 美团 tasks (Nov 13 2026) were
@@ -88,10 +72,10 @@ enum Harness {
             let others = app.otherIDs.isEmpty ? "" : " (another edition: \(app.otherIDs.joined(separator: ", ")))"
             return "- \(names): \(app.id)\(others)"
         }
-        return "The apps this request names and their iPhone bundle ids. Launch them with these ids, not ids from memory (Android package names differ):\n" + lines.joined(separator: "\n")
+        return "Use these iPhone bundle ids for apps named in this request:\n" + lines.joined(separator: "\n")
     }
 
-    /// Poki's own browser's tools (ESP-145) sit beside the phone's.
+    /// Poki's sandbox browser tools sit beside the phone tools.
     static var tools: [ToolSpec] {
         catalogTools(includeScreenHistory: HistoryCapture.isEnabled) + [findApp] + WebTools.specs + [reportPlan, finishTask]
     }
@@ -154,17 +138,17 @@ enum Harness {
         let item = object(["id": string, "title": string, "date": string, "from": string, "to": string, "depart": string, "arrive": string,
                            "duration": string, "price": string, "note": string, "seats": ["type": "array", "items": seat]], ["id", "title"])
         var card = object(["app": string, "kind": ["type": "string", "enum": [RailwayTrains.kind]],
-                           "items": ["type": "array", "items": item, "minItems": 2], "recommended": string,
+                           "items": ["type": "array", "items": item, "minItems": 1], "recommended": string,
                            "primary": action, "next": action], ["app", "kind", "items", "recommended", "primary"])
         card["description"] = cardDescription
         return card
     }()
 
-    // The fixed words and the reply's examples are agy's (ESP-904's copy record), except the main button,
+    // The fixed words and the reply's examples are agy's (from its copy record), except the main button,
     // which says 查看 as the card's rules require, not agy's 预订.
     private static let cardDescription = """
-        Only when the owner is choosing among two or more results of one app (trains, flights, products): those results as a card in the app's own look under the task card, which replaces listing them in the reply. Leave it out otherwise. Write its words in the owner's language; the examples are for a Chinese conversation.
-        kind 12306.trains, Railway 12306's train list: app "cn.12306.rails12306". Each item is one train as 12306 shows it: id and title the train number ("G1234"), date ("11月20日 周四"), from and to stations, depart and arrive times ("07:00"), duration ("4小时28分"), price ("¥626"), seats [{name: "二等座", left: "有", "候补", "无" or "5张"}], and note only for a fact that bears on the choice ("15:00 有冲突").
+        When the result is items of one app that the owner can pick from or act on (trains, flights, products): those items as a card in the app's own look under the task card, which replaces listing them in the reply. A single result is still a card with one item, such as the one earliest train asked for. Leave it out when the result is not a list of such items. Write its words in the owner's language; the examples are for a Chinese conversation.
+        kind 12306.trains, Railway 12306's train list: app "cn.12306.rails12306". Always send it when the owner asked about trains in 12306, for one train or several; never report a train only as details or in the reply. Each item is one train as 12306 shows it: id and title the train number ("G1234"), date ("11月20日 周四"), from and to stations, depart and arrive times ("07:00"), duration ("4小时28分"), price ("¥626"), seats [{name: "二等座", left: "有", "候补", "无" or "5张"}], and note only for a fact that bears on the choice ("15:00 有冲突").
         recommended is the id of the item that best fits the request; the card selects it until the owner taps another. primary and next are the card's buttons for the selected item: in label and say, {field} becomes that item's field. A tap sends say as the owner's message, so say stands alone with the item's key facts, written as {field}s so they follow the selection. primary: {label: "在 12306 查看", say: "在 12306 打开 {date} {title} 次（{from} {depart} 开）"}. next is the one obvious next step, or left out. To send the train to someone, name the recipient the long-term notes give: {label: "发到公司差旅群", say: "把这趟车发到公司差旅群：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}; when the notes name none: {label: "发送车次", say: "把这趟车发出去：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}. Never offer paying, booking or choosing seats.
         """
 
