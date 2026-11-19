@@ -16,5 +16,8 @@
 
 AI assistance: None, Claude Code, Codex, or Other. I have reviewed and understand these changes.
 
-- [ ] I removed passcodes, tokens, and private screen contents from this PR.
-- [ ] I release this contribution under the [AGPL-3.0-only license](../LICENSE).
+<!--
+No checkboxes to tick. Before you submit, remove passcodes, tokens, pairing records, and private
+screen contents from this PR. The license release is a one-time step: on your first pull request,
+Poki Repo Bot asks you to agree to CONTRIBUTOR_AGREEMENT.md with one comment.
+-->
