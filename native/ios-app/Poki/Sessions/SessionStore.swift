@@ -65,6 +65,7 @@ struct SavedSession: Codable, Identifiable, Equatable {
             case .plan(let steps): return "Plan: " + steps.map { "\($0.state.rawValue): \($0.text)" }.joined(separator: "; ")
             case .step(let text, let ok): return "Step (\(ok.map { $0 ? "succeeded" : "failed" } ?? "unconfirmed")): \(text)"
             case .note(.problem(let text)): return "Problem: \(text)"
+            case .card(let card): return card.context(chosen: entry.chosen)
             default: return nil
             }
         }.map { String($0.prefix(4000)) }
@@ -217,6 +218,10 @@ final class SessionStore {
     private(set) var sessions: [SavedSession] = []
     private(set) var isInitialReady = false
     private(set) var isLoaded = false
+    /// A conversation that just left the list, archived or deleted. The screen that still shows it
+    /// leaves it (`RootView`), so it no longer stays open in the chat and its next line does not save it back.
+    struct Removal: Equatable { let id: String; let serial: Int }
+    private(set) var removed: Removal?
     private let folder: URL
     private let defaults: UserDefaults
     private var pendingWrites: Set<String> = []
@@ -618,6 +623,7 @@ final class SessionStore {
         guard var session = session(id), !session.live, session.archived == nil else { return }
         session.archived = Date()
         put(session)
+        removed = Removal(id: id, serial: (removed?.serial ?? 0) + 1)
     }
 
     /// Back to the conversations list, at its own time and place among the days; for the limit it counts
@@ -635,6 +641,7 @@ final class SessionStore {
         sessions.removeAll { $0.id == id }
         let url = file(id)
         writeQueue.async { try? FileManager.default.removeItem(at: url) }
+        removed = Removal(id: id, serial: (removed?.serial ?? 0) + 1)
     }
 
     // MARK: Outside agents

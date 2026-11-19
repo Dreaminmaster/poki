@@ -10,7 +10,7 @@ import { checkWork, signal, phase } from './work.mjs';
 
 const starting = new Map();
 const localHelpers = new Map();
-const readOnly = new Set(['ax_tree', 'screenshot', 'device_info', 'display_info', 'list_apps']);
+const readOnly = new Set(['ax_tree', 'screenshot', 'device_info', 'display_info', 'panels', 'list_apps']);
 let closing = false;
 
 async function stopLocalHelper({ child, exited }) {

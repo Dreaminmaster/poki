@@ -160,3 +160,18 @@ pre.snippet { user-select: text; cursor: text; white-space: pre-wrap; word-break
 /* Poki Setup's own update, offered at the top of the page. */
 .update-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px; background: var(--card, rgba(127,127,127,0.12)); }
 .update-bar span { flex: 1; }
+
+/* One bar for a whole job (JobBar). */
+.jobbar { display: flex; flex-direction: column; gap: 6px; }
+.jobbar .bar.wide { max-width: none; height: 6px; border-radius: 3px; margin-top: 0; }
+.jobbar.failed .bar i { background: var(--bad); }
+.jobbar.failed .detail { color: var(--bad); }
+.jobbar.waiting .detail { color: var(--warn); }
+.jobbar .detail { color: var(--text2); font-size: 12px; line-height: 17px; user-select: text; }
+.linkish { background: none; border: 0; padding: 0; color: var(--text2); cursor: pointer; align-self: flex-start; font: inherit; }
+.linkish:hover { color: var(--blue); }
+.build { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--fill2); }
+.build:first-child { border-top: 0; }
+.build .num { min-width: 44px; text-align: center; font-weight: 700; font-size: 17px; padding: 4px 0; border-radius: 8px; background: var(--fill2); font-variant-numeric: tabular-nums; }
+.build .facts { display: flex; flex-wrap: wrap; gap: 10px; color: var(--text2); font-size: 12px; }
+.build a { color: var(--blue); text-decoration: none; }

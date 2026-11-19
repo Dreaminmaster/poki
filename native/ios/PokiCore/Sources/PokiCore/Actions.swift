@@ -346,19 +346,16 @@ extension Computer {
             return ("back", try await back(until: until))
         case .handoff:
             if case .bool(false) = spec {
-                guard let current = handoff.value, current.done == nil else { return ("handoff", "handoff: nothing is handed to the owner") }
-                handoff.value = nil
-                emit(.handoffEnded(id: current.id, how: "takenBack"))
+                guard let current = handoff.apply(.takeBack).takenBack else { return ("handoff", "handoff: nothing is handed to the owner") }
                 return ("handoff", "handoff: taken back (\(current.kind): \"\(current.text.prefix(60))\"); inputs are sent again")
             }
             let kind = (spec["kind"]?.string ?? "other").lowercased()
             let kinds = ["passcode", "password", "verification", "payment", "other"]
             guard kinds.contains(kind) else { throw ActionFailure(message: "handoff kind is one of \(kinds.joined(separator: ", "))", delivery: .notSent) }
             guard let text = spec.text ?? spec["text"]?.text, !text.isEmpty else { throw ActionFailure(message: "handoff takes {kind, text}: what the owner must do themselves on the phone; or false to take the step back", delivery: .notSent) }
-            let h = Handoff(id: UUID().uuidString, kind: kind, text: String(text.prefix(300)), requested: Date())
-            handoff.value = h
-            emit(.handoffRequested(id: h.id, kind: kind, text: h.text, app: lastForeground?.describe))
-            return ("handoff", "handed to the owner (\(kind)): \"\(h.text.prefix(80))\", shown on the phone with a Done button. Keep calling look every few seconds, or {wait_until: {handoff_done: true, ms: 10000}}; no input is sent until the owner taps Done or you send {handoff: false}; status shows handoff: waiting|done")
+            let trimmed = String(text.prefix(300))
+            handoff.apply(.request(id: UUID().uuidString, kind: kind, text: trimmed, app: lastForeground?.describe, now: Date()))
+            return ("handoff", "handed to the owner (\(kind)): \"\(trimmed.prefix(80))\", shown on the phone with a Done button. Keep calling look every few seconds, or {wait_until: {handoff_done: true, ms: 10000}}; no input is sent until the owner taps Done or you send {handoff: false}; status shows handoff: waiting|done")
         case .key:
             guard let key = spec.text else { throw ActionFailure(message: "key takes a key name: return, delete, tab, space, escape or one character", delivery: .notSent) }
             let k = key.lowercased()

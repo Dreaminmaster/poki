@@ -309,6 +309,23 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Whether Screen History keeps anything: reads or summaries. Nil while the file cannot be read, as
+    /// while the phone is locked, or when the question cannot be asked of it.
+    func holdsAnything() -> Bool? {
+        queue.sync {
+            guard open() else { return nil }
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT 1 FROM entries UNION ALL SELECT 1 FROM notes LIMIT 1", -1, &statement, nil) == SQLITE_OK,
+                  let statement else { return nil }
+            defer { sqlite3_finalize(statement) }
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW: return true
+            case SQLITE_DONE: return false
+            default: return nil
+            }
+        }
+    }
+
     private func bytesNow() -> Int64 {
         ((try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber)?.int64Value ?? 0
     }

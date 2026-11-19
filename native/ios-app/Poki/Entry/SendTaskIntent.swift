@@ -79,8 +79,8 @@ struct PokiShortcuts: AppShortcutsProvider {
                     phrases: ["Talk to \(.applicationName)", "Start talking to \(.applicationName)"],
                     shortTitle: LocalizedStringResource("Talk to Poki", table: "Entry"), systemImageName: "waveform.circle")
         AppShortcut(intent: TalkHereIntent(),
-                    phrases: ["Talk to \(.applicationName) here", "Talk to \(.applicationName) without leaving this app"],
-                    shortTitle: LocalizedStringResource("Talk Here", table: "Entry"), systemImageName: "waveform.badge.mic")
+                    phrases: ["\(.applicationName) Anytime", "Talk to \(.applicationName) without leaving this app"],
+                    shortTitle: LocalizedStringResource("Poki Anytime", table: "Entry"), systemImageName: "waveform.badge.mic")
         AppShortcut(intent: SendTaskToPokiIntent(),
                     phrases: ["Send a task to \(.applicationName)", "Give \(.applicationName) a task"],
                     shortTitle: LocalizedStringResource("Send Task", table: "Entry"), systemImageName: "paperplane")

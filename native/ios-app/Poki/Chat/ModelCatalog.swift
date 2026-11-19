@@ -60,7 +60,22 @@ enum ModelCatalog {
     }
 
     /// Reads the provider's model list with the owner's key (sent only to that provider).
+    @MainActor
     static func refresh(_ provider: ModelProvider) async throws -> Int {
+        if provider == .custom {
+            let address = ModelKeys.customURL
+            let key = ModelKeys.key(.custom)
+            let revision = UserDefaults.standard.string(forKey: "models.revision.custom")
+            let ids = try await fetchCustom(address: address, key: key)
+            try Task.checkCancellation()
+            guard address == ModelKeys.customURL, key == ModelKeys.key(.custom),
+                  revision == UserDefaults.standard.string(forKey: "models.revision.custom") else {
+                throw CancellationError()
+            }
+            UserDefaults.standard.set(ids, forKey: "models.listed.custom")
+            ModelKeys.saved += 1
+            return ids.count
+        }
         guard let request = request(provider) else { return 0 }
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -127,16 +142,86 @@ enum ModelCatalog {
             request = URLRequest(url: URL(string: "https://openrouter.ai/api/v1/models")!)
             if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         case .custom:
-            let base = ModelKeys.customURL.trimmingCharacters(in: .whitespaces)
-            guard let url = URL(string: base)?.appending(path: "models") else { return nil }
-            request = URLRequest(url: url)
-            if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+            return try? customRequest(address: ModelKeys.customURL, key: key)
         case .chatgpt:
             // A ChatGPT sign-in has no model list; its plan's models are the built-in ones.
             return nil
         }
         request.timeoutInterval = 15
         return request
+    }
+
+    // MARK: Custom endpoint discovery
+
+    enum DiscoveryError: Error, Equatable {
+        case invalidAddress, authentication, permission, unsupported, rateLimited, server, malformed, network
+
+        var message: String {
+            switch self {
+            case .invalidAddress: AppLocalization.text("Enter a valid HTTP or HTTPS service address.")
+            case .authentication: AppLocalization.text("Authentication failed. Check the API key.")
+            case .permission: AppLocalization.text("The service refused access to its model list.")
+            case .unsupported: AppLocalization.text("This service does not offer a model list. Enter a model ID manually.")
+            case .rateLimited: AppLocalization.text("Too many requests. Try again later.")
+            case .server: AppLocalization.text("The service could not return its model list. Try again later.")
+            case .malformed: AppLocalization.text("The service returned an invalid model list.")
+            case .network: AppLocalization.text("Could not reach the service. Check the connection and try again.")
+            }
+        }
+    }
+
+    static func normalizedAddress(_ address: String) -> String {
+        var value = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.hasSuffix("/") { value.removeLast() }
+        return value
+    }
+
+    static func customRequest(address: String, key: String?) throws -> URLRequest {
+        guard let parts = URLComponents(string: normalizedAddress(address)),
+              let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+              let url = parts.url else { throw DiscoveryError.invalidAddress }
+        var request = URLRequest(url: url.appending(path: "models"))
+        request.timeoutInterval = 15
+        let key = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        return request
+    }
+
+    /// Uses draft credentials without changing the account or its cached models.
+    static func fetchCustom(address: String, key: String?, session: URLSession = .shared) async throws -> [String] {
+        let request = try customRequest(address: address, key: key)
+        let data: Data
+        let response: URLResponse
+        do { (data, response) = try await session.data(for: request) }
+        catch is CancellationError { throw CancellationError() }
+        catch let error as URLError where error.code == .cancelled { throw CancellationError() }
+        catch { throw DiscoveryError.network }
+        try Task.checkCancellation()
+        switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
+        case 200..<300: break
+        case 401: throw DiscoveryError.authentication
+        case 403: throw DiscoveryError.permission
+        case 404, 405: throw DiscoveryError.unsupported
+        case 429: throw DiscoveryError.rateLimited
+        default: throw DiscoveryError.server
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let items = (json["data"] ?? json["models"]) as? [[String: Any]] else {
+            throw DiscoveryError.malformed
+        }
+        let ids = items.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }
+            .map { $0.hasPrefix("models/") ? String($0.dropFirst(7)) : $0 }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && usable($0, .custom) }
+        return Array(Set(ids)).sorted { fast($0) == fast($1) ? $0 < $1 : fast($0) }
+    }
+
+    /// Also invalidates in-flight refreshes, including an address changed away and back again.
+    static func invalidateCustom() {
+        UserDefaults.standard.removeObject(forKey: "models.listed.custom")
+        UserDefaults.standard.set(UUID().uuidString, forKey: "models.revision.custom")
     }
 
     // MARK: Voice

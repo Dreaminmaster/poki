@@ -219,10 +219,10 @@ _Avoid_: notes page, memory list
 _zh-Hans UI_: 记忆页
 
 **Dream**:
-An automated maintenance pass that runs overnight while the iPhone charges, analyzing the behavior log and recent tasks to add, update, or remove memories, habits, and skills.
+An automated maintenance pass that runs overnight while the iPhone charges, analyzing the behavior log and recent tasks to add, update, or remove memories, habits, and skills. This name is not translated in any language.
 _Related_: Behavior log, Habit, Recent updates
 _Avoid_: Nightly review, consolidation, background review, sync
-_zh-Hans UI_: 做梦
+_zh-Hans UI_: Dream
 
 **Screen history**:
 The owner's private record on the iPhone of what was on screen and when, kept behind its own PIN.

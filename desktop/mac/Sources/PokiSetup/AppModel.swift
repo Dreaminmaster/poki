@@ -3,24 +3,28 @@ import Foundation
 import SwiftUI
 
 enum Page: String, CaseIterable, Identifiable {
-    case setup, phones, account, relay, debug
+    case setup, phones, account, relay, debug, testBuilds, github
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .setup: "Set Up"
-        case .phones: "iPhones"
-        case .account: "Apple Account"
-        case .relay: "Relay"
-        case .debug: "Diagnostics"
+        case .setup: localized("Set Up")
+        case .phones: localized("Devices")
+        case .account: localized("Apple Account")
+        case .relay: localized("Relay")
+        case .debug: localized("Diagnostics")
+        case .testBuilds: localized("Test Builds")
+        case .github: localized("GitHub Account")
         }
     }
     var symbol: String {
         switch self {
         case .setup: "sparkles"
-        case .phones: "iphone.gen3"
+        case .phones: "ipad.and.iphone"
         case .account: "person.crop.circle"
         case .relay: "point.3.connected.trianglepath.dotted"
         case .debug: "stethoscope"
+        case .testBuilds: "hammer"
+        case .github: "person.badge.key"
         }
     }
 }
@@ -33,6 +37,8 @@ final class AppModel: ObservableObject {
     @Published var account: AccountState?
     @Published var accountError: CoreError?
     @Published var teams: [Team] = []
+    /// Why the team list could not be loaded, shown in place of the spinner.
+    @Published var teamsError: SetupMessage?
     @Published var phones: [PhoneRow] = []
     @Published var phonesError: CoreError?
     @Published var selectedUDID: String?
@@ -49,6 +55,16 @@ final class AppModel: ObservableObject {
     @Published var latestError: String?
     @Published var channels: [ChannelInfo] = []
 
+    // Developer: the GitHub sign-in and test builds from GitHub Actions.
+    @Published var dev = DevState()
+    /// The code GitHub is waiting for, while a GitHub sign-in is under way.
+    @Published var githubCode: GithubSignIn?
+    @Published var githubError: String?
+    @Published var testBuilds: TestBuildListing?
+    @Published var testBuildsError: String?
+    @Published var loadingTestBuilds = false
+    private var syncTask: Task<Void, Never>?
+
     // Sign-in
     @Published var needsCode = false
     @Published var codeVia: String?
@@ -59,7 +75,7 @@ final class AppModel: ObservableObject {
     @Published var logLines: [String] = []
 
     /// A short message at the bottom of the window.
-    @Published var banner: String?
+    @Published var banner: SetupMessage?
 
     let bridge = Bridge.shared
     private var started = false
@@ -107,6 +123,15 @@ final class AppModel: ObservableObject {
             await refreshLatest()
             await refreshChannels()
             relay = try? await bridge.call("relay_state", as: Deployed?.self) ?? nil
+            await refreshDev()
+        }
+        // Test builds: with the automatic sync on, look for a new one every two minutes.
+        syncTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            while !Task.isCancelled {
+                await self?.syncTestBuilds()
+                try? await Task.sleep(for: .seconds(120))
+            }
         }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -153,11 +178,13 @@ final class AppModel: ObservableObject {
         if done.relaunching {
             NSApp.terminate(nil)
         } else {
-            banner = "Poki Setup could not replace itself here, so its update is open in Finder. Quit Poki Setup, then drag the new one into Applications."
+            banner = .copy("Poki Setup could not replace itself here, so its update is open in Finder. Quit Poki Setup, then drag the new one into Applications.")
         }
     }
 
     // MARK: Refresh
+
+    static let rateLimitedTeams = SetupMessage.copy("Apple has had too many sign-in attempts or codes for this Apple Account. Wait about an hour, then sign in again.")
 
     func refreshAccount() async {
         if demo { return }
@@ -169,12 +196,21 @@ final class AppModel: ObservableObject {
                 codeVia = state.pendingFactor
                 needsCode = true
             }
-            if state.signedIn, state.pendingFactor == nil, !state.isRateLimited(), teams.isEmpty {
-                do {
-                    teams = try await bridge.call("teams")
-                } catch let e as CoreError where e.kind == "needs_code" {
-                    await promptForCode()
-                } catch {}
+            if state.signedIn, state.pendingFactor == nil, teams.isEmpty {
+                if state.isRateLimited() {
+                    teamsError = Self.rateLimitedTeams
+                } else {
+                    do {
+                        teams = try await bridge.call("teams")
+                        teamsError = nil
+                    } catch let e as CoreError where e.kind == "needs_code" {
+                        await promptForCode()
+                    } catch {
+                        teamsError = .verbatim(error.localizedDescription)
+                    }
+                }
+            } else if !state.signedIn {
+                teamsError = nil
             }
         } catch let e as CoreError {
             accountError = e
@@ -192,6 +228,7 @@ final class AppModel: ObservableObject {
             needsCode = false
             codeVia = nil
             teams = []
+            teamsError = nil
         }
     }
 
@@ -250,6 +287,143 @@ final class AppModel: ObservableObject {
         await refreshLatest()
     }
 
+    // MARK: Developer
+
+    func refreshDev() async {
+        if demo { return }
+        if let s: DevState = try? await bridge.call("dev_state") { dev = s }
+    }
+
+    /// GitHub's device sign-in: shows a code to enter on github.com, then waits until GitHub says
+    /// it was entered.
+    func signInToGitHub() async {
+        githubError = nil
+        var started = ""
+        do {
+            let code: GithubSignIn = try await bridge.call("github_sign_in_start")
+            started = code.deviceCode
+            githubCode = code
+            dev = try await bridge.call("github_sign_in_finish", ["pending": code.wire])
+            await refreshTestBuilds(fresh: true)
+        } catch {
+            // A cancelled sign-in, or one a newer one replaced, ends here with nothing to say.
+            if started.isEmpty || githubCode?.deviceCode == started { githubError = error.localizedDescription }
+        }
+        if githubCode?.deviceCode == started { githubCode = nil }
+    }
+
+    func cancelGitHubSignIn() {
+        githubCode = nil
+        Task { let _: DevState? = try? await bridge.call("github_sign_in_cancel") }
+    }
+
+    /// Uses the account the GitHub CLI (gh) is signed in to on this Mac.
+    func useGitHubCLI() async {
+        githubError = nil
+        do {
+            dev = try await bridge.call("github_use_cli")
+            await refreshTestBuilds(fresh: true)
+        } catch { githubError = error.localizedDescription }
+    }
+
+    func useGitHubToken(_ token: String) async -> Bool {
+        githubError = nil
+        do {
+            dev = try await bridge.call("github_use_token", ["token": token])
+            await refreshTestBuilds(fresh: true)
+            return true
+        } catch {
+            githubError = error.localizedDescription
+            return false
+        }
+    }
+
+    func signOutOfGitHub() async {
+        githubCode = nil
+        do {
+            dev = try await bridge.call("github_sign_out")
+            testBuilds = nil
+            if page == .testBuilds { page = .github }
+        } catch { githubError = error.localizedDescription }
+    }
+
+    func setDevPrefs(_ prefs: DevPrefs) async {
+        dev.prefs = prefs
+        do {
+            dev = try await bridge.call("dev_set_prefs", ["prefs": prefs.wire])
+            await refreshTestBuilds()
+        } catch { testBuildsError = error.localizedDescription }
+    }
+
+    func refreshTestBuilds(fresh: Bool = false) async {
+        guard !demo, dev.signedIn else { return }
+        loadingTestBuilds = true
+        defer { loadingTestBuilds = false }
+        do {
+            testBuilds = try await bridge.call("test_builds", ["fresh": fresh])
+            testBuildsError = nil
+        } catch { testBuildsError = error.localizedDescription }
+    }
+
+    /// Downloads a test build into the cache without installing it.
+    func downloadTestBuild(_ b: TestBuild) async throws {
+        guard let id = b.artifactId else { return }
+        struct Got: Decodable { var ipa: String }
+        let _: Got = try await job("download") { try await bridge.call("test_build_download", ["artifact_id": id]) }
+        await refreshTestBuilds()
+        await refreshDev()
+    }
+
+    /// Signs a test build with the Apple Account and installs it, like Install Poki does with the
+    /// release. The device's record keeps the build, so renewals sign it again.
+    func installTestBuild(_ b: TestBuild, udid: String) async throws -> InstallAnswer {
+        guard let ref = b.ref else { throw CoreError(kind: "error", message: localized("This build is not ready yet.")) }
+        let answer = try await installClosingPoki(udid: udid, ["udid": udid, "test_build": ref, "hand_off": false])
+        await refreshRecords()
+        await refreshPhones()
+        await refreshTestBuilds()
+        await refreshDev()
+        return answer
+    }
+
+    /// The automatic sync: the newest build the filters let through, once, when it is newer than
+    /// the last one handled. Installs it on the chosen device when that one is connected.
+    func syncTestBuilds() async {
+        guard !demo, dev.signedIn, dev.prefs.syncing else { return }
+        if busyJobs.contains("install") || busyJobs.contains("download") { return }
+        guard let next = try? await bridge.call("test_build_next", as: TestBuild?.self) else { return }
+        let p = dev.prefs
+        let target = p.autoInstallUdid.flatMap { id in phones.first(where: { $0.id == id && $0.facts != nil }) }
+        if p.autoInstall, let target, account?.signedIn == true {
+            do {
+                _ = try await installTestBuild(next, udid: target.id)
+                banner = .copy("Installed test build \(next.runNumber) on \(target.title).")
+            } catch {
+                banner = .copy("Test build \(next.runNumber) did not install on \(target.title). \(error.localizedDescription)")
+            }
+            dev = (try? await bridge.call("test_build_synced", ["run_id": next.runId])) ?? dev
+            return
+        }
+        if p.autoDownload, !next.downloaded {
+            do { try await downloadTestBuild(next) } catch {
+                banner = .copy("Test build \(next.runNumber) did not download. \(error.localizedDescription)")
+                dev = (try? await bridge.call("test_build_synced", ["run_id": next.runId])) ?? dev
+                return
+            }
+        }
+        // Waiting for the device: the build stays next until it is plugged in.
+        if !p.autoInstall {
+            dev = (try? await bridge.call("test_build_synced", ["run_id": next.runId])) ?? dev
+        }
+    }
+
+    func deleteTestBuildDownloads() async {
+        do {
+            dev = try await bridge.call("test_builds_delete_downloads")
+            await refreshTestBuilds()
+        } catch { report(error) }
+    }
+
     // MARK: Account
 
     func signIn(appleID: String, password: String, keep: Bool) async throws {
@@ -260,6 +434,7 @@ final class AppModel: ObservableObject {
         } else {
             needsCode = false
             teams = []
+            teamsError = nil
             await refreshAccount()
         }
     }
@@ -268,6 +443,7 @@ final class AppModel: ObservableObject {
         try await bridge.run("finish_sign_in", ["code": code])
         needsCode = false
         teams = []
+        teamsError = nil
         await refreshAccount()
     }
 
@@ -275,6 +451,7 @@ final class AppModel: ObservableObject {
         do {
             try await bridge.run("sign_out")
             teams = []
+            teamsError = nil
             needsCode = false
             await refreshAccount()
         } catch { report(error) }
@@ -338,7 +515,13 @@ final class AppModel: ObservableObject {
         busyJobs.insert(name)
         defer { busyJobs.remove(name) }
         do {
-            return try await body()
+            let value = try await body()
+            // The core ends with "all" done; the last step it named is done with it.
+            if var list = steps[name] {
+                for i in list.indices where list[i].state == .running || list[i].state == .waiting { list[i].state = .done }
+                steps[name] = list
+            }
+            return value
         } catch {
             if var list = steps[name], let i = list.lastIndex(where: { $0.state != .done }) {
                 list[i].state = .failed
@@ -350,12 +533,69 @@ final class AppModel: ObservableObject {
     }
 
     func install(udid: String, ipa: URL?, handOff: Bool) async throws -> InstallAnswer {
-        let answer: InstallAnswer = try await job("install") {
-            try await bridge.call("install", ["udid": udid, "ipa": ipa?.path, "hand_off": handOff])
-        }
+        let answer = try await installClosingPoki(udid: udid, ["udid": udid, "ipa": ipa?.path, "hand_off": handOff])
         await refreshRecords()
         await refreshPhones()
         return answer
+    }
+
+    // MARK: Closing Poki before an update
+
+    /// The question on screen: Poki is open on this device, close it?
+    @Published var closeAsk: CloseAsk?
+    private var closeAnswer: CheckedContinuation<Bool, Never>?
+
+    struct CloseAsk: Identifiable {
+        let id = UUID()
+        var name: String
+    }
+
+    private func deviceName(_ udid: String) -> String {
+        phones.first(where: { $0.id == udid })?.title ?? records.first(where: { $0.udid == udid })?.phoneName ?? localized("the device")
+    }
+
+    /// Asks whether to close Poki on the device, and waits for the answer.
+    func askToClosePoki(udid: String) async -> Bool {
+        if dev.prefs.closeWithoutAsking { return true }
+        closeAnswer?.resume(returning: false)
+        return await withCheckedContinuation { c in
+            closeAnswer = c
+            closeAsk = CloseAsk(name: deviceName(udid))
+        }
+    }
+
+    func answerClose(_ yes: Bool) {
+        let c = closeAnswer
+        closeAnswer = nil
+        closeAsk = nil
+        c?.resume(returning: yes)
+    }
+
+    /// Before an update replaces Poki: when Poki is running on the device, asks to close it (or
+    /// closes it without asking when Developer says so). True means go on and close Poki; the
+    /// core still checks right before it installs.
+    func okToReplacePoki(udid: String) async -> Bool {
+        let installed = records.contains(where: { $0.udid == udid }) || phones.first(where: { $0.id == udid })?.record != nil
+        guard installed, !dev.prefs.closeWithoutAsking else { return true }
+        let running = try? await bridge.call("poki_running", ["udid": udid], as: Bool?.self)
+        guard running == .some(.some(true)) else { return true }
+        return await askToClosePoki(udid: udid)
+    }
+
+    /// Runs an install that may replace a running Poki: asks first, and asks again if Poki was
+    /// opened while Poki Setup signed it.
+    func installClosingPoki(udid: String, _ args: [String: Any?]) async throws -> InstallAnswer {
+        guard await okToReplacePoki(udid: udid) else {
+            throw CoreError(kind: "cancelled", message: localized("Nothing was installed. Poki is still open on \(deviceName(udid))."))
+        }
+        var withClose = args
+        withClose["close_poki"] = true
+        do {
+            return try await job("install") { try await bridge.call("install", withClose) }
+        } catch let e as CoreError where e.kind == "poki_running" {
+            guard await askToClosePoki(udid: udid) else { throw e }
+            return try await job("install") { try await bridge.call("install", withClose) }
+        }
     }
 
     func pair(udid: String) async throws {
@@ -369,6 +609,8 @@ final class AppModel: ObservableObject {
     }
 
     func renew(udid: String) async throws {
+        // A renewal closes Poki before it installs; asked first when Poki is open.
+        guard await okToReplacePoki(udid: udid) else { return }
         let _: Record = try await job("renew") { try await bridge.call("renew", ["udid": udid]) }
         await refreshRecords()
     }
@@ -403,7 +645,7 @@ final class AppModel: ObservableObject {
         do {
             let p: AgentPrompt = try await bridge.call("agent_prompt")
             copyToPasteboard(p.prompt)
-            banner = "Copied. Paste it into your agent (Claude Code, Codex or another one that runs on this Mac)."
+            banner = .copy("Copied. Paste it into your agent (Claude Code, Codex or another one that runs on this Mac).")
         } catch { report(error) }
     }
 
@@ -421,7 +663,7 @@ final class AppModel: ObservableObject {
     }
 
     func report(_ error: Error) {
-        banner = error.localizedDescription
+        banner = .verbatim(error.localizedDescription)
     }
 
     // MARK: Demo data (screenshots only: POKI_SETUP_DEMO=1)
@@ -443,6 +685,14 @@ final class AppModel: ObservableObject {
             ChannelInfo(id: "alpha", title: "Alpha", selected: false, latest: Release(tag: "ios-alpha-0.2.8-110", version: "0.2.8", build: "110", ipaName: "Poki-external-0.2.8-110.ipa", channel: "alpha")),
             ChannelInfo(id: "pre-alpha", title: "Pre-alpha", selected: false, latest: Release(tag: "ios-prealpha-0.2.8-260", version: "0.2.8", build: "260", ipaName: "Poki-external-0.2.8-260.ipa", channel: "pre-alpha")),
         ]
+        dev = DevState(signedIn: true, login: "janeappleseed", source: "github", cliAvailable: true, canSignIn: true, prefs: DevPrefs(), syncedRun: 101, downloadsBytes: 48_000_000, repo: "JosssphZhou/poki")
+        let iso = ISO8601DateFormatter()
+        let pr = PullRef(number: 360, title: "Record the iPhone history on the device", url: "https://github.com/JosssphZhou/poki/pull/360", state: "open", draft: true)
+        testBuilds = TestBuildListing(builds: [
+            TestBuild(state: "building", runId: 103, runNumber: 21, runAttempt: 1, workflow: "iOS IPA", branch: "dev/iphone-history", sha: "c0ffee1234567890", title: "Keep the timeline on the device", actor: "janeappleseed", event: "workflow_dispatch", runUrl: "https://github.com/JosssphZhou/poki/actions/runs/103", createdAt: iso.string(from: Date().addingTimeInterval(-240)), pr: pr, artifactId: nil, artifactName: nil, size: 0, expiresAt: nil, downloaded: false),
+            TestBuild(state: "ready", runId: 102, runNumber: 20, runAttempt: 1, workflow: "iOS IPA", branch: "dev/iphone-history", sha: "aa47ce4144abe014", title: "Read the tree from the screen centre", actor: "janeappleseed", event: "workflow_dispatch", runUrl: "https://github.com/JosssphZhou/poki/actions/runs/102", createdAt: iso.string(from: Date().addingTimeInterval(-3_600)), pr: pr, artifactId: 9002, artifactName: "Poki-unsigned", size: 48_482_371, expiresAt: nil, downloaded: true),
+            TestBuild(state: "ready", runId: 101, runNumber: 19, runAttempt: 2, workflow: "iOS IPA", branch: "dev/automation-session-rebind", sha: "99c3948abcdef012", title: "Stop automation when Poki opens", actor: "janeappleseed", event: "workflow_dispatch", runUrl: "https://github.com/JosssphZhou/poki/actions/runs/101", createdAt: iso.string(from: Date().addingTimeInterval(-86_400)), pr: nil, artifactId: 9001, artifactName: "Poki-unsigned", size: 48_472_575, expiresAt: nil, downloaded: false),
+        ], total: 3, branches: ["dev/automation-session-rebind", "dev/iphone-history"], login: "janeappleseed", checkedAt: now)
         steps["install"] = [
             StepItem(id: "phone", title: "Finding the iPhone", state: .done, detail: facts.name),
             StepItem(id: "pair", title: "Pairing with the iPhone", state: .done),

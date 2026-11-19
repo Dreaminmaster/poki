@@ -157,6 +157,16 @@ final class CapsuleTextView: UITextView {
             view.needsFontRefresh = true
             view.refreshFont()
         }
+        // An icon arrived or the installed apps changed: the capsules are pictures, so they are made again.
+        iconsChanged = NotificationCenter.default.addObserver(forName: AppIconStore.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.redraw() }
+        }
+    }
+
+    nonisolated(unsafe) private var iconsChanged: (any NSObjectProtocol)?
+
+    deinit {
+        if let iconsChanged { NotificationCenter.default.removeObserver(iconsChanged) }
     }
 
     @available(*, unavailable)

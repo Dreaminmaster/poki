@@ -151,7 +151,7 @@ final class ComposerReturnTests: XCTestCase {
     private struct Host: View {
         @ObservedObject var draft: Draft
         var body: some View {
-            ComposerInputView(input: $draft.text, focused: $draft.focused, running: false,
+            ComposerInputView(input: $draft.text, focused: $draft.focused, adding: .constant(false), running: false,
                               send: { text, _ in draft.sent.append(text) }, stop: {}, openVoice: {})
                 .dynamicTypeSize(draft.typeSize)
         }

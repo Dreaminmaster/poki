@@ -96,7 +96,9 @@ When Bonjour (`.local` or `.local.`, case-insensitive) mode discards a dead tunn
 
 On iOS, Tailscale cannot run alongside another ordinary VPN. Users who need that other VPN to reach their AI client must resolve the internet-access requirement too. A suitable Tailscale exit node is a possible topology, but it has not been validated in this experiment. See [Tailscale's VPN compatibility documentation](https://tailscale.com/docs/reference/faq/other-vpns).
 
-Device-management paths such as app installation, process termination, Settings deep links, recording, location simulation, and standalone clipboard access are not supported by this transport. They report a transport limitation instead of silently using a local connection.
+Mac MCP's `get_clipboard` reads text and reports clipboard types over the existing RemotePairing tunnel, subject to the normal [operator approval](tools.md#approval--clipboard-behavior).
+
+Device-management paths such as app installation, process termination, Settings deep links, recording, location simulation, and standalone clipboard writes are not supported by this transport. They report a transport limitation instead of silently using a local connection.
 
 ## Return to USB or local Wi-Fi
 

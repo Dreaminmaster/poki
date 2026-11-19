@@ -9,6 +9,7 @@
 //! - [`sign`]: takes Poki's release IPA and signs it for a team: bundle ids, app groups,
 //!   entitlements, profiles, every nested bundle, with the pure-Rust apple-codesign.
 //! - [`release`]: Poki's release IPAs from GitHub, checked against their digests.
+//! - [`devbuilds`]: test builds from GitHub Actions artifacts, for people developing Poki.
 //! - [`keeper`]: the phones this computer set up, their expiry, what is due.
 //! - [`mcp`]: connector links, client snippets, and a `tools/list` check.
 //! - [`relay`]: deploys `deploy/cf-relay` to the person's own Cloudflare account.
@@ -21,6 +22,8 @@
 #[cfg(feature = "device")]
 pub mod agent;
 pub mod apple;
+#[cfg(feature = "device")]
+pub mod devbuilds;
 #[cfg(feature = "device")]
 pub mod device;
 pub mod error;
