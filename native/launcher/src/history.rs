@@ -49,6 +49,14 @@ const DEFAULT_READ_WITHIN: Duration = Duration::from_secs(10);
 
 /// The run in progress. A new run, or `cancel`, moves it on, and the older run ends at its next look.
 static RUN: AtomicU64 = AtomicU64::new(0);
+/// The run reads nothing while this is set, and keeps its tunnel: on cellular a tunnel that was
+/// closed cannot be opened again, so a wait (an agent's task) must not cost it.
+static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Holds or lets go the reads of the run in progress. A new run starts unheld.
+pub fn pause(on: bool) {
+    PAUSED.store(on, Ordering::SeqCst);
+}
 
 /// Ends the background run, if one is going. It answers with what it measured so far.
 pub fn cancel() {
@@ -182,6 +190,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         None => vec![DEFAULT_READ_WITHIN],
     };
     let me = RUN.fetch_add(1, Ordering::SeqCst) + 1;
+    PAUSED.store(false, Ordering::SeqCst);
     let mut stats = RunStats::default();
     let mut device: Option<Device> = None;
     // Wall time, not the runtime's clock: a suspended app's time must show up as a gap.
@@ -206,6 +215,14 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             break;
         }
         let asked = Instant::now();
+        if PAUSED.load(Ordering::SeqCst) {
+            // One line each round, so the caller can tell a held run from a silent one.
+            emit(json!({"paused": true, "at_s": at.as_secs()}));
+            while asked.elapsed() < interval && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            continue;
+        }
         let mut line = json!({"n": stats.reads + stats.failures + 1, "at_s": at.as_secs()});
         let subscribed = direct.is_some();
         let result = async {

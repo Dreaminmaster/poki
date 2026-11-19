@@ -54,4 +54,7 @@ enum HistoryBridge {
     }
 
     static func cancel() { poki_history_cancel() }
+
+    /// Holds or lets go the reads of the run in progress. The run keeps its tunnel.
+    static func pause(_ on: Bool) { poki_history_pause(on) }
 }

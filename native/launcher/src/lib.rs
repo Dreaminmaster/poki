@@ -289,6 +289,12 @@ pub unsafe extern "C" fn poki_history_call(request_json: *const c_char, cb: Even
     0
 }
 
+/// Holds (true) or lets go (false) the reads of the history run in progress; its tunnel stays open.
+#[unsafe(no_mangle)]
+pub extern "C" fn poki_history_pause(on: bool) {
+    history::pause(on);
+}
+
 /// Ends the history run in progress, if any; it then answers with what it measured so far.
 #[unsafe(no_mangle)]
 pub extern "C" fn poki_history_cancel() {

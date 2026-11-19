@@ -83,6 +83,8 @@ final class HistoryCapture: ObservableObject {
     /// Set when a run's launcher call was ended to wait (an agent's task took the screen), so the
     /// run goes on afterwards and is not taken for finished.
     private var interrupted = false
+    /// An always run held inside the launcher while an agent's task has the screen.
+    private var paused = false
     /// Why the run is waiting to read again, while it does.
     @Published private(set) var held: Status?
     /// Since when no read has worked, in a run. nil while reads work.
@@ -218,6 +220,7 @@ final class HistoryCapture: ObservableObject {
         prune()
         Task { await self.tidy() }
         interrupted = false
+        paused = false
         held = nil
         failingSince = nil
         notified = false
@@ -244,7 +247,8 @@ final class HistoryCapture: ObservableObject {
         let wait = once ? Self.waitSeconds : 0
         set(once ? .waiting : .reading)
         // A run with no end asks the launcher for an hour at a time.
-        let duration = always ? 3600 : max(10, (minutes ?? 0) * 60)
+        // A day at a time for an always run: every new launcher call needs a new tunnel.
+        let duration = always ? 86_400 : max(10, (minutes ?? 0) * 60)
         let until = always ? Date.distantFuture : Date().addingTimeInterval(Double(wait + (once ? 0 : duration)))
         ends = always ? nil : until
         #if !targetEnvironment(simulator)
@@ -410,13 +414,29 @@ final class HistoryCapture: ObservableObject {
 
     /// One read from the launcher. Only a screen whose text changed carries text.
     private func took(_ data: Data, run me: Int, model: AppModel) {
-        guard me == run, status == .reading, !lockedOrDark,
+        guard me == run, !lockedOrDark,
               let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
-        if model.hasOpenInProcessSession {
-            // A single read gives way. A run waits for the task to end and reads on.
-            if once { end(me, .task) } else if !interrupted { interrupted = true; HistoryBridge.cancel() }
+        if paused {
+            // The launcher sends one line a round while it is held: the moment to look again.
+            if model.hasOpenInProcessSession { return }
+            paused = false
+            HistoryBridge.pause(false)
+            resume()
             return
         }
+        guard status == .reading else { return }
+        if model.hasOpenInProcessSession {
+            // A single read gives way. A run waits for the task to end and reads on. An always run
+            // waits inside the launcher, which keeps its tunnel: on cellular a closed one cannot
+            // be opened again (phone log, 2026-11-18).
+            if once { end(me, .task) } else if always {
+                paused = true
+                HistoryBridge.pause(true)
+                hold(.task, model: model)
+            } else if !interrupted { interrupted = true; HistoryBridge.cancel() }
+            return
+        }
+        if line["paused"] as? Bool == true { return }
         // A read the launcher could not make: its tunnel is down and it is opening another.
         if line["ok"] as? Bool == true { lastReadAt = Date(); working() } else if !model.loopback.cellularRefused { failing() }
         if keep(line), once { end(me, .finished) }

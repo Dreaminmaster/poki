@@ -68,6 +68,8 @@ int32_t poki_signer_call(const char *request_json, poki_event_cb cb, void *conte
 int32_t poki_history_call(const char *request_json, poki_event_cb cb, void *context);
 // Ends the run in progress; it answers with what it measured so far.
 void poki_history_cancel(void);
+/// Holds (true) or lets go (false) the reads of the history run in progress; its tunnel stays open.
+void poki_history_pause(bool on);
 
 #ifdef __cplusplus
 }
