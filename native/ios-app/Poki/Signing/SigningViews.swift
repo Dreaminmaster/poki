@@ -179,6 +179,22 @@ struct SigningUpdatesPage: View {
     }
 }
 
+/// The Apple Account's row: the account's address under its name, whole until it is too long for the line and
+/// then cut in the middle. (As a value beside the name, a long address left the name a strip one letter wide.)
+struct AppleAccountRow: View {
+    var appleID: String?
+    var signedIn: Bool
+
+    var body: some View {
+        if let appleID {
+            SettingsRow(title: "Apple Account", dataCaption: appleID, symbol: "person")
+        } else {
+            SettingsRow(title: "Apple Account", symbol: "person",
+                        value: signedIn ? nil : AppLocalization.text(LocalizedStringResource("Not Signed In")))
+        }
+    }
+}
+
 /// The rows of Signing & Updates. Setup's checklist shows them too.
 struct SigningSection: View {
     @Environment(AppModel.self) private var model
@@ -239,8 +255,7 @@ struct SigningSection: View {
 
         Section {
             NavigationLink { AppleAccountPage() } label: {
-                SettingsRow(title: "Apple Account", symbol: "person",
-                            value: signer.signedIn ? signer.status?.apple_id : AppLocalization.text(LocalizedStringResource("Not Signed In")))
+                AppleAccountRow(appleID: signer.signedIn ? signer.status?.apple_id : nil, signedIn: signer.signedIn)
             }
             NavigationLink { SigningOptionsPage() } label: {
                 SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")

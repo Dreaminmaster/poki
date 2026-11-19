@@ -247,6 +247,13 @@ final class SelfSigner {
     }
 
     func reload() async {
+        if let sample = Self.screenshotAccount() {
+            status = sample.status
+            teams = sample.teams
+            lastError = sample.error
+            sessionExpired = sample.expired
+            return
+        }
         do { status = try await decode(Status.self, ["op": "status"]) } catch { lastError = error.localizedDescription }
     }
 
@@ -358,7 +365,7 @@ final class SelfSigner {
             await teamsTask.value
             return
         }
-        guard !needsCode, !rateLimited, !needsReauth else { return }
+        guard !needsCode, !rateLimited, !needsReauth, Self.screenshotAccount() == nil else { return }
         let task = Task { @MainActor in
             do {
                 teams = try await decode([Team].self, ["op": "teams"])
@@ -803,6 +810,35 @@ final class SelfSigner {
         UserDefaults.standard.bool(forKey: "pokiSignedIn")
         #else
         false
+        #endif
+    }
+
+    /// `-pokiAppleID name@example.com`: a simulator's screenshots show the Signing pages with that Apple Account,
+    /// with no sign-in to Apple. `-pokiAppleName` is its name, `-pokiAppleTeams 0|1|2` how many teams it has
+    /// (none, a free one, or two) and `-pokiAppleState code|reauth|expired|error` the account waiting for a code,
+    /// needing a fresh sign-in, with Apple's saved sign-in expired (Sign In Again), or with a failed renewal.
+    nonisolated private static func screenshotAccount() -> (status: Status, teams: [Team], error: String?, expired: Bool)? {
+        #if targetEnvironment(simulator)
+        let defaults = UserDefaults.standard
+        guard let id = defaults.string(forKey: "pokiAppleID"), !id.isEmpty else { return nil }
+        let state = defaults.string(forKey: "pokiAppleState")
+        let name = defaults.string(forKey: "pokiAppleName")
+        let free = Team(team_id: "T1", name: name ?? id, kind: "individual", is_free: true)
+        let studio = Team(team_id: "T2", name: "Poki Studio LLC", kind: "company", is_free: false)
+        let teams = switch defaults.integer(forKey: "pokiAppleTeams") {
+        case 0: [Team]()
+        case 1: [free]
+        default: [free, studio]
+        }
+        let status = Status(signed_in: state != "reauth", needs_reauth: state == "reauth", needs_code: state == "code",
+                            rate_limited: nil, rate_limited_until: nil, resend_available_at: nil,
+                            apple_id: id, name: name, team_id: teams.first?.team_id,
+                            keeps_password: true, anisette: "", channel: "stable", channels: [])
+        let error = state == "error" ? "Apple did not accept the renewal. Try again in a few minutes."
+            : state == "expired" ? SelfSigner.sessionExpiredMessage : nil
+        return (status, teams, error, state == "expired")
+        #else
+        nil
         #endif
     }
 
