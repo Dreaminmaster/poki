@@ -41,9 +41,9 @@ Poki 是開源的 iPhone agent，能替你操作整台 iPhone。Poki 應用程�
 ## 為什麼用 Poki
 
 <p align="center">
-  <img src="docs/images/why-1-errands.gif" width="32%" alt="Poki 在聊天中接收點餐指令，並在 Uber Eats 中將餐點加入購物車">
-  <img src="docs/images/why-2-routines.gif" width="32%" alt="Poki 在真實的 Uber 應用程式中預約叫車">
-  <img src="docs/images/why-3-standalone.gif" width="32%" alt="Poki 回報上車地點與預估車資">
+  <img src="docs/images/why-1-errands.png" width="32%" alt="聊天中顯示的 Poki 點牛肉麵分步計畫">
+  <img src="docs/images/why-2-routines.png" width="32%" alt="Poki 在其他應用程式中運作時顯示於動態島">
+  <img src="docs/images/why-3-standalone.png" width="32%" alt="Poki 在付款前請求核准：允許付款嗎？">
 </p>
 
 - **日常瑣事不必在多個應用程式之間來回點選。** 直接在對話裡告訴 Poki，或長按動作按鈕、呼叫 Siri，就能透過內建瀏覽器查資料、查看明天天氣或建立備忘錄。在 iPhone Duo 上，Poki 還能在分割畫面中同時操作兩個應用程式。

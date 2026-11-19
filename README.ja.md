@@ -41,9 +41,9 @@ Poki は、あなたの代わりに iPhone 全体を操作するオープンソ�
 ## なぜ Poki か
 
 <p align="center">
-  <img src="docs/images/why-1-errands.gif" width="32%" alt="チャットで注文を受け、Uber Eats で料理をカートに追加する Poki">
-  <img src="docs/images/why-2-routines.gif" width="32%" alt="実際の Uber アプリで配車を予約する Poki">
-  <img src="docs/images/why-3-standalone.gif" width="32%" alt="乗車場所と予想料金を報告する Poki">
+  <img src="docs/images/why-1-errands.png" width="32%" alt="チャットに表示された、牛肉麺を注文するための Poki のステップごとの計画">
+  <img src="docs/images/why-2-routines.png" width="32%" alt="別のアプリで動作中にダイナミックアイランドに表示された Poki">
+  <img src="docs/images/why-3-standalone.png" width="32%" alt="支払い前に承認を求める Poki：支払いを許可しますか？">
 </p>
 
 - **日常の用事を複数のアプリを行き来せずに済ませる。** チャットで頼むか、アクションボタンの長押しや Siri から呼び出すだけで、内蔵ブラウザでの調べもの、明日の天気の確認、メモの作成を任せられます。iPhone Duo では Split View で 2 つのアプリを並べて操作できます。

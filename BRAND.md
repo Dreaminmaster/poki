@@ -22,7 +22,7 @@ The Poki bear is the character at the center of Poki, and the main thing this fi
 | --- | --- |
 | The Poki app icon, light and dark | [`docs/images/poki-app-icon.png`](docs/images/poki-app-icon.png) |
 | The earlier Poki icon | [`docs/images/poki-icon.png`](docs/images/poki-icon.png) |
-| Promotional images and animations | [`docs/images/poki-home.gif`](docs/images/poki-home.gif), [`docs/images/poki-order-demo.gif`](docs/images/poki-order-demo.gif), [`docs/images/poki-hero.gif`](docs/images/poki-hero.gif), [`docs/images/poki-hero.zh-CN.gif`](docs/images/poki-hero.zh-CN.gif), [`docs/images/why-1-errands.gif`](docs/images/why-1-errands.gif), [`docs/images/why-2-routines.gif`](docs/images/why-2-routines.gif), [`docs/images/why-3-standalone.gif`](docs/images/why-3-standalone.gif), [`docs/images/roadmap.png`](docs/images/roadmap.png), [`docs/images/roadmap.zh-CN.png`](docs/images/roadmap.zh-CN.png) |
+| Promotional images and animations | [`docs/images/poki-home.gif`](docs/images/poki-home.gif), [`docs/images/poki-order-demo.gif`](docs/images/poki-order-demo.gif), [`docs/images/poki-hero.gif`](docs/images/poki-hero.gif), [`docs/images/poki-hero.zh-CN.gif`](docs/images/poki-hero.zh-CN.gif), [`docs/images/why-1-errands.png`](docs/images/why-1-errands.png), [`docs/images/why-2-routines.png`](docs/images/why-2-routines.png), [`docs/images/why-3-standalone.png`](docs/images/why-3-standalone.png), [`docs/images/roadmap.png`](docs/images/roadmap.png), [`docs/images/roadmap.zh-CN.png`](docs/images/roadmap.zh-CN.png) |
 
 In this file, "brand assets" means the Poki bear and everything in the two tables above.
 
