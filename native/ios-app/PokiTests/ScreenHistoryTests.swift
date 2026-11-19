@@ -515,8 +515,35 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(payload(requests[3]).contains(canary), "A new grant does not revive old evidence")
     }
 
+    func testRetentionPruningRevokesPendingQuery() async throws {
+        try await assertRevokedPendingQuery(change: .shortenRetention)
+    }
+
+    func testStoragePruningRevokesPendingQuery() async throws {
+        try await assertRevokedPendingQuery(change: .reduceStorage)
+    }
+
+    func testPruningCannotRestoreAnEarlierSummary() async throws {
+        try unlockHistoryForFixture()
+        let capture = HistoryCapture.shared
+        let store = HistoryStore.shared
+        let oldDays = capture.retentionDays
+        let oldAt = Date().addingTimeInterval(-5 * 86_400)
+        capture.enabled = true
+        defer { capture.retentionDays = oldDays }
+        store.add(at: oldAt, app: "com.apple.mobilenotes", title: "Fixture", text: "SYNTHETIC_PRUNED_TEXT")
+        let generation = await store.summaryGeneration()
+        let before = await store.entries(from: oldAt.addingTimeInterval(-1), to: oldAt.addingTimeInterval(1))
+        XCTAssertTrue(before.contains { $0.text.contains("SYNTHETIC_PRUNED_TEXT") })
+        capture.retentionDays = 3
+        let after = await store.entries(from: oldAt.addingTimeInterval(-1), to: oldAt.addingTimeInterval(1))
+        XCTAssertFalse(after.contains { $0.text.contains("SYNTHETIC_PRUNED_TEXT") })
+        let saved = await store.keep(BacktapeNote(title: "Fixture", body: "SYNTHETIC_PRUNED_TEXT"), start: oldAt, generation: generation)
+        XCTAssertFalse(saved, "A summary of pruned text must not be persisted under its old generation")
+    }
+
     private enum PendingPrivacyChange {
-        case turnOff, turnOffThenOn, changeAppScope, clear, lockThenUnlock, deviceLock, changePIN, changeBiometrics
+        case turnOff, turnOffThenOn, changeAppScope, clear, lockThenUnlock, deviceLock, changePIN, changeBiometrics, shortenRetention, reduceStorage
     }
 
     private func assertRevokedPendingQuery(change: PendingPrivacyChange) async throws {
@@ -525,8 +552,12 @@ final class ScreenHistoryTests: XCTestCase {
         let lock = HistoryLock.shared
         capture.enabled = true
         let savedBiometrics = lock.biometricsOn
+        let savedRetention = capture.retentionDays
+        let savedStorage = capture.storageMegabytes
         defer {
             if lock.unlocked, lock.biometricsOn != savedBiometrics { _ = lock.setBiometrics(savedBiometrics) }
+            if capture.retentionDays != savedRetention { capture.retentionDays = savedRetention }
+            if capture.storageMegabytes != savedStorage { capture.storageMegabytes = savedStorage }
         }
         let canary = "SYNTHETIC_PRIVATE_HISTORY_CANARY"
         HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
@@ -577,6 +608,13 @@ final class ScreenHistoryTests: XCTestCase {
             XCTAssertTrue(lock.setPIN(fixturePIN))
         case .changeBiometrics:
             XCTAssertTrue(lock.setBiometrics(!savedBiometrics))
+        case .shortenRetention:
+            capture.retentionDays = max(1, savedRetention - 1)
+            // A read queued behind prune guarantees its database work and completion ran.
+            _ = await HistoryStore.shared.size()
+        case .reduceStorage:
+            capture.storageMegabytes = max(1, savedStorage - 1)
+            _ = await HistoryStore.shared.size()
         }
         await delayedRead.release()
 

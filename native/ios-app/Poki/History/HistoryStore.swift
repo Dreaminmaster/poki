@@ -183,8 +183,11 @@ final class HistoryStore: @unchecked Sendable {
     /// summaries stay. Past `summaryDays` (never less than `days`) everything goes. Over
     /// `megabytes`: the oldest trees go, then the oldest screen text with its 10 minute notes, then
     /// the oldest reads and summaries whole.
-    func prune(days: Int, summaryDays: Int = 0, megabytes: Int = 200) {
+    func prune(days: Int, summaryDays: Int = 0, megabytes: Int = 200, completion: (@Sendable () -> Void)? = nil) {
         queue.async {
+            defer { completion?() }
+            // Serialize this with note writes: a summary based on a pre-prune read is stale.
+            self.generation = UUID()
             let now = Date().timeIntervalSince1970
             let cut = now - Double(days) * 86_400
             let end = now - Double(max(days, summaryDays)) * 86_400

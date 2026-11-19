@@ -137,7 +137,16 @@ final class HistoryCapture: ObservableObject {
 
     private func prune() {
         guard !loading else { return }
-        HistoryStore.shared.prune(days: retentionDays, summaryDays: summaryDays, megabytes: storageMegabytes)
+        // Pruning may forget text already fetched by a query, just like an explicit clear.
+        // Revoke now, before dispatching to the store, and deny new reads until it finishes.
+        Self.queryLease.beginDeletion()
+        BacktapeNotes.shared.reset()
+        HistoryStore.shared.prune(days: retentionDays, summaryDays: summaryDays, megabytes: storageMegabytes) { [weak self] in
+            Self.queryLease.endDeletion()
+            Task { @MainActor in
+                self?.changes += 1
+            }
+        }
     }
 
     // MARK: State
