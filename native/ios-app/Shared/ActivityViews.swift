@@ -45,7 +45,7 @@ enum ActivityMetrics {
     static let compactClip: CGFloat = 4.33
     /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
-    static let compactBear: CGFloat = 27.2
+    static let compactBear: CGFloat = 27
     /// The compact island's right block during a run: one width from step to step, so the island
     /// keeps its size while the words change.
     static let compactWords: CGFloat = 52
@@ -56,7 +56,7 @@ enum ActivityMetrics {
     static let narrowCircle: CGFloat = 28
     /// The bear's whole picture in that circle and in the minimal circle: one side for every pose, so
     /// the bear does not grow or shrink when the state changes.
-    static let circleBear: CGFloat = 22.6
+    static let circleBear: CGFloat = 22
     static let button: CGFloat = 38
     /// The Don’t Ask Again row under the two answers, and the space between. iOS cuts a Live Activity
     /// off at about 160 points, so the row sits in the card's own height.
@@ -376,7 +376,7 @@ struct CompactLeading: View {
                 NarrowBear(bear: face.bear)
             } else {
                 ZStack {
-                    Image(face.bear.image).resizable().interpolation(.high)
+                    Image(face.bear.compactImage).resizable().interpolation(.high)
                         .frame(width: side, height: side)
                         .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 6) }
                         .offset(x: origin.x, y: origin.y)
@@ -487,7 +487,7 @@ private struct NarrowBear: View {
         let origin = bear.circleOrigin
         let circle = ActivityMetrics.narrowCircle
         ZStack {
-            Image(bear.image).resizable().interpolation(.high)
+            Image(bear.smallImage).resizable().interpolation(.high)
                 .frame(width: side, height: side)
                 .offset(x: origin.x, y: origin.y)
                 .frame(width: circle, height: circle, alignment: .topLeading)
@@ -514,7 +514,7 @@ struct MinimalView: View {
                 NarrowBear(bear: face.bear)
             } else {
                 ZStack {
-                    Image(face.bear.image).resizable().interpolation(.high)
+                    Image(face.bear.smallImage).resizable().interpolation(.high)
                         .frame(width: side, height: side)
                         .offset(x: inset + origin.x, y: inset + origin.y)
                         .frame(width: circle, height: circle, alignment: .topLeading)
