@@ -607,6 +607,44 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertFalse(model.hasOpenInProcessSession)
     }
 
+    func testCellularPreparationWaitsForTheImageWithoutOpeningAutomation() async {
+        let opened = expectation(description: "Cellular preparation only mounts the developer image")
+        opened.isInverted = true
+        session.onPrepare = { opened.fulfill() }
+
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .ready)
+        model.prepareForCellular()
+        XCTAssertFalse(model.runnerPaused)
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .preparing)
+
+        model.checkIdle(now: Date().addingTimeInterval(600))
+        XCTAssertFalse(model.runnerPaused, "mounting can take longer than the idle interval")
+        await finishPreparing()
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .retry, "a running launcher is not evidence of a mounted image")
+        XCTAssertEqual(model.cellularPreparation(imageMounted: true), .mounted)
+
+        model.prepareForCellular()
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .preparing)
+        await finishPreparing()
+        await fulfillment(of: [opened], timeout: 0.5)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+    }
+
+    func testCellularPreparationRequiresLocalConnectionAndRespectsOwnerPause() {
+        model.loopback.simulate(.noAnswer)
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .needsLocalConnection)
+        model.prepareForCellular()
+        XCTAssertTrue(model.runnerPaused)
+
+        model.loopback.simulate(.working(ms: 9))
+        model.pauseByOwner()
+        XCTAssertEqual(model.cellularPreparation(imageMounted: false), .automationOff)
+        model.prepareForCellular()
+        XCTAssertTrue(model.runnerPaused)
+        XCTAssertTrue(model.ownerPaused)
+        XCTAssertEqual(session.prepares, 0)
+    }
+
     func testRemoteInitializationAndStatusWaitForPhoneReadToEnableAutomation() async {
         let opened = expectation(description: "Connecting an agent does not enable Automation Mode")
         opened.isInverted = true

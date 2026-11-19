@@ -25393,6 +25393,150 @@
         }
       }
     },
+    "Cellular Startup" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "蜂窝网络启动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行動網路啟動"
+          }
+        }
+      }
+    },
+    "Prepare for Cellular" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "准备切换到蜂窝网络"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "準備切換至行動網路"
+          }
+        }
+      }
+    },
+    "Switch to cellular and run a new task to verify automation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到蜂窝网络后，运行一个新任务来验证自动化。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換至行動網路後，執行一個新任務來驗證自動化。"
+          }
+        }
+      }
+    },
+    "Turn on Automation in Connection to prepare for cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在「连接」中开启自动化，再准备切换到蜂窝网络。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在「連線」中開啟自動化，再準備切換至行動網路。"
+          }
+        }
+      }
+    },
+    "Connect to Wi-Fi and check the local connection in Connection." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请连接 Wi-Fi，然后在「连接」中检查本地连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請連上 Wi-Fi，然後在「連線」中檢查本機連線。"
+          }
+        }
+      }
+    },
+    "Wait for the current task to finish before preparing for cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请等当前任务结束，再准备切换到蜂窝网络。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請等目前任務結束，再準備切換至行動網路。"
+          }
+        }
+      }
+    },
+    "Prepare the developer disk image before switching to cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到蜂窝网络前，请先准备开发者磁盘映像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換至行動網路前，請先準備開發者磁碟映像。"
+          }
+        }
+      }
+    },
+    "Poki is preparing the developer disk image." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在准备开发者磁盘映像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在準備開發者磁碟映像。"
+          }
+        }
+      }
+    },
+    "The image is still not mounted. Check the local connection and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "映像仍未挂载。请检查本地连接后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "映像仍未掛載。請檢查本機連線後再試一次。"
+          }
+        }
+      }
+    },
     "Developer Disk Image" : {
       "localizations" : {
         "zh-Hans" : {

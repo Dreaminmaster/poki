@@ -499,6 +499,7 @@ final class AppModel {
     }
     /// Poki's own automation session (ESP-152); a fake in tests.
     private let automation: InProcessAutomation
+    private var preparingCellularImage = false
     private var inProcessWarming = false
     private var inProcessOpensInFlight = 0
     /// A failed local open went back to the loopback once since it last answered.
@@ -586,6 +587,36 @@ final class AppModel {
         runnerPaused = false
         host.setPaused(false)
         launchRunner()
+    }
+
+    enum CellularPreparation: Equatable {
+        case mounted, automationOff, needsLocalConnection, busy, ready, preparing, retry
+
+        var canPrepare: Bool { self == .ready || self == .retry }
+    }
+
+    var cellularPreparation: CellularPreparation { cellularPreparation(imageMounted: Self.localDDIMounted) }
+
+    func cellularPreparation(imageMounted: Bool) -> CellularPreparation {
+        if imageMounted { return .mounted }
+        guard sessionOn, !ownerPaused else { return .automationOff }
+        guard setup.loopback != .none, loopback.isWorking else { return .needsLocalConnection }
+        guard automationPath == .inProcess, !probeDriven, inProcessSession == .idle,
+              !chatTaskActive, stepUnderWay == nil, approvals.isEmpty, handoffText == nil,
+              outsideAgentsAtWork.isEmpty, endingTasks == 0 else { return .busy }
+        if preparingCellularImage { return .preparing }
+        if runnerPaused { return .ready }
+        if runner.isRunning || runner.state == "failed" || runner.state == "waiting_network" { return .retry }
+        return .preparing
+    }
+
+    /// Use the launcher to mount the image. Automation Mode still opens on the next phone step.
+    func prepareForCellular() {
+        guard cellularPreparation.canPrepare else { return }
+        preparingCellularImage = true
+        log.add("runner", "preparing the developer disk image for cellular from Diagnostics")
+        if runnerPaused { prepareForTask() }
+        else { launchRunner() }
     }
 
     func warmInProcess(_ why: String) {
@@ -1200,6 +1231,7 @@ final class AppModel {
     func stopSession() {
         sessionStartTask?.cancel()
         pendingPrepareForTask = false
+        preparingCellularImage = false
         wantsOn = false
         if AskPoki.app === self, let chat = AskPoki.chat, chat.isRunningInSplitView { chat.stop() }
         guard sessionOn else {
@@ -1380,6 +1412,7 @@ final class AppModel {
 
     /// The runner is off and starts on the next agent request.
     private func standBy(reason: String?, keepingDone: Bool = false) {
+        preparingCellularImage = false
         runnerPaused = true
         runner = RunnerStatus(state: "standby", detail: reason.map { "\($0). It starts again when an agent asks." } ?? "It starts when an agent asks.")
         host.update(runner: .starting(automationPath == .inProcess ? "opening the automation session" : "starting the runner"))
@@ -1525,6 +1558,7 @@ final class AppModel {
     private var canStandByWhenIdle: Bool {
         sessionOn && !runnerPaused && (automationPath == .inProcess || !inFront) && idleStopSeconds > 0 && approvals.isEmpty
             && activityText == "Idle" && !chatTaskActive && endingTasks == 0
+            && !(preparingCellularImage && inProcessSession == .idle)
             && !(AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true)
     }
 
@@ -1634,6 +1668,9 @@ final class AppModel {
         if status != runner { log.add("runner", "\(status.state)\(status.detail.map { ": \($0)" } ?? "")\(status.state == "failed" && runner.state != "failed" ? " [\(networkNote)]" : "")") }
         // Events from a launcher that was stopped for idle are old news.
         guard !runnerPaused else { return }
+        if preparingCellularImage, status.isRunning || status.state == "failed" || status.state == "waiting_network" {
+            preparingCellularImage = false
+        }
         switch status.state {
         case "running" where status.code == "local_ddi":
             servicesSilent = false
