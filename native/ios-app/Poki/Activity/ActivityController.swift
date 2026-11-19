@@ -76,9 +76,10 @@ final class ActivityController {
     /// True when the owner turned Ready off: no idle Live Activity. It starts when work begins while
     /// Poki is in front, and goes when the run has folded.
     var hidesWhenIdle: () -> Bool = { ActivityController.hidesReady }
-    /// The owner turned off Ready in Settings › Connection: no Live Activity while nothing happens.
+    /// Ready is off unless the owner turned it on in Settings › Connection: no Live Activity while
+    /// nothing happens.
     nonisolated static let hidesReadyKey = "liveActivity.hidesReady"
-    nonisolated static var hidesReady: Bool { UserDefaults.standard.bool(forKey: hidesReadyKey) }
+    nonisolated static var hidesReady: Bool { UserDefaults.standard.object(forKey: hidesReadyKey) as? Bool ?? true }
     /// Poki is in front: iOS starts a Live Activity only then.
     var canStart: () -> Bool = { true }
     /// The device name `start` was last asked with: the activity is wanted, shown or not.
