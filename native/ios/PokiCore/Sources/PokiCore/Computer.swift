@@ -1417,20 +1417,27 @@ final class Computer: @unchecked Sendable {
         return nil
     }
 
-    /// How long `pressNow` reads for two reads in a row that agree.
     /// Up to `pause` seconds before the read after the actions, ended early once the screen differs
-    /// from `before` and two reads in a row agree. A read that fails or takes long ends the sampling,
-    /// and the rest of the pause is slept as it always was.
+    /// from `before`, lists something, and two reads in a row agree (an app still drawing its first
+    /// screen lists nothing). A read is given only the time left, and one slower than that left is not
+    /// begun again: the pause is never longer than it was, and a read cut short by it is not taken
+    /// for a runner gone. A read that fails ends the sampling, and the rest of the pause is slept.
     func settledPause(_ pause: Double, before: String) async -> (waited: Double, settled: Bool) {
         let began = now()
         guard let screen = size else { await sleep(seconds: pause); return (pause, false) }
         await sleep(seconds: min(pause, 0.15))
         var last: String?
-        while pause - (now() - began) > 0.25 {
+        var slowest = 0.0
+        while true {
             let left = pause - (now() - began)
-            guard let tree = try? await runner.tree(timeout: max(0.3, left), format: config.treeFormat) else { break }
+            guard left > max(0.25, slowest) else { break }
+            let asked = now()
+            guard let tree = try? await withDeadline(left, "a read while the screen settles", { [runner, format = config.treeFormat] in
+                try await runner.tree(timeout: left, format: format, countsAsMiss: false)
+            }) else { break }
+            slowest = max(slowest, now() - asked)
             let signature = listable(tree.elements, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
-            if signature != before, signature == last { return (now() - began, true) }
+            if !signature.isEmpty, signature != before, signature == last { return (now() - began, true) }
             last = signature
             await sleep(seconds: 0.06)
         }
@@ -1439,6 +1446,7 @@ final class Computer: @unchecked Sendable {
         return (now() - began, false)
     }
 
+    /// How long `pressNow` reads for two reads in a row that agree.
     static let settleWindow = 2.0
 
     /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when
