@@ -87,6 +87,13 @@ enum SignerBridge {
         await withCheckedContinuation { finishPrepare = $0; prepareHeld?.resume() }
     }
     static func call(_ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> Data {
+        if request["op"] as? String == "prepare" {
+            progress?(["kind": "step", "id": "release", "title": "Getting the newest Poki"])
+            await Task.yield()
+            await holdPrepare()
+            let reply = #"{"v":{"kind":"update","ipa":"/tmp/test.ipa","bundle_id":"test.poki","version":"9.0.0","build":"9999","tag":"test","team_name":"Test","team_is_free":true,"profile_expires_at":0,"prepared_at":0}}"#
+            return Data(reply.utf8)
+        }
         installProgress = progress
         progress?(["kind": "step", "id": "install"])
         await Task.yield()
@@ -94,12 +101,9 @@ enum SignerBridge {
         if fails { throw SignerError(message: "Installation failed.", code: "device") }
         return Data()
     }
-    static func decode<T: Decodable>(_ type: T.Type, _ request: [String: Any], progress: (@Sendable ([String: Any]) -> Void)? = nil) async throws -> T {
-        progress?(["kind": "step", "id": "release", "title": "Getting the newest Poki"])
-        await Task.yield()
-        await holdPrepare()
-        let prepared = #"{"kind":"update","ipa":"/tmp/test.ipa","bundle_id":"test.poki","version":"9.0.0","build":"9999","tag":"test","team_name":"Test","team_is_free":true,"profile_expires_at":0,"prepared_at":0}"#
-        return try JSONDecoder().decode(type, from: Data(prepared.utf8))
+    private struct Wrapped<T: Decodable>: Decodable { let v: T }
+    static func unwrap<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try JSONDecoder().decode(Wrapped<T>.self, from: data).v
     }
 }
 

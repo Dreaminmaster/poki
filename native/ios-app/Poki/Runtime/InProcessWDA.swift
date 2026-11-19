@@ -182,7 +182,10 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             },
             // Beside another app, the front app's part of the screen is the screen the agent sees (viewport).
             "GET /wda/screen": { [unowned self] _, _ in
-                let geometry = self.native.displayGeometry()
+                let geometry = self.native.readDisplayGeometry()
+                guard !geometry.routesDisplay.boolValue || !geometry.bounds.isEmpty else {
+                    throw Refusal("unknown error", "target_display_unavailable: read the active screen again")
+                }
                 let viewport = self.native.viewport
                 let size = viewport.isNull ? geometry.bounds.size : viewport.size
                 self.readGeometry.withLock { $0 = (geometry, viewport) }
