@@ -221,6 +221,64 @@ final class HistoryLockTests: XCTestCase {
         XCTAssertTrue(lock.unlock(pin: "1357"))
     }
 
+    func testLateBiometricSuccessCannotRestoreTheAgentGrant() async {
+        let phone = Phone()
+        var grants: [Bool] = []
+        let lock = phone.launch(agentGrantChanged: { grants.append($0) })
+        phone.evaluate = {
+            await Task.yield()
+            lock.lock()
+            return true
+        }
+        await lock.unlockWithBiometrics()
+        XCTAssertFalse(lock.unlocked)
+        XCTAssertFalse(grants.contains(true), "The obsolete attempt must never grant access")
+        phone.evaluate = nil
+        await lock.unlockWithBiometrics()
+        XCTAssertTrue(lock.unlocked)
+        XCTAssertEqual(grants.last, true)
+    }
+
+    func testCredentialChangesSuspendTheGrantAndFailedPINSaveLeavesItClosed() {
+        let phone = Phone()
+        phone.biometrics = .unavailable
+        var grants: [Bool] = []
+        let lock = phone.launch(agentGrantChanged: { grants.append($0) })
+        XCTAssertTrue(lock.setPIN("2468"))
+        XCTAssertEqual(grants.last, true)
+        phone.onPINWrite = { XCTAssertEqual(grants.last, false, "Revoke before replacing the PIN") }
+        XCTAssertTrue(lock.setPIN("1357"))
+        XCTAssertEqual(Array(grants.suffix(2)), [false, true])
+
+        phone.biometrics = .usable
+        XCTAssertTrue(lock.setBiometrics(true))
+        XCTAssertEqual(Array(grants.suffix(2)), [false, true])
+        phone.failPINWrite = true
+        XCTAssertFalse(lock.setPIN("8642"))
+        XCTAssertFalse(lock.unlocked)
+        XCTAssertEqual(grants.last, false, "A failed replacement must not restore the old grant")
+    }
+
+    func testUnreadableKeychainRevokesAnUnlockedGrantUntilFreshAuthentication() {
+        let phone = Phone()
+        phone.biometrics = .unavailable
+        var grants: [Bool] = []
+        let lock = phone.launch(agentGrantChanged: { grants.append($0) })
+        XCTAssertTrue(lock.setPIN("2468"))
+        XCTAssertEqual(grants.last, true)
+        phone.deviceLocked = true
+        lock.refresh()
+        XCTAssertEqual(lock.state, .deviceLocked)
+        XCTAssertEqual(grants.last, false)
+        XCTAssertFalse(lock.unlock(pin: "2468"))
+        phone.deviceLocked = false
+        lock.refresh()
+        XCTAssertFalse(lock.unlocked)
+        XCTAssertEqual(grants.last, false)
+        XCTAssertTrue(lock.unlock(pin: "2468"))
+        XCTAssertEqual(grants.last, true)
+    }
+
     // MARK: Helpers
 
     private enum Kept { case read, summaryOnly }
@@ -258,6 +316,9 @@ private final class Phone {
     /// Each item with whether it can be read only while the iPhone is unlocked.
     var keychain: [String: (value: Data, whenUnlocked: Bool)] = [:]
     var deviceLocked = false
+    var failPINWrite = false
+    var onPINWrite: (() -> Void)?
+    var evaluate: (() async -> Bool)?
     var biometrics = HistoryLock.Biometrics.usable
     var now = Date(timeIntervalSince1970: 1_800_000_000)
     private var defaults = Phone.freshDefaults()
@@ -267,10 +328,13 @@ private final class Phone {
         self.history = history
     }
 
-    func launch() -> HistoryLock {
+    func launch(agentGrantChanged: ((Bool) -> Void)? = nil) -> HistoryLock {
         HistoryLock(boundary: HistoryLock.Boundary(
             biometrics: { [self] in biometrics },
-            evaluateBiometrics: { [self] _ in biometrics.ready },
+            evaluateBiometrics: { [self] _ in
+                if let evaluate { return await evaluate() }
+                return biometrics.ready
+            },
             readKeychain: { [self] account in
                 guard let item = keychain[account] else { return .absent }
                 return deviceLocked && item.whenUnlocked ? .inaccessibleWhileDeviceLocked : .present(item.value)
@@ -278,6 +342,10 @@ private final class Phone {
             writeKeychain: { [self] account, value, accessible in
                 let whenUnlocked = accessible == kSecAttrAccessibleWhenUnlockedThisDeviceOnly
                 guard !(deviceLocked && whenUnlocked) else { return false }
+                if account == "pin" {
+                    onPINWrite?()
+                    if failPINWrite { keychain[account] = nil; return false }
+                }
                 keychain[account] = (value, whenUnlocked)
                 return true
             },
@@ -285,7 +353,7 @@ private final class Phone {
             defaults: defaults,
             historyHoldsAnything: { [self] in history() },
             now: { [self] in now }
-        ))
+        ), agentGrantChanged: agentGrantChanged)
     }
 
     /// Poki's settings go. Screen History goes too, and the caller empties the store it reads.
