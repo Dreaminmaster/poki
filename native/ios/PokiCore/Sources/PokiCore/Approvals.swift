@@ -182,7 +182,13 @@ enum Countdown {
         guard before != after else { return true }
         let b = readings(before), a = readings(after)
         guard b.masked == a.masked else { return false }
-        return zip(b.seconds, a.seconds).allSatisfy { old, new in old == new || (new < old && abs(Double(old - new) - elapsed) <= slack) }
+        // One reading at a time, with its types written out: as one expression Xcode's type checker
+        // gives up on it ("unable to type-check this expression in reasonable time").
+        return zip(b.seconds, a.seconds).allSatisfy { (old: Int, new: Int) -> Bool in
+            if old == new { return true }
+            let fell = Double(old - new)
+            return new < old && abs(fell - elapsed) <= slack
+        }
     }
 }
 
