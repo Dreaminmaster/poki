@@ -3,6 +3,10 @@ import { useSyncExternalStore } from "react";
 
 export type Lang = "en" | "zh-Hans";
 const zh: Record<string, string> = {
+  "Install Apple Devices to connect the iPhone or iPad": "安装 Apple 设备以连接 iPhone 或 iPad",
+  "Windows needs Apple's device driver to talk to an iPhone or iPad over the cable. It comes with Apple Devices from the Microsoft Store, or with iTunes from apple.com. Install one, open it once, then plug the device in again. Poki Setup checks again by itself.": "Windows 需要 Apple 的设备驱动才能通过数据线连接 iPhone 或 iPad。它随 Microsoft Store 中的 Apple 设备一起安装，或随 apple.com 上的 iTunes 一起安装。任选其一安装并打开一次，然后重新插上设备。Poki Setup 会自动重新检查。",
+  "Get Apple Devices": "获取 Apple 设备",
+  "Download iTunes": "下载 iTunes",
   "Close Poki on": "关闭以下设备上的 Poki",
   "Close Poki and Update": "关闭 Poki 并更新",
   "Close Poki without asking": "不询问直接关闭 Poki",

@@ -61,7 +61,8 @@ export default function Setup({ goAccount }: { goAccount: () => void }) {
       </div>
 
       <Card>
-        {listError && listError.kind === "usbmuxd" && <div className="note">{listError.text}</div>}
+        {listError && listError.kind === "usbmuxd" && <DeviceServiceCard text={listError.text} />}
+        {listError && listError.kind !== "usbmuxd" && <div className="note">{listError.text}</div>}
         {!phone && !listError && <div className="row"><span className="muted">{rows === null ? t("Looking for a device…") : t("Plug the iPhone or iPad in with a cable and unlock it.")}</span></div>}
         {rows && rows.length > 1 && (
           <div className="seg" style={{ marginBottom: 12 }}>
@@ -126,5 +127,31 @@ export default function Setup({ goAccount }: { goAccount: () => void }) {
         </Card>
       )}
     </>
+  );
+}
+
+const isWindows = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+
+async function openLink(url: string) {
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } catch {
+    window.open(url, "_blank");
+  }
+}
+
+/** The computer has no iPhone service: say what to install, with links, instead of an empty list. */
+function DeviceServiceCard({ text }: { text: string }) {
+  if (!isWindows) return <div className="note">{text}</div>;
+  return (
+    <div className="note">
+      <strong>{t("Install Apple Devices to connect the iPhone or iPad")}</strong>
+      <p className="small" style={{ margin: "6px 0 10px" }}>{t("Windows needs Apple's device driver to talk to an iPhone or iPad over the cable. It comes with Apple Devices from the Microsoft Store, or with iTunes from apple.com. Install one, open it once, then plug the device in again. Poki Setup checks again by itself.")}</p>
+      <div className="row" style={{ gap: 8 }}>
+        <Capsule onClick={() => openLink("ms-windows-store://pdp/?productid=9NP83LWLPZ9K")}>{t("Get Apple Devices")}</Capsule>
+        <button className="link" onClick={() => openLink("https://www.apple.com/itunes/")}>{t("Download iTunes")}</button>
+      </div>
+    </div>
   );
 }

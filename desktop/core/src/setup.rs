@@ -676,6 +676,15 @@ pub async fn run(signer: &mut Signer, opts: Options, reporter: &Reporter) -> Res
         if let Err(e) = device::ddi::seed_container(&phone, &built.bundle_id, reporter).await {
             reporter.note("pairing_file", format!("Developer disk image not pre-seeded ({e}); Poki downloads it itself."));
         }
+        // Mount it too, from here, so automation can start before Poki ever reaches its loopback.
+        // Poki mounts it again by itself after a restart; a failure here only means it will.
+        if !matches!(device::ddi::mounted(&phone).await, Ok(true)) {
+            if let Err(e) = device::ddi::mount(&phone, reporter).await {
+                tracing::warn!(error = %e, "mounting the developer disk image from the computer failed");
+                reporter.note("mount", format!("The developer disk image was not mounted from this computer ({e}). Poki mounts it itself when it connects."));
+                reporter.done("mount", None);
+            }
+        }
     }
     let handoff = if let (true, Some(record)) = (opts.hand_off || !handed, &record) {
         let server = pairshare::serve(record.clone()).await?;
