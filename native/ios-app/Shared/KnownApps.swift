@@ -48,6 +48,20 @@ struct KnownApp {
 }
 
 enum KnownApps {
+    private static let netEaseCloudMusicID = "com.netease.cloudmusic"
+    private static let netEaseCloudMusicAliases: Set<String> = ["网易云", "網易雲"]
+    private static let otherNetEaseProductPrefixes = ["课堂", "課堂", "信", "游戏", "遊戲", "阅读", "閱讀"]
+
+    /// 网易云 also starts the names of Cloud Classroom, Yunxin, Cloud Gaming and Cloud Reading.
+    /// Keep the short Cloud Music aliases out of those product names when the next word is direct.
+    static func allowsNameMatch<Following: Collection>(
+        _ name: String, appID: String, followedBy suffix: Following
+    ) -> Bool where Following.Element == Character {
+        guard appID.caseInsensitiveCompare(netEaseCloudMusicID) == .orderedSame,
+              netEaseCloudMusicAliases.contains(name) else { return true }
+        return !otherNetEaseProductPrefixes.contains { suffix.starts(with: $0) }
+    }
+
     /// One identity lookup for app text, icons and the file passed to the widget.
     static func find(_ value: String) -> KnownApp? {
         let key = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -121,7 +135,8 @@ enum KnownApps {
         KnownApp("com.xiaojukeji.didi", icon: "didi", "DiDi", "滴滴出行", aliases: ["滴滴"]),
         KnownApp("cn.12306.rails12306", icon: "rails12306", "Railway 12306", "铁路12306", "鐵路12306", aliases: ["12306", "Railway12306"]),
         KnownApp("ctrip.com", icon: "ctrip", "Trip.com", "携程旅行", "攜程旅行", aliases: ["携程", "攜程", "Ctrip"]),
-        KnownApp("com.netease.cloudmusic", icon: "netease-music", "NetEase Cloud Music", "网易云音乐", "網易雲音樂"),
+        KnownApp("com.netease.cloudmusic", icon: "netease-music", "NetEase Cloud Music", "网易云音乐", "網易雲音樂",
+                 aliases: ["网易云", "網易雲"]),
         KnownApp("com.tencent.QQMusic", icon: "qq-music", "QQ Music", "QQ音乐", "QQ音樂", aliases: ["QQ 音乐", "QQ 音樂"]),
         KnownApp("com.tencent.mqq", icon: "qq", "QQ"),
         KnownApp("com.laiwang.DingTalk", icon: "dingtalk", "DingTalk", "钉钉", "釘釘"),

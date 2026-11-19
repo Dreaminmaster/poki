@@ -113,6 +113,10 @@ final class AppIconStore {
             let hit = namesLongestFirst.first { name in
                 let chars = Array(name)
                 guard i + chars.count <= text.count, Array(text[i..<i + chars.count]) == chars else { return false }
+                if name == "网易云" || name == "網易雲" {
+                    guard let appID = KnownApps.byName[name],
+                          KnownApps.allowsNameMatch(name, appID: appID, followedBy: text[(i + chars.count)...]) else { return false }
+                }
                 if AppCapsule.everydayChinese.contains(name) {
                     return CapsuleText.appGoes(after: String(text[..<i]))
                 }

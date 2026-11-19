@@ -196,6 +196,30 @@ struct ActivityPreview: View {
         var setup = PokiState(phase: .setup, headline: "Setting up Poki", thumbnailVersion: 0)
         setup.guide = .init(number: 2, count: 6, title: SetupStep.developerMode.activityTitle)
 
+        // Each state as it is in the first seconds after the app enters it, while its event word is on:
+        // the island pops open then, so these are the states the owner sees expanded.
+        var doneJust = PokiState(phase: .done, headline: "Finished", thumbnailVersion: 0)
+        doneJust.since = now.addingTimeInterval(-34); doneJust.endedAt = now
+        doneJust.stepCount = 5
+        doneJust.event = .init(kind: .finished, text: "Run finished")
+        var doneLong = doneJust
+        doneLong.app = "Messages"
+        let chinese = AppLocalization.locale.identifier.hasPrefix("zh")
+        doneLong.plan = .init(steps: steps, current: 2, title: chinese ? "给妈妈发消息，说今晚加班会晚点回家吃饭" : "Text Mom that I’m working late and will be home after dinner")
+        // A chat task finished: finish_task's summary, or the task as asked when there is none.
+        var doneResult = doneJust
+        doneResult.result = chinese ? "已在微信给妈妈发送“今晚加班，晚点回家”" : "Sent Mom “Working late, home after dinner” in WeChat"
+        var doneTask = doneJust
+        doneTask.task = chinese ? "看看明天上海会不会下雨" : "Check if it rains in Shanghai tomorrow"
+        var yourTurnJust = yourTurn
+        yourTurnJust.event = .init(kind: .handoff, text: "Your turn")
+        var problemJust = problem
+        problemJust.event = .init(kind: .problem, text: "Runner Stopped")
+        var codeJust = pairCode
+        codeJust.event = .init(kind: .code, text: "Code ready")
+        var pairedJust = PokiState(phase: .idle, headline: "Paired", thumbnailVersion: 0)
+        pairedJust.event = .init(kind: .paired, text: "Pairing complete")
+
         // The runner on its way up: one main line, the stage under it.
         let waking = PokiState(phase: .idle, headline: "Checking pairing", thumbnailVersion: 0)
 
@@ -211,7 +235,9 @@ struct ActivityPreview: View {
         let all = [("start", start), ("working", working), ("step", step), ("approval", approval), ("deciding", deciding), ("yourturn", yourTurn), ("passcode", passcode), ("done", done),
                    ("plan", plan), ("plannext", planNext), ("plandone", planDone),
                    ("ready", ready), ("waking", waking), ("idle", idle), ("problem", problem), ("pairing", pairWait), ("code", pairCode), ("setup", setup), ("voice", voice),
-                   ("voiceworking", voiceWorking), ("voiceapproval", voiceApproval)]
+                   ("voiceworking", voiceWorking), ("voiceapproval", voiceApproval),
+                   ("donejust", doneJust), ("donelong", doneLong), ("doneresult", doneResult), ("donetask", doneTask), ("yourturnjust", yourTurnJust), ("problemjust", problemJust),
+                   ("codejust", codeJust), ("pairedjust", pairedJust)]
         // `-pokiActivityCaller "Claude Code"`: every sample as an outside agent's, to see where its badge goes.
         guard let caller = UserDefaults.standard.string(forKey: "pokiActivityCaller") else { return all }
         return all.map { name, state in var state = state; state.caller = caller; return (name, state) }

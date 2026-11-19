@@ -172,6 +172,7 @@ final class AppModel {
     /// Automation started in this boot: iOS will not ask again until the next restart.
     private func automationStarted() {
         InProcessWDA.gate.withLock { $0.startedThisBoot = true }
+        AutomationAllowance(boot: BootClock.current, at: Date()).save()
         guard UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current else { return }
         UserDefaults.standard.set(BootClock.current, forKey: Self.automationBootKey)
     }
@@ -338,6 +339,11 @@ final class AppModel {
         self.activity = ActivityController()
         self.automation = automation
         self.idleSessionPolicy = .forSystem(systemVersion)
+        // iOS 27 lets a relaunched Poki open automation without the passcode while the boot's allowance
+        // lasts, so a phone step from the background (Poki Anytime, an agent) does not wait for Poki in front.
+        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved?.covers(boot: BootClock.current, at: Date()) == true {
+            InProcessWDA.gate.withLock { $0.startedThisBoot = true }
+        }
         self.requiresDiskImageCheck = requiresDiskImageCheck ?? !Self.onSimulator
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
@@ -351,8 +357,15 @@ final class AppModel {
                                #if DEBUG && targetEnvironment(simulator)
                                if TalkRehearsal.asked { return await TalkRehearsal.step() }
                                #endif
-                               let result = await core.tool(name, arguments: arguments)
-                               return (result.text, result.isError)
+                               let tool = { (name: String, arguments: String) async -> PhoneAnswer in
+                                   let result = await core.tool(name, arguments: arguments)
+                                   return (result.text, result.isError, result.jpeg)
+                               }
+                               guard name == "open_app" else { return await tool(name, arguments) }
+                               return await VoiceApps.open(arguments, tool: tool, openLink: { url in
+                                   guard UIApplication.shared.applicationState == .active else { return false }
+                                   return await UIApplication.shared.open(url)
+                               })
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
                            connection: VoiceModel.connection)
@@ -410,7 +423,9 @@ final class AppModel {
         ApprovalNotice.registerActions()
         listenForApprovals()
         talkActivity = TalkActivity(voice: voice, activity: self.activity, deviceName: { UIDevice.current.name },
-                                    keepsActivity: { [weak self] in self?.sessionOn == true })
+                                    keepsActivity: { [weak self] in self?.sessionOn == true },
+                                    ended: { [weak self] in self?.talkEnded() },
+                                    endFromLiveActivity: { [weak self] in self?.stopFromOutside(AppModel.liveActivityEnd) })
         // One pump for the app's whole life. Cancelling a task that reads an AsyncStream ends the
         // stream for good, so a pump per session would go silent after the first Turn off (no steps,
         // no approvals, no relay state in the log, which is what happened on the phone).
@@ -1243,7 +1258,44 @@ final class AppModel {
 
     /// Stops the runner, and with it iOS's automation banner, while the relay stays connected; the
     /// next agent request starts it again. From the Stop runner button, the Live Activity, or idle.
-    func pauseRunner(reason: String = "Stopped", byOwner: Bool = true) {
+    static let liveActivityStop = "Stopped from the Live Activity"
+    static let liveActivityEnd = "Ended from the Live Activity"
+
+    private func isApprovalTapEcho(_ reason: String) -> Bool {
+        guard reason == Self.liveActivityStop, let answered = lastApprovalAnswered else { return false }
+        return Date().timeIntervalSince(answered) < 4
+    }
+
+    /// The owner's Stop from outside Poki: Stop or End on the Live Activity, or Poki Anytime run again.
+    /// The talk, the chat's task, a waiting approval and the agent's steps all stop at once, and the
+    /// Live Activity shows Poki standing by. End with nothing under way only ends the talk: the automation
+    /// then closes as after a task (`closeAfterTalk`), so on iOS 18–26 the next talk needs no passcode.
+    /// While Poki is on, its Live Activity stays (as when a talk ends, `TalkActivity`): an outside agent
+    /// can start again from the background, where iOS starts no Live Activity, and its steps and Stop
+    /// must show there.
+    func stopFromOutside(_ reason: String) {
+        let chat = AskPoki.app === self ? AskPoki.chat : nil
+        // A Split View task stops at once, even right after an approval (as in `pauseRunner`).
+        if chat?.isRunningInSplitView != true, isApprovalTapEcho(reason) {
+            log.add("runner", "a Stop from the Live Activity right after an approval was ignored")
+            return
+        }
+        let busy = chat?.running == true || stepUnderWay != nil || !approvals.isEmpty
+        if voice.isOn { voice.stop() }
+        guard busy || reason == Self.liveActivityStop else {
+            log.add("session", "\(reason): the talk ends")
+            return
+        }
+        log.add("session", "\(reason): the talk and the task stop")
+        if let chat, chat.running { chat.stop() }
+        for approval in approvals { resolve(approval, approved: false) }
+        pauseRunner(reason: reason, fromOutside: true)
+        if !sessionOn { activity.end() }
+    }
+
+    /// `fromOutside`: `stopFromOutside` has stopped the chat's task, checked the Stop is no echo of an
+    /// approval's tap, and refused the approvals that wait, which end a moment later.
+    func pauseRunner(reason: String = "Stopped", byOwner: Bool = true, fromOutside: Bool = false) {
         let splitChat = byOwner && AskPoki.app === self && AskPoki.chat?.isRunningInSplitView == true ? AskPoki.chat : nil
         splitChat?.stop()
         guard sessionOn, !runnerPaused || byOwner else { return }
@@ -1251,11 +1303,11 @@ final class AppModel {
         // that lands within a few seconds of an answered approval is that same tap (build 144: an
         // Allow, then "Stopped from the Live Activity" 0.7 s after the approval ended). A running
         // Split View task still needs an immediate Stop, including during and just after approval.
-        if splitChat == nil, reason == "Stopped from the Live Activity", let answered = lastApprovalAnswered, Date().timeIntervalSince(answered) < 4 {
+        if splitChat == nil, !fromOutside, isApprovalTapEcho(reason) {
             log.add("runner", "a Stop from the Live Activity right after an approval was ignored")
             return
         }
-        guard approvals.isEmpty || splitChat != nil else { return }
+        guard approvals.isEmpty || splitChat != nil || fromOutside else { return }
         ownerPaused = byOwner
         if runnerPaused {
             if automationPath == .inProcess { closeInProcess("stopped by the owner") }
@@ -1403,6 +1455,24 @@ final class AppModel {
         ownerPaused = false
         closeInProcess("the end of the task", keepingSession: idleSessionPolicy == .pauseAutomation)
         standBy(reason: nil, keepingDone: true)
+    }
+
+    /// A talk ended (End, the Action Button again, or silence): the automation its steps used closes
+    /// as at the end of a task, so iOS's banner goes at once, not when Poki next comes to the front.
+    /// A step still running closes it when it finishes.
+    private var talkStepsToClose = false
+    private func talkEnded() {
+        talkStepsToClose = true
+        closeAfterTalk()
+    }
+
+    private func closeAfterTalk() {
+        guard talkStepsToClose else { return }
+        // A new talk or task owns the session now; its own end closes it.
+        if voice.isOn || chatTaskActive { talkStepsToClose = false; return }
+        guard stepUnderWay == nil, outsideAgentsAtWork.isEmpty else { return }
+        talkStepsToClose = false
+        closeAfterTask("the talk ended")
     }
 
     /// Starts a paused runner again (the next agent request, or the owner).
@@ -1704,6 +1774,7 @@ final class AppModel {
             activity.update { state in state.app = app ?? state.app }
             activity.setThumbnail(thumbnail)
             if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
+            closeAfterTalk()
         case .approvalRequested(let approval):
             switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
             case .allow:
@@ -1784,6 +1855,7 @@ final class AppModel {
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
     func finishTask(then: (@MainActor () -> Void)? = nil) {
+        chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
         lastShot = nil
@@ -1827,14 +1899,20 @@ final class AppModel {
 
     // MARK: The chat's task
 
+    /// The chat no longer says when its run ends (stopped, or ended without a word): the Live
+    /// Activity's quiet wait finishes the run, as it does an outside agent's.
+    func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
+
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
+    /// The chat says when the task ends (chatTaskEnded), so until then a pause between steps, while the
+    /// model thinks, never reads as the end of the run (ESP-954).
     func chatTaskBegan(splitViewSession: String? = nil) {
         log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         chatTaskActive = automationPath == .inProcess
         if chatTaskActive { lastAgentActivity = Date() }
         lastShot = nil
         activitySplitViewSession = splitViewSession
-        activity.setChatOwnsCompletion(splitViewSession != nil)
+        activity.setChatOwnsCompletion(true)
         // The owner sees at once that Poki took the task: the Live Activity (started here, while
         // Poki is in front) and iOS's background line say so before the model's first answer.
         if sessionOn {
@@ -1871,7 +1949,7 @@ final class AppModel {
     }
 
     /// End the task, return to Poki and finish its Live Activity.
-    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false) {
+    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false, result: String? = nil, task: String? = nil) {
         lastShot = nil
         guard acted else {
             if !inSplitView { finishTask() }
@@ -1886,7 +1964,7 @@ final class AppModel {
             return
         }
         // On a Dynamic Island the activity's own pop-up says the task is over: no banner on top of it.
-        let islandTold = activity.finishNow(alert: true)
+        let islandTold = activity.finishNow(alert: true, result: result, task: task)
         if !inSplitView {
             finishTask { [weak self] in
                 guard !islandTold else { return }
@@ -2009,7 +2087,7 @@ final class AppModel {
         CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
             guard let observer else { return }
             let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.pauseRunner(reason: "Stopped from the Live Activity") }
+            Task { @MainActor in model.stopFromOutside(AppModel.liveActivityStop) }
         }, ApprovalMailbox.stopRunner as CFString, nil, .deliverImmediately)
         CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
             guard let observer else { return }
@@ -2484,4 +2562,26 @@ enum BootClock {
         guard sysctl(&mib, 2, &boot, &size, nil, 0) == 0 else { return 0 }
         return Double(boot.tv_sec)
     }()
+}
+
+/// When automation last started: the boot it was in, and when. On iOS 27 a relaunched Poki opens
+/// automation without the passcode in that boot (on the phone, 2 h after the passcode, the first open
+/// answered in 2.6 s). iOS asks again 8 hours later (the passcode notice, `ActivityFace`), so past 8
+/// hours after the last start the first open waits for Poki in front again.
+struct AutomationAllowance: Equatable {
+    let boot: Double
+    let at: Date
+    static let lasts: TimeInterval = 8 * 3600
+    static let key = "automationAllowance"
+
+    func covers(boot current: Double, at now: Date) -> Bool {
+        boot == current && now >= at && now.timeIntervalSince(at) < Self.lasts
+    }
+
+    static var saved: AutomationAllowance? {
+        guard let pair = UserDefaults.standard.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
+        return AutomationAllowance(boot: pair[0], at: Date(timeIntervalSince1970: pair[1]))
+    }
+
+    func save() { UserDefaults.standard.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
 }

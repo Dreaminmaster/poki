@@ -94,7 +94,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     /// When an open may bring up iOS's passcode screen. It does only before the first automation
     /// of a boot, so until then: one open at a time (two at once each showed a screen), never from
     /// the background (the screen then could not be closed), and none after the owner cancelled one,
-    /// until they turn Poki on again.
+    /// until they turn Poki on again. `startedThisBoot` is also set at launch on iOS 27 while the
+    /// boot's allowance lasts (`AutomationAllowance`): then no screen comes.
     struct OpenGate {
         var declined = false
         var inFront = true

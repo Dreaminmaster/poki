@@ -1001,7 +1001,7 @@
     },
     {
       "name": "install_app",
-      "description": "Install an application from a local path. Requires operator approval by default and valid Apple signing where applicable. Optional device selects an id or name; otherwise the session selection or sole available device is used.",
+      "description": "Install an application from a local path. Requires operator approval by default and valid Apple signing where applicable. When the app is one of Poki's own builds (bundle id starting nz.zheha.poki) on a physical iPhone, a running Poki is ended first, and an install that makes no progress for 90 seconds is retried once before it fails. Optional device selects an id or name; otherwise the session selection or sole available device is used.",
       "inputSchema": {
         "type": "object",
         "properties": {

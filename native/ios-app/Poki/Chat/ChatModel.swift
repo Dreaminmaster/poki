@@ -147,6 +147,8 @@ final class ChatModel {
     private var toolCalls = 0
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
+    /// The task under way as the owner asked it.
+    private var taskText = ""
     private var client: ModelClient?
     private var restoredContext: String?
     /// The plan the model published with report_plan; the bubble shows its steps up to the current one.
@@ -557,10 +559,11 @@ final class ChatModel {
         switch prepared.engine {
         case .direct(let client, let instructions):
             client.say(prepared.message)
-            began("direct", prepared.provider, prepared.model)
+            began("direct", prepared.provider, prepared.model, task: prepared.text)
             await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
-            if !current { app.finishTask() }
+            // The direct engine does not say when its task ends: the quiet wait finishes the run.
+            if !current { app.finishTask() } else { app.chatReleasesRun() }
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
             if current { running = false; awaitingModel = false }
         case .pi(let piModel):
@@ -589,7 +592,7 @@ final class ChatModel {
                 }
             }
             let splitSession = splitViewSession
-            began("pi", prepared.provider, prepared.model, splitViewSession: splitSession)
+            began("pi", prepared.provider, prepared.model, task: prepared.text, splitViewSession: splitSession)
             if let splitSession, pair.count == 2 {
                 phoneStepUnderWay = true
                 let confirmed = await openSplitViewPair(pair, session: splitSession, token: token)
@@ -762,8 +765,8 @@ final class ChatModel {
     /// instead; that code goes once the phone acceptance with the owner's OpenAI key has passed on pi.
     private static var direct: Bool { UserDefaults.standard.string(forKey: "chatEngine") == "direct" }
 
-    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, splitViewSession: String? = nil) {
-        taskStart = Date(); toolCalls = 0; taskResult = nil
+    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) {
+        taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
         taskCalls.removeAll()
         app.prepareForTask()
         app.chatTaskBegan(splitViewSession: splitViewSession)
@@ -849,7 +852,10 @@ final class ChatModel {
         if case .stopped = outcome {
             if !usesSplitView { app.finishTask() }
         } else {
-            app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView)
+            // A finished run on the Live Activity says what it came to: finish_task's summary when the
+            // task succeeded, else the task itself. A failure's summary under Done would read as success.
+            app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView,
+                              result: taskResult.flatMap { $0.success ? $0.summary : nil }, task: taskText)
         }
     }
 

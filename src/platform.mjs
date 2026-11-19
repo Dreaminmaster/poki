@@ -315,7 +315,7 @@ async function interfaceReady(ctx, pid) {
   return { foreground_verified: inFront, interface_ready: false, ...ctx.inBatch ? {} : { screen: (await ctx.readback()).screen }, instruction: `The app reported no readable elements within ${launchReadyMs / 1000} seconds. Use take_screenshot to look, or wait_for if it is still loading.` };
 }
 
-async function applicationMutation(target, request, verify) {
+async function applicationMutation(target, request, verify, timeout) {
   let recovery;
   if (request.op === 'install_app') {
     request = { ...request, staging_id: randomUUID() };
@@ -331,7 +331,7 @@ async function applicationMutation(target, request, verify) {
   let receipt = {}, result;
   try {
     const { stdout } = await platformRun(join(root, 'build/poki-native'), ['--udid', target.id], {
-      input: JSON.stringify(request), timeout: request.op === 'install_app' ? 185000 : 95000,
+      input: JSON.stringify(request), timeout: timeout ?? (request.op === 'install_app' ? 185000 : 95000),
     });
     receipt = JSON.parse(stdout);
     if (receipt.isError) result = { ...receipt, ...(receipt.outcome === 'unknown' ? { stop_reason: 'unknown' } : {}) };
@@ -359,6 +359,48 @@ async function applicationMutation(target, request, verify) {
     }
   }
   return result;
+}
+
+// iOS will not replace an app while its process is alive: the install then waits on the phone
+// ("Updating Poki") until the helper gives up many minutes later. For Poki's own builds the process
+// is ended first, and an install that makes no progress is cut short and tried once more. This is a
+// deliberate exception to "no install command is retried" (installation.rs): the stuck attempt never
+// returned a receipt, its helper is killed first, and each attempt stages under its own directory.
+const pokiBundlePrefix = 'nz.zheha.poki';
+const pokiInstallStuckMs = 90000;
+export const pokiStuckInstallError = 'Poki on the iPhone is stuck updating. Swipe Poki away on the phone and try again. (手机上的 Poki 卡住了更新，请在手机上划掉 Poki 后重试)';
+export const isPokiBundle = bundle => bundle.startsWith(pokiBundlePrefix);
+// Only this install's own 90-second limit counts; a caller that cancelled or ran out of time stops the work instead.
+// A receipt that says completed is never repeated, even when reading the app list back ran out of time.
+const installTimedOut = result => result.isError === true && result.stop_reason === 'timeout' && result.outcome !== 'completed' && !signal()?.aborted;
+
+// stop() ends the running app and attempt() runs one install; both are given so the order can be tested.
+export async function installPokiBuild({ stop, attempt }) {
+  const firstStop = await stop();
+  const first = await attempt();
+  if (!installTimedOut(first)) return { ...first, poki_stop: firstStop };
+  const secondStop = await stop();
+  const second = await attempt();
+  if (!installTimedOut(second)) return { ...second, poki_stop: secondStop, install_retried: true };
+  return { ...second, isError: true, outcome: 'unknown', stop_reason: 'unknown', install_retried: true, error: pokiStuckInstallError,
+    instruction: `${pokiStuckInstallError} The update may still finish on the phone: inspect list_apps before another install.`,
+    ...(first.recovery_record ? { earlier_recovery_record: first.recovery_record } : {}) };
+}
+
+// Ends every process of the installed app with this bundle id. A phone that cannot report processes
+// must not block the install, so a failure is reported in the result instead.
+async function stopInstalledApp(target, bundle) {
+  try {
+    const app = (await apps(target, true)).find(candidate => candidate.bundle_id === bundle);
+    if (!app) return { running: false, installed: false };
+    const matched = terminateAppMatch(app, (await devicectl(target.id, ['device', 'info', 'processes'])).runningProcesses);
+    if (matched.already_stopped) return { running: false };
+    for (const process of matched.processes) await devicectl(target.id, ['device', 'process', 'terminate', '--pid', String(process.processIdentifier)]);
+    return { running: true, terminated: matched.processes.length };
+  } catch (error) {
+    if (stopped(error)) throw error;
+    return { error: error.message };
+  }
 }
 
 async function install(target, value) {
@@ -389,10 +431,16 @@ async function install(target, value) {
         archive = join(temporary, 'package.ipa');
         await platformRun('ditto', ['-c', '-k', '--keepParent', payload, archive]);
       }
-      return await applicationMutation(target, { op: 'install_app', ipa_path: archive, bundle_id: bundle }, async () => {
+      const verify = async () => {
         const app = (await apps(target, true)).find(app => app.bundle_id === bundle);
         if (!app) throw new Error('Install completed, but the installed app was not found.');
         return { installed: true, ...app };
+      };
+      const request = { op: 'install_app', ipa_path: archive, bundle_id: bundle };
+      if (!isPokiBundle(bundle)) return await applicationMutation(target, request, verify);
+      return await installPokiBuild({
+        stop: () => stopInstalledApp(target, bundle),
+        attempt: () => applicationMutation(target, request, verify, pokiInstallStuckMs),
       });
     }
     const app = (await apps(target, true)).find(app => app.bundle_id === bundle);
