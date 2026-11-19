@@ -75,9 +75,10 @@ bears "$APP"
 LAUNCH="$HERE/Poki/LaunchArt"
 LAUNCH_IMAGES="$HERE/Poki/LaunchImages"
 mkdir -p "$LAUNCH_IMAGES"
+rm -f "$LAUNCH_IMAGES/LaunchBear@3x.png"
 cp "$LAUNCH/LaunchBackdrop.png" "$LAUNCH_IMAGES/LaunchBackdrop.png"
 swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/Geist-SemiBold.ttf" "$LAUNCH/LaunchBear.png" \
-  "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@3x.png"
+  "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@2x.png"
 
 WIDGET="$HERE/PokiWidgets/Assets.xcassets"
 catalog "$WIDGET"
