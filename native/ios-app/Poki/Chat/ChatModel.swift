@@ -769,6 +769,8 @@ final class ChatModel {
         taskCalls.removeAll()
         app.prepareForTask()
         app.chatTaskBegan(splitViewSession: splitViewSession)
+        // find_app and the task's icons see the phone's current apps.
+        InstalledApps.shared.refreshSoon()
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
@@ -781,6 +783,11 @@ final class ChatModel {
         let record = TaskRecord(session: session, task: text, calls: taskCalls, result: taskResult,
                                 seconds: Date().timeIntervalSince(taskStart))
         Self.afterTask?(record)
+        if !isSample {
+            ChatDebugLog.add(ChatDebugLog.entry(model: "\(engine), \(ModelKeys.selectedProvider.rawValue)/\(ModelKeys.selectedModel)",
+                                                named: AppIconStore.bundleIDs(namedIn: record.task), calls: record.calls,
+                                                finished: taskResult?.success, seconds: record.seconds))
+        }
         store.taskEnded(session, success: taskResult?.success, stopped: stopAsked)
         if kind == .poki, taskResult?.success == true { Haptics.done() }
     }
@@ -1029,6 +1036,9 @@ final class ChatModel {
             if let refusal = selectRoute(.web) { return refusal }
             showBrowser(opening: name == "web_open")
             return await WebTools.perform(name, arguments: call.arguments)
+        case "find_app":
+            let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
+            return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
             phoneStepUnderWay = true

@@ -59,7 +59,7 @@ enum Harness {
         // front when a task begins, so a first look reads only the owner's chat (ESP-465). finish_task
         // ends the chat's task and the app brings Poki back (chatTaskEnded), so a finish: true do is a
         // step more; the save rides in the same reply instead of a turn before it.
-        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. When you are not sure of an app's iPhone bundle id, or a launch answers that no app with that bundle id is installed, do not tell the owner the app is missing yet: go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it; say the app is not installed only when that search finds nothing. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
+        parts.append("Choose the route from the owner's request. For a website task, start with web_open and use only web tools; do not call look or do to check readiness, open Safari, or finish the task. For an app task, start with do {run: name} when the routine below covers it, else do {launch: bundle id}. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. Send report_plan with the first action. Use both routes only when the owner explicitly requested a separate app part, and put that part in its own plan step with the app's name. A failed step is not permission to switch routes. Finish with finish_task. After a successful app task that was not already a routine, save its steps with routines {action: \"save\", name, description}, named the way the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
@@ -76,6 +76,10 @@ enum Harness {
 
     private static let replyApprovals = "Approvals here are decided from what the owner said in this chat. When a step is refused (declined), do not tell the owner to tap anything: ask them in plain words whether they want that step done, naming the step, and if they say yes, send the same step again."
 
+    /// The iPhone bundle ids of the apps the owner's request names, from the list behind the app pills
+    /// (KnownApps). Without them the model guessed: a tester's 淘宝 and 美团 tasks (Nov 13 2026) were
+    /// refused as "no app with that bundle id is installed", and the agent told the owner to install
+    /// apps they had. nil when the request names no listed app.
     @MainActor private static func appIDs(for task: String) -> String? {
         let apps = AppIconStore.bundleIDs(namedIn: task).compactMap { KnownApps.byID[$0.lowercased()] }
         guard !apps.isEmpty else { return nil }
@@ -89,8 +93,14 @@ enum Harness {
 
     /// Poki's own browser's tools (ESP-145) sit beside the phone's.
     static var tools: [ToolSpec] {
-        catalogTools(includeScreenHistory: HistoryCapture.isEnabled) + WebTools.specs + [reportPlan, finishTask]
+        catalogTools(includeScreenHistory: HistoryCapture.isEnabled) + [findApp] + WebTools.specs + [reportPlan, finishTask]
     }
+
+    /// Bundle ids from the phone's own app list, with the App Store's search as the backup (InstalledApps).
+    static let findApp = ToolSpec(
+        name: "find_app",
+        description: "Find an app on this iPhone and its bundle id for {launch}. name: the app's name in any language (\"淘宝\", \"Notes\"); answers the installed apps with that name from the phone's own app list, or, when none is installed, the App Store's matches marked not installed with their links. purpose: what an app should do (\"parking\"); answers App Store apps for it, installed ones first, with links for the others. Launch only ids it says are installed. When it says it could not tell, the app may still be there.",
+        schema: ["type": "object", "properties": ["name": string, "purpose": string], "additionalProperties": false])
 
     static var splitViewTools: [ToolSpec] {
         [

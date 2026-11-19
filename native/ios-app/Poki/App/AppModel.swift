@@ -269,6 +269,7 @@ final class AppModel {
             guard let self, let path = self.pairingPath, self.loopback.isWorking else { return nil }
             return ["device_address": "10.7.0.1", "pairing_file": path, "host_name": "Poki"]
         }
+        InstalledApps.shared.phone = signer.phone
         signer.isIdle = { [weak self] in self?.signingIdle ?? false }
         signer.whyUnreachable = { [weak self] in self?.signerUnreachable ?? .loopback }
         signer.busyReason = { [weak self] in self?.signingBusyReason }
@@ -995,6 +996,8 @@ final class AppModel {
                 self.pairingTrouble = nil
                 self.servicesSilent = false
                 self.pairingVerifiedAt = Date()
+                // The phone answers over the loopback: the installed apps' names and icons can be read.
+                InstalledApps.shared.refreshSoon()
                 return true
             } catch {
                 let text = error.localizedDescription

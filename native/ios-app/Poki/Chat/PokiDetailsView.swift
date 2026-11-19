@@ -520,7 +520,7 @@ struct AdvancedSettingsView: View {
         .onAppear {
             // The run log is written to tmp for the share sheet, as Memory did it.
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("poki-agent-debug.json")
-            if (try? RoutineStore.shared.debugBundle().write(to: file, options: .atomic)) != nil { runLog = file }
+            if (try? ChatDebugLog.exportBundle().write(to: file, options: .atomic)) != nil { runLog = file }
         }
     }
 }
