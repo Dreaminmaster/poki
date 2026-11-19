@@ -35394,18 +35394,18 @@
         }
       }
     },
-    "When on, Poki can answer questions from text kept on this iPhone. Excluded apps and password fields are left out, and nothing leaves this iPhone." : {
+    "Screen History stores text on this iPhone and leaves out excluded apps and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启后，Poki 可以根据保存在这台 iPhone 上的屏幕文字回答你的问题。已排除的应用和密码栏不会被记录，所有内容都只留在这台 iPhone 上。"
+            "value" : "屏幕历史记录将文字保存在这台 iPhone 上，不记录已排除的应用和密码栏。当 Poki 或已连接的代理查询历史记录时，相关文字可能会发送给所选 AI 服务提供商或已连接的代理。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟後，Poki 可以根據保存在這台 iPhone 上的螢幕文字回答你的問題。已排除的應用和密碼欄不會被記錄，所有內容都只留在這台 iPhone 上。"
+            "value" : "螢幕歷史記錄將文字保存在這台 iPhone 上，不記錄已排除的應用程式和密碼欄。當 Poki 或已連線的代理程式查詢歷史記錄時，相關文字可能會傳送給所選 AI 服務提供者或已連線的代理程式。"
           }
         }
       }
