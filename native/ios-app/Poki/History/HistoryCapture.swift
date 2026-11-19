@@ -62,6 +62,8 @@ final class HistoryCapture: ObservableObject {
     @Published private(set) var lastKept: Date?
     /// When the launcher last made a read, kept or not: the sign that the connection is open.
     private(set) var lastReadAt: Date?
+    /// When the launcher last showed its tunnel open: a read, or a held run's line.
+    private(set) var lastTunnelAt: Date?
 
     var isRunning: Bool { status == .waiting || status == .reading }
 
@@ -212,7 +214,8 @@ final class HistoryCapture: ObservableObject {
         if !enabled { enabled = true }
         watchLock()
         // A run with no end waits for the connection or an agent's task like any run under way.
-        if let refused = refusal(model), !always || refused == .locked || refused == .notPaired { set(refused); return }
+        // A run with no end also starts while the iPhone is locked: held, so it only opens its tunnel.
+        if let refused = refusal(model), !always || refused == .notPaired { set(refused); return }
         run += 1
         let me = run
         once = minutes == nil && !always
@@ -271,7 +274,12 @@ final class HistoryCapture: ObservableObject {
             while self.run == me {
                 let left = self.once || self.always ? duration : Int(until.timeIntervalSinceNow.rounded())
                 if left < (self.once ? 1 : 5) { break }
-                if let refused = self.refusal(model) {
+                // A run with no end does not wait here for the lock, a task or the connection
+                // check: the launcher is asked at once and held (it opens its tunnel and reads
+                // nothing), and it tries the connection itself. The check can be stale by seconds,
+                // and those are the seconds a shortcut has with Cellular Data off.
+                let asksHeld = self.always && (self.lockedOrDark || model.hasOpenInProcessSession)
+                if let refused = self.refusal(model), !(self.always && refused != .notPaired) {
                     if self.once || refused == .locked || refused == .notPaired { self.end(me, refused); return }
                     self.hold(refused, model: model)
                     model.loopback.check()
@@ -280,8 +288,14 @@ final class HistoryCapture: ObservableObject {
                     try? await Task.sleep(for: .seconds(min(30, 1 << min(tries, 5))))
                     continue
                 }
-                self.resume()
+                if asksHeld {
+                    self.paused = true
+                    self.hold(self.lockedOrDark ? .locked : .task, model: model)
+                } else {
+                    self.resume()
+                }
                 let request: [String: Any] = [
+                    "paused": asksHeld,
                     "op": "run", "device_address": "10.7.0.1", "pairing_file": model.pairingPath ?? "", "host_name": "Poki",
                     // After a restart the image is gone and the audit service with it: the run mounts it again.
                     "ddi_dir": AppFiles.ddiDirectory.path,
@@ -316,7 +330,7 @@ final class HistoryCapture: ObservableObject {
     }
 
     /// The run waits: the status stays a running one, and the reason goes to the observing record.
-    private func hold(_ why: Status, model: AppModel) {
+    private func hold(_ why: Status, model: AppModel?) {
         if held != why {
             held = why
             HistoryStore.shared.note(why.rawValue)
@@ -325,7 +339,7 @@ final class HistoryCapture: ObservableObject {
         if status != .waiting { status = .waiting }
         // An agent's task is no accident, and neither is being on cellular, where iOS refuses the
         // local connection for as long as it lasts: nothing to turn back on.
-        if why == .noConnection, !model.loopback.cellularRefused { failing() } else { failingSince = nil }
+        if why == .noConnection, let model, !model.loopback.cellularRefused { failing() } else { failingSince = nil }
     }
 
     /// Reads go on.
@@ -407,7 +421,28 @@ final class HistoryCapture: ObservableObject {
         let changed: @Sendable (Int32) -> Void = { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if self.lockedOrDark { self.end(self.run, .locked) } else { HistoryCollector.shared.evaluate("the iPhone unlocked") }
+                if self.lockedOrDark {
+                    // A run with no end is held through the lock and keeps its tunnel: unlocked on
+                    // cellular, a new one could not be opened.
+                    if self.isAlways, self.isRunning {
+                        if !self.paused {
+                            self.paused = true
+                            HistoryBridge.pause(true)
+                        }
+                        self.hold(.locked, model: nil)
+                        HistoryStore.shared.close()
+                    } else {
+                        self.end(self.run, .locked)
+                    }
+                } else {
+                    // Let go at once, not at the launcher's next line.
+                    if self.paused, self.isRunning, !(HistoryCollector.shared.taskOpen()) {
+                        self.paused = false
+                        HistoryBridge.pause(false)
+                        self.resume()
+                    }
+                    HistoryCollector.shared.evaluate("the iPhone unlocked")
+                }
             }
         }
         notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
@@ -416,17 +451,18 @@ final class HistoryCapture: ObservableObject {
 
     /// One read from the launcher. Only a screen whose text changed carries text.
     private func took(_ data: Data, run me: Int, model: AppModel) {
-        guard me == run, !lockedOrDark,
-              let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        guard me == run, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        // The tunnel is open: a read came through, or a held run says so.
+        if line["ok"] as? Bool == true || line["tunnel"] as? Bool == true { lastTunnelAt = Date() }
         if paused {
             // The launcher sends one line a round while it is held: the moment to look again.
-            if model.hasOpenInProcessSession { return }
+            if lockedOrDark || model.hasOpenInProcessSession { return }
             paused = false
             HistoryBridge.pause(false)
             resume()
             return
         }
-        guard status == .reading else { return }
+        guard status == .reading, !lockedOrDark else { return }
         if model.hasOpenInProcessSession {
             // A single read gives way. A run waits for the task to end and reads on. An always run
             // waits inside the launcher, which keeps its tunnel: on cellular a closed one cannot

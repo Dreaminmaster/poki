@@ -109,11 +109,16 @@ final class HistoryCollector {
         model.loopback.check()
         while Date().timeIntervalSince(asked) < seconds {
             try? await Task.sleep(for: .milliseconds(500))
-            if let read = capture.lastReadAt, read > asked { return true }
+            // Connected is the tunnel open, not a read: the iPhone may be locked in a pocket when
+            // Wi-Fi drops, and a locked screen is not read.
+            if let open = capture.lastTunnelAt, open > asked { return true }
             if !capture.isRunning { evaluate("a reconnect was asked for") }
         }
         return false
     }
+
+    /// Whether an agent's task has the screen.
+    func taskOpen() -> Bool { model?.hasOpenInProcessSession ?? false }
 
     /// Starts a run when one should be reading and none is.
     func evaluate(_ reason: String) {
@@ -129,7 +134,6 @@ final class HistoryCollector {
         let why: String? =
             !capture.enabled ? "Screen History is off"
             : ownerStopped ? "the owner stopped it"
-            : capture.screenOff ? "the iPhone is locked"
             : !staysUp(model) ? "nothing keeps Poki running in the background until it is opened once"
             : Date().timeIntervalSince(startedAt) < Self.pause ? "a run started a moment ago"
             : nil

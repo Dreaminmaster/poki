@@ -247,7 +247,9 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         None => vec![DEFAULT_READ_WITHIN],
     };
     let me = RUN.fetch_add(1, Ordering::SeqCst) + 1;
-    PAUSED.store(false, Ordering::SeqCst);
+    // A run may start held (the iPhone is locked, or an agent's task has the screen): it opens its
+    // tunnel and reads nothing until it is let go.
+    PAUSED.store(request["paused"].as_bool().unwrap_or(false), Ordering::SeqCst);
     let mut stats = RunStats::default();
     let mut device: Option<Device> = None;
     // Wall time, not the runtime's clock: a suspended app's time must show up as a gap.
@@ -273,8 +275,21 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         }
         let asked = Instant::now();
         if PAUSED.load(Ordering::SeqCst) {
+            // A held run still opens its tunnel: the moment it can be opened may not come again
+            // (on cellular iOS refuses a new one), and the reads to come need it open.
+            let mut line = json!({"paused": true, "at_s": at.as_secs()});
+            if device.is_none() {
+                match target.open().await {
+                    Ok(open) => {
+                        device = Some(open);
+                        stats.connections += 1;
+                    }
+                    Err(failure) => line["error"] = failure.detail.into(),
+                }
+            }
+            line["tunnel"] = device.is_some().into();
             // One line each round, so the caller can tell a held run from a silent one.
-            emit(json!({"paused": true, "at_s": at.as_secs()}));
+            emit(line);
             while asked.elapsed() < interval && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
