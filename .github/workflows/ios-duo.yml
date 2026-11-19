@@ -1,0 +1,49 @@
+# Poki's in-process screen read on an iPhone Duo simulator (#419). An app linked against an SDK
+# before iOS 27.1 is letterboxed on the Duo: Poki's own screen is then the letterbox, the picture
+# XCTest takes is the whole panel, and every screen read was refused. The first step shows that
+# with a check app built with Xcode 27.0, the others that a build with the newest Xcode gets its
+# picture and can read, tap and type.
+name: iOS Duo
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - native/ios-app/Poki/Native/**
+      - native/ios-app/scripts/inprocess-sim/**
+      - .github/workflows/ios-duo.yml
+      - .github/actions/build-ipa/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-duo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  duo:
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the newest Xcode
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version && xcrun --sdk iphonesimulator --show-sdk-version
+          ls -d /Applications/Xcode_*.app
+      - name: Built with the iOS 27.0 SDK, the Duo gives no picture
+        run: POKI_CHECK_DUO=1 POKI_CHECK_BUILD_XCODE=/Applications/Xcode_27.0.app POKI_CHECK_OUT=out/sdk-27.0 native/ios-app/scripts/inprocess-sim/check.sh --shot letterboxed
+      - name: Built with the newest SDK, the Duo gives its picture
+        if: always()
+        run: POKI_CHECK_DUO=1 POKI_CHECK_OUT=out/sdk-newest native/ios-app/scripts/inprocess-sim/check.sh --shot full
+      - name: Read, tap, type and read back on the Duo
+        if: always()
+        run: POKI_CHECK_DUO=1 POKI_CHECK_OUT=out/field native/ios-app/scripts/inprocess-sim/check.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: duo-check
+          path: out/
+          if-no-files-found: ignore

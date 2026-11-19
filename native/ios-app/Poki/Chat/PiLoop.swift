@@ -21,11 +21,13 @@ final class PiLoop {
 
     let provider: ModelProvider
     let model: Model
-    /// Stable identity of the saved conversation, passed as metadata to PiSwift.
     let sessionID: String
     let inSplitView: Bool
     private let agent: Agent
     private let gate = StopGate()
+    /// A custom address's HTTP client, which repairs a doubled `data:` stream and keeps what the address
+    /// answered for the log.
+    private let endpoint: CustomEndpointClient?
     private let stall = StallWatch()
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
@@ -48,6 +50,8 @@ final class PiLoop {
         self.sessionID = sessionID
         self.inSplitView = inSplitView
         let gate = self.gate
+        let endpoint = provider == .custom ? CustomEndpointClient() : nil
+        self.endpoint = endpoint
         let stall = self.stall
         let agentTools = tools.map { spec in
             AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
@@ -74,11 +78,15 @@ final class PiLoop {
         // agent/pi-session.mjs: low thinking, one tool call at a time.
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low, tools: agentTools, messages: messages),
-            // The pinned PiSwift provider adds x-opencode-session only for matching OpenCode endpoints.
-            // Other providers keep their normal header handling. Reusing this ID preserves cache routing
-            // across retries, model switches, and a conversation restored from disk.
             sessionId: sessionID,
             identity: provider == .custom ? Self.clientIdentity() : nil,
+            streamFn: endpoint.map { client -> StreamFn in
+                { model, context, options in
+                    var options = options
+                    options.httpClient = client
+                    return try streamSimple(model: model, context: context, options: options)
+                }
+            },
             getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
             toolExecution: .sequential
         ))
@@ -126,6 +134,10 @@ final class PiLoop {
             }
         }
         if let message = failure.value {
+            if let seen = endpoint?.seen {
+                let key = ModelKeys.key(provider)
+                AppLog.shared.add("model", seen.summary(key: key) + ", failed: " + CustomEndpointClient.redacted(message, key: key))
+            }
             // The owner's message goes again with the next one, as with the direct clients.
             _ = agent.dropTrailingErroredAssistant()
             return .failed(Self.words(message, provider: provider))

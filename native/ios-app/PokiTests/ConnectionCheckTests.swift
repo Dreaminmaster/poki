@@ -28,7 +28,7 @@ final class ModelServerStub: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host() else { return false }
-        return ["model-server.test", "openrouter.ai", "api.anthropic.com"].contains(host)
+        return ["model-server.test", "openrouter.ai", "api.anthropic.com", "opencode.ai"].contains(host)
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -133,6 +133,28 @@ final class ConnectionCheckTests: XCTestCase {
         return await ConnectionCheck.run(.custom, key: key, customURL: "https://model-server.test/v1", modelID: "house-model")
     }
 
+    func testOpenCodeConnectionCheckSendsAnIsolatedSessionHeader() async {
+        ModelServerStub.responder = { request, _ in
+            let session = request.value(forHTTPHeaderField: "x-opencode-session")
+            let isOpenCode = request.url?.host() == "opencode.ai"
+            if isOpenCode {
+                guard let session, UUID(uuidString: session) != nil else {
+                    return (400, "application/json", #"{"error":{"message":"MissingSessionID"}}"#)
+                }
+            } else if session != nil {
+                return (400, "application/json", #"{"error":{"message":"Unexpected session header"}}"#)
+            }
+            return (401, "application/json", #"{"error":{"message":"Invalid credential"}}"#)
+        }
+
+        let openCode = await ConnectionCheck.run(.custom, key: key,
+            customURL: "https://opencode.ai/inference/go/openai/v1", modelID: "deepseek-v4-pro")
+        XCTAssertEqual(openCode, .badKey(reason: "Invalid credential"))
+        let other = await ConnectionCheck.run(.custom, key: key,
+            customURL: "https://model-server.test/v1", modelID: "house-model")
+        XCTAssertEqual(other, .badKey(reason: "Invalid credential"))
+    }
+
     func testEachAnswerIsWordedForTheOwner() async {
         let chunk = #"{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"house-model-2026-11","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#
         let works = await check((200, "data: \(chunk)\n\ndata: [DONE]\n\n"))
@@ -150,6 +172,11 @@ final class ConnectionCheckTests: XCTestCase {
 
         let late = await check(nil)
         XCTAssertEqual(late.words, "No answer within 10 seconds. Check the address and the network, then try again.")
+
+        // A gateway that doubles the prefix (issue #344) works as the chat now reads it.
+        let doubled = await check((200, "data:data: \(chunk)\n\ndata:\n\ndata:data: [DONE]\n\n"))
+        XCTAssertTrue(doubled.passed)
+        XCTAssertEqual(doubled.words, "Connection works. Model: house-model-2026-11")
 
         AppLocalization.shared.preference = "zh-Hant"
         XCTAssertEqual(works.words, "連線正常，回應模型：house-model-2026-11")

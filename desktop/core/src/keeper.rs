@@ -27,6 +27,10 @@ pub struct Record {
     /// The phone's last known Wi-Fi address, for renewals without the cable.
     pub wifi_address: Option<String>,
     pub pairing_handed_off: bool,
+    /// Set when the device has a test build from GitHub Actions instead of a release.
+    #[cfg(feature = "device")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_build: Option<crate::devbuilds::BuildRef>,
 }
 
 impl Record {
@@ -97,6 +101,8 @@ mod tests {
             last_error: None,
             wifi_address: None,
             pairing_handed_off: false,
+            #[cfg(feature = "device")]
+            test_build: None,
         };
         put(mk("A", 7)).unwrap();
         put(mk("B", 1)).unwrap();

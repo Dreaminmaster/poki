@@ -66,6 +66,11 @@ struct PokiActivityAttributes: ActivityAttributes {
         var previous: String?
         /// When the run finished (phase `done`), so the summary shows a fixed duration.
         var endedAt: Date?
+        /// What the chat's finished task came to, in the model's words: finish_task's summary, set only
+        /// when it says the task succeeded. And the task as the owner asked it, for when there is no
+        /// summary and no plan title. Both set when the run finishes, cleared with its plan.
+        var result: String? = nil
+        var task: String? = nil
         /// A short-lived event ("Started", "Now in WeChat", "Allowed") shown as the status word for a few
         /// seconds. ActivityController clears it.
         var event: Event?

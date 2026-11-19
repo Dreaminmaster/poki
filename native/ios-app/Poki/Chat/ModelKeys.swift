@@ -194,25 +194,55 @@ enum ModelKeys {
 
     static func save(_ key: String, for provider: ModelProvider) throws {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let changed = Self.key(provider) != trimmed
         try Keychain.write(Data(trimmed.utf8), account: account(provider))
+        if provider == .custom, changed { ModelCatalog.invalidateCustom() }
         saved += 1
     }
 
     static func remove(_ provider: ModelProvider) {
         Keychain.delete(account(provider))
+        if provider == .custom { ModelCatalog.invalidateCustom() }
         saved += 1
     }
 
     /// The custom endpoint's address (not a secret: kept in the app's settings).
     static var customURL: String {
         get { UserDefaults.standard.string(forKey: "chat.customURL") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "chat.customURL") }
+        set {
+            if ModelCatalog.normalizedAddress(newValue) != ModelCatalog.normalizedAddress(customURL) {
+                ModelCatalog.invalidateCustom()
+            }
+            UserDefaults.standard.set(newValue, forKey: "chat.customURL")
+        }
     }
 
     /// The custom endpoint's model id.
     static var customModel: String {
         get { UserDefaults.standard.string(forKey: "chat.customModel") ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: "chat.customModel") }
+    }
+
+    /// A different address never inherits the previous service's secret.
+    static func customDraftKey(address: String, typedKey: String) -> String? {
+        let typed = typedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        return ModelCatalog.normalizedAddress(address) == ModelCatalog.normalizedAddress(customURL) ? key(.custom) : nil
+    }
+
+    @MainActor
+    static func saveCustom(address: String, model: String, typedKey: String) throws {
+        let address = ModelCatalog.normalizedAddress(address)
+        let credential = customDraftKey(address: address, typedKey: typedKey)
+        // Save the secret first: a keychain failure must not change the address/model.
+        if let credential { try save(credential, for: .custom) }
+        else if hasKey(.custom) { remove(.custom) }
+        customURL = address
+        customModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        ModelCatalog.set(customModel, on: true, for: .custom)
+        selectedProvider = .custom
+        selectedModel = customModel
+        saved += 1
     }
 
     /// The chat can run: the chosen provider is wired and has a key (a custom endpoint: an address and a

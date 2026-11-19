@@ -110,17 +110,17 @@ An installation is complete only after the installer reports success and the pho
 
 1. The `install` step's `Poki <version> (<build>) installed`.
 2. The `open_poki` step's `Poki <version> (<build>) is open on the iPhone`. Poki writes this itself when it starts, so it is the iPhone's own answer. The result's `check.poki` is only this Mac's install record.
-3. What the user reads in Poki at Settings > Signing & Updates > Poki Version.
+3. What the user reads in Poki at Settings > Signing & Updates > Version (Poki Version in older builds).
 
 When `open_poki` ended with "the person said Poki is open" or "a version that does not write its hello yet", the third is the only readback: ask the user for it. Tell the user the version, the build and the channel it came from.
 
 **The version is wrong.**
 
 - `install` was `skipped` with "already installed from this computer": nothing was installed. Follow "Update an installed Poki" before forcing another install.
-- Poki Version still shows the old build: the old copy may still be running while iOS finishes replacing it. Ask the user to swipe Poki away in the app switcher, wait a moment, open it again and read Poki Version again.
-- Poki Version matches the `install` line but not what the user expected: the channel chose it (see "Which Poki you get"). Tell the user the channel and build. Do not switch to preview releases to work around a missing Beta.
+- Version still shows the old build: the old copy may still be running while iOS finishes replacing it. Ask the user to swipe Poki away in the app switcher, wait a moment, open it again and read Version again.
+- Version matches the `install` line but not what the user expected: the channel chose it (see "Which Poki you get"). Tell the user the channel and build. Do not switch to preview releases to work around a missing Beta.
 
-Done when Poki Version equals the selected release's actual version and numeric build, as well as the `install` line. Otherwise report the installation as incomplete and name the mismatch. On an existing installation, use the preservation checks below before any retry.
+Done when Version equals the selected release's actual version and numeric build, as well as the `install` line. Otherwise report the installation as incomplete and name the mismatch. On an existing installation, use the preservation checks below before any retry.
 
 ## No paid developer account
 
@@ -135,8 +135,8 @@ Poki reaches the iPhone's developer services at 10.7.0.1, and a VPN app on the p
 Tell the user these after the result:
 
 - **Poki Setup on the Mac renews Poki.** The installer runs Poki Setup's helper only while it runs. Renewal on the Mac is done by the Poki Setup app while it is open (closing its window leaves it in the menu bar): every 6 hours it renews each iPhone this Mac set up that has 2 days of signing left or fewer, with the Apple Account password it kept. The Mac must be awake and the iPhone reachable and trusted. USB is the fallback when network discovery on the same Wi-Fi does not find it. Ask the user to open Poki Setup and keep it open, and not to sign out of it or delete it.
-- **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > Signing & Updates > Signing Options > Apple Account, Poki prepares a refreshed build 3 days before signing ends and asks the user to tap Install Refresh or Install Update.
-- **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and refreshes.
+- **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > Signing & Updates > Apple Account (Signing Options > Apple Account in older builds), Poki prepares a renewal 3 days before signing ends and asks the user to tap Install Renewal or Install Update.
+- **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and renewals.
 
 With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command refuses equal builds; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
 
@@ -174,7 +174,7 @@ In current builds the update page is Settings > Signing & Updates; earlier build
 
 ## When Poki's own update stalls
 
-After the user taps Install Update or Download and Install Update in Poki (Settings > Signing & Updates in current builds), Poki can stay on "Finishing the update: Poki will close to finish it", after the alert "Poki Will Close to Finish the Update". Poki shows this once iOS has begun installing the new copy, and iOS finishes only after the old Poki leaves the screen. For the reported 0.4.0 case where installation has succeeded, tell the user the new version is installed and to swipe Poki away in the app switcher and reopen it. This closes the process without deleting the app or its data. The status text alone is not proof that installation succeeded; always read back the version. Done when Settings > Signing & Updates > Poki Version shows the new build. If it still shows the old build a minute later, or Poki does not open, follow "Update an installed Poki".
+After the user taps Install Update or Download and Install Update in Poki (Settings > Signing & Updates in current builds), Poki can stay on "Finishing the update: Poki will close to finish it", after the alert "Poki Will Close to Finish the Update". Poki shows this once iOS has begun installing the new copy, and iOS finishes only after the old Poki leaves the screen. For the reported 0.4.0 case where installation has succeeded, tell the user the new version is installed and to swipe Poki away in the app switcher and reopen it. This closes the process without deleting the app or its data. The status text alone is not proof that installation succeeded; always read back the version. Done when Settings > Signing & Updates > Version shows the new build. If it still shows the old build a minute later, or Poki does not open, follow "Update an installed Poki".
 
 ## When a step fails
 
@@ -196,7 +196,7 @@ The installer exits with code 2. The last `error` event has `code`, `reason` and
 | `apple_sign_in_rejected` | Apple refused the email or password. | The window opens again by itself. |
 | `apple_code_wrong` | Apple refused the code. | The window asks again; without windows, the user runs the `code` command again with the newest code. |
 | `apple_server_busy` | Apple or the anisette server answered with an error. | Retried by itself on another server. |
-| `apple_account_limit` | A free-account limit: 10 App IDs a week, 3 apps, or one certificate already held by AltStore, SideStore, Xcode or another computer. | Stop. Tell the user which limit Apple named. The way out is their decision. |
+| `apple_account_limit` | An Apple Account limit: too many sign-in attempts or verification codes, or a free-account limit (10 App IDs a week, 3 apps, or one certificate already held by AltStore, SideStore, Xcode or another computer). | Stop. Do not retry sign-in automatically; wait when Apple rate-limited the account, or tell the user which limit Apple named so they can decide. |
 | `network` | A request failed, also while signing in. | Retried by itself with what the user already typed. When the reason says Poki's releases could not be read from GitHub with 403 or 429, it is usually the same hourly limit as `setup_download_failed`; the `channel` step does not retry it and the `install` step tries 3 more times: ask the user to switch network or proxy node and run again, or to wait an hour. Otherwise report. |
 | `sign_failed` | Signing failed. | Stop and run `diagnose`. |
 | `ddi_refused` | Apple rejected the developer disk image with STATUS=94 or a signing-server refusal. The image may be too old for the phone's iOS. | Relay the detected Xcode and iOS versions from the error. Update Xcode to support that iOS version (iOS 27 requires Xcode 27), open Xcode once, and wait for its components to finish installing. Rerun the same command. Poki does not need to be reinstalled. If `prepare-device` used `--image`, replace that image with the updated Xcode image. |

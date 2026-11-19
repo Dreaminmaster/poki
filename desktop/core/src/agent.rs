@@ -74,6 +74,8 @@ pub struct Next {
     pub channel: String,
     pub signed_in: bool,
     pub account: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_error: Option<String>,
     pub phones: Vec<PhoneState>,
     /// A newer Poki Setup on the channel, when there is one.
     pub update: Option<String>,
@@ -85,14 +87,17 @@ pub struct Next {
 
 fn cmd(cli: &str, rest: &str) -> Option<String> { Some(format!("\"{cli}\" {rest}")) }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountCheck {
+    SignedIn,
+    SignedOut,
+    Unavailable(String),
+}
+
 /// Reads this computer's state (account, phones, what it installed, updates) without changing
 /// anything, and lists what is left. `udid` narrows it to one phone.
 pub async fn next(udid: Option<&str>) -> Next {
     let cli = cli_path().map(|p| p.display().to_string()).unwrap_or_else(|| "poki-setup".into());
-    let signer = setup::Signer::open().ok();
-    let signed_in = signer.as_ref().map(|s| s.signed_in()).unwrap_or(false);
-    let account = signer.as_ref().and_then(|s| s.account.apple_id().map(str::to_string));
-
     let mut phones = vec![];
     for p in device::Phone::list().await.unwrap_or_default() {
         if udid.map(|u| u != p.udid).unwrap_or(false) {
@@ -111,25 +116,56 @@ pub async fn next(udid: Option<&str>) -> Next {
     }
     let update = release::desktop_update().await.ok().filter(|u| u.newer).and_then(|u| u.latest);
     let channel = release::channel().title().to_string();
-    let steps = plan(&cli, signed_in, &phones, update.as_deref());
-    let ready = steps.iter().all(|s| s.id == "update");
+    build_next(&cli, setup::Signer::open(), phones, update, channel)
+}
+
+fn build_next(cli: &str, open: crate::Result<setup::Signer>, phones: Vec<PhoneState>, update: Option<String>, channel: String) -> Next {
+    let (signed_in, account, account_error, account_check) = match open {
+        Ok(s) => {
+            let signed_in = s.signed_in();
+            let check = if signed_in { AccountCheck::SignedIn } else { AccountCheck::SignedOut };
+            (signed_in, s.account.apple_id().map(str::to_string), None, check)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            (false, None, Some(msg.clone()), AccountCheck::Unavailable(msg))
+        }
+    };
+    let steps = plan_with_account(cli, &account_check, &phones, update.as_deref());
+    let ready = account_error.is_none() && steps.iter().all(|s| s.id == "update");
     let summary = match (ready, phones.first().and_then(|p| p.poki.as_ref())) {
         (true, Some(p)) => format!("Poki {} ({}) is installed and signed for {} more days. Poki Setup renews it while this computer is on.", p.version, p.build, p.days_left),
         _ => steps.first().map(|s| s.say.clone()).unwrap_or_default(),
     };
-    Next { ready, poki_setup: crate::display_version(&crate::full_version()), channel, signed_in, account, phones, update, steps, summary }
+    Next { ready, poki_setup: crate::display_version(&crate::full_version()), channel, signed_in, account, account_error, phones, update, steps, summary }
 }
 
 /// The steps left, from what [`next`] read. Kept apart so it can be tested without a phone.
 pub fn plan(cli: &str, signed_in: bool, phones: &[PhoneState], update: Option<&str>) -> Vec<Step> {
+    let check = if signed_in { AccountCheck::SignedIn } else { AccountCheck::SignedOut };
+    plan_with_account(cli, &check, phones, update)
+}
+
+pub fn plan_with_account(cli: &str, account: &AccountCheck, phones: &[PhoneState], update: Option<&str>) -> Vec<Step> {
     let mut steps = vec![];
-    if !signed_in {
-        steps.push(Step {
-            id: "sign_in",
-            who: Who::Person,
-            command: cmd(cli, "login <apple-id-email> --keep-password"),
-            say: "Poki Setup needs your Apple Account to sign Poki. Run the command in your own terminal window: it asks for your password and the code Apple sends you. Your password stays on this computer.".into(),
-        });
+    match account {
+        AccountCheck::SignedIn => {}
+        AccountCheck::SignedOut => {
+            steps.push(Step {
+                id: "sign_in",
+                who: Who::Person,
+                command: cmd(cli, "login <apple-id-email> --keep-password"),
+                say: "Poki Setup needs your Apple Account to sign Poki. Run the command in your own terminal window: it asks for your password and the code Apple sends you. Your password stays on this computer.".into(),
+            });
+        }
+        AccountCheck::Unavailable(err) => {
+            steps.push(Step {
+                id: "unlock_keychain",
+                who: Who::Person,
+                command: None,
+                say: format!("{err} Unlock your Mac login keychain and choose Always Allow if prompted, then run `{cli} next` again."),
+            });
+        }
     }
     match phones.first() {
         None => steps.push(Step { id: "connect", who: Who::Person, command: None, say: "Plug your iPhone or iPad into this computer with a cable and unlock it.".into() }),
@@ -180,5 +216,25 @@ mod tests {
     fn prompt_names_the_tool() {
         assert!(PROMPT.contains("poki-setup next --json"));
         assert!(prompt_for(Some(std::path::Path::new("/x/poki-setup"))).ends_with("\"/x/poki-setup\"\n"));
+    }
+
+    #[test]
+    fn keychain_error_is_not_treated_as_signed_out() {
+        struct DeniedKeychain;
+        impl crate::apple::store::KeychainBackend for DeniedKeychain {
+            fn get(&self, _key: &str) -> std::result::Result<String, crate::apple::store::KeychainErr> {
+                Err(crate::apple::store::KeychainErr::Failure("User canceled the operation.".into()))
+            }
+            fn set(&self, _key: &str, _value: &str) -> std::result::Result<(), crate::apple::store::KeychainErr> { Ok(()) }
+            fn delete(&self, _key: &str) -> std::result::Result<(), crate::apple::store::KeychainErr> { Ok(()) }
+        }
+
+        let err = crate::apple::store::load_with_keychain(&DeniedKeychain).unwrap_err();
+        assert_eq!(err.kind(), "keychain");
+        let next = build_next("p", Err(err), vec![], None, "Beta".into());
+        assert!(!next.ready);
+        assert!(next.account_error.is_some());
+        assert!(!next.steps.iter().any(|s| s.id == "sign_in"));
+        assert_eq!(next.steps.first().map(|s| s.id), Some("unlock_keychain"));
     }
 }

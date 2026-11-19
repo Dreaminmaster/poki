@@ -1,6 +1,6 @@
 use crate::Shared;
 use poki_setup_core::apple::anisette::Source;
-use poki_setup_core::{Progress, Reporter, device, keeper, mcp, pairshare, relay, release, setup, support};
+use poki_setup_core::{Progress, Reporter, devbuilds, device, keeper, mcp, pairshare, relay, release, setup, support};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
@@ -39,7 +39,18 @@ async fn with_signer<T>(state: &Shared, f: impl AsyncFnOnce(&mut setup::Signer) 
     if guard.is_none() {
         *guard = Some(setup::Signer::open()?);
     }
-    Ok(f(guard.as_mut().unwrap()).await?)
+    if guard.as_mut().unwrap().sync_account() {
+        *state.pending.lock().await = None;
+    }
+    match f(guard.as_mut().unwrap()).await {
+        Ok(v) => Ok(v),
+        Err(poki_setup_core::Error::NeedsCode(pending)) => {
+            let msg = poki_setup_core::Error::NeedsCode(pending.clone()).to_string();
+            *state.pending.lock().await = Some(*pending);
+            Err(Failure { kind: "needs_code", message: msg })
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[derive(Serialize)]
@@ -129,6 +140,7 @@ pub async fn devmode(app: AppHandle, udid: String) -> R<bool> {
 #[derive(Serialize)]
 pub struct AccountView {
     signed_in: bool,
+    needs_reauth: bool,
     apple_id: Option<String>,
     name: Option<String>,
     team_id: Option<String>,
@@ -139,16 +151,17 @@ pub struct AccountView {
 
 #[tauri::command]
 pub async fn account(state: State<'_, Shared>) -> R<AccountView> {
-    let pending = state.pending.lock().await.as_ref().map(|p| p.via);
     with_signer(&state, async |s| {
+        let mem_pending = state.pending.lock().await.as_ref().map(|p| p.via);
         Ok(AccountView {
             signed_in: s.signed_in(),
+            needs_reauth: s.needs_reauth(),
             apple_id: s.account.apple_id().map(|a| a.to_string()),
             name: s.account.display_name(),
             team_id: s.account.team_id.clone(),
             password_kept: s.account.password.is_some(),
             anisette: s.account.anisette.clone().unwrap_or_else(Source::default_for_platform),
-            pending_factor: pending,
+            pending_factor: mem_pending.or_else(|| s.pending().map(|p| p.via)),
         })
     })
     .await
@@ -165,13 +178,19 @@ pub async fn sign_in(state: State<'_, Shared>, apple_id: String, password: Strin
 
 #[tauri::command]
 pub async fn finish_sign_in(state: State<'_, Shared>, code: String) -> R<()> {
-    let pending = state.pending.lock().await.take().ok_or_else(|| poki_setup_core::Error::msg("Start the sign-in again."))?;
-    let keep = pending.clone();
-    let result = with_signer(&state, async |s| s.finish_sign_in(pending, &code).await).await;
+    let mut updated_pending = None;
+    let result = with_signer(&state, async |s| {
+        let mem_pending = state.pending.lock().await.take();
+        let pending = mem_pending.or_else(|| s.pending().cloned()).ok_or_else(|| poki_setup_core::Error::msg("Start the sign-in again."))?;
+        let r = s.finish_sign_in(pending, &code).await;
+        if r.is_err() {
+            updated_pending = s.pending().cloned();
+        }
+        r
+    })
+    .await;
     if result.is_err() {
-        // A wrong code: keep the waiting sign-in so the person can type the code again. Starting
-        // over would ask Apple for another code, which replaces this one and counts toward its limit.
-        *state.pending.lock().await = Some(keep);
+        *state.pending.lock().await = updated_pending;
     }
     result
 }
@@ -199,7 +218,7 @@ pub struct InstallResult {
 }
 
 #[tauri::command]
-pub async fn install(app: AppHandle, state: State<'_, Shared>, udid: Option<String>, ipa: Option<String>, hand_off: bool) -> R<InstallResult> {
+pub async fn install(app: AppHandle, state: State<'_, Shared>, udid: Option<String>, ipa: Option<String>, hand_off: bool, test_build: Option<devbuilds::BuildRef>, close_poki: Option<bool>) -> R<InstallResult> {
     {
         let mut busy = state.busy.lock().await;
         if *busy {
@@ -208,7 +227,7 @@ pub async fn install(app: AppHandle, state: State<'_, Shared>, udid: Option<Stri
         *busy = true;
     }
     let r = reporter(&app, "install");
-    let opts = setup::Options { udid, ipa: ipa.map(Into::into), signing_zip: None, wait: None, hand_off, seed_ddi: true };
+    let opts = setup::Options { udid, ipa: ipa.map(Into::into), signing_zip: None, wait: None, hand_off, seed_ddi: true, test_build, close_poki: close_poki.unwrap_or(false) };
     let result = with_signer(&state, async |s| setup::run(s, opts, &r).await).await;
     *state.busy.lock().await = false;
     let done = result?;
@@ -386,3 +405,56 @@ pub async fn set_channel(channel: String) -> R<Vec<release::ChannelInfo>> {
 
 #[tauri::command]
 pub fn qr_svg(text: String) -> R<String> { Ok(pairshare::qr_svg(&text)?) }
+
+// Developer: the GitHub sign-in and test builds from GitHub Actions (core devbuilds).
+
+#[tauri::command]
+pub fn dev_state() -> devbuilds::State { devbuilds::state() }
+
+#[tauri::command]
+pub async fn dev_set_prefs(prefs: devbuilds::Prefs) -> R<devbuilds::State> { Ok(devbuilds::set_prefs(prefs).await?) }
+
+#[tauri::command]
+pub async fn github_sign_in_start() -> R<devbuilds::SignIn> { Ok(devbuilds::sign_in_start().await?) }
+
+#[tauri::command]
+pub async fn github_sign_in_finish(pending: devbuilds::SignIn) -> R<devbuilds::State> { Ok(devbuilds::sign_in_finish(&pending).await?) }
+
+#[tauri::command]
+pub fn github_sign_in_cancel() -> devbuilds::State {
+    devbuilds::sign_in_cancel();
+    devbuilds::state()
+}
+
+#[tauri::command]
+pub async fn github_use_cli() -> R<devbuilds::State> { Ok(devbuilds::use_cli().await?) }
+
+#[tauri::command]
+pub async fn github_use_token(token: String) -> R<devbuilds::State> { Ok(devbuilds::use_token(&token).await?) }
+
+#[tauri::command]
+pub fn github_sign_out() -> R<devbuilds::State> { Ok(devbuilds::sign_out()?) }
+
+#[tauri::command]
+pub async fn test_builds(fresh: Option<bool>) -> R<devbuilds::Listing> { Ok(devbuilds::list(fresh.unwrap_or(false)).await?) }
+
+#[tauri::command]
+pub async fn test_build_download(app: AppHandle, artifact_id: u64) -> R<String> {
+    let r = reporter(&app, "download");
+    r.step("release", "Downloading the test build");
+    let (ipa, _) = devbuilds::fetch(artifact_id, &r, "release").await?;
+    r.done("release", None);
+    Ok(ipa.display().to_string())
+}
+
+#[tauri::command]
+pub async fn test_build_next() -> R<Option<devbuilds::TestBuild>> { Ok(devbuilds::next_to_sync().await?) }
+
+#[tauri::command]
+pub fn test_build_synced(run_id: u64) -> R<devbuilds::State> { Ok(devbuilds::mark_synced(run_id)?) }
+
+#[tauri::command]
+pub fn test_builds_delete_downloads() -> R<devbuilds::State> { Ok(devbuilds::delete_downloads()?) }
+
+#[tauri::command]
+pub async fn poki_running(udid: String) -> R<Option<bool>> { Ok(setup::poki_running(&udid).await?) }

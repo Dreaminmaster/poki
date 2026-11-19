@@ -2,6 +2,7 @@ mod apps;
 mod ax;
 mod configuration;
 mod device_ops;
+mod display;
 mod gesture;
 mod installation;
 mod pasteboard;
@@ -25,7 +26,90 @@ use std::{io::Read, time::Duration};
 use stream::NoDisplayService;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-type Touch = UniversalHidServiceClient<Box<dyn ReadWrite>>;
+/// The bridge routes input, screenshots and accessibility reads to the active panel of a phone
+/// that has more than one. The launcher compiles the same files with this off.
+const ROUTES_BY_PANEL: bool = true;
+type Hid = UniversalHidServiceClient<Box<dyn ReadWrite>>;
+struct Touch {
+    client: Hid,
+    surface: u64,
+    rotation: u16,
+}
+impl Touch {
+    async fn connect_rsd(
+        adapter: &mut idevice::tcp::handle::AdapterHandle,
+        rsd: &mut RsdHandshake,
+    ) -> Result<Self> {
+        let display = display::active(adapter, rsd).await?;
+        let mut client = Hid::connect_rsd(adapter, rsd).await?;
+        let route = display::route(display.as_ref());
+        let surface = match route.touch_panel {
+            Some(panel) => {
+                display::touch_surface(panel, &client.list_connected_services().await?)?
+            }
+            None => idevice::core_device::hid::DIGITIZER_SURFACE_MAIN_TOUCHSCREEN,
+        };
+        let rotation = route.rotation;
+        Ok(Self {
+            client,
+            surface,
+            rotation,
+        })
+    }
+    async fn send_touchscreen(
+        &mut self,
+        state: u8,
+        x: u16,
+        y: u16,
+        timestamp: Option<u64>,
+    ) -> Result<()> {
+        let (x, y) = display::to_panel(self.rotation, x, y);
+        self.client
+            .send_report(
+                self.surface,
+                idevice::core_device::hid::build_touchscreen_report(state, x, y, timestamp),
+            )
+            .await?;
+        Ok(())
+    }
+    async fn send_multitouch(
+        &mut self,
+        contacts: &[idevice::core_device::hid::TouchscreenContact],
+        timestamp: Option<u64>,
+    ) -> Result<()> {
+        let contacts: Vec<_> = contacts
+            .iter()
+            .map(|c| {
+                let (x, y) = display::to_panel(self.rotation, c.x, c.y);
+                idevice::core_device::hid::TouchscreenContact {
+                    identity: c.identity,
+                    touching: c.touching,
+                    x,
+                    y,
+                }
+            })
+            .collect();
+        self.client
+            .send_report(
+                self.surface,
+                idevice::core_device::hid::build_multitouch_report(&contacts, timestamp)?,
+            )
+            .await?;
+        Ok(())
+    }
+}
+impl std::ops::Deref for Touch {
+    type Target = Hid;
+    fn deref(&self) -> &Hid {
+        &self.client
+    }
+}
+impl std::ops::DerefMut for Touch {
+    fn deref_mut(&mut self) -> &mut Hid {
+        &mut self.client
+    }
+}
+
 type Indigo = IndigoHidClient<Box<dyn ReadWrite>>;
 fn trace(stage: &str) {
     if std::env::var_os("POKI_MCP_NATIVE_TRACE").is_some() {
@@ -38,6 +122,8 @@ struct InputMedia {
     client: idevice::core_device::DisplayServiceClient<Box<dyn ReadWrite>>,
     receivers: tokio::task::JoinSet<()>,
     ready_at: tokio::time::Instant,
+    last_input: tokio::time::Instant,
+    last_activity: tokio::time::Instant,
 }
 
 impl InputMedia {
@@ -45,7 +131,9 @@ impl InputMedia {
         adapter: &mut idevice::tcp::handle::AdapterHandle,
         rsd: &mut RsdHandshake,
     ) -> Result<Self> {
-        let stream = stream::start_screen_media_stream(adapter, rsd, 1)
+        let display = display::active(adapter, rsd).await?;
+        let display_id = display::route(display.as_ref()).media_display;
+        let stream = stream::start_screen_media_stream(adapter, rsd, display_id)
             .await
             .map_err(|e| {
                 if e.is::<NoDisplayService>() {
@@ -66,10 +154,13 @@ impl InputMedia {
             receivers.spawn(async move { while socket.recv().await.is_ok() {} });
         }
         trace("input media connected");
+        let ready_at = tokio::time::Instant::now() + Duration::from_millis(1000);
         Ok(Self {
             client: stream.client,
             receivers,
-            ready_at: tokio::time::Instant::now() + Duration::from_millis(1000),
+            ready_at,
+            last_input: ready_at,
+            last_activity: ready_at,
         })
     }
 }
@@ -129,6 +220,8 @@ impl Keyboard {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     DisplayInfo,
+    /// Whether the phone has more than one built-in panel.
+    Panels,
     Screenshot {
         path: String,
     },
@@ -260,7 +353,26 @@ impl Request {
                 | Self::Screenshot { .. }
                 | Self::DeviceInfo
                 | Self::DisplayInfo
+                | Self::Panels
                 | Self::ListApps
+        )
+    }
+
+    fn uses_input_media(&self) -> bool {
+        !matches!(
+            self,
+            Self::DisplayInfo
+                | Self::Panels
+                | Self::DeviceInfo
+                | Self::Screenshot { .. }
+                | Self::ListApps
+                | Self::InstallApp { .. }
+                | Self::UninstallApp { .. }
+                | Self::AxTree { .. }
+                | Self::AppForPid { .. }
+                | Self::Pasteboard { .. }
+                | Self::Configuration { .. }
+                | Self::LaunchApp(_)
         )
     }
 
@@ -405,6 +517,28 @@ fn select_usbmux_device(
         .into_iter()
         .filter(|device| device.udid == udid)
         .min_by_key(|device| !matches!(device.connection_type, idevice::usbmuxd::Connection::Usb))
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::Request;
+
+    #[test]
+    fn read_only_requests_never_open_input_media() {
+        for op in [
+            r#"{"op":"panels"}"#,
+            r#"{"op":"display_info"}"#,
+            r#"{"op":"device_info"}"#,
+            r#"{"op":"list_apps"}"#,
+            r#"{"op":"screenshot","path":"x"}"#,
+            r#"{"op":"ax_tree"}"#,
+            r#"{"op":"app_for_pid","pid":1}"#,
+        ] {
+            let request: Request = serde_json::from_str(op).unwrap();
+            assert!(request.read_only(), "{op}");
+            assert!(!request.uses_input_media(), "{op}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -563,59 +697,97 @@ async fn execute_connected(
     request: Request,
     media: &mut Option<InputMedia>,
 ) -> Result<Value> {
-    if let Request::LaunchApp(request) = request {
-        return match apps::launch(adapter, rsd, request).await {
-            Err(error) if error.is::<NotSent>() => Err(error),
-            result => Ok(result.unwrap_or_else(apps::not_sent)),
+    if !request.uses_input_media() {
+        let max_hold = media
+            .as_ref()
+            .map(|m| m.last_input + remote::INPUT_MEDIA_MAX_READ_HOLD);
+        let op = async {
+            if let Request::LaunchApp(request) = request {
+                return match apps::launch(adapter, rsd, request).await {
+                    Err(error) if error.is::<NotSent>() => Err(error),
+                    result => Ok(result.unwrap_or_else(apps::not_sent)),
+                };
+            }
+            if let Request::Screenshot { path } = request {
+                let display = display::active(adapter, rsd).await?;
+                let bytes = if let Some(panel) = display::route(display.as_ref()).capture {
+                    let mut capture =
+                        idevice::core_device::ScreenCaptureServiceClient::connect_rsd(adapter, rsd)
+                            .await?;
+                    capture
+                        .take_screenshot(Some(panel), idevice::core_device::ImageFormat::Png)
+                        .await?
+                } else {
+                    let mut dvt =
+                        idevice::dvt::remote_server::RemoteServerClient::connect_rsd(adapter, rsd)
+                            .await?;
+                    dvt.read_message(0).await?;
+                    let mut screenshot =
+                        idevice::dvt::screenshot::ScreenshotClient::new(&mut dvt).await?;
+                    screenshot.take_screenshot().await?
+                };
+                use std::io::Write;
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)?;
+                file.write_all(&bytes)?;
+                return Ok(json!({"saved":true}));
+            }
+            if matches!(request, Request::DeviceInfo) {
+                let mut lockdown =
+                    idevice::lockdown::LockdownClient::connect_rsd(adapter, rsd).await?;
+                let scale = lockdown
+                    .get_value(Some("ScreenScaleFactor"), Some("com.apple.mobile.iTunes"))
+                    .await?;
+                let properties = ["DeviceName", "ProductType", "ProductVersion"]
+                    .into_iter()
+                    .filter_map(|key| rsd.properties.get(key).map(|value| (key, value)))
+                    .collect::<std::collections::HashMap<_, _>>();
+                return Ok(json!({"scale":scale,"properties":properties}));
+            }
+            if matches!(request, Request::ListApps) {
+                return apps::list(adapter, rsd, provider).await;
+            }
+            if let Request::Configuration { method, value } = request {
+                return configuration::execute(adapter, rsd, &method, value).await;
+            }
+            if let Request::AxTree { include_offscreen } = request {
+                return ax::read_tree(adapter, rsd, include_offscreen).await;
+            }
+            if let Request::AppForPid { pid } = request {
+                return apps::app_for_pid(adapter, rsd, pid).await;
+            }
+            if let Request::Pasteboard { action, text } = request {
+                return device_ops::pasteboard(adapter, rsd, &action, text.as_deref()).await;
+            }
+            if matches!(request, Request::Panels) {
+                return Ok(json!({"multiple": display::multiple(adapter, rsd).await}));
+            }
+            if matches!(request, Request::DisplayInfo) {
+                let mut display =
+                    idevice::core_device::DisplayServiceClient::connect_rsd(adapter, rsd).await?;
+                let info = display.get_media_support_info().await?;
+                return Ok(serde_json::to_value(info)?);
+            }
+            unreachable!()
         };
-    }
-    if let Request::Screenshot { path } = request {
-        let mut dvt =
-            idevice::dvt::remote_server::RemoteServerClient::connect_rsd(adapter, rsd).await?;
-        dvt.read_message(0).await?;
-        let mut screenshot = idevice::dvt::screenshot::ScreenshotClient::new(&mut dvt).await?;
-        let bytes = screenshot.take_screenshot().await?;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(&bytes)?;
-        return Ok(json!({"saved":true}));
-    }
-    if matches!(request, Request::DeviceInfo) {
-        let mut lockdown = idevice::lockdown::LockdownClient::connect_rsd(adapter, rsd).await?;
-        let scale = lockdown
-            .get_value(Some("ScreenScaleFactor"), Some("com.apple.mobile.iTunes"))
-            .await?;
-        let properties = ["DeviceName", "ProductType", "ProductVersion"]
-            .into_iter()
-            .filter_map(|key| rsd.properties.get(key).map(|value| (key, value)))
-            .collect::<std::collections::HashMap<_, _>>();
-        return Ok(json!({"scale":scale,"properties":properties}));
-    }
-    if matches!(request, Request::ListApps) {
-        return apps::list(adapter, rsd, provider).await;
-    }
-    if let Request::Configuration { method, value } = request {
-        return configuration::execute(adapter, rsd, &method, value).await;
-    }
-    if let Request::AxTree { include_offscreen } = request {
-        return ax::read_tree(adapter, rsd, include_offscreen).await;
-    }
-    if let Request::AppForPid { pid } = request {
-        return apps::app_for_pid(adapter, rsd, pid).await;
-    }
-    if let Request::Pasteboard { action, text } = request {
-        return device_ops::pasteboard(adapter, rsd, &action, text.as_deref()).await;
-    }
-    if matches!(request, Request::DisplayInfo) {
-        let mut display =
-            idevice::core_device::DisplayServiceClient::connect_rsd(adapter, rsd).await?;
-        let info = display.get_media_support_info().await?;
-        return Ok(serde_json::to_value(info)?);
+        tokio::pin!(op);
+        return tokio::select! {
+            biased;
+            res = &mut op => res,
+            () = async {
+                match max_hold {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                let _ = close_input(media).await;
+                op.await
+            }
+        };
     }
     if media.is_none() {
         *media = Some(
@@ -633,6 +805,7 @@ async fn execute_connected(
     let action: Result<Value> = async {
         match request {
             Request::DisplayInfo
+            | Request::Panels
             | Request::DeviceInfo
             | Request::Screenshot { .. }
             | Request::ListApps
@@ -802,6 +975,15 @@ async fn execute_connected(
     .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     drop(touch);
+    if action
+        .as_ref()
+        .is_ok_and(|value| value["outcome"] != "not_sent" && value["sent"] != false)
+        && let Some(media) = media.as_mut()
+    {
+        let now = tokio::time::Instant::now();
+        media.last_input = now;
+        media.last_activity = now;
+    }
     action
 }
 

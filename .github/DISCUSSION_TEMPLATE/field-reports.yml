@@ -1,10 +1,8 @@
-name: Field report or setup notes
-description: Share a working setup, a port, an install path, or test results. No fix requested.
-labels: [field-report]
+title: "[Field report] "
 body:
   - type: markdown
     attributes:
-      value: Something broken goes in a bug report. Remove passcodes, tokens, Apple account details, and private screen contents.
+      value: Share a working setup, a port, an install path, or test results. If something is broken, open a bug report instead. Remove passcodes, tokens, Apple account details, and private screen contents.
   - type: textarea
     id: summary
     attributes:

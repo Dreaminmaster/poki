@@ -23,9 +23,9 @@ final class TalkRehearsal: VoiceConnection, @unchecked Sendable {
 
     /// The step on the phone: it waits as long as a short one takes and says it went well. Held for a
     /// screenshot, it does not come back.
-    static func step() async -> (String, Bool) {
+    static func step() async -> PhoneAnswer {
         try? await Task.sleep(for: .seconds(hold == .acting ? 3600 : 3.2))
-        return ("done", false)
+        return ("done", false, nil)
     }
 
     private let onEvent: @MainActor ([String: Any]) -> Void

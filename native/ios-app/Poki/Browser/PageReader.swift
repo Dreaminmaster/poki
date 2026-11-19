@@ -419,6 +419,10 @@ enum PageReader {
     } else {
       return { ok: false, error: 'notfield', name: name(el) };
     }
+    // Enter sends the whole form. One that also holds a password, a code, a card or an identity
+    // document already filled in is the owner's to send, so the text stays typed and nothing is sent.
+    const owners = submit && el.form ? [...el.form.elements].find((other) => other !== el && !['private field', null].includes(privateField(other)) && String(other.value || '').trim() !== '') : null;
+    if (owners) return { ok: false, error: 'ownerform', name: name(el) };
     if (submit) {
       for (const type of ['keydown', 'keypress', 'keyup']) {
         el.dispatchEvent(new view.KeyboardEvent(type, { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));

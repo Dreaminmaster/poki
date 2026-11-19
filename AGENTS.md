@@ -51,29 +51,30 @@ To disable checks and notices, set `POKI_NO_UPDATE_CHECK=1` before starting the 
 
 ## File an issue
 
-When the user asks you to report a problem or request a feature, file the issue so it matches one of the [issue forms](.github/ISSUE_TEMPLATE). `gh issue create --body` skips the forms, so write the body in the form's shape yourself. A check on new issues labels any issue that matches no form `needs-template` and asks for an edit.
+When the user asks you to report a problem or request a feature, file the issue so it matches one of the [issue forms](.github/ISSUE_TEMPLATE). `gh issue create --body` skips the forms, so write the body in the form's shape yourself. A check on new issues labels any issue that matches no form `state:needs-info` and asks for an edit.
 
 1. **Search first.** Run `gh issue list --repo JosssphZhou/poki --state all --search "<key words>"`. If an issue already covers the problem, add a comment with your new evidence instead of opening another one.
 2. **Pick one form.** One problem per issue.
 
    | Form | Use it for | Required headings, in order |
    | --- | --- | --- |
-   | `bug_report.yml` | Poki MCP, Poki Agent, iMessage or Telegram, setup, native helper, relay on a computer | What happened, Steps to reproduce, Component, Connection, Versions |
-   | `ios_app_bug.yml` | The standalone Poki iPhone app (Alpha or Pre-alpha) or Poki Setup | What happened, Steps to reproduce, Area, App version, Installed with, iPhone and iOS |
-   | `task_failure.yml` | The tools work, but a real task in a specific app does not finish | Task, Where it stopped, Driven by, Versions |
-   | `feature_request.yml` | A capability, speed-up, or design proposal | What you want to do, What happens today, Area |
-   | `field_report.yml` | A working setup, port, install path, or test results, with no fix requested | Summary, Environment |
+   | `bug_report.yml` | The Poki iPhone app, Poki Setup, Poki MCP, or Poki Agent does not work as documented | Problem description, Steps to reproduce, Affected area in Poki, Poki version, iPhone model and iOS version, Connection method |
+   | `install-failure.yml` | Installing Poki on the iPhone stopped at a step | Problem description, Failed installation step, Installation method, Diagnostics output, Poki and Poki Setup versions, iPhone model and iOS version |
+   | `task_failure.yml` | The tools work, but a real task in a specific app does not finish | Requested task, Point of failure, Client or integration, Poki version and model, iPhone model and iOS version, Run trace |
+   | `feature_request.yml` | A capability, speed-up, or design proposal | Goal or use case, Current limitation, Affected area in Poki |
+
+   A working setup, port, install path, or test results with no fix requested is not an issue: post it in [Discussions](https://github.com/JosssphZhou/poki/discussions/new?category=field-reports) under Field reports.
 
 3. **Write the body.** Read the chosen form file. Make one `### <label>` heading for each field, using the label exactly as written in English, in the form's order. Put the answer under each heading. For a dropdown, use one of its options verbatim. Leave out no required heading. Write `_No response_` under an optional heading you cannot fill. The answers can be in the user's language.
 4. **Keep it reviewable.** State what you observed and what you inferred separately. Give versions and commits from `poki_mcp_status` or the app's Settings. Quote exact error text. Remove passcodes, tokens, Apple account details, pairing records, phone numbers, and private screen contents.
-5. **Create it.** Write the body to a file and run `gh issue create --repo JosssphZhou/poki --title "<specific title>" --body-file <file>`. Ask the user before creating it, and show them the title and body. Report vulnerabilities through [private reporting](https://github.com/JosssphZhou/poki/security/advisories/new), never in an issue.
+5. **Create it.** Write the body to a file and run `gh issue create --repo JosssphZhou/poki --title "<specific title>" --body-file <file> --label <labels>`, with the form's `type:` label (`type:bug`, `type:task-failure`, or `type:feature`; Install failure also takes `type:bug` and `area:install`). The check adds the `area:` label from the Affected area answer. Ask the user before creating it, and show them the title and body. Report vulnerabilities through [private reporting](https://github.com/JosssphZhou/poki/security/advisories/new), never in an issue.
 
 If the check flags an issue you filed, edit that issue with `gh issue edit <number> --body-file <file>`. Do not open a duplicate. The label comes off once the body matches a form.
 
 Example body for `bug_report.yml`:
 
 ```markdown
-### What happened
+### Problem description
 
 `terminate_app` returned `already_stopped: true`, but Calculator stayed in the foreground with the same PID.
 
@@ -82,23 +83,27 @@ Example body for `bug_report.yml`:
 1. `launch_app` with `com.apple.calculator`.
 2. `terminate_app` with the same bundle ID.
 
-### Component
+### Affected area in Poki
 
 Poki MCP
 
-### Connection
+### Poki version
+
+0.1.1 f4fd51e
+
+### iPhone model and iOS version
+
+iPhone 15 Pro, iOS 27.3
+
+### Connection method
 
 Physical iPhone over USB
-
-### Versions
-
-0.1.1 f4fd51e, macOS 27.0, Xcode 27.1, iPhone 15 Pro, iOS 27.3
 
 ### Logs
 
 _No response_
 
-### Suspected cause or fix
+### Screenshots or screen recording
 
 _No response_
 ```
@@ -107,8 +112,8 @@ _No response_
 
 These rules are for agents changing this repository. The full release flow is in [docs/release-channels.md](docs/release-channels.md).
 
-1. **Branch from `main`.** `main` is the only long-lived branch and it is protected: never push to it, force-push it, or rebase it. Name your branch `dev/<topic>` (one change per branch), never `claude/...` or a session name. Older branches such as `standalone` and `poki/ios-integration` are retired; do not base new work on them.
-2. **Open a pull request into `main`.** Fill in [the template](.github/PULL_REQUEST_TEMPLATE.md). The `PR checks` workflow runs on Linux (Poki Setup core tests, Cargo lockfiles, actionlint) and must pass. After a change to `desktop/` or `native/launcher/` dependencies, run `cargo metadata --locked` for that manifest before pushing.
+1. **Branch from `main`.** `main` is the only long-lived code branch and it is protected: never push to it, force-push it, or rebase it. The one other long-lived branch, `contributor-signatures`, is a data branch that Poki Repo Bot writes: it holds only `signatures.json`, the record of who agreed to the [Poki Contributor Agreement](CONTRIBUTOR_AGREEMENT.md). Never base work on it, push to it by hand, or delete it in a branch cleanup. Name your branch `dev/<topic>` (one change per branch), never `claude/...` or a session name. Older branches such as `standalone` and `poki/ios-integration` are retired; do not base new work on them.
+2. **Open a pull request into `main`.** Fill in [the template](.github/PULL_REQUEST_TEMPLATE.md). On a contributor's first pull request, Poki Repo Bot asks them to agree once to the [Poki Contributor Agreement](CONTRIBUTOR_AGREEMENT.md). That agreement is the user's to give: show them the bot's request and never post the agreement comment on your own initiative. The `PR checks` workflow runs on Linux (Poki Setup core tests, Cargo lockfiles, actionlint) and must pass. After a change to `desktop/` or `native/launcher/` dependencies, run `cargo metadata --locked` for that manifest before pushing.
 3. **A fix for a version already in Beta** lands on `main` first, then a separate PR cherry-picks it into `release/X.Y`. Release branches never take features.
 4. **Do not cut releases by hand.** Every merge into `main` becomes a pre-alpha automatically (`prealpha.yml`, tag `app-X.Y.Z-prealpha.N`, N = commit count of `main`). Pre-alpha does not require approval, including the tag fallback. Alpha, Beta and Stable are promotions of that same build, started by a maintainer: Promote to Alpha, then Propose promotion (a bot PR on `promote/<channel>-<version>`). Publishing Alpha, Beta, Stable or uploading installers requires the repository owner's approval. Agents must not approve on the owner's behalf. The one release made by hand is the second release of a build for installed clients, `scripts/release/publish-compat.sh` (see [docs/release-channels.md](docs/release-channels.md#installed-clients)): agents may run its default `check`, but `draft` and `public` are the owner's to run, or someone's the owner told to for that build. Do not push `app-*`, `ios-*` or `desktop-*` tags, do not edit `.github/channels.json` or `native/ios-app/VERSION` except in a promotion PR or a minor version bump the repository owner asked for (set `native/ios-app/VERSION` to the next minor version, such as 0.4.0, in the PR whose merge should start it; the next pre-alpha then carries that version), and do not dispatch macOS workflows unless the user asks: GitHub runs at most 5 macOS jobs at once for this repository.
 5. **Leave other people's branches alone.** Never force-push or rewrite a branch you did not create.

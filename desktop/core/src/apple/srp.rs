@@ -102,6 +102,60 @@ impl Default for Client {
 }
 
 #[cfg(test)]
+pub(crate) struct TestServer {
+    username: String,
+    pub salt: Vec<u8>,
+    pub iterations: u32,
+    v: BigUint,
+    b_priv: BigUint,
+    pub b_pub: Vec<u8>,
+}
+
+#[cfg(test)]
+impl TestServer {
+    pub fn new(username: &str, password: &str) -> Self {
+        let salt = b"0123456789abcdef".to_vec();
+        let iterations = 10;
+        let derived = Client::derive_password(password, &salt, iterations, false);
+        let n = n();
+        let g = g();
+        let inner = h(&[b":", &derived]);
+        let x = from_bytes(&h(&[&salt, &inner]));
+        let v = g.modpow(&x, &n);
+        let b_priv = BigUint::from(123456789u64);
+        let k = from_bytes(&h(&[&pad(&n), &pad(&g)]));
+        let b_pub_int = (&k * &v + g.modpow(&b_priv, &n)) % &n;
+        Self {
+            username: username.to_string(),
+            salt,
+            iterations,
+            v,
+            b_priv,
+            b_pub: b_pub_int.to_bytes_be(),
+        }
+    }
+
+    pub fn verify_and_m2(&self, a_pub: &[u8], m1: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        let n = n();
+        let g = g();
+        let a_num = from_bytes(a_pub);
+        let b_num = from_bytes(&self.b_pub);
+        let u = from_bytes(&h(&[&pad(&a_num), &pad(&b_num)]));
+        let s = (&a_num * self.v.modpow(&u, &n)).modpow(&self.b_priv, &n);
+        let key = h(&[&s.to_bytes_be()]);
+        let hn = h(&[&n.to_bytes_be()]);
+        let hg = h(&[&pad(&g)]);
+        let xor: Vec<u8> = hn.iter().zip(hg.iter()).map(|(a, b)| a ^ b).collect();
+        let expected_m1 = h(&[&xor, &h(&[self.username.as_bytes()]), &self.salt, a_pub, &self.b_pub, &key]);
+        if m1 != expected_m1.as_slice() {
+            return None;
+        }
+        let m2 = h(&[a_pub, m1, &key]);
+        Some((key, m2))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use num_bigint::BigUint;

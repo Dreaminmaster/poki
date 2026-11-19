@@ -80,7 +80,7 @@ const names = (device, query) => device.id === query || device.name.toLocaleLowe
 
 export class Devices {
   selected; requested; frame; size; seen; structureViewport; batchViewportVerified = false; elements = []; elementsAt = 0; lastInputAt = -Infinity; lastInputCompletedAt; inBatch = false;
-  scales = new Map(); readCosts = new Map(); physicalNames = new Map(); backgroundDevices = new Map(); nextRef = 0;
+  scales = new Map(); multiplePanels = new Map(); readCosts = new Map(); physicalNames = new Map(); backgroundDevices = new Map(); nextRef = 0;
   constructor(coordinator = new Coordination()) { this.coordinator = coordinator; }
   async run(file, args, timeout = 45000, input) {
     const result = await execute(file, args, { timeout, input });
@@ -214,6 +214,17 @@ export class Devices {
     if (!Number.isFinite(scale) || scale <= 0 || scale > 5) throw new Error('Could not read the screen scale. Refusing to guess touch coordinates.');
     this.scales.set(target.id, scale); return scale;
   }
+  // Whether the phone has a second built-in panel. Only then must a screenshot name the panel, which the helper does.
+  // Every other phone, and one whose helper cannot say, keeps the screenshot command used before.
+  async panels(target) {
+    if (this.multiplePanels.has(target.id)) return this.multiplePanels.get(target.id);
+    let multiple;
+    try { multiple = (await nativeRequest(target, { op: 'panels' })).multiple; }
+    catch (error) { if (stopped(error)) throw error; }
+    // No answer is not remembered, so a phone that could not be asked yet is asked again.
+    if (typeof multiple !== 'boolean') return false;
+    this.multiplePanels.set(target.id, multiple); return multiple;
+  }
   capture() { return phase('screen_capture', () => this.captureFrame()); }
   async captureFrame() {
     checkWork();
@@ -225,7 +236,7 @@ export class Devices {
     try {
       // Unmasked, the area around the Dynamic Island differs between frames of a still screen, which would expire refs.
       if (target.kind === 'simulator') await this.run('xcrun', ['simctl', 'io', target.id, 'screenshot', '--type=png', '--mask=black', path]);
-      else if (target.remote) await nativeRequest(target, { op: 'screenshot', path });
+      else if (target.remote || await this.panels(target)) await nativeRequest(target, { op: 'screenshot', path });
       else await this.native(['screenshot', path], /Screenshot saved to:/);
       const original = await readFile(path), meta = await sharp(original).metadata();
       const scale = await this.scale(target);

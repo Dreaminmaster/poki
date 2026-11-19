@@ -123,21 +123,21 @@ export async function issueDraft({ state }) {
   // Headings are the install-failure template's labels, so the draft reads like a form submission.
   const body = [
     '<!-- Drafted by node bin/install-iphone.mjs issue. Identifiers and secrets were removed; read it before you submit. -->',
-    '### What happened', '',
-    redactText(failed.reason ?? manifest.errors[code]?.reason ?? 'See the diagnostics below.'), '',
-    '### Step it stopped at', '', stepLabel, '',
-    '### Error code', '', `\`${code}\``, '',
-    '### Install path', '', 'Agent installer (node bin/install-iphone.mjs)', '',
-    '### What you or the agent tried', '',
-    ...(bundle.errors?.length ? bundle.errors.map(e => `- \`${e.code}\`${e.retrying ? ' (retried)' : ''}: ${e.reason}`) : ['- Nothing beyond the run in the diagnostics.']),
+    '### Problem description', '',
+    `${redactText(failed.reason ?? manifest.errors[code]?.reason ?? 'See the diagnostics below.')} Error code: \`${code}\`.`, '',
+    ...(bundle.errors?.length ? bundle.errors.map(e => `- \`${e.code}\`${e.retrying ? ' (retried)' : ''}: ${e.reason}`) : ['- Nothing beyond the run in the diagnostics was tried.']),
     manifest.errors[code] ? `- The installer's fix for this code: ${manifest.errors[code].agent_fix}` : '', '',
-    '### Diagnostics', '', '```json', JSON.stringify(bundle, null, 2), '```', '',
-    '### Versions', '',
-    `Poki installer ${bundle.installer ? installerLabel(bundle.installer) : 'unknown'}; Poki Setup ${bundle.poki_setup ?? 'unknown'} (channel ${bundle.channel ?? 'unknown'}); Poki ${bundle.poki ?? 'not installed'}; macOS ${bundle.system.macos} ${bundle.system.arch}; Xcode: ${bundle.system.xcode}; ${phone?.product_type ?? 'iPhone unknown'} on iOS ${phone?.ios ?? 'unknown'}${phone?.build ? ` (${phone.build})` : ''} over ${phone?.link ?? 'unknown'}`,
+    '### Failed installation step', '', stepLabel, '',
+    '### Installation method', '', 'Agent installer (node bin/install-iphone.mjs)', '',
+    '### Diagnostics output', '', '```json', JSON.stringify(bundle, null, 2), '```', '',
+    '### Poki and Poki Setup versions', '',
+    `Poki installer ${bundle.installer ? installerLabel(bundle.installer) : 'unknown'}; Poki Setup ${bundle.poki_setup ?? 'unknown'} (channel ${bundle.channel ?? 'unknown'}); Poki ${bundle.poki ?? 'not installed'}; macOS ${bundle.system.macos} ${bundle.system.arch}; Xcode: ${bundle.system.xcode}`, '',
+    '### iPhone model and iOS version', '',
+    `${phone?.product_type ?? 'iPhone unknown'} on iOS ${phone?.ios ?? 'unknown'}${phone?.build ? ` (${phone.build})` : ''} over ${phone?.link ?? 'unknown'}`,
     '',
   ].join('\n');
   const draftFile = join(state, 'issue-draft.md');
   await writeFile(draftFile, body);
-  const command = `gh issue create --repo JosssphZhou/poki --title ${JSON.stringify(title)} --body-file ${JSON.stringify(draftFile)} --label bug`;
+  const command = `gh issue create --repo JosssphZhou/poki --title ${JSON.stringify(title)} --body-file ${JSON.stringify(draftFile)} --label type:bug --label area:install`;
   return { title, body, draftFile, command };
 }

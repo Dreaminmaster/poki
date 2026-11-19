@@ -1,5 +1,8 @@
 import ActivityKit
+import Darwin
+import SwiftUI
 import UIKit
+import UserNotifications
 import XCTest
 @testable import Poki
 
@@ -82,7 +85,7 @@ final class LiveActivityTests: XCTestCase {
     }
 
     private func withSessionApp(
-        _ test: (AppModel, () -> [Activity<PokiActivityAttributes>]) async throws -> Void
+        _ test: (AppModel, @escaping () -> [Activity<PokiActivityAttributes>]) async throws -> Void
     ) async throws {
         let defaults = UserDefaults.standard
         let keys = ["relayAddress", "relayEnabled", "wantsOn"]
@@ -146,7 +149,7 @@ final class LiveActivityTests: XCTestCase {
     /// No presentation of the Live Activity counts a run's steps: an agent changes its count as it
     /// goes, so "2/5", "Step 8" and "12 steps" read as broken promises. The line over the title names
     /// the app, the compact island shows the app or the time, the line under the title has no
-    /// segments, and a finished run says where and how long, with or without a plan.
+    /// segments, and a finished run says how long, with or without a plan.
     func testNoPresentationCountsTheRunsSteps() {
         let start = Date(timeIntervalSince1970: 1_000_000)
         var state = PokiState(phase: .working, headline: "Tap “Send”", thumbnailVersion: 0)
@@ -166,7 +169,105 @@ final class LiveActivityTests: XCTestCase {
         state.endedAt = start.addingTimeInterval(84)
         state.plan = .init(steps: ["Open Messages", "Send it"], current: 2, title: "Text Mom")
         XCTAssertEqual(state.face.content, "Text Mom")
-        XCTAssertEqual(state.face.subtitle, "Done in Messages, took 1:24")
+        XCTAssertEqual(state.face.subtitle, "Took 1:24")
+    }
+
+    /// ESP-954: a finished run says Done once, over what the run came to. The island said it twice
+    /// (the finish event's word over a title that fell back to Done), with the time cut off under it.
+    func testAFinishedRunSaysDoneOnceOverWhatItCameTo() {
+        func finished(result: String? = nil, task: String? = nil, _ set: (inout PokiState) -> Void = { _ in }) -> ActivityFace {
+            let controller = ActivityController()
+            controller.update { $0.phase = .working; $0.headline = "Open Notes"; set(&$0) }
+            controller.finishNow(alert: false, result: result, task: task)
+            return controller.state.face
+        }
+        // Nothing known about the run: Done is the title, said once.
+        let bare = finished()
+        XCTAssertEqual(bare.content, "Done")
+        XCTAssertNil(bare.kicker)
+        XCTAssertNil(bare.event)
+
+        // Otherwise Done over finish_task's summary, else the plan's title, else the task as asked,
+        // else the app.
+        let inNotes: (inout PokiState) -> Void = { $0.app = "Notes" }
+        let titled: (inout PokiState) -> Void = { $0.app = "Notes"; $0.plan = .init(steps: ["Open Notes"], current: 1, title: "Shopping list") }
+        let lines = [
+            finished(inNotes),
+            finished(task: "Make me a shopping list\nwith milk", inNotes),
+            finished(task: "Make me a shopping list", titled),
+            finished(result: "Wrote the shopping list in Notes", task: "Make me a shopping list", titled),
+        ]
+        XCTAssertEqual(lines.map(\.content), ["Notes", "Make me a shopping list", "Shopping list", "Wrote the shopping list in Notes"])
+        for face in lines {
+            XCTAssertEqual(face.kicker, "Done")
+            XCTAssertNil(face.event)
+            XCTAssertEqual(face.subtitle, "Took 0:00")
+        }
+    }
+
+    /// ESP-981: in every voice state on the expanded Dynamic Island (listening, thinking, speaking,
+    /// working, approval, deciding, hand-off, done), both the bear and the words and controls stay
+    /// above the 12.33-point bottom strip that iOS clips away.
+    func testEveryVoiceStatesExpandedIslandKeepsTheBearAndControlsInsideTheSystemClip() throws {
+        let samples = ActivityPreview.makeSamples().filter { $0.0.hasPrefix("voice") }
+        XCTAssertEqual(samples.map(\.0), ["voice", "voicethinking", "voicespeaking", "voiceworking", "voiceapproval", "voicedeciding", "voicehandoff", "voicedone"])
+        let width = 374
+        let clip = Int(ActivityMetrics.islandClip)
+        let space = CGColorSpaceCreateDeviceRGB()
+
+        for locale in ["en", "zh-Hans"] {
+            AppLocalization.shared.preference = locale
+            for (name, sample) in samples {
+                var variants = [(name, sample)]
+                if sample.phase == .idle {
+                    var withEvent = sample
+                    withEvent.event = .init(kind: .started, text: "Started")
+                    variants.append(("\(name)+event", withEvent))
+                } else if sample.phase == .approval {
+                    var withStopAsking = sample
+                    withStopAsking.approval?.stopsWhenOff = true
+                    variants.append(("\(name)+stopAsking", withStopAsking))
+                }
+                for (label, state) in variants {
+                    let face = state.face
+                    let sizes = ActivityMetrics.sizes(face)
+                    let height = Int(sizes.island - ActivityMetrics.cameraRow)
+                    let split = Int(sizes.islandLeft)
+                    let view = IslandBottom(face: face)
+                        .dynamicTypeSize(...ActivityMetrics.largestType)
+                        .environment(\.isLuminanceReduced, true)
+                        .frame(width: CGFloat(width), height: CGFloat(height))
+                    let renderer = ImageRenderer(content: view)
+                    renderer.scale = 1
+                    let cgImage = try XCTUnwrap(renderer.cgImage, "\(locale) \(label)")
+                    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+                    let context = try XCTUnwrap(CGContext(
+                        data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                        space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    ))
+                    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+                    var bearVisible = 0, bearClipped = 0
+                    var wordsVisible = 0, wordsClipped = 0
+                    for y in 0..<height {
+                        let inBottomClip = y >= height - clip
+                        for x in 0..<width {
+                            let alpha = pixels[(y * width + x) * 4 + 3]
+                            guard alpha > 16 else { continue }
+                            if x < split {
+                                if inBottomClip { bearClipped += 1 } else { bearVisible += 1 }
+                            } else {
+                                if inBottomClip { wordsClipped += 1 } else { wordsVisible += 1 }
+                            }
+                        }
+                    }
+                    XCTAssertGreaterThan(bearVisible, 0, "\(locale) \(label): bear must render above the bottom clip")
+                    XCTAssertGreaterThan(wordsVisible, 0, "\(locale) \(label): words and controls must render above the bottom clip")
+                    XCTAssertEqual(wordsClipped, 0, "\(locale) \(label): words or buttons extend into the bottom \(clip)pt clip")
+                    XCTAssertEqual(bearClipped, 0, "\(locale) \(label): bear extends into the bottom \(clip)pt clip")
+                }
+            }
+        }
     }
 
     /// ESP-467: the island and the Lock Screen say what the task is doing, never the single tap under
@@ -217,6 +318,348 @@ final class LiveActivityTests: XCTestCase {
         var state = PokiState(phase: .approval, headline: "Allow this step?", thumbnailVersion: 0)
         state.approval = PendingApproval(id: "a", app: "Messages", summary: "Tap “Send”", reason: "sending a message (\"send\")", expires: .now.addingTimeInterval(60))
         XCTAssertTrue(state.face.compact.says("Allow?"))
+    }
+
+    private static var runningSession: RunningSession?
+
+    private struct RunningSession {
+        let app: AppModel
+        let existingIDs: Set<String>
+        let restore: @MainActor () -> Void
+
+        @MainActor
+        func activities() -> [Activity<PokiActivityAttributes>] {
+            Activity<PokiActivityAttributes>.activities.filter {
+                !existingIDs.contains($0.id) && ($0.activityState == .active || $0.activityState == .stale)
+            }
+        }
+
+        @MainActor
+        func stop() {
+            if app.sessionOn { app.stopSession() }
+            restore()
+        }
+    }
+
+    override class func tearDown() {
+        MainActor.assumeIsolated {
+            runningSession?.stop()
+            runningSession = nil
+        }
+        super.tearDown()
+    }
+
+    func testLiveActivityLeavesUpdateNotificationsIntact() async throws {
+        try await withFinishWindow(dynamicIsland: true) {
+            try await withSessionApp { app, activities in
+                app.becameActive()
+                app.startSession()
+                app.chatTaskBegan()
+                let activity = try XCTUnwrap(activities().first)
+                XCTAssertEqual(activity.activityState, .active)
+
+                let updateID = "nz.zheha.poki.signing.reopen"
+                clearNotice(updateID)
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let ipa = dir.appendingPathComponent("Poki.ipa")
+                try Data("ipa".utf8).write(to: ipa)
+                let pairing = dir.appendingPathComponent("pairing.plist")
+                let pairingPlist: [String: Any] = [
+                    "identifier": "test-host",
+                    "public_key": Data(repeating: 1, count: 32),
+                    "private_key": Data(repeating: 2, count: 32),
+                ]
+                try PropertyListSerialization.data(fromPropertyList: pairingPlist, format: .xml, options: 0).write(to: pairing)
+
+                let readyDir = SelfSigner.home.appendingPathComponent("ready/update", isDirectory: true)
+                let existingManifest = try? Data(contentsOf: readyDir.appendingPathComponent("manifest.json"))
+                try FileManager.default.createDirectory(at: readyDir, withIntermediateDirectories: true)
+                let manifest: [String: Any] = [
+                    "kind": "update",
+                    "ipa": ipa.path,
+                    "bundle_id": Bundle.main.bundleIdentifier ?? "nz.zheha.poki",
+                    "version": "99.0.0",
+                    "build": "99999",
+                    "tag": "v99.0.0",
+                    "team_name": "Test Team",
+                    "team_is_free": true,
+                    "profile_expires_at": Int64(Date().addingTimeInterval(7 * 86_400).timeIntervalSince1970),
+                    "prepared_at": Int64(Date().timeIntervalSince1970),
+                ]
+                try JSONSerialization.data(withJSONObject: manifest).write(to: readyDir.appendingPathComponent("manifest.json"))
+
+                let hold = try LocalPortHold()
+                poki_set_remote_pairing_port(hold.port)
+                defer {
+                    poki_set_remote_pairing_port(0)
+                    hold.closeAll()
+                    clearNotice(updateID)
+                    if let existingManifest {
+                        try? existingManifest.write(to: readyDir.appendingPathComponent("manifest.json"))
+                    } else {
+                        try? FileManager.default.removeItem(at: readyDir.appendingPathComponent("manifest.json"))
+                    }
+                    try? FileManager.default.removeItem(at: dir)
+                }
+
+                let signer = SelfSigner()
+                signer.start()
+                for _ in 0..<100 where signer.next == nil {
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                XCTAssertEqual(signer.next?.kind, "update")
+                signer.isIdle = { true }
+                signer.phone = { ["device_address": "127.0.0.1", "pairing_file": pairing.path, "host_name": "Poki"] }
+
+                let installing = Task { await signer.install() }
+                try await hold.waitForConnection()
+                let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+                let reopen = try XCTUnwrap(pending.first { $0.identifier == updateID },
+                                           "Update reopen notification must remain scheduled while a Dynamic Island activity runs")
+                XCTAssertEqual(reopen.content.title, "Poki Was Updated")
+                hold.closeAll()
+                await installing.value
+            }
+        }
+    }
+
+    func testTaskFinishOnDynamicIslandUpdatesActivityWithoutPostingBanner() async throws {
+        try await withActiveActivityInBackground(dynamicIsland: true) { app, activity in
+            app.chatTaskBegan()
+            try await waitForPhase(.working, on: activity)
+            clearNotice("poki-reply")
+            app.chatTaskEnded(reply: "Sent the note.", session: "finish-island", acted: true)
+
+            try await waitForPhase(.done, on: activity)
+            try await Task.sleep(for: .milliseconds(1800))
+            let completionBanner = await deliveredNotice("poki-reply")
+            XCTAssertNil(completionBanner, "Dynamic Island activity must not also post a task finish banner")
+        }
+    }
+
+    func testTaskFinishWithoutDynamicIslandPostsBannerEvenWhenActivityRuns() async throws {
+        try await withActiveActivityInBackground(dynamicIsland: false) { app, activity in
+            XCTAssertEqual(activity.activityState, .active)
+            app.chatTaskBegan()
+            try await waitForPhase(.working, on: activity)
+            clearNotice("poki-reply")
+            app.chatTaskEnded(reply: "Sent the note.", session: "finish-notch", acted: true)
+
+            let banner = try await waitForDeliveredNotice("poki-reply")
+            XCTAssertEqual(banner.request.content.body, "The task has ended. Open Poki to see the result.")
+        }
+    }
+
+    func testTaskFinishWithoutRunningActivityPostsBannerOnDynamicIsland() async throws {
+        if let existing = Self.runningSession {
+            existing.stop()
+            Self.runningSession = nil
+            for _ in 0..<100 where !Activity<PokiActivityAttributes>.activities.filter({ $0.activityState == .active }).isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        try await withFinishWindow(dynamicIsland: true) {
+            try await withSessionApp { app, activities in
+                defer { clearNotice("poki-reply") }
+                try await movePokiToBackground(app)
+                app.startSession()
+                app.chatTaskBegan()
+                XCTAssertTrue(activities().isEmpty)
+
+                clearNotice("poki-reply")
+                app.chatTaskEnded(reply: "Sent the note.", session: "finish-no-activity", acted: true)
+
+                let banner = try await waitForDeliveredNotice("poki-reply")
+                XCTAssertEqual(banner.request.content.body, "The task has ended. Open Poki to see the result.")
+            }
+        }
+    }
+
+    private func ensureRunningSession() throws -> RunningSession {
+        if let session = Self.runningSession, session.activities().first != nil {
+            return session
+        }
+        Self.runningSession?.stop()
+        let defaults = UserDefaults.standard
+        let keys = ["relayAddress", "relayEnabled", "wantsOn"]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        let setup = SetupState.load()
+        let existingIDs = Set(Activity<PokiActivityAttributes>.activities.map(\.id))
+        let automation = FakeAutomation()
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation)
+        app.loopback.simulate(.working(ms: 9))
+        app.setup.loopback = .proxy
+        XCTAssertTrue(app.setRelay("https://relay.invalid"))
+        app.becameActive()
+        app.startSession()
+        app.chatTaskBegan()
+        let session = RunningSession(app: app, existingIDs: existingIDs) {
+            automation.answer(nil)
+            for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) }
+            setup.save()
+        }
+        Self.runningSession = session
+        return session
+    }
+
+    private func withActiveActivityInBackground(
+        dynamicIsland: Bool,
+        _ body: (AppModel, Activity<PokiActivityAttributes>) async throws -> Void
+    ) async throws {
+        try await withFinishWindow(dynamicIsland: dynamicIsland) {
+            let session = try ensureRunningSession()
+            let activity = try XCTUnwrap(session.activities().first)
+            XCTAssertEqual(activity.activityState, .active)
+            defer { clearNotice("poki-reply") }
+            try await movePokiToBackground(session.app)
+            try await body(session.app, activity)
+        }
+    }
+
+    private func withFinishWindow(dynamicIsland: Bool, _ body: () async throws -> Void) async throws {
+        _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.provisional])
+        var windowScene: UIWindowScene?
+        for _ in 0..<1500 where windowScene == nil {
+            windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            if windowScene == nil { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        let scene = try XCTUnwrap(windowScene, "The app never connected a window scene")
+        let hidden = scene.windows.filter { !$0.isHidden }
+        hidden.forEach { $0.isHidden = true }
+        let nativeProbe = UIWindow(windowScene: scene)
+        nativeProbe.frame = scene.screen.bounds
+        nativeProbe.rootViewController = UIViewController()
+        nativeProbe.makeKeyAndVisible()
+        nativeProbe.layoutIfNeeded()
+        let nativeTop = nativeProbe.safeAreaInsets.top
+        nativeProbe.isHidden = true
+
+        let window: UIWindow
+        if (dynamicIsland && nativeTop >= 51) || (!dynamicIsland && nativeTop > 0 && nativeTop < 51) {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = FixedSafeAreaWindow(windowScene: scene, topInset: dynamicIsland ? 62 : 47)
+        }
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer {
+            window.isHidden = true
+            hidden.forEach { $0.isHidden = false }
+            hidden.first?.makeKeyAndVisible()
+        }
+        try await body()
+    }
+
+    private func movePokiToBackground(_ app: AppModel) async throws {
+        app.wentToBackground()
+        if UIApplication.shared.applicationState == .active {
+            UIApplication.shared.perform(NSSelectorFromString("suspend"))
+            for _ in 0..<150 where UIApplication.shared.applicationState == .active {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        XCTAssertNotEqual(UIApplication.shared.applicationState, .active, "Poki must leave the foreground to test finish notices")
+    }
+
+    private func waitForPhase(_ phase: PokiState.Phase, on activity: Activity<PokiActivityAttributes>) async throws {
+        for _ in 0..<150 where activity.content.state.phase != phase {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(activity.content.state.phase, phase)
+    }
+
+    private func clearNotice(_ id: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+    }
+
+    private func deliveredNotice(_ id: String) async -> UNNotification? {
+        await UNUserNotificationCenter.current().deliveredNotifications().first { $0.request.identifier == id }
+    }
+
+    private func waitForDeliveredNotice(_ id: String) async throws -> UNNotification {
+        for _ in 0..<150 {
+            if let found = await deliveredNotice(id) { return found }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let found = await deliveredNotice(id)
+        return try XCTUnwrap(found, "Expected delivered notification \(id)")
+    }
+}
+
+private final class FixedSafeAreaWindow: UIWindow {
+    private let customInsets: UIEdgeInsets
+
+    init(windowScene: UIWindowScene, topInset: CGFloat) {
+        customInsets = UIEdgeInsets(top: topInset, left: 0, bottom: 34, right: 0)
+        super.init(windowScene: windowScene)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var safeAreaInsets: UIEdgeInsets { customInsets }
+}
+
+private final class LocalPortHold {
+    private var serverFD: Int32
+    private var clientFD: Int32 = -1
+    let port: UInt16
+
+    init() throws {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bound = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard bound == 0, listen(fd, 1) == 0 else {
+            close(fd)
+            throw POSIXError(.EADDRINUSE)
+        }
+        var actual = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &actual) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+        }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+        serverFD = fd
+        port = UInt16(bigEndian: actual.sin_port)
+    }
+
+    func waitForConnection() async throws {
+        for _ in 0..<150 {
+            let fd = accept(serverFD, nil, nil)
+            if fd >= 0 {
+                clientFD = fd
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Timed out waiting for SelfSigner connection")
+    }
+
+    func closeAll() {
+        if clientFD >= 0 {
+            var buf = [UInt8](repeating: 0, count: 4096)
+            _ = recv(clientFD, &buf, buf.count, MSG_DONTWAIT)
+            let reply = Array("HTTP/1.1 500 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+            _ = send(clientFD, reply, reply.count, 0)
+            shutdown(clientFD, SHUT_WR)
+            close(clientFD)
+            clientFD = -1
+        }
+        if serverFD >= 0 { close(serverFD); serverFD = -1 }
     }
 }
 

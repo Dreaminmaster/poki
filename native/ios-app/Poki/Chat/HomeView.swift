@@ -346,7 +346,7 @@ enum HomeIdea {
     private static func idea(_ app: String, _ text: String) -> HomeShortcut? {
         guard let capsule = AppCapsule.catalog.first(where: { $0.names.contains(app) }), let shown = ShortcutApp.named(capsule.id) else { return nil }
         return HomeShortcut(key: HomeShortcuts.normalize(text), app: shown.id, appName: shown.name, text: text,
-                            prompt: CapsuleText.prefill(app: app, sentence: text))
+                            prompt: CapsuleText.prefill(app: shown.name, sentence: text))
     }
     /// An app by its bundle ID, the action its pill shows and the whole request a tap puts in the field.
     private static func idea(app: String, _ text: String, prompt: String) -> HomeShortcut? {
@@ -380,16 +380,26 @@ enum HomeIdea {
     /// the English set. A tap only fills the field and the caret lands at the end, so a request that
     /// needs a contact, a topic, a product or a place ends where that goes, for the owner to finish.
     private static var simplifiedChinese: [HomeShortcut] {
-        [idea(app: "com.tencent.xin", "发消息", prompt: "用微信发一条消息给"),
-         idea(app: "com.taobao.taobao4iphone", "查物流", prompt: "打开淘宝，看看我最近一单的物流到哪了"),
-         idea(app: "com.dianping.dpscope", "找附近餐厅", prompt: "用大众点评找附近评分高的餐厅"),
-         idea(app: "com.meituan.itakeaway", "点外卖", prompt: "打开美团外卖，帮我看看附近有什么好吃的"),
-         idea(app: "com.xunmeng.pinduoduo", "查订单", prompt: "打开拼多多，看看我的订单到哪了"),
-         idea(app: "com.xingin.discover", "搜攻略", prompt: "在小红书搜一下攻略："),
-         idea(app: "com.taobao.fleamarket", "看我的闲置", prompt: "打开闲鱼，看看我发布的闲置有没有新消息"),
-         idea(app: "com.360buy.jdmobile", "查价格", prompt: "在京东查一下价格："),
-         idea(app: "com.baidu.map", "导航回家", prompt: "打开百度地图，导航回家"),
-         idea(app: "com.autonavi.amap", "查路线", prompt: "打开高德地图，查一下路线，目的地是")].compactMap { $0 }
+        [idea(app: "com.tencent.xin", AppLocalization.text(LocalizedStringResource("Send a message")),
+              prompt: AppLocalization.text(LocalizedStringResource("Send a WeChat message to "))),
+         idea(app: "com.taobao.taobao4iphone", AppLocalization.text(LocalizedStringResource("Check delivery")),
+              prompt: AppLocalization.text(LocalizedStringResource("Open Taobao and check the delivery status of my latest order"))),
+         idea(app: "com.dianping.dpscope", AppLocalization.text(LocalizedStringResource("Find nearby restaurants")),
+              prompt: AppLocalization.text(LocalizedStringResource("Find top-rated nearby restaurants on Dianping"))),
+         idea(app: "com.meituan.itakeaway", AppLocalization.text(LocalizedStringResource("Order takeout")),
+              prompt: AppLocalization.text(LocalizedStringResource("Open Meituan Waimai and find good food nearby"))),
+         idea(app: "com.xunmeng.pinduoduo", AppLocalization.text(LocalizedStringResource("Check orders")),
+              prompt: AppLocalization.text(LocalizedStringResource("Open Pinduoduo and check my order status"))),
+         idea(app: "com.xingin.discover", AppLocalization.text(LocalizedStringResource("Search guides")),
+              prompt: AppLocalization.text(LocalizedStringResource("Search Xiaohongshu for guides: "))),
+         idea(app: "com.taobao.fleamarket", AppLocalization.text(LocalizedStringResource("View my listings")),
+              prompt: AppLocalization.text(LocalizedStringResource("Open Xianyu and check for new messages on my listings"))),
+         idea(app: "com.360buy.jdmobile", AppLocalization.text(LocalizedStringResource("Check prices")),
+              prompt: AppLocalization.text(LocalizedStringResource("Check the price on JD: "))),
+         idea(app: "com.baidu.map", AppLocalization.text(LocalizedStringResource("Navigate home")),
+              prompt: AppLocalization.text(LocalizedStringResource("Open Baidu Maps and navigate home"))),
+         idea(app: "com.autonavi.amap", AppLocalization.text(LocalizedStringResource("Check routes")),
+              prompt: AppLocalization.text(LocalizedStringResource("Open Amap and check the route to ")))].compactMap { $0 }
     }
 }
 
@@ -453,6 +463,8 @@ struct HomePage<Footer: View>: View {
     var writing = false
     /// How far Poki's picture rises into the top bar as the conversation begins: the greeting rises with it.
     var rise: CGFloat = 0
+    var sessionStore: SessionStore = .shared
+    var shortcutStore: HomeShortcutStore = .shared
     var pick: (String) -> Void
     @ViewBuilder var footer: () -> Footer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -461,7 +473,6 @@ struct HomePage<Footer: View>: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    private let shortcutStore = HomeShortcutStore.shared
     /// Picked as the page comes in, so it does not change while you look at it.
     @State private var greetedAt = Date.now
     /// The pill whose menu is open, and where it is on the screen: both rows stand still under it.
@@ -493,11 +504,11 @@ struct HomePage<Footer: View>: View {
                 content(inset: inset, height: geometry.size.height, scrolls: false)
             }
         }
-        .task(id: SessionStore.shared.sessions.count) {
-            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+        .task(id: sessionStore.sessions.count) {
+            shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
-        .onChange(of: AppLocalization.language) { _, _ in
-            shortcutStore.refresh(sessions: SessionStore.shared.sessions, routines: RoutineStore.shared.routines)
+        .onChange(of: AppLocalization.language, initial: true) { _, _ in
+            shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { page = $0 }
         // The menu, over the pill (the owner: it opened under the pill, on the message field). The

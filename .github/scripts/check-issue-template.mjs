@@ -4,9 +4,18 @@
 // "### <label>" heading with an answer under it, which is what the form renders.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { createApi } from './github-api.mjs';
 
 export const MARKER = '<!-- poki-issue-template-check -->';
-export const LABEL = 'needs-template';
+export const LABEL = 'state:needs-info';
+export const AREA_HEADING = 'Affected area in Poki';
+// Dropdown answer -> area label. Answers not listed here (Other or not sure) get no area label.
+export const AREA_LABELS = new Map([
+  ['Poki iPhone app', 'area:ios-app'],
+  ['Poki MCP', 'area:mcp'],
+  ['Poki Agent, iMessage, or Telegram', 'area:agent'],
+  ['Installation or Poki Setup', 'area:install'],
+]);
 const TEMPLATE_DIR = '.github/ISSUE_TEMPLATE';
 const EXEMPT = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
@@ -56,6 +65,12 @@ export function matchForm(body, forms) {
   return forms.find((f) => f.required.every((label) => answered(have.get(norm(label))))) || null;
 }
 
+export function areaLabel(body) {
+  const answer = (sections(body).get(norm(AREA_HEADING)) || '').trim();
+  for (const [option, label] of AREA_LABELS) if (norm(option) === norm(answer)) return label;
+  return null;
+}
+
 export function commentBody(forms, repo) {
   const base = `https://github.com/${repo}`;
   const list = forms.map((f) => `- [${f.name}](${base}/issues/new?template=${f.file}): ${f.required.map((r) => `\`### ${r}\``).join(', ')}`).join('\n');
@@ -71,35 +86,35 @@ Edit this issue rather than opening a new one. When it matches a form, the \`${L
 感谢反馈。这个 issue 没有使用仓库的 issue 模板，维护者暂时无法分类处理。如果是 AI 代理（Claude Code、Codex 等）代你提交的，请让它先阅读 [AGENTS.md 中的 File an issue](${base}/blob/main/AGENTS.md#file-an-issue)，再编辑本 issue，按上面任一模板补齐所有必填小节（标题保留英文原文，内容可以用中文）。请直接编辑本 issue，不要重新开一个。符合模板后 \`${LABEL}\` 标签会自动移除。`;
 }
 
-async function api(path, init = {}) {
-  const res = await fetch(`https://api.github.com${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${process.env.GITHUB_TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', ...(init.headers || {}) },
-  });
-  if (!res.ok && res.status !== 404) throw new Error(`${init.method || 'GET'} ${path}: ${res.status} ${await res.text()}`);
-  return res.status === 204 || res.status === 404 ? null : res.json();
-}
-
 async function main() {
+  const api = createApi({ token: process.env.GITHUB_TOKEN, botToken: process.env.BOT_TOKEN });
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const { action, issue } = event;
   const repo = process.env.GITHUB_REPOSITORY;
   const path = `/repos/${repo}/issues/${issue.number}`;
   if (issue.pull_request || issue.user?.type === 'Bot') return console.log('skip: pull request or bot');
-  if (EXEMPT.has(issue.author_association)) return console.log(`skip: author is ${issue.author_association}`);
-  const flagged = (issue.labels || []).some((l) => l.name === LABEL);
+  const have = new Set((issue.labels || []).map((l) => l.name));
+  const flagged = have.has(LABEL);
   const forms = loadForms();
   const form = matchForm(issue.body, forms);
   console.log(`#${issue.number} ${action}: ${form ? `matches ${form.file}` : 'matches no form'}`);
 
+  // A dropdown cannot set a label by itself, so the area label follows the answer here.
+  const area = form && areaLabel(issue.body);
+  if (area && !have.has(area) && (action === 'opened' || flagged)) {
+    await api(`${path}/labels`, { method: 'POST', bot: true, body: { labels: [area] } });
+  }
+  if (EXEMPT.has(issue.author_association)) return console.log(`skip: author is ${issue.author_association}`);
+
   if (action === 'opened' && !form) {
-    await api(`${path}/labels`, { method: 'POST', body: JSON.stringify({ labels: [LABEL] }) });
-    await api(`${path}/comments`, { method: 'POST', body: JSON.stringify({ body: commentBody(forms, repo) }) });
+    await api(`${path}/labels`, { method: 'POST', bot: true, body: { labels: [LABEL] } });
+    await api(`${path}/comments`, { method: 'POST', bot: true, body: { body: commentBody(forms, repo) } });
   } else if (action === 'edited' && flagged && form) {
-    await api(`${path}/labels/${LABEL}`, { method: 'DELETE' });
-    const comments = await api(`${path}/comments?per_page=100`);
-    const mine = (comments || []).find((c) => c.user?.type === 'Bot' && c.body?.startsWith(MARKER));
-    if (mine) await api(`/repos/${repo}/issues/comments/${mine.id}`, { method: 'PATCH', body: JSON.stringify({ body: `${MARKER}\nThanks, this issue now matches the **${form.name}** form. 已符合模板，谢谢。` }) });
+    const mine = (await api.paginate(`${path}/comments`)).find((c) => c.user?.type === 'Bot' && c.body?.startsWith(MARKER));
+    if (!mine) return console.log(`skip: ${LABEL} was not set by this check`);
+    // Someone may have taken the label off by hand since the event: that 404 is the wanted state.
+    await api(`${path}/labels/${encodeURIComponent(LABEL)}`, { method: 'DELETE', bot: true }).catch((e) => { if (e.status !== 404) throw e; });
+    await api(`/repos/${repo}/issues/comments/${mine.id}`, { method: 'PATCH', bot: true, body: { body: `${MARKER}\nThanks, this issue now matches the **${form.name}** form. 已符合模板，谢谢。` } });
   }
 }
 
