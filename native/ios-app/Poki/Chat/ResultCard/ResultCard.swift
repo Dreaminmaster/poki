@@ -15,6 +15,10 @@ struct ResultCard: Codable, Equatable {
     var recommended: String
     var primary: Action
     var next: Action?
+    /// Each item's picture (a product's photo), JPEG, cut from the phone's screenshot where the item's
+    /// `image` box points when the task finished (`ResultCardPictures`). Only items whose picture was
+    /// whole on the screen have one.
+    var pictures: [String: Data]?
 
     /// One choice. Every kind of card needs only its id and title; the rest are the app's own fields,
     /// kept as the model sent them for that app's look to read.
@@ -36,6 +40,14 @@ struct ResultCard: Codable, Equatable {
 
         func text(_ key: String) -> String? {
             fields[key]?.text.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        }
+
+        /// A box the model gave as [x, y, width, height] in the screenshot's points, such as `image`.
+        func box(_ key: String) -> Rect? {
+            guard case .array(let parts)? = fields[key], parts.count == 4 else { return nil }
+            let n = parts.compactMap { part -> Double? in if case .number(let v) = part, v.isFinite { return v } else { return nil } }
+            guard n.count == 4, n[2] > 0, n[3] > 0 else { return nil }
+            return Rect(x: n[0], y: n[1], width: n[2], height: n[3])
         }
 
         /// A button's words for this item: each `{field}` becomes the item's value of it.
@@ -103,6 +115,13 @@ enum ResultCardLooks {
         RailwayTrains.kind: ResultCardLook(problem: RailwayTrains.problem, tint: RailwayTrains.blue, buttonShape: .roundedRectangle(radius: 8)) {
             AnyView(RailwayTrainsList(card: $0, selected: $1, choose: $2))
         },
+        Ctrip.flights: Ctrip.look(Ctrip.flights),
+        Ctrip.hotels: Ctrip.look(Ctrip.hotels),
+        Ctrip.rooms: Ctrip.look(Ctrip.rooms),
+        Ctrip.fares: Ctrip.look(Ctrip.fares),
+        Taobao.kind: Taobao.look,
+        Dianping.kind: Dianping.look,
+        UberEats.kind: UberEats.look,
     ]
 }
 

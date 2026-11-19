@@ -1066,7 +1066,10 @@ final class ChatModel {
                 for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting { steps[i].state = result.success ? .done : .failed }
             }
             // An outside agent reads the reply, not the card: its tasks answer in words.
-            let card = result.success && kind == .poki ? result.card : nil
+            var card = result.success && kind == .poki ? result.card : nil
+            // The pictures are only ever cut from the phone's screen, never taken from the model.
+            card?.pictures = nil
+            if let shown = card { card?.pictures = await app.itemPictures(for: shown) }
             if let card { showCard(card) }
             return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):

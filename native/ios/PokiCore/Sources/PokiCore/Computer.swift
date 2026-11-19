@@ -60,6 +60,8 @@ final class Computer: @unchecked Sendable {
     var swipeUnread = false
     var lastForeground: Foreground?
     private var selectedPane: (side: String, identity: String, app: String, other: String, session: String?)?
+    /// Whether reads are of one pane of a split view (their frames are the pane's, not the screen's).
+    var paneSelected: Bool { selectedPane != nil }
     private let workspaceOwner = LockedBox<String?>(nil)
     var hasLocalWorkspace: Bool { workspaceOwner.value != nil }
     func heldByLocalTask(otherThan session: String?) -> Bool {

@@ -636,6 +636,14 @@ public final class PokiCore: @unchecked Sendable {
         await computer.runner.settle(timeout: timeout)
     }
 
+    /// The pictures of a finished task's items in the latest screenshot (`ItemPictures`), nil when
+    /// there are none to cut. Waits briefly for a tool call under way, which may change the screen.
+    public func itemPictures(_ boxes: [String: Rect]) async -> ItemPictures? {
+        guard !boxes.isEmpty, await gate.enter(waiting: 2) else { return nil }
+        defer { gate.leave() }
+        return computer.itemPictures(boxes)
+    }
+
     /// The chat can set up an iPhone workspace while it owns the same queue its pane tools use.
     /// Launcher steps are device-local and are never listed as model or connector tools.
     public func prepareWorkspace(session: String) async -> Bool {

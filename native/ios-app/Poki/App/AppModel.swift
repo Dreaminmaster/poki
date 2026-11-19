@@ -2089,6 +2089,15 @@ final class AppModel {
         return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask)
     }
 
+    /// A result card's item pictures, cut from the latest screenshot where the items' `image` boxes
+    /// point (`ResultCardPictures`); nil when there are none.
+    func itemPictures(for card: ResultCard) async -> [String: Data]? {
+        let boxes = Dictionary(card.items.compactMap { item in item.box("image").map { (item.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        guard !boxes.isEmpty, let found = await core.itemPictures(boxes) else { return nil }
+        let cut = ResultCardPictures.cut(found)
+        return cut.isEmpty ? nil : cut
+    }
+
     /// After Stop: waits until the phone has finished the action a stopped call had already sent.
     func phoneSettles(within seconds: Double) async -> Bool { await core.settle(timeout: seconds) }
 
