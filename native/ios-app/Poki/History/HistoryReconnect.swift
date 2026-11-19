@@ -7,7 +7,8 @@ import SwiftUI
 /// A shortcut that is shared as a link names the Reconnect Poki action by the bundle id of the Poki
 /// it was made with, and every owner's Poki has its own (the team is part of it), so the action is
 /// missing on any other iPhone. A request to this iPhone itself has no such name in it: the shared
-/// shortcut asks `http://127.0.0.1:47684/reconnect` and reads `true` or `false`. The address is the
+/// shortcut asks `http://127.0.0.1:47684/reconnect`, which answers `true` at once and connects in the
+/// background as the network changes. The address is the
 /// iPhone's own, which iOS never refuses, on Wi-Fi or cellular.
 @MainActor
 final class HistoryReconnect: ObservableObject {
@@ -81,7 +82,7 @@ final class HistoryReconnect: ObservableObject {
                 Task { @MainActor in
                     var body = "not found"
                     if asks, let model {
-                        body = await HistoryCollector.shared.reconnect(model, by: "a shortcut") ? "true" : "false"
+                        body = HistoryCollector.shared.reconnectSoon(model, by: "a shortcut") ? "true" : "false"
                     }
                     let answer = "HTTP/1.1 \(asks ? "200 OK" : "404 Not Found")\r\nContent-Type: text/plain\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
                     connection.send(content: Data(answer.utf8), completion: .contentProcessed { _ in connection.cancel() })

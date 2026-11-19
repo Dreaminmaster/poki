@@ -57,4 +57,8 @@ enum HistoryBridge {
 
     /// Holds or lets go the reads of the run in progress. The run keeps its tunnel.
     static func pause(_ on: Bool) { poki_history_pause(on) }
+
+    /// A run with no tunnel tries five times a second for the coming seconds: the moment around a
+    /// change of network is the one in which a new tunnel can be opened.
+    static func hurry(_ seconds: UInt32) { poki_history_hurry(seconds) }
 }

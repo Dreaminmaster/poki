@@ -295,6 +295,12 @@ pub extern "C" fn poki_history_pause(on: bool) {
     history::pause(on);
 }
 
+/// Makes the history run try its tunnel five times a second for the coming seconds, while it has none.
+#[unsafe(no_mangle)]
+pub extern "C" fn poki_history_hurry(seconds: u32) {
+    history::hurry(seconds);
+}
+
 /// Ends the history run in progress, if any; it then answers with what it measured so far.
 #[unsafe(no_mangle)]
 pub extern "C" fn poki_history_cancel() {

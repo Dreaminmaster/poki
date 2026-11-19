@@ -26,6 +26,8 @@ final class LoopbackMonitor {
     private(set) var droppedAt: Date?
     /// Called on every change of state, with the old and the new one.
     var onChange: ((State, State) -> Void)?
+    /// Called on every change of the network path, before the loopback is checked again.
+    var onNetworkChange: (() -> Void)?
     private var timer: Timer?
     private let path = NWPathMonitor()
     private let wifiPath = NWPathMonitor(requiredInterfaceType: .wifi)
@@ -79,6 +81,7 @@ final class LoopbackMonitor {
     /// interface came or went: the path summary also changes when a proxy's tunnel rebinds.
     private func networkChanged(physical: Bool) {
         probeEpoch &+= 1
+        onNetworkChange?()
         if physical { resetPortSearch() }
         if !isWorking { publish(.checking, log: false) }
         check()

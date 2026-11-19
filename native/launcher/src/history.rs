@@ -56,6 +56,40 @@ static RUN: AtomicU64 = AtomicU64::new(0);
 /// given). After that it tries once a round, so a refusing loopback is not hammered.
 const EAGER: Duration = Duration::from_secs(40);
 const EAGER_EVERY: Duration = Duration::from_secs(1);
+/// Until when (milliseconds since 1970) a run with no tunnel tries five times a second. The app
+/// sets it when the network changes and when the reconnect shortcut asks: the loopback takes a new
+/// connection only in the short time around cellular going away or coming back, while the proxy
+/// app's connection is still (or already) up (the owner's phone, 2026-11-19: with cellular off the
+/// proxy's connection is dropped, so waiting there finds nothing).
+static HURRY_UNTIL: AtomicU64 = AtomicU64::new(0);
+const HURRY_EVERY: Duration = Duration::from_millis(200);
+/// One try in a hurry gives up early, so a try that hangs does not use the whole moment up.
+const HURRY_OPEN_WITHIN: Duration = Duration::from_secs(4);
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Makes a run with no tunnel try fast for the coming seconds. A later call only ever extends it.
+pub fn hurry(seconds: u32) {
+    HURRY_UNTIL.fetch_max(now_ms() + u64::from(seconds.min(120)) * 1000, Ordering::SeqCst);
+}
+
+fn hurrying() -> bool {
+    now_ms() < HURRY_UNTIL.load(Ordering::SeqCst)
+}
+
+/// How long a round waits before the next: short while there is no tunnel and one may come.
+fn wait_for(no_tunnel: bool, eager: bool, interval: Duration) -> Duration {
+    if no_tunnel && hurrying() {
+        HURRY_EVERY
+    } else if no_tunnel && eager {
+        EAGER_EVERY
+    } else {
+        interval
+    }
+}
+
 /// The run reads nothing while this is set, and keeps its tunnel: on cellular a tunnel that was
 /// closed cannot be opened again, so a wait (an agent's task) must not cost it.
 static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -124,7 +158,8 @@ impl Target {
 
     async fn open(&self) -> Result<Device, Failure> {
         let mut pairing = Pairing::read(&self.pairing_file, self.host_name.as_deref())?;
-        let mut device = Device::open(self.address, &mut pairing, OPEN_WITHIN).await?;
+        let within = if hurrying() { HURRY_OPEN_WITHIN } else { OPEN_WITHIN };
+        let mut device = Device::open(self.address, &mut pairing, within).await?;
         if !crate::ddi::mounted(&device) {
             if let Some(dir) = self.ddi_dir.as_deref().filter(|d| crate::ddi::files_present(d)) {
                 // A failure here may only mean the supervisor mounted it meanwhile: the new tunnel tells.
@@ -297,9 +332,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             line["tunnel"] = device.is_some().into();
             // One line each round, so the caller can tell a held run from a silent one.
             emit(line);
-            let wait = if device.is_none() && since_start() < EAGER { EAGER_EVERY } else { interval };
-            while asked.elapsed() < wait && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(250)).await;
+            let none = device.is_none();
+            // Asked again each piece, so a hurry that begins during a long wait cuts it short.
+            while asked.elapsed() < wait_for(none, since_start() < EAGER, interval) && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
             continue;
         }
@@ -393,10 +429,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             }
         }
         emit(line);
-        let wait = if device.is_none() && since_start() < EAGER { EAGER_EVERY } else { interval };
-        // Waits in short pieces, so Stop is answered at once.
-        while asked.elapsed() < wait && RUN.load(Ordering::SeqCst) == me {
-            tokio::time::sleep(wait.saturating_sub(asked.elapsed()).min(Duration::from_millis(250))).await;
+        let none = device.is_none();
+        // Waits in short pieces, so Stop is answered at once and a hurry cuts a long wait short.
+        while asked.elapsed() < wait_for(none, since_start() < EAGER, interval) && RUN.load(Ordering::SeqCst) == me {
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
     if let Some(mut open) = direct.take() {

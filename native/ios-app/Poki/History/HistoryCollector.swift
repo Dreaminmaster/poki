@@ -67,6 +67,7 @@ final class HistoryCollector {
             }
         }
         model.background.onWake = { [weak self] in self?.evaluate("iOS woke Poki") }
+        model.loopback.onNetworkChange = { [weak self] in self?.networkChanged() }
         // The shared shortcut's way in, whether or not Screen History is on.
         HistoryReconnect.shared.listen(true, model: model)
         evaluate("Poki came to the front")
@@ -77,6 +78,41 @@ final class HistoryCollector {
         ownerStopped = true
         HistoryCapture.shared.stop()
         AppLog.shared.add("history", "collector: stopped by the owner until Poki is opened again")
+    }
+
+    /// How long the tunnel is tried fast after a change of network, and after the shortcut asked.
+    private static let catchFor: UInt32 = 30
+    private var catching = false
+
+    /// Cellular or Wi-Fi came or went. The loopback takes a new connection only in the moment
+    /// around such a change, so the run tries its tunnel fast now and is started if none is going.
+    private func networkChanged() {
+        guard let model, HistoryCapture.shared.enabled, !ownerStopped else { return }
+        HistoryBridge.hurry(Self.catchFor)
+        AppLog.shared.add("history", "collector: the network changed (\(model.loopback.pathSummary)), trying the tunnel fast for \(Self.catchFor) s")
+        if !HistoryCapture.shared.isRunning {
+            startedAt = .distantPast
+            evaluate("the network changed")
+        }
+    }
+
+    /// The shortcut's way in: answered at once, so the shortcut turns cellular back on without a
+    /// wait, and the tunnel is caught in the background as the network changes (the owner,
+    /// 2026-11-19: with cellular off the proxy's connection is gone, so holding the answer there
+    /// only hangs). The outcome is noted when it is known.
+    func reconnectSoon(_ model: AppModel, by source: String) -> Bool {
+        HistoryBridge.hurry(Self.catchFor)
+        guard !catching else {
+            AppLog.shared.add("loopback", "reconnect asked by \(source) again: still trying")
+            return true
+        }
+        catching = true
+        AppLog.shared.add("loopback", "reconnect asked by \(source): answered at once, trying for \(Self.catchFor) s")
+        Task { @MainActor in
+            _ = await self.reconnect(model, by: source, within: TimeInterval(Self.catchFor))
+            self.catching = false
+        }
+        return true
     }
 
     /// Opens the connection again now, without waiting out a run's next try, and says whether it
@@ -105,6 +141,7 @@ final class HistoryCollector {
         capture.stop()
         startedAt = .distantPast
         // A background start cannot take the keeper, but the run itself starts wherever Poki runs.
+        HistoryBridge.hurry(UInt32(seconds))
         evaluate("a reconnect was asked for")
         model.loopback.check()
         while Date().timeIntervalSince(asked) < seconds {

@@ -70,6 +70,8 @@ int32_t poki_history_call(const char *request_json, poki_event_cb cb, void *cont
 void poki_history_cancel(void);
 /// Holds (true) or lets go (false) the reads of the history run in progress; its tunnel stays open.
 void poki_history_pause(bool on);
+/* Makes the history run try its tunnel five times a second for the coming seconds, while it has none. */
+void poki_history_hurry(uint32_t seconds);
 
 #ifdef __cplusplus
 }
