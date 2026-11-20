@@ -23,6 +23,23 @@
         }
       }
     },
+    "Apple's sign-in service is temporarily unavailable (HTTP 503). Wait a few minutes, then try signing in again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 的登录服务暂时无法使用（HTTP 503）。请等几分钟，再试一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 的登入服務暫時無法使用（HTTP 503）。請等幾分鐘，再試一次。"
+          }
+        }
+      }
+    },
     "Your Apple session has expired. Sign in again." : {
       "localizations" : {
         "en" : {

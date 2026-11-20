@@ -361,6 +361,9 @@ impl Client {
                 return Err(apple_error(&root_st));
             }
         }
+        if http_status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            return Err(Error::msg("Apple's sign-in service is temporarily unavailable (HTTP 503). Wait a few minutes, then try signing in again."));
+        }
         if !http_status.is_success() {
             return Err(Error::msg(format!("Apple's sign-in service answered HTTP {http_status}.")));
         }
@@ -1342,7 +1345,9 @@ mod rate_limit_regressions {
                                 match op {
                                     "init" => {
                                         counts.lock().unwrap().srp_init += 1;
-                                        if b.srp_status != 200 {
+                                        if b.srp_status == 503 {
+                                            (503, "text/html", b"<h1>503 Service Unavailable</h1>".to_vec())
+                                        } else if b.srp_status != 200 {
                                             (b.srp_status, "text/plain", b"rate limited".to_vec())
                                         } else {
                                             *last_a.lock().unwrap() = data(req, "A2k").unwrap().to_vec();
@@ -1749,6 +1754,20 @@ mod rate_limit_regressions {
             signer.finish_sign_in(pending, "654321").await.unwrap();
             assert_eq!(mock.counts.lock().unwrap().srp_complete, 2, "signs in once more after the code");
             assert_eq!(mock.counts.lock().unwrap().sms_send, 1);
+        });
+    }
+
+    #[test]
+    fn sign_in_with_http_503_tells_the_user_to_try_again_later() {
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior { srp_status: 503, ..MockBehavior::default() }).await;
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let error = signer.sign_in_as("person@example.com", "correct-horse-battery", false, CodeCaller::IosSignIn).await.unwrap_err();
+
+            assert_eq!(error.to_string(), "Apple's sign-in service is temporarily unavailable (HTTP 503). Wait a few minutes, then try signing in again.");
+            assert!(!signer.account.is_rate_limited(time::OffsetDateTime::now_utc().unix_timestamp()));
+            assert_eq!(mock.counts.lock().unwrap().total_codes_sent(), 0);
         });
     }
 
