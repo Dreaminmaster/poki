@@ -132,7 +132,14 @@ enum Harness {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
-            guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
+            guard let name = tool["name"] as? String, let description = tool["description"] as? String, var schema = tool["inputSchema"] as? [String: Any] else { return nil }
+            if name == "do", var properties = schema["properties"] as? [String: Any] {
+                properties["used_memory_ids"] = [
+                    "type": "array", "items": string, "maxItems": 20,
+                    "description": "IDs of supplied saved memories that changed the actions in this call. Omit this field for memories you only read or that did not affect the actions.",
+                ] as [String: Any]
+                schema["properties"] = properties
+            }
             return ToolSpec(name: name, description: description, schema: schema)
         }
     }

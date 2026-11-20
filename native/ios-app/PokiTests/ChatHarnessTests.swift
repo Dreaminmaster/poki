@@ -31,17 +31,18 @@ final class ChatHarnessTests: XCTestCase {
     /// A conversation handed over by an outside agent, on the fake endpoint. The phone's tools answer
     /// without a session (the Debug probe's call), so routines reaches the app's own memory.
     private func chat(on server: FakeCompletions, transport: HTTPTransport? = nil,
-                      automation: InProcessAutomation = PKInProcess.shared(), kind: SavedSession.Kind = .handoff, readyForProbe: Bool = true) -> ChatModel {
+                      automation: InProcessAutomation = PKInProcess.shared(), kind: SavedSession.Kind = .handoff, readyForProbe: Bool = true,
+                      store: SessionStore? = nil) -> ChatModel {
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
         ModelKeys.customModel = "fake-model"
         ModelKeys.selectedProvider = .custom
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
         if readyForProbe { app.inProcessReadyForProbe() }
         self.app = app
-        return ChatModel(app: app, kind: kind, requester: kind == .handoff ? "Test agent" : nil)
+        return ChatModel(app: app, kind: kind, requester: kind == .handoff ? "Test agent" : nil, store: store)
     }
 
-    private static func json(_ object: [String: Any]) -> String {
+    nonisolated private static func json(_ object: [String: Any]) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 
@@ -694,65 +695,6 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(card.memoryUse?.skills, [name])
     }
 
-    func testFailedTaskCardNamesTheSkillWhenTheOwnerDeclinesTheNextActionInTheBatch() async throws {
-        let defaults = UserDefaults.standard
-        let mode = defaults.object(forKey: ApprovalClassifier.modeKey)
-        defaults.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
-        defer { defaults.set(mode, forKey: ApprovalClassifier.modeKey) }
-
-        let name = "Open Settings from the saved skill"
-        let bundle = "com.apple.Preferences"
-        let fixture = SkillStore(url: nil)
-        let skill = Skill(name: name, description: "", app: bundle,
-                          steps: [SkillStep(action: ["launch": .string(bundle)])],
-                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
-                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
-        XCTAssertTrue(fixture.save(skill))
-        let automation = FakeAutomation()
-        _ = automation.prepare()
-        let transport = SessionScreenTransport(session: automation, screenLabel: { "Delete" })
-        let server = try FakeCompletions(replies: [
-            FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Delete the sample item"], "currentStep": 2]),
-            FakeCompletions.tool("look", ["full": true]),
-            FakeCompletions.tool("do", ["actions": [["run": name], ["tap": 1]]]),
-            FakeCompletions.tool("finish_task", [
-                "success": false, "summary": "The owner declined the second action.",
-                "details": [], "answer": ["kind": "action"],
-            ]),
-            FakeCompletions.text("I stopped after you declined the deletion."),
-        ])
-        let chat = chat(on: server, transport: transport, automation: automation)
-        let app = try XCTUnwrap(app)
-        app.addShellObserver { [weak app] event in
-            if case .approvalRequested(let approval) = event { app?.resolve(approval, approved: false) }
-        }
-        let imported = await app.runTool("skills", arguments: Self.json([
-            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
-        ]))
-        XCTAssertFalse(imported.isError, imported.text)
-        let library = MemoryLibrary.shared
-        library.reload()
-        let item = try XCTUnwrap(library.items.first { $0.text == name })
-        defer { library.forget(item.id) }
-
-        let result = await chat.runDelegated("Open Settings and delete the sample item.")
-
-        XCTAssertEqual(result.success, false, result.text)
-        let batch = try XCTUnwrap(server.requests.dropFirst(3).first)
-        let answer = Self.toolAnswer(batch)
-        XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
-        XCTAssertTrue(answer.contains("not_sent from action 2: the owner declined on the phone"), answer)
-        XCTAssertTrue(chat.entries.contains {
-            if case .note(.approval(let note)) = $0.kind { return note.state == .refused && !note.byModel }
-            return false
-        })
-        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
-        guard case .plan(let steps) = card.kind else { return XCTFail("Missing task card") }
-        XCTAssertEqual(TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
-                                     stopped: card.stopped == true, saveFailed: card.saveFailed == true || card.failed == true), .failed)
-        XCTAssertEqual(card.memoryUse?.skills, [name])
-    }
-
     func testTaskCardKeepsLiveSkillAttributionAcrossTaskEndings() async throws {
         enum Ending: String, CaseIterable { case completed, declined, stopped, failed }
         let defaults = UserDefaults.standard
@@ -818,7 +760,7 @@ final class ChatHarnessTests: XCTestCase {
                 }
             }
 
-            _ = await chat.runDelegated("Check Settings and ask before the follow-up action.")
+            let result = await chat.runDelegated("Check Settings and ask before the follow-up action.")
             XCTAssertEqual(approvalRequested, needsApproval, ending.rawValue)
 
             let card = try XCTUnwrap(lastTaskCard(in: chat.entries))
@@ -831,10 +773,168 @@ final class ChatHarnessTests: XCTestCase {
             if ending != .stopped {
                 let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(3).first))
                 XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
-                if ending == .declined { XCTAssertTrue(answer.contains("the owner declined on the phone"), answer) }
+                if ending == .declined {
+                    XCTAssertEqual(result.success, false, result.text)
+                    XCTAssertTrue(answer.contains("not_sent from action 2: the owner declined on the phone"), answer)
+                    XCTAssertTrue(chat.entries.contains {
+                        if case .note(.approval(let note)) = $0.kind { return note.state == .refused && !note.byModel }
+                        return false
+                    })
+                }
                 if ending == .failed { XCTAssertTrue(answer.contains("wait takes nonnegative milliseconds"), answer) }
             }
         }
+    }
+
+    func testStoppingDuringSkillReplayKeepsTheSkillOnTheCard() async throws {
+        let name = "Open Settings and Calculator"
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let fixture = SkillStore(url: nil)
+        let skill = Skill(name: name, description: "", app: settings, steps: [
+            SkillStep(action: ["launch": .string(settings)]),
+            SkillStep(action: ["launch": .string(calculator)]),
+        ], params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+           lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let cards = try await stopWhenActivating(calculator, fixture: fixture, replies: [
+            FakeCompletions.tool("do", ["actions": [["run": name]]]),
+        ], expectedActivations: [settings, calculator])
+        XCTAssertEqual(cards.active?.memoryUse?.skills, [name], "Active card while a skill is still replaying")
+        XCTAssertEqual(cards.stopped.memoryUse?.skills, [name], "Stopped card after a partial replay")
+    }
+
+    func testStoppingAMemoryDrivenActionKeepsTheUsedMemoryOnTheCard() async throws {
+        let settings = "com.apple.Preferences"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Open Settings first when checking the device version.", by: "Poki"))
+        XCTAssertNotNil(fixture.remember("Use 24-hour time on the device.", by: "Poki"))
+        let cards = try await stopWhenActivating(settings, fixture: fixture, replies: [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": settings]], "used_memory_ids": [memory.id, "unseen-id"]]),
+        ], expectedActivations: [settings], offeredMemory: memory.id)
+        XCTAssertEqual(cards.active?.memoryUse?.notes.map(\.id), [memory.id], "Active card when the memory-driven action is sent")
+        XCTAssertEqual(cards.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopped card without finish_task")
+    }
+
+    private func stopWhenActivating(_ bundle: String, fixture: SkillStore, replies: [String],
+                                    expectedActivations: [String], offeredMemory: String? = nil) async throws -> (active: ChatEntry?, stopped: ChatEntry) {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Check the device"], "currentStep": 1]),
+        ] + replies)
+        let activations = AsyncStream.makeStream(of: String.self)
+        let gate = ChatTransportGate()
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, beforeActivation: {
+            activations.continuation.yield($0)
+            if $0 == bundle { await gate.holdFirstRequest() }
+        })
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let skillNames = Set(fixture.usableSkills.map(\.name))
+        let noteIDs = Set(fixture.notes.map(\.id))
+        let cleanup = library.items.filter { skillNames.contains($0.text) || noteIDs.contains($0.id) }.map(\.id)
+        let store = SessionStore.shared
+        let session = chat.sessionID
+        defer {
+            for id in cleanup { library.forget(id) }
+            store.delete(session)
+        }
+        func card(in entries: [ChatEntry]) -> ChatEntry? {
+            entries.last { if case .plan = $0.kind { true } else { false } }
+        }
+        var sent: [String] = []
+        var activeCard: ChatEntry?
+        let owner = Task { @MainActor in
+            for await activated in activations.stream {
+                sent.append(activated)
+                if activated == bundle {
+                    activeCard = card(in: store.session(session)?.entries ?? [])
+                    chat.stop()
+                    await gate.release()
+                    return
+                }
+            }
+        }
+        _ = await chat.runDelegated("Check the device version.")
+        activations.continuation.finish()
+        await owner.value
+        defer { withExtendedLifetime(server) {} }
+        XCTAssertEqual(sent, expectedActivations)
+        if let offeredMemory { XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(offeredMemory) }) }
+        XCTAssertNotNil(activeCard)
+        XCTAssertNil(activeCard?.ended)
+        let stopped = try XCTUnwrap(card(in: chat.entries))
+        XCTAssertEqual(stopped.id, activeCard?.id)
+        XCTAssertEqual(stopped.stopped, true)
+        return (activeCard, stopped)
+    }
+
+    func testReopeningANoPlanRetryInterruptsTheRetryCardAndLeavesTheEarlierCardAlone() async throws {
+        let fixture = SkillStore(url: nil)
+        let note = try XCTUnwrap(fixture.remember("The verification nickname is Test Device.", by: "Poki"))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let suiteName = "ChatHarnessTests.retry.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let task = "Recall the verification nickname."
+        let oldRequest = ChatEntry(.you(task, delivered: true))
+        var oldCard = ChatEntry(.plan([]))
+        oldCard.ended = Date()
+        oldCard.failed = true
+        let session = SavedSession(id: UUID().uuidString, kind: .poki, client: nil, title: task,
+                                   started: Date(), updated: Date(), live: false, outcome: .failed,
+                                   entries: [oldRequest, oldCard, ChatEntry(.note(.problem("The model connection ended.")))], calls: [])
+        try JSONEncoder().encode(session).write(to: folder.appendingPathComponent(session.id + ".json"))
+        let store = SessionStore(folder: folder, defaults: defaults)
+        let askedForReply = expectation(description: "The model received finish_task's reply but hasn't answered")
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Test Device", "details": [], "answer": ["kind": "field"], "used_memory_ids": [note.id],
+            ]),
+            FakeCompletions.text("Test Device."),
+        ], holdAfter: 2, onRequest: { request in
+            if Self.toolAnswer(request).contains("Result recorded.") { askedForReply.fulfill() }
+        })
+        let chat = chat(on: server, kind: .poki, store: store)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        defer {
+            chat.stop()
+            server.release()
+            MemoryLibrary.shared.forget(note.id)
+        }
+        chat.restore(try XCTUnwrap(store.session(session.id)))
+        XCTAssertTrue(chat.canRetry)
+        chat.retry()
+        await fulfillment(of: [askedForReply], timeout: 10)
+        XCTAssertTrue(chat.running)
+
+        let reopenedStore = SessionStore(folder: folder, defaults: defaults)
+        let reopened = try XCTUnwrap(reopenedStore.session(session.id))
+        let cards = reopened.entries.filter { if case .plan = $0.kind { true } else { false } }
+        let requests = reopened.entries.filter { if case .you = $0.kind { true } else { false } }
+        XCTAssertEqual(requests.count, 2, "The retry has its own request")
+        XCTAssertEqual(cards.first, oldCard, "The earlier task remains unchanged")
+        let retryCard = try XCTUnwrap(cards.first { $0.id != oldCard.id })
+        XCTAssertEqual(retryCard.memoryUse?.notes.map(\.id), [note.id])
+        XCTAssertNotNil(retryCard.ended, "Only the active retry card was interrupted")
+        XCTAssertEqual(reopened.outcome?.rawValue, "interrupted")
     }
 
     func testRejectedRequiredSaveLeavesTheTaskMemoryBatchUnchanged() async throws {
@@ -1082,7 +1182,7 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     /// The tool answer the model was given last in a request.
-    private static func toolAnswer(_ request: [String: Any]) -> String {
+    nonisolated private static func toolAnswer(_ request: [String: Any]) -> String {
         let messages = request["messages"] as? [[String: Any]] ?? []
         guard let tool = messages.last(where: { $0["role"] as? String == "tool" }) else { return "" }
         return (tool["content"] as? String) ?? json(tool)
@@ -2080,16 +2180,19 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let beforeRequest: (@Sendable () async -> Void)?
     private let screenLabel: @Sendable () -> String
+    private let beforeActivation: (@Sendable (String) async -> Void)?
     private let lock = NSLock()
     private var reads = 0
     private var firstRead: TimeInterval?
     var firstReadAt: TimeInterval? { lock.withLock { firstRead } }
     var screenReads: Int { lock.withLock { reads } }
     /// `screenLabel` is the one button the fake screen shows, read at each look.
-    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil, screenLabel: @escaping @Sendable () -> String = { "General" }) {
+    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
+         beforeActivation: (@Sendable (String) async -> Void)? = nil, screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
+        self.beforeActivation = beforeActivation
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
@@ -2098,6 +2201,9 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
         let value: JSON
         switch path {
+        case "/wda/apps/activate":
+            if let body, let bundle = (try? JSON.parse(body))?["bundleId"]?.string { await beforeActivation?(bundle) }
+            value = .null
         case "/session": value = ["sessionId": "fixture-session"]
         case "/status": value = ["ready": true]
         case "/wda/locked": value = false
