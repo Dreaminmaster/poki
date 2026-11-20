@@ -31,7 +31,7 @@ struct ModelSettingsView: View {
             } header: {
                 Text("In Use").textCase(nil)
             } footer: {
-                Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
+                Text("Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account.")
             }
 
             // With no account yet the card above has Add Account, and an empty group would only be a heading.

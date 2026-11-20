@@ -11,9 +11,6 @@ struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     var sharedDraft: Binding<String>? = nil
-    /// Opens Poki's card: under Poki's picture over the greeting on the home page (the bottom of the
-    /// picture, in global points), under the top bar in the chat (nil).
-    var openDetails: (_ under: CGFloat?) -> Void
     var openVoice: () -> Void
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
@@ -32,8 +29,6 @@ struct ChatView: View {
     private var voice: VoiceModel { model.voice }
     /// The taps on Poki's picture, for the bear to answer.
     @State private var pokes = 0
-    /// Where Poki's picture over the greeting ends, for the card to open under it.
-    @State private var homeBottom: CGFloat?
     /// How far Poki's picture rises from the home page into the top bar.
     @State private var flightRise: CGFloat = 0
     @State private var wardrobeOpen = false
@@ -42,12 +37,13 @@ struct ChatView: View {
         writing = false
         adding = false
         pokes += 1
+    }
+
+    private func openWardrobe() {
+        tapPoki()
         wardrobeOpen = true
     }
 
-    private func showPokiStatus() {
-        openDetails(isGreeting ? homeBottom : nil)
-    }
     /// The message field has the keyboard.
     @State private var writing = false
     /// Plus's ways to add a photo or a file stand over the message field.
@@ -163,7 +159,7 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: showPokiStatus)
+                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: tapPoki, openModel: openModel)
             }
         }
         .bottomBar(softEdge: true) {
@@ -185,7 +181,7 @@ struct ChatView: View {
             GeometryReader { proxy in
                 if !bare {
                     PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
-                               tap: tapPoki, statusCard: showPokiStatus, landed: { homeBottom = $0 }, travel: { flightRise = $0 })
+                               tap: tapPoki, openModel: openModel, openOutfits: openWardrobe, travel: { flightRise = $0 })
                         .offset(y: home && wardrobeOpen ? -46 : 0)
                         .animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.14), value: wardrobeOpen)
                 }
@@ -1033,10 +1029,11 @@ struct MessageListHeader: View {
     var subtitle: String? = nil
     var title: String = "Poki"
     var back: (() -> Void)? = nil
-    var openDetails: () -> Void
+    /// Settings › Models, for the menu's Add Model.
+    var openModel: () -> Void = {}
 
     var body: some View {
-        Button(action: openDetails) {
+        PokiMenu(openModel: openModel) {
             VStack(spacing: 4) {
                 PokiAvatar(size: 56)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {

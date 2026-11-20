@@ -3,7 +3,7 @@ import SwiftUI
 /// A home page pill's Edit popup (long press, Edit): a small card over the page with the pill's
 /// sentence and its app, Cancel and Save. It is two rows, so it is not a page (the owner). The card is
 /// the glass of the cards that ask for an answer (`ApprovalAskCard`), Save is Poki's blue, and the app
-/// row opens in place to the choices, as a row of Poki's card does (`PokiStatusCard`). Beginning the
+/// row opens in place to the choices, as a row of a settings card does. Beginning the
 /// sentence with an app's name picks that app; taking the app's name out of a sentence that began
 /// with it leaves no app, and the pill shows Poki's icon. Picking another app puts its name at the
 /// start of the sentence in place of the old one's.

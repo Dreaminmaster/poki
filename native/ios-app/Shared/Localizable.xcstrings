@@ -5228,18 +5228,18 @@
         }
       }
     },
-    "Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account." : {
+    "Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Poki 的卡片里更换聊天模型：轻点对话顶部 Poki 的头像。输入框听写不需要账户。"
+            "value" : "在 Poki 菜单里更换聊天模型。轻点首页的头像或对话顶部的名字打开菜单。输入框听写不需要账户。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Poki 的卡片裡更換聊天模型：輕點對話頂部 Poki 的頭像。輸入框聽寫不需要帳戶。"
+            "value" : "在 Poki 選單裡更換聊天模型。輕點首頁的頭像或對話頂部的名字開啟選單。輸入框聽寫不需要帳戶。"
           }
         }
       }
