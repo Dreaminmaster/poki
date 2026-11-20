@@ -16,7 +16,7 @@ struct ResultCard: Codable, Equatable {
     var primary: Action
     var next: Action?
     /// Each item's picture (a product's photo), JPEG, cut from the phone's screenshot where the item's
-    /// `image` box points when the task finished (`ResultCardPictures`). Only items whose picture was
+    /// `image` box points (`ResultCardPictures`). Only items whose picture was
     /// whole on the screen have one.
     var pictures: [String: Data]?
 
@@ -90,7 +90,7 @@ struct ResultCard: Codable, Equatable {
     func context(chosen: String?) -> String {
         let choice = selected(chosen)
         let rows = items.map { item in
-            ([item.title] + item.fields.keys.sorted().filter { $0 != "id" && $0 != "title" }.compactMap { key in
+            ([item.title] + item.fields.keys.sorted().filter { $0 != "id" && $0 != "title" && $0 != "image_screenshot" }.compactMap { key in
                 item.text(key).map { "\(key) \($0)" }
             }).joined(separator: ", ")
         }

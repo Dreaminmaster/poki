@@ -1,12 +1,64 @@
 import Foundation
 
-/// The pictures of a result card's items (a product's photo, a hotel's), to cut from the latest
-/// screenshot: the screenshot, the screen's size in points and each item's picture frame in points.
+public struct ItemPictureRequest: Sendable {
+    public let screenshotID: String
+    public let box: Rect
+
+    public init(screenshotID: String, box: Rect) {
+        self.screenshotID = screenshotID
+        self.box = box
+    }
+}
+
+/// All item pictures to cut from a single screenshot, with the screen size and frames in points.
 /// The app cuts them (PokiCore has no image library on Linux).
 public struct ItemPictures: Sendable {
     public var png: Data
     public var screen: ScreenSize
     public var frames: [String: Rect]
+}
+
+struct ItemPictureSource: Sendable {
+    let png: Data
+    let screen: ScreenSize
+    let images: [Rect]
+}
+
+struct ItemPictureSources {
+    private struct Capture {
+        let id: String
+        let task: String
+        let at: Double
+        let source: ItemPictureSource
+    }
+
+    private var recent: [Capture] = []
+    private static let lifetime: Double = 120
+    private static let limit = 8
+
+    mutating func record(_ source: ItemPictureSource, task: String) -> String {
+        let at = now()
+        recent.removeAll { at - $0.at >= Self.lifetime }
+        if recent.count == Self.limit { recent.removeFirst() }
+        let id = UUID().uuidString.lowercased()
+        recent.append(Capture(id: id, task: task, at: at, source: source))
+        return id
+    }
+
+    func pictures(_ requests: [String: ItemPictureRequest], task: String) -> [ItemPictures] {
+        let at = now()
+        let byScreenshot = Dictionary(grouping: requests) { $0.value.screenshotID }
+        return recent.compactMap { capture in
+            guard capture.task == task, at - capture.at < Self.lifetime,
+                  let requests = byScreenshot[capture.id] else { return nil }
+            let source = capture.source
+            var frames: [String: Rect] = [:]
+            for (id, request) in requests {
+                frames[id] = ItemPictureFit.frame(for: request.box, images: source.images, screen: source.screen)
+            }
+            return frames.isEmpty ? nil : ItemPictures(png: source.png, screen: source.screen, frames: frames)
+        }
+    }
 }
 
 enum ItemPictureFit {
@@ -32,19 +84,5 @@ enum ItemPictureFit {
         let both = a.intersection(b).area
         let either = a.area + b.area - both
         return either > 0 ? both / either : 0
-    }
-}
-
-extension Computer {
-    /// The latest screenshot with each item's picture frame, when it was taken in the last two minutes
-    /// of a whole screen (not one pane of a split view) and at least one box fits a picture.
-    func itemPictures(_ boxes: [String: Rect]) -> ItemPictures? {
-        guard !boxes.isEmpty, !paneSelected, let png = lastPNG, let at = lastPNGAt, now() - at < 120, let size else { return nil }
-        let images = lastAll.filter { $0.type == "Image" && !$0.fromPicture }.map(\.frame)
-        var frames: [String: Rect] = [:]
-        for (id, box) in boxes {
-            if let frame = ItemPictureFit.frame(for: box, images: images, screen: size) { frames[id] = frame }
-        }
-        return frames.isEmpty ? nil : ItemPictures(png: png, screen: size, frames: frames)
     }
 }

@@ -2089,12 +2089,16 @@ final class AppModel {
         return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask)
     }
 
-    /// A result card's item pictures, cut from the latest screenshot where the items' `image` boxes
-    /// point (`ResultCardPictures`); nil when there are none.
-    func itemPictures(for card: ResultCard) async -> [String: Data]? {
-        let boxes = Dictionary(card.items.compactMap { item in item.box("image").map { (item.id, $0) } }, uniquingKeysWith: { a, _ in a })
-        guard !boxes.isEmpty, let found = await core.itemPictures(boxes) else { return nil }
-        let cut = ResultCardPictures.cut(found)
+    func itemPictures(for card: ResultCard, localTask: String) async -> [String: Data]? {
+        let requests = card.items.compactMap { item -> (String, ItemPictureRequest)? in
+            guard let id = item.text("image_screenshot"), let box = item.box("image") else { return nil }
+            return (item.id, ItemPictureRequest(screenshotID: id, box: box))
+        }
+        guard !requests.isEmpty else { return nil }
+        let found = await core.itemPictures(Dictionary(requests, uniquingKeysWith: { first, _ in first }), localTask: localTask)
+        let cut = found.reduce(into: [String: Data]()) { pictures, source in
+            pictures.merge(ResultCardPictures.cut(source), uniquingKeysWith: { first, _ in first })
+        }
         return cut.isEmpty ? nil : cut
     }
 

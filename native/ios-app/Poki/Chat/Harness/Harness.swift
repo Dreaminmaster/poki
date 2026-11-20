@@ -175,7 +175,8 @@ enum Harness {
                           "wait": string, "change": string, "seats": ["type": "array", "items": seat]], ["number"])
         properties["legs"] = ["type": "array", "items": leg, "minItems": 2]
         properties["image"] = ["type": "array", "items": ["type": "number"], "minItems": 4, "maxItems": 4,
-                               "description": "[x, y, width, height] of the item's own picture (its photo) in the latest screenshot's points, only when that picture is whole on the screen now"]
+                               "description": "[x, y, width, height] of the item's whole picture in the screenshot named by image_screenshot"]
+        properties["image_screenshot"] = ["type": "string", "description": "Copy the screenshot_id from the tool answer whose screenshot supplied this item's image coordinates."]
         let item = object(properties, ["id", "title"])
         let kinds = [RailwayTrains.kind, RailwayTransfers.kind, Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares, Taobao.kind, Dianping.kind, UberEats.kind, AnyAppList.kind]
         var card = object(["app": string, "kind": ["type": "string", "enum": kinds],
@@ -200,7 +201,7 @@ enum Harness {
         kind dianping.places, Dianping's places: app "com.dianping.dpscope". Each item one place: title, subtitle its other name, rating ("4.5"), reviews ("79条"), price ("¥167/人"), category, area, distance, query on the first item. primary: {label: "在大众点评查看", say: "在大众点评打开 {title}"}.
         kind ubereats.items, a store's menu items on Uber Eats: app "com.ubercab.UberEats". Each item one menu item: title, price, detail (what comes with it), calories, store on the first item. primary: {label: "View in Uber Eats", say: "Open {title} ({price}) in Uber Eats"}.
         kind list, for any other app (Meituan, Fliggy, Amazon, a store, a booking site): app its bundle id. Each item: title, subtitle, detail, value the fact that decides the choice on the right ("¥58", "18:30", "4.8"), value_note under it, note, legs for a journey with changes, and heading and subheading on the first item (the search, the date). primary: {label: "在<app>查看", say: "在<app>打开 {title}"}. Use an app's own kind when it has one.
-        For a look whose app shows a picture per item (products, hotels, rooms, places, menu items), give image only for items whose picture is whole in the latest screenshot; the card cuts it from the phone's screen. Never guess one.
+        For a look whose app shows a picture per item (products, hotels, rooms, places, menu items), give image and image_screenshot together. Use the coordinates of the whole picture and copy screenshot_id from the tool answer that shows those coordinates. Items can use different screenshots. Omit both fields when that answer has no screenshot_id. Never guess either field.
         Values are copied from the screen as shown; leave out a field the screen does not show.
         """
 

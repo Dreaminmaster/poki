@@ -18,18 +18,29 @@ final class ItemPictureTests: XCTestCase {
             wda.set("GET /screenshot") { _ in (200, ["value": .string(png.base64EncodedString())]) }
             wda.tree([Node("Image", "Product photo", [frame.x, frame.y, frame.width, frame.height])])
         }
+        func screenshotID(_ answer: PokiCore.ToolAnswer) throws -> String {
+            XCTAssertNotNil(answer.jpeg)
+            let prefix = "screenshot_id: "
+            let line = try XCTUnwrap(answer.text.split(separator: "\n").first { $0.hasPrefix(prefix) })
+            return String(line.dropFirst(prefix.count))
+        }
 
         show(firstPNG, firstFrame)
         let first = await core.callTool("look", arguments: "{}", localTask: "shop")
-        XCTAssertNotNil(first.jpeg)
         show(secondPNG, secondFrame)
         let second = await core.callTool("look", arguments: "{}", localTask: "shop")
-        XCTAssertNotNil(second.jpeg)
 
-        let pictures = await core.itemPictures(["first": box, "second": box])
-        XCTAssertEqual(pictures?.png, firstPNG, "The first item came from the first screenshot")
-        XCTAssertEqual(pictures?.frames["first"], firstFrame)
-        XCTAssertEqual(pictures?.frames["second"], secondFrame)
+        let requests = [
+            "first": ItemPictureRequest(screenshotID: try screenshotID(first), box: box),
+            "second": ItemPictureRequest(screenshotID: try screenshotID(second), box: box),
+            "unknown": ItemPictureRequest(screenshotID: "unknown", box: box),
+        ]
+        let pictures = await core.itemPictures(requests, localTask: "shop")
+        XCTAssertEqual(pictures.count, 2)
+        XCTAssertEqual(pictures.first { $0.png == firstPNG }?.frames, ["first": firstFrame])
+        XCTAssertEqual(pictures.first { $0.png == secondPNG }?.frames, ["second": secondFrame])
+        let fromAnotherTask = await core.itemPictures(requests, localTask: "another task")
+        XCTAssertTrue(fromAnotherTask.isEmpty)
     }
 
     func testABoxThatMatchesAnImageTakesTheImagesWholeFrame() {

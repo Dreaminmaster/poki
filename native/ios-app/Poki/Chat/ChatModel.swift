@@ -1023,6 +1023,7 @@ final class ChatModel {
 
     private func performCall(_ call: ToolCall) async -> PokiCore.ToolAnswer {
         toolCalls += 1
+        let localTask = "\(sessionID)#\(runToken)"
         let args = (call.arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
         if usesSplitView {
             switch call.name {
@@ -1069,7 +1070,7 @@ final class ChatModel {
             var card = result.success && kind == .poki ? result.card : nil
             // The pictures are only ever cut from the phone's screen, never taken from the model.
             card?.pictures = nil
-            if let shown = card { card?.pictures = await app.itemPictures(for: shown) }
+            if let shown = card { card?.pictures = await app.itemPictures(for: shown, localTask: localTask) }
             if let card { showCard(card) }
             return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):
@@ -1084,7 +1085,7 @@ final class ChatModel {
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             let taskToken = runToken
-            let response = await app.runTool(call.name, arguments: call.arguments, localSession: splitViewSession, expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)")
+            let response = await app.runTool(call.name, arguments: call.arguments, localSession: splitViewSession, expectedApps: expectedSplitViewApps, localTask: localTask)
             guard taskToken == runToken, usesSplitView else { return response }
             let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&
                 response.splitView.map { $0.layout != lastSplitViewLayout } == true

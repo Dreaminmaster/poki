@@ -15,6 +15,7 @@ public struct ToolResult: Sendable {
     var waitingForOwner = false
     var automationAuthorizationDeclined = false
     var screenEvidence: ScreenEvidence? = nil
+    var itemPictureSource: ItemPictureSource?
 }
 
 struct ScreenEvidence: OptionSet, Sendable {
@@ -60,8 +61,6 @@ final class Computer: @unchecked Sendable {
     var swipeUnread = false
     var lastForeground: Foreground?
     private var selectedPane: (side: String, identity: String, app: String, other: String, session: String?)?
-    /// Whether reads are of one pane of a split view (their frames are the pane's, not the screen's).
-    var paneSelected: Bool { selectedPane != nil }
     private let workspaceOwner = LockedBox<String?>(nil)
     var hasLocalWorkspace: Bool { workspaceOwner.value != nil }
     func heldByLocalTask(otherThan session: String?) -> Bool {
@@ -483,10 +482,16 @@ final class Computer: @unchecked Sendable {
         var evidence: ScreenEvidence = []
         if treeRead || pictureOnly { evidence.insert(.references) }
         if reading.png != nil, jpeg != nil, size != nil { evidence.insert(.screenshot) }
+        var itemPictureSource: ItemPictureSource?
+        let pokiPane = reading.foreground?.pokiPane
+        if !inWorkspace, pokiPane != "left", pokiPane != "right", let png = reading.png, jpeg != nil, let size {
+            let images = reading.elements.filter { $0.type == "Image" && !$0.fromPicture }.map(\.frame)
+            itemPictureSource = ItemPictureSource(png: png, screen: size, images: images)
+        }
         // A screenshot helps the caller recover from a failed action without hiding the failure.
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
                           screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
-                          waitingForOwner: handoffWaiting, screenEvidence: evidence)
+                          waitingForOwner: handoffWaiting, screenEvidence: evidence, itemPictureSource: itemPictureSource)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
