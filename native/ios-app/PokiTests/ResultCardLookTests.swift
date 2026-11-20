@@ -67,6 +67,18 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertNil(card.problem)
     }
 
+    func testRoomActionsKeepTheHotelAcrossSelections() throws {
+        var card = try make(Ctrip.rooms, Ctrip.app, [
+            ["id": "king", "title": "King Room", "hotel": "Harbor Hotel", "price": "¥700"],
+            ["id": "twin", "title": "Twin Room", "price": "¥800"],
+        ])
+        card.primary.say = "Open {title} at {hotel} for {price}"
+
+        XCTAssertEqual(card.selected(nil).fill(card.primary.say), "Open King Room at Harbor Hotel for ¥700")
+        XCTAssertEqual(card.selected("twin").fill(card.primary.say), "Open Twin Room at Harbor Hotel for ¥800")
+        XCTAssertEqual(card.selected("king").fill(card.primary.say), "Open King Room at Harbor Hotel for ¥700")
+    }
+
     func testFinishTaskOffersEveryLookAndTheItemsPictureBox() throws {
         let finish = try XCTUnwrap(Harness.tools.first { $0.name == "finish_task" })
         let schema = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: finish.schema), encoding: .utf8))
