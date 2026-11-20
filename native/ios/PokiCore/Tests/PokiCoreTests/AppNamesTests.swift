@@ -151,6 +151,21 @@ final class AppNamesTests: XCTestCase {
         }
     }
 
+    func testAnUnknownDottedLaunchShorthandSendsNothing() async {
+        for actions: [JSON] in [
+            [["tap": 1], ["launch": "tutti.ch"]],
+            [["path": ["steps": [["tap": "General"], ["launch": "tutti.ch"]]]]],
+        ] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("tutti.ch") && result.text.contains("nothing was sent"), result.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, result.text)
+            XCTAssertEqual(launched(wda), [], result.text)
+        }
+    }
+
     func testANameWithADotIsANameUnlessItIsShapedLikeABundleID() async {
         for id in ["com.apple.mobiletimer", "tv.twitch", "com.example.new-app", "net.whatsapp.WhatsApp"] {
             XCTAssertTrue(Computer.looksLikeBundleID(id), id)
