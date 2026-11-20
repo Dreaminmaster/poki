@@ -415,7 +415,9 @@ extension Computer {
             // gesture gets, and a slow answer is not taken as a sign that the runner is gone.
             case "lock", "power": _ = try await runner.call("POST", "/wda/lock", [:], timeout: 8, countsAsMiss: false)
             // WDA serves the Home button only outside a session ("Unhandled endpoint" inside one).
-            case "home": _ = try await runner.raw("POST", "/wda/homescreen", [:], timeout: 8, countsAsMiss: false)
+            case "home":
+                _ = try await runner.raw("POST", "/wda/homescreen", [:], timeout: 8, countsAsMiss: false)
+                skillStepApp = nil
             default:
                 guard let wda = Self.buttons[n] else { throw ActionFailure(message: "button \(name) has no equivalent; use home, lock, volume_up or volume_down", delivery: .notSent) }
                 _ = try await runner.call("POST", "/wda/pressButton", ["name": .string(wda)], timeout: 8, countsAsMiss: false)
@@ -448,6 +450,7 @@ extension Computer {
                 do { _ = try await runner.call("POST", "/wda/apps/activate", ["bundleId": .string(bundle)], timeout: max(3, min(10, until - now() - 0.3))) }
                 catch let e as RunnerError where e.delivery == .notSent { throw Self.launchRefused(bundle, e) }
             }
+            skillStepApp = nil
             return ("launch", "launch \(bundle)\(fresh ? " (fresh)" : "")\(note)")
         case .waitUntil:
             return ("wait_until", try await waitUntil(spec, until: until))

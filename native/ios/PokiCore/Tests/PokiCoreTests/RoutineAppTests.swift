@@ -123,6 +123,10 @@ final class RoutineAppTests: XCTestCase {
         let saved = await core.call("skills", ["action": "save", "name": "Saved replay"])
         XCTAssertFalse(saved.isError, saved.text)
         XCTAssertEqual(store.skill(named: "Saved replay")?.app, Self.xiaohongshu)
+
+        let resaved = await core.call("skills", ["action": "save", "name": "Discover"])
+        XCTAssertFalse(resaved.isError, resaved.text)
+        XCTAssertEqual(store.skill(named: "Discover")?.runs, 1)
     }
 
     static let fileFrom045 = #"""

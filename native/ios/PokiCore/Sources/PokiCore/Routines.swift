@@ -87,6 +87,7 @@ public struct SkillStep: Codable, Equatable, Sendable {
     public var target: SkillTarget?
     /// The app in front when the step was sent.
     public var app: String?
+    var appWasRead: Bool? = nil
     /// A type into a password field: the text was not kept, so a run stops here for the agent.
     public var secret: Bool?
     /// Texts that must be on screen once the step is done ({tap: "Wi-Fi", expect: "Networks"}): read
@@ -213,7 +214,7 @@ public struct Skill: Codable, Equatable, Sendable {
 
     var startingApp: String? { Self.normalizedApp(steps.first?.app) ?? app }
 
-    fileprivate static func normalizedApp(_ raw: String?) -> String? {
+    private static func normalizedApp(_ raw: String?) -> String? {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty,
               trimmed.caseInsensitiveCompare("com.apple.springboard") != .orderedSame,
@@ -229,10 +230,12 @@ public struct Skill: Codable, Equatable, Sendable {
 
     private static func operatedApps(from steps: [SkillStep]) -> [String] {
         var apps: [String] = []
-        // Launch and Home can leave the previous foreground in the recorded steps until the next read.
+        // Older recordings can carry the previous app through Launch or Home without a new read.
         var staleForeground: String?
         for step in steps {
-            if let recorded = step.app, recorded != staleForeground { staleForeground = nil }
+            if let recorded = step.app, step.appWasRead == true || recorded != staleForeground {
+                staleForeground = nil
+            }
             switch ActionKind(step.action) {
             case .launch?:
                 let launch = step.action["launch"]
@@ -418,20 +421,10 @@ struct MemoryFile: Codable {
     mutating func regroupLegacySkills() -> Bool {
         guard (appRule ?? 0) < Self.currentAppRule else { return false }
         skills = skills.map { $0.migrated() }
-        if var changes {
-            for i in changes.indices {
-                let previous = changes[i].routine?.migrated()
-                changes[i].routine = previous
-                guard let name = changes[i].routineName else { continue }
-                if let current = skills.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
-                    changes[i].routineApp = current.app
-                } else if let previous {
-                    changes[i].routineApp = previous.app
-                } else {
-                    changes[i].routineApp = Skill.normalizedApp(changes[i].routineApp)
-                }
-            }
-            self.changes = changes
+        changes = changes?.map { change in
+            var migrated = change
+            migrated.routine = change.routine?.migrated()
+            return migrated
         }
         appRule = Self.currentAppRule
         return true
@@ -584,7 +577,12 @@ public final class SkillStore: @unchecked Sendable {
                 s.locked = old.locked
                 if s.app == nil { s.app = old.app }
                 // A skill saved again after it stopped is the path that worked: its record starts over.
-                if old.steps == s.steps { s.runs = old.runs; s.ok = old.ok; s.failuresInARow = old.failuresInARow; s.lastStop = old.lastStop }
+                let sameSteps = old.steps.elementsEqual(s.steps) { before, after in
+                    var comparable = before
+                    comparable.appWasRead = after.appWasRead
+                    return comparable == after
+                }
+                if sameSteps { s.runs = old.runs; s.ok = old.ok; s.failuresInARow = old.failuresInARow; s.lastStop = old.lastStop }
                 f.skills[i] = s
                 Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.edited, id: Self.newID(), at: Date(), by: skill.savedBy,
                                                 routineName: s.name, routineApp: s.app, routine: old))
@@ -1030,7 +1028,9 @@ extension Computer {
         }
         if case .object(var p) = o["pinch"], let e = element(.object(p)) { p["ref"] = nil; let c = e.frame.centre; p["x"] = .number(c.x.rounded()); p["y"] = .number(c.y.rounded()); o["pinch"] = .object(p) }
         let keys = Set(listed.map(\.element.key))
-        return RecordedStep(step: SkillStep(action: .object(o), target: target, app: lastForeground?.bundleID, secret: secret), typed: typed, keysBefore: keys)
+        var step = SkillStep(action: .object(o), target: target, app: skillStepApp, secret: secret)
+        if skillStepApp != nil { step.appWasRead = true }
+        return RecordedStep(step: step, typed: typed, keysBefore: keys)
     }
 
     /// The task's recorded steps as a skill (nil and why, when they cannot make one).
@@ -1350,6 +1350,7 @@ extension Computer {
                 // Not read for this step: a launch may not have opened what it named, so the runner says.
                 if !read, let info = try? await runner.raw("GET", "/wda/activeAppInfo", timeout: 1.5, countsAsMiss: false), let bundle = info["bundleId"]?.string, !bundle.isEmpty {
                     front = Foreground(bundleID: bundle, name: info["name"]?.string)
+                    read = true
                 }
                 if config.isPoki(front) {
                     refs[Self.runRef] = nil
@@ -1376,6 +1377,7 @@ extension Computer {
             if let element = refs[Self.runRef], step.target?.type == SkillTarget.anyType { recorded.target = SkillTarget(element) }
             refs[Self.runRef] = nil
             recorded.app = front?.bundleID ?? lastForeground?.bundleID ?? step.app
+            recorded.appWasRead = read && front?.bundleID != nil ? true : nil
             if let spec = action["launch"] { front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil) }
             done = index + 1
             log.append("\(index + 1) \(text.prefix(80)) (\(Int(((now() - began) * 1000).rounded())) ms)")
@@ -1475,6 +1477,7 @@ extension Computer {
     /// A new task: its recording starts empty.
     func beginRecording() {
         trace = []
+        skillStepApp = nil
         skillRanWhole = false
     }
 
