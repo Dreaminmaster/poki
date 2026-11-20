@@ -2870,7 +2870,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             } while ([by timeIntervalSinceNow] > 0);
             return NO;
         };
-        if (launch && !PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; })) {
+        BOOL sent = launch && !PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; });
+        if (sent) {
             // A launch sent while the old process is still exiting is answered but starts nothing.
             NSDate *by = [NSDate dateWithTimeIntervalSinceNow:5];
             while ([by timeIntervalSinceNow] > 0 && [[self frontApp][@"bundleId"] isEqualToString:bundle]) [NSThread sleepForTimeInterval:0.25];
@@ -2880,7 +2881,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             NSString *code = PKDaemonReply(30, ^(void (^reply)(NSError *)) {
                 [proxy _XCT_launchApplicationWithBundleID:bundle arguments:@[] environment:@{} completion:reply];
             });
-            if (code) return code;
+            if (code) return sent ? @"not_in_front" : code;
+            sent = YES;
             if (inFront(attempt ? 10 : 5)) return nil;
         }
         return @"not_in_front";

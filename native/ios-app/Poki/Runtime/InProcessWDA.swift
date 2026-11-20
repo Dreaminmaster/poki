@@ -367,6 +367,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             return (200, (["value": try route(body, element)] as JSON).data())
         } catch let r as Refusal {
             return refused(r.code == "invalid session id" ? 404 : 500, r.code, r.message)
+        } catch TransportError.other(let message) {
+            return (500, (["value": ["error": "unknown error", "message": .string(message), "delivery": "unknown"]] as JSON).data())
         } catch {
             return refused(500, "unknown error", "\(error)")
         }
@@ -389,6 +391,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
 
     private func done(_ failure: String?) throws -> JSON {
         guard let failure else { return .null }
+        if failure == "no_reply" || failure == "not_in_front" { throw TransportError.other(failure) }
         throw Refusal("unknown error", failure)
     }
 

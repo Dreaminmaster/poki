@@ -304,7 +304,7 @@ final class HomeShortcutStore {
     }
 
     private nonisolated static func remembered(_ routines: [Routine]) -> [HomeShortcuts.Remembered] {
-        routines.map { .init(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
+        routines.filter { !$0.stale }.map { .init(text: $0.description.isEmpty ? $0.name : $0.description, app: $0.app, runs: $0.runs, at: $0.updated) }
     }
 
     func refresh(sessions: [SavedSession], routines: [Routine], now: Date = Date()) {

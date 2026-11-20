@@ -177,6 +177,12 @@ final class AppIconStore {
                 if AppCapsule.everydayChinese.contains(name) {
                     return CapsuleText.appGoes(after: String(text[..<i]))
                 }
+                if name == "phone" {
+                    let before = text[..<i].reversed().drop(while: \.isWhitespace).prefix(while: \.isLetter)
+                    let after = text[(i + chars.count)...].drop(while: \.isWhitespace).prefix(while: \.isLetter)
+                    if ["this", "that", "my", "your", "our", "the"].contains(String(before.reversed())),
+                       !after.elementsEqual("app") { return false }
+                }
                 guard chars.allSatisfy(\.isASCII) else { return true }
                 // A Latin name stops at any letter; a number only at a Latin letter or a digit, as Chinese
                 // characters are letters too and sit right against it.

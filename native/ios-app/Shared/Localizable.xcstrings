@@ -7837,6 +7837,22 @@
         }
       }
     },
+    "Task interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中斷"
+          }
+        }
+      }
+    },
     "IPv6 present, %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -39329,6 +39345,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "透過 %@ API 回應"
+          }
+        }
+      }
+    },
+    "Used: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用到了：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用到了：%@"
+          }
+        }
+      }
+    },
+    "Skill: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "技能：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "技能：%@"
+          }
+        }
+      }
+    },
+    "Memory reported by Poki: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 报告使用的记忆：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 回報使用的記憶：%@"
+          }
+        }
+      }
+    },
+    "Couldn’t save the skill “%@”." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能保存技能「%@」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存技能「%@」。"
+          }
+        }
+      }
+    },
+    "Couldn’t save that memory." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能保存这条记忆。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存這則記憶。"
           }
         }
       }

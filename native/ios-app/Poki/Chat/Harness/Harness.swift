@@ -37,15 +37,15 @@ enum Harness {
     """
 
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
-    @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
+    @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
         if inSplitView {
             var parts = [splitViewInstructions, countedScrollInstructions]
             if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
-            return parts.joined(separator: "\n\n")
+            return (parts.joined(separator: "\n\n"), [])
         }
         let namedBundleIDs = AppIconStore.bundleIDs(namedIn: task)
-        let brief = PokiCore.memoryBrief(for: task, apps: namedBundleIDs)
+        let brief = SkillStore.shared.taskBrief(for: task, apps: namedBundleIDs)
         var parts = [instructions]
         parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.
@@ -68,9 +68,11 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        if let apps = appIDs(for: task) { parts.append(apps) }
-        if !brief.isEmpty { parts.append(brief) }
-        return parts.joined(separator: "\n\n")
+        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report IDs only on the actions that used them.")
+        parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
+        if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
+        if !brief.text.isEmpty { parts.append(brief.text) }
+        return (parts.joined(separator: "\n\n"), brief.notes)
     }
 
     /// A result card's send button names the recipient only when the notes do (the card's description).
@@ -82,8 +84,8 @@ enum Harness {
     /// (KnownApps). Without them the model guessed: a tester's 淘宝 and 美团 tasks (Nov 13 2026) were
     /// refused as "no app with that bundle id is installed", and the agent told the owner to install
     /// apps they had. nil when the request names no listed app.
-    @MainActor private static func appIDs(for task: String) -> String? {
-        let apps = AppIconStore.bundleIDs(namedIn: task).compactMap { KnownApps.byID[$0.lowercased()] }
+    private static func appIDs(_ bundleIDs: [String]) -> String? {
+        let apps = bundleIDs.compactMap { KnownApps.byID[$0.lowercased()] }
         guard !apps.isEmpty else { return nil }
         let lines = apps.map { app -> String in
             let names = app.names.joined(separator: " / ")
@@ -112,7 +114,7 @@ enum Harness {
     /// The current permission determines which ones are declared for each request.
     static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
         if !inSplitView {
-            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs + taskTools
+            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs.map(withActionMemoryIDs) + taskTools
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
@@ -133,13 +135,27 @@ enum Harness {
 
     /// PokiCore's catalog: look, do and status.
     static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false)
+    static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
+
+    private static func withActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
+        guard memoryUsingActions.contains(tool.name), var properties = tool.schema["properties"] as? [String: Any] else { return tool }
+        var tool = tool
+        properties["used_memory_ids"] = [
+            "type": "array", "items": string, "maxItems": 20,
+            "description": tool.name == "do"
+                ? "For a single action except path and run. Put memory IDs on the specific action, path step, or numbered step in run.step_memory_ids."
+                : "IDs of supplied saved memories that changed this action. Omit memories you only read.",
+        ] as [String: Any]
+        tool.schema["properties"] = properties
+        return tool
+    }
 
     private static func catalogTools(includeScreenHistory: Bool) -> [ToolSpec] {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
             guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
-            return ToolSpec(name: name, description: description, schema: schema)
+            return withActionMemoryIDs(ToolSpec(name: name, description: description, schema: schema))
         }
     }
 
@@ -173,6 +189,7 @@ enum Harness {
         schema: object([
             "success": ["type": "boolean"], "summary": string,
             "details": ["type": "array", "items": object(["label": string, "value": string], ["label", "value"])],
+            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "Obsolete and ignored. Omit this field."],
             "answer": object([
                 "kind": ["type": "string", "enum": ["action", "field", "list"]],
                 "items": ["type": "array", "items": object(["ref": string, "field": ["type": "string", "enum": ["label", "value"]], "prefix": string, "suffix": string], ["ref", "field"])],

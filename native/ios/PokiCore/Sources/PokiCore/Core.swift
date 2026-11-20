@@ -325,6 +325,9 @@ public struct RelayResponse: Sendable, Equatable {
 
 /// Poki on the phone: the MCP server behind the relay.
 public final class PokiCore: @unchecked Sendable {
+    /// The original do action, its replay step if any, and its saved skill, after a successful driver receipt.
+    public typealias ActionSucceeded = @MainActor @Sendable (Int, Int?, String?) -> Void
+
     public let config: CoreConfig
     weak var host: CoreHost?
     let runner: Runner
@@ -610,11 +613,13 @@ public final class PokiCore: @unchecked Sendable {
         public let waitingForOwner: Bool
         public let automationAuthorizationDeclined: Bool
         public let numberedScreen: NumberedScreen?
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, numberedScreen: NumberedScreen? = nil) {
+        public let offeredMemories: [MemoryNote]
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, numberedScreen: NumberedScreen? = nil, offeredMemories: [MemoryNote] = []) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
             self.automationAuthorizationDeclined = automationAuthorizationDeclined
             self.numberedScreen = numberedScreen
+            self.offeredMemories = offeredMemories
         }
     }
 
@@ -623,12 +628,24 @@ public final class PokiCore: @unchecked Sendable {
     /// object the model sent.
     /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
     /// where it was heard.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> ToolAnswer {
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: ActionSucceeded? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession, onActionSucceeded: onActionSucceeded)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
-                          automationAuthorizationDeclined: output.automationAuthorizationDeclined, numberedScreen: output.numberedScreen)
+                          automationAuthorizationDeclined: output.automationAuthorizationDeclined,
+                          numberedScreen: output.numberedScreen, offeredMemories: output.offeredMemories)
+    }
+
+    /// Returns the indices of writes that were not saved. A required failure discards the whole batch.
+    public func saveTaskMemories(_ writes: [TaskMemoryWrite], conversation: String, task: String) -> [Int] {
+        guard !writes.isEmpty, let store = computer.memory, gate.tryEnter() else { return Array(writes.indices) }
+        defer { gate.leave() }
+        return store.saveTaskMemories(writes) { staged, write in
+            guard let args = try? JSON.parse(write.arguments),
+                  let action = args["action"]?.string, ["save", "remember"].contains(action) else { return false }
+            return !skillsCall(args, session: nil, conversation: conversation, recordingTask: task, store: staged).isError
+        }
     }
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the
@@ -689,7 +706,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -745,11 +762,20 @@ public final class PokiCore: @unchecked Sendable {
                     }
                     return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps, localTask: localTask)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask)
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: onActionSucceeded)
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
             output = ToolResult(text: "error: \(error); what was sent is unknown. Call look to see the screen.", jpeg: nil, isError: true)
+        }
+        if local, session == nil, let localTask, localTask == computer.recordingTask,
+           !output.isError, let app = output.readApp?.lowercased(), app != "com.apple.springboard",
+           let memory = computer.memory, computer.memoryAppsOffered.insert(app).inserted {
+            let brief = memory.appMemoryBrief(for: app)
+            if !brief.notes.isEmpty {
+                output.text += "\n" + brief.text
+                output.offeredMemories = brief.notes
+            }
         }
         gate.current = nil
         gate.leave()

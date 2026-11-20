@@ -9,16 +9,17 @@ import UIKit
 
 /// How a task's card reads: Poki has the phone (blue), it waits for you (amber), or it is over.
 enum TaskCardState: Equatable {
-    case running, needsYou, yourTurn, done, failed, stopped
+    case running, needsYou, yourTurn, done, failed, stopped, interrupted
 
     /// From a plan's steps: `live` is the task under way; `waiting` and `handedOver` are what holds it.
-    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false) {
+    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false, interrupted: Bool = false) {
         if live {
             if handedOver { self = .yourTurn }
             else if waiting || steps.contains(where: { $0.state == .waiting }) { self = .needsYou }
             else { self = .running }
-        } else if stopped { self = .stopped }
-        else if steps.contains(where: { $0.state == .failed }) { self = .failed }
+        } else if interrupted { self = .interrupted }
+        else if stopped { self = .stopped }
+        else if saveFailed || steps.contains(where: { $0.state == .failed }) { self = .failed }
         else if steps.allSatisfy({ $0.state == .done }) { self = .done }
         else { self = .stopped }
     }
@@ -51,6 +52,7 @@ struct TaskCard: View {
     var ended: Date? = nil
     var plannedTotal: Int? = nil
     var resultSummary: String? = nil
+    var memoryUse: TaskMemoryUse? = nil
     /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
     /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
     @State private var open: Bool?
@@ -69,7 +71,14 @@ struct TaskCard: View {
     private var soft: Color { blue ? .white.opacity(0.74) : Color(.secondaryLabel) }
     /// Over: the result card (board 定稿 07), the app's icon, what was done, where and how long, and a
     /// mark for how it ended.
-    private var over: Bool { state == .done || state == .failed || state == .stopped }
+    private var over: Bool { state == .done || state == .failed || state == .stopped || state == .interrupted }
+    private var usedNotes: [MemoryItem] {
+        (memoryUse?.notes ?? []).compactMap { reference in
+            guard let item = MemoryLibrary.shared.item(reference.id),
+                  item.kind == .memory, Int64(item.updated.timeIntervalSince1970) == reference.updatedAtSeconds else { return nil }
+            return item
+        }
+    }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: over ? 20 : 26, style: .continuous)
@@ -125,6 +134,12 @@ struct TaskCard: View {
             VStack(alignment: .leading, spacing: over ? 2 : 1) {
                 Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? nil : 1)
                 subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? nil : 1)
+                let usedNames = (memoryUse?.skills ?? []) + usedNotes.map(\.text)
+                if !usedNames.isEmpty {
+                    Text("Used: \(usedNames.formatted(.list(type: .and)))")
+                        .font(.footnote).foregroundStyle(soft).lineLimit(big ? nil : 1)
+                        .accessibilityIdentifier("taskCard.memoryUse")
+                }
                 // At the accessibility text sizes the title wraps and the label goes under it.
                 if big, !over || asker != nil { pill }
             }
@@ -140,6 +155,7 @@ struct TaskCard: View {
         switch state {
         case .done: endMark("checkmark", Tint.green).accessibilityLabel(Text("Done"))
         case .failed: endMark("xmark", Tint.red).accessibilityLabel(Text("Failed"))
+        case .interrupted: endMark("stop.fill", Color(.systemGray), size: 7).accessibilityLabel(Text("Task interrupted"))
         default: endMark("stop.fill", Color(.systemGray), size: 7).accessibilityLabel(Text("Stopped"))
         }
     }
@@ -158,7 +174,7 @@ struct TaskCard: View {
                 .clipShape(.rect(cornerRadius: 10, style: .continuous))
         case .needsYou: PokiAvatar(size: 34, mood: .needsYou)
         case .yourTurn: PokiAvatar(size: 34, mood: .yourTurn)
-        case .done, .failed, .stopped:
+        case .done, .failed, .stopped, .interrupted:
             if let app, !app.isEmpty {
                 AppIconView(app: app, size: 32)
             } else if usedBrowser {
@@ -188,6 +204,8 @@ struct TaskCard: View {
             if let app, !app.isEmpty { Text("\(app), didn’t finish") } else { Text("Didn’t finish") }
         case .stopped:
             if let app, !app.isEmpty { Text("\(app), stopped") } else { Text("Stopped") }
+        case .interrupted:
+            Text("Task interrupted")
         case .running, .needsYou, .yourTurn:
             if isOpen {
                 HStack(spacing: 0) {
@@ -221,11 +239,17 @@ struct TaskCard: View {
                 .foregroundStyle(ink)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        ForEach(memoryUse?.skills ?? [], id: \.self) { name in
+            Text("Skill: \(name)").font(.subheadline).foregroundStyle(ink)
+        }
+        ForEach(usedNotes) { note in
+            Text("Memory reported by Poki: \(note.text)").font(.subheadline).foregroundStyle(ink)
+        }
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(steps) { step in
                     TaskStepRow(text: step.text, state: step.state, tone: tone,
-                                stopped: state == .stopped)
+                                stopped: state == .stopped || state == .interrupted)
                         .transition(PlanMotion.stepTransition)
                 }
                 ForEach(Array(upcoming.enumerated()), id: \.offset) { _, text in

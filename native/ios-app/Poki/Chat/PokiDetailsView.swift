@@ -88,7 +88,7 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                     NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
+                        SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.usableSkills.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                     NavigationLink(value: DetailsRoute.conversations) {
