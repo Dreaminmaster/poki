@@ -151,14 +151,10 @@ final class ChatModel {
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
     private var messageScroll: MessageScroll?
+    private var pendingCountedScroll: (requestID: UUID, progress: MessageScroll)?
     private var messageScreen: PokiCore.NumberedScreen?
     private var messagePane: String?
 
-    private var reportsMessageScroll: Bool {
-        guard let messageScroll else { return false }
-        return messageScroll.started || messageScroll.needsCount || taskResult != nil ||
-            (toolRoute == .app && planID != nil)
-    }
     /// The task under way as the owner asked it.
     private var taskText = ""
     private var client: ModelClient?
@@ -298,6 +294,7 @@ final class ChatModel {
         loop = nil
         client = nil
         restoredContext = nil
+        pendingCountedScroll = nil
         calls = []
         planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         sessionID = UUID().uuidString.lowercased()
@@ -321,6 +318,7 @@ final class ChatModel {
         userChoseConversation = true
         loop = nil
         client = nil
+        pendingCountedScroll = nil
         planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         sessionID = session.id
         calls = session.calls
@@ -420,7 +418,7 @@ final class ChatModel {
         let provider: ModelProvider
         let model: String
         let continuation: String?
-        let countedScrollTarget: Int?
+        let countedScroll: MessageScroll?
         let inSplitView: Bool
         let images: [Data]
         let namedApps: [String]
@@ -533,7 +531,7 @@ final class ChatModel {
         let answeredRequest = entries.first { $0.id == answeredID }
         let linkedTask: String?
         var countedScrollRequestID: UUID?
-        var countedScrollTarget = MessageScroll.requestedTarget(in: text)
+        var countedScroll = MessageScrollTarget.parse(text).map(MessageScroll.init(target:))
         let continuation: String?
         if let resumedTask {
             linkedTask = resumedTask
@@ -541,8 +539,13 @@ final class ChatModel {
         } else if let answeredRequest, case .you(let requestedText, _) = answeredRequest.kind {
             linkedTask = requestedText
             countedScrollRequestID = answeredRequest.id
-            countedScrollTarget = MessageScroll.requestedTarget(in: requestedText)
-            continuation = "The owner's latest message answers your question about this task: \(requestedText). Verify the requested count before completing it."
+            if let pendingCountedScroll, pendingCountedScroll.requestID == answeredRequest.id {
+                countedScroll = pendingCountedScroll.progress
+                countedScroll?.rereadAfterReply()
+            } else {
+                countedScroll = MessageScrollTarget.parse(requestedText).map(MessageScroll.init(target:))
+            }
+            continuation = "The owner's latest message answers your question about this task: \(requestedText). Recheck the current screen before continuing. Verify the requested count before completing it."
         } else {
             linkedTask = nil
             continuation = nil
@@ -599,7 +602,7 @@ final class ChatModel {
             }
             guard let client else { return nil }
             return PreparedSend(text: text, you: you, message: message, runSession: runSession, provider: provider, model: model,
-                                continuation: continuation, countedScrollTarget: countedScrollTarget,
+                                continuation: continuation, countedScroll: countedScroll,
                                 inSplitView: inSplitView, images: images, namedApps: namedApps,
                                 engine: .direct(client, instructions))
         }
@@ -608,23 +611,34 @@ final class ChatModel {
             return nil
         }
         return PreparedSend(text: text, you: you, message: message, runSession: runSession, provider: provider, model: model,
-                            continuation: continuation, countedScrollTarget: countedScrollTarget,
+                            continuation: continuation, countedScroll: countedScroll,
                             inSplitView: inSplitView, images: images, namedApps: namedApps,
                             engine: .pi(piModel))
     }
 
-    private func keepCountedScrollRequestForReply(to id: UUID) {
-        guard kind == .poki, messageScroll != nil, taskResult == nil, toolRoute != .web,
-              let tail = entries.indices.last, case .poki = entries[tail].kind,
-              let request = entries[..<tail].last(where: { if case .you = $0.kind { true } else { false } }),
-              request.id == id else { return }
-        entries[tail].countedScrollRequestID = request.countedScrollRequestID ?? id
+    private func askCountedScrollQuestion(_ text: String?, replyingTo id: UUID) -> Bool {
+        guard kind == .poki, let messageScroll, taskResult == nil, let text,
+              let request = entries.last(where: { $0.id == id }),
+              Self.isClarificationQuestion(text) else { return false }
+        let original = request.countedScrollRequestID ?? id
+        pendingCountedScroll = (original, messageScroll)
+        var question = ChatEntry(.poki(text))
+        question.countedScrollRequestID = original
+        if running { Haptics.received() }
+        entries.append(question)
+        return true
+    }
+
+    private static func isClarificationQuestion(_ text: String) -> Bool {
+        if text.contains(where: { "?？؟".contains($0) }) { return true }
+        return text.range(of: #"(?i)(?:^|[.!。！\n])\s*(?:please\s+(?:tell|specify|confirm|choose|provide|select|let me know)\b|请(?:你)?(?:告诉|说明|确认|选择|提供|回复)|請(?:你)?(?:告訴|說明|確認|選擇|提供|回覆))"#,
+                          options: .regularExpression) != nil
     }
 
     private func executePreparedSend(_ prepared: PreparedSend, token: Int) async {
         switch prepared.engine {
         case .direct(let client, let instructions):
-            await began("direct", prepared.provider, prepared.model, task: prepared.text, countedScrollTarget: prepared.countedScrollTarget)
+            await began("direct", prepared.provider, prepared.model, task: prepared.text, countedScroll: prepared.countedScroll)
             guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
             awaitingModel = true
             client.say(prepared.message)
@@ -661,7 +675,7 @@ final class ChatModel {
             }
             let splitSession = splitViewSession
             await began("pi", prepared.provider, prepared.model, task: prepared.text,
-                        countedScrollTarget: prepared.countedScrollTarget, splitViewSession: splitSession)
+                        countedScroll: prepared.countedScroll, splitViewSession: splitSession)
             guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
             awaitingModel = true
             if let splitSession, pair.count == 2 {
@@ -694,7 +708,7 @@ final class ChatModel {
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(prepared.you.id)
                 self.awaitingModel = false
-                if !self.reportsMessageScroll { self.add(.poki(text)) }
+                if self.messageScroll == nil { self.add(.poki(text)) }
             }
             if let splitSession {
                 await app.finishSplitViewTask(localSession: splitSession, authorizationDeclined: outcome == .authorizationDeclined) {
@@ -702,7 +716,8 @@ final class ChatModel {
                 }
             }
             let current = runToken == token
-            if current { ended(outcome, delivered: prepared.you.id) } else if splitSession == nil { app.finishTask() }
+            if current { ended(outcome, delivered: prepared.you.id, modelReply: loop.finalText) }
+            else if splitSession == nil { app.finishTask() }
             logEnd("pi", outcome: outcome, session: prepared.runSession, text: prepared.text, stopped: !current || outcome == .authorizationDeclined)
             guard current else { return }
             running = false
@@ -840,9 +855,10 @@ final class ChatModel {
     private static var direct: Bool { UserDefaults.standard.string(forKey: "chatEngine") == "direct" }
 
     private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String,
-                       countedScrollTarget: Int?, splitViewSession: String? = nil) async {
+                       countedScroll: MessageScroll?, splitViewSession: String? = nil) async {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
-        messageScroll = countedScrollTarget.map(MessageScroll.init(target:))
+        pendingCountedScroll = nil
+        messageScroll = countedScroll
         messageScreen = nil
         messagePane = nil
         taskCalls.removeAll()
@@ -914,13 +930,17 @@ final class ChatModel {
     /// The display name of the agent whose hand-off is running, while one runs.
     static var delegatedBusy: String?
 
-    private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID) {
+    private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID, modelReply: String? = nil) {
         let stopped = outcome == .stopped || outcome == .authorizationDeclined
         // The turn is over: the phone goes back to the app the task began in (Poki's chat, where the
         // reply is), or stays where it is and the reply goes out as a notification that can be answered
         // there (Advanced › When a Task Ends).
         var reply: String?
-        if let counted = finishMessageScroll(outcome) {
+        let waitingForReply = outcome == .done && askCountedScrollQuestion(modelReply, replyingTo: youID)
+        if waitingForReply {
+            markDelivered(youID)
+            reply = modelReply
+        } else if let counted = finishMessageScroll(outcome) {
             if outcome == .done { markDelivered(youID) }
             reply = counted
             add(.poki(counted))
@@ -928,7 +948,6 @@ final class ChatModel {
             switch outcome {
             case .done:
                 markDelivered(youID)
-                keepCountedScrollRequestForReply(to: youID)
                 reply = entries.reversed().lazy.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }.first
             case .stopped, .authorizationDeclined: add(.poki(AppLocalization.text(LocalizedStringResource("Stopped."))))
             case .overTurns:
@@ -942,7 +961,7 @@ final class ChatModel {
                 add(.note(.problem(words)))
             }
         }
-        finishPlan(stopped: stopped)
+        finishPlan(stopped: stopped || waitingForReply)
         if stopped {
             app.chatTaskStopped()
             if !usesSplitView { app.finishTask(switching: outcome != .authorizationDeclined) }
@@ -955,7 +974,7 @@ final class ChatModel {
     }
 
     private func finishMessageScroll(_ outcome: PiLoop.Outcome) -> String? {
-        guard reportsMessageScroll, let messageScroll else { return nil }
+        guard let messageScroll else { return nil }
         if let taskResult { return taskResult.summary }
         let verified = outcome == .done && messageScroll.verifiedTarget(in: messageScreen, pane: messagePane)
         let reason: String?
@@ -1042,7 +1061,7 @@ final class ChatModel {
             }
             if stopped { client.forgetUnansweredQuestion(); return }
             markDelivered(youID)
-            if !reportsMessageScroll { for text in turn.texts { add(.poki(text)) } }
+            if messageScroll == nil { for text in turn.texts { add(.poki(text)) } }
             switch turn.ending {
             case .tools:
                 var authorizationDeclined = false
@@ -1079,9 +1098,9 @@ final class ChatModel {
                 return
             case .done:
                 // A reply without tools ends the turn, as a chat does: the model may be asking the owner something.
-                if let counted = finishMessageScroll(.done) { add(.poki(counted)) }
-                else { keepCountedScrollRequestForReply(to: youID) }
-                finishPlan()
+                let waitingForReply = askCountedScrollQuestion(turn.texts.joined(separator: "\n\n"), replyingTo: youID)
+                if !waitingForReply, let counted = finishMessageScroll(.done) { add(.poki(counted)) }
+                finishPlan(stopped: waitingForReply)
                 return
             }
         }
@@ -1167,7 +1186,7 @@ final class ChatModel {
             guard var result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
                 return PokiCore.ToolAnswer(text: Harness.invalidResult, jpeg: nil, isError: true)
             }
-            if var scroll = messageScroll, toolRoute != .web {
+            if var scroll = messageScroll {
                 if result.success && !scroll.verifiedTarget(in: messageScreen, pane: messagePane) {
                     let answer = scroll.rejectCompletion()
                     messageScroll = scroll
@@ -1195,7 +1214,9 @@ final class ChatModel {
             var toolArguments = call.arguments
             var countedDistance: Double?
             if call.name == "do", let messageScroll, messageScroll.started, !actions.isEmpty || args["finish"] as? Bool == true {
-                if messageScroll.reachedTarget || messageScroll.needsCount { return messageScroll.progress(error: true) }
+                if messageScroll.reachedTarget || messageScroll.reachedTop || messageScroll.needsCount {
+                    return messageScroll.progress(error: true)
+                }
                 let skipsReads = actions.contains { $0["run"] != nil || $0["path"] != nil }
                 if actions.count > 1 || skipsReads || args["finish"] as? Bool == true {
                     return PokiCore.ToolAnswer(text: "Send one scroll at a time and verify the next screen before continuing.", jpeg: nil, isError: true)
@@ -1253,8 +1274,7 @@ final class ChatModel {
                 steps[i].state = result.success ? .done : .failed
             }
         }
-        if messageScroll != nil, toolRoute != .web,
-           let planID, let index = entries.firstIndex(where: { $0.id == planID }) {
+        if messageScroll != nil, let planID, let index = entries.firstIndex(where: { $0.id == planID }) {
             entries[index].resultSummary = result.success ? nil : result.summary
         }
     }

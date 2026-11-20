@@ -19,32 +19,15 @@ struct MessageScroll {
     private var confirmed = 0
     private var anchor: Element?
     private var problem: Problem?
-    private var dragTravel: Double? = 0
+    private var lastDragDistance: Double?
     private var recovery: Recovery?
     private(set) var needsCount = false
     var started: Bool { page != nil }
     var reachedTarget: Bool { confirmed == target && !needsCount && problem == nil }
+    var reachedTop: Bool { problem == .stationary }
     var observedStopReason: String? { problem?.words }
 
     init(target: Int) { self.target = target }
-
-    // Explicit requests can activate the completion check even if the model skips the counting tool.
-    private static let targetPatterns = [
-        #"\b(?:scroll|go)\s+(?:up|back)\s+(?:by\s+)?([0-9]+)\s+(?:older\s+)?messages?\b"#,
-        #"\bscroll\s+([0-9]+)\s+(?:older\s+)?messages?\s+(?:up|back)\b"#,
-        #"(?:往上|向上|往回|向回)\s*(?:翻|滑动|滑動|滑|滚动|滾動)\s*([0-9]+)\s*(?:条|條|則)(?:\s*(?:消息|信息|訊息))?"#,
-    ].map { try! NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-    static func requestedTarget(in request: String) -> Int? {
-        let range = NSRange(request.startIndex..., in: request)
-        for pattern in targetPatterns {
-            if let match = pattern.firstMatch(in: request, range: range),
-               let digits = Range(match.range(at: 1), in: request),
-               let target = Int(request[digits]), target > 0 {
-                return target
-            }
-        }
-        return nil
-    }
 
     func boundedDrag(_ drag: Any?) -> (action: [String: Any], distance: Double)? {
         guard let page, page.rows.count >= 2 else { return nil }
@@ -93,7 +76,11 @@ struct MessageScroll {
     mutating func actionTookPlace(error: Bool, distance: Double?) {
         needsCount = true
         problem = error ? .actionFailed : .unreadable
-        dragTravel = error ? nil : distance
+        lastDragDistance = error ? nil : distance
+    }
+
+    mutating func rereadAfterReply() {
+        if started { needsCount = true }
     }
 
     mutating func rejectCompletion() -> PokiCore.ToolAnswer {
@@ -104,7 +91,7 @@ struct MessageScroll {
     func verifiedTarget(in screen: PokiCore.NumberedScreen?, pane: String?) -> Bool {
         guard reachedTarget, let page, let anchor, let screen,
               page.bundleID == screen.bundleID, page.pane == pane else { return false }
-        return screen.elements.values.contains { $0.key == anchor.key && $0.frame == anchor.frame }
+        return screen.elements.values.contains { Self.sameMessage($0, anchor) && $0.frame == anchor.frame }
     }
 
     mutating func count(_ refs: [Int], in screen: PokiCore.NumberedScreen?, pane: String?) -> PokiCore.ToolAnswer {
@@ -120,42 +107,35 @@ struct MessageScroll {
             anchor = rows.first
             needsCount = false
             problem = nil
-            dragTravel = 0
+            lastDragDistance = nil
             return progress()
         }
         guard previous.bundleID == current.bundleID, previous.pane == current.pane else {
             return rejected(.differentApp)
         }
         let positionTolerance = 2.0
-        let samePage = previous.rows.count == rows.count && zip(previous.rows, rows).allSatisfy { old, new in
-            old.key == new.key && old.identifier == new.identifier &&
-            abs(old.frame.centre.x - new.frame.centre.x) <= positionTolerance &&
-            abs(old.frame.centre.y - new.frame.centre.y) <= positionTolerance
-        }
+        let samePage = rows.count == previous.rows.count &&
+            zip(previous.rows, rows).allSatisfy { Self.sameMessage($0, $1) && $0.frame == $1.frame }
         if case .exhausted = recovery { return rejected(.unmatched) }
         if case .returning(let distance) = recovery {
-            guard let dragTravel, dragTravel < 0, samePage else { return rejected(.unmatched) }
-            if let anchor, let index = previous.rows.firstIndex(of: anchor) { self.anchor = rows[index] }
-            page = current
+            guard needsCount, let lastDragDistance, lastDragDistance < 0, samePage else {
+                return rejected(.unmatched)
+            }
             recovery = .retrying(distance: distance / 2)
             needsCount = false
             problem = nil
-            self.dragTravel = 0
+            self.lastDragDistance = nil
             return progress()
         }
-        // When the bounded drag could have moved past the old page, neither text nor spacing can prove overlap.
-        let span = rows[rows.count - 1].frame.centre.y - previous.rows[0].frame.centre.y
-        guard let dragTravel, dragTravel + positionTolerance < span else { return rejected(.unmatched) }
+        if problem == .actionFailed { return progress(error: true) }
         if samePage {
-            if let anchor, let index = previous.rows.firstIndex(of: anchor) { self.anchor = rows[index] }
-            page = current
-            if needsCount, confirmed < target { problem = .stationary }
+            if needsCount, lastDragDistance != nil { problem = .stationary }
             needsCount = false
-            self.dragTravel = 0
-            if case .retrying = recovery { recovery = .exhausted }
+            lastDragDistance = nil
             return progress()
         }
-        guard let overlap = Self.overlap(between: previous.rows, and: rows, within: dragTravel, tolerance: positionTolerance) else {
+        guard needsCount, lastDragDistance != nil,
+              let overlap = Self.overlap(between: previous.rows, and: rows, tolerance: positionTolerance) else {
             return rejected(.unmatched)
         }
         let newRows = rows.count - overlap
@@ -165,12 +145,16 @@ struct MessageScroll {
         page = current
         needsCount = false
         problem = nil
-        self.dragTravel = 0
+        lastDragDistance = nil
         recovery = nil
         return progress()
     }
 
-    private static func overlap(between previous: [Element], and current: [Element], within travel: Double, tolerance: Double) -> Int? {
+    private static func sameMessage(_ first: Element, _ second: Element) -> Bool {
+        first.key == second.key && first.identifier == second.identifier
+    }
+
+    private static func overlap(between previous: [Element], and current: [Element], tolerance: Double) -> Int? {
         let maximum = min(previous.count, current.count)
         guard maximum >= 2 else { return nil }
         // A repeated label can join two disjoint pages. Require a sequence with context
@@ -178,13 +162,9 @@ struct MessageScroll {
         let candidates = (2...maximum).filter { length in
             let olderPageTail = current.suffix(length)
             let shift = current[current.count - length].frame.centre.y - previous[0].frame.centre.y
-            // The list starts moving only after recognizing the pan. In the simulator,
-            // a 420-point resting drag moved the visible rows 399 points.
-            let panAllowance = 32.0
-            guard shift > tolerance, shift <= travel + tolerance, travel - shift <= panAllowance,
-                  Set(olderPageTail.map(\.key)).count > 1 else { return false }
+            guard shift > 0, Set(olderPageTail.map(\.key)).count > 1 else { return false }
             return zip(previous.prefix(length), olderPageTail).allSatisfy { old, new in
-                old.key == new.key && old.identifier == new.identifier &&
+                sameMessage(old, new) &&
                     abs(new.frame.centre.x - old.frame.centre.x) <= tolerance &&
                     abs(new.frame.centre.y - old.frame.centre.y - shift) <= tolerance
             }
@@ -196,8 +176,8 @@ struct MessageScroll {
         if self.problem != .actionFailed { self.problem = problem }
         if !started { needsCount = true }
         if problem == .unmatched, needsCount {
-            if recovery == nil, let dragTravel, dragTravel >= 24 {
-                recovery = .returning(distance: dragTravel)
+            if recovery == nil, let lastDragDistance, lastDragDistance >= 24 {
+                recovery = .returning(distance: lastDragDistance)
             } else {
                 recovery = .exhausted
             }
@@ -210,7 +190,7 @@ struct MessageScroll {
         let next: String
         if reachedTarget {
             next = "The requested message is visible. Call finish_task."
-        } else if problem == .actionFailed {
+        } else if problem == .actionFailed || reachedTop {
             next = problem?.instruction ?? ""
         } else {
             switch recovery {
@@ -251,7 +231,7 @@ struct MessageScroll {
         var instruction: String {
             switch self {
             case .unreadable: return "Use a full screen read and submit the current message refs in top-to-bottom order."
-            case .stationary: return "The list stopped moving. Check whether more history is available."
+            case .stationary: return "The list stopped moving. Stop and report the confirmed count."
             case .unmatched: return "Couldn't match the overlap. Stop and report the confirmed count."
             case .differentApp: return "The app or pane changed. Return to the original conversation."
             case .actionFailed: return "The scroll could not be verified. Read the conversation again."

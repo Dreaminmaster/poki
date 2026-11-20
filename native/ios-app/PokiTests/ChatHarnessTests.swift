@@ -141,7 +141,8 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testCountedMessageScrollRejectsARepeatedSequenceAfterAFullPageDrag() async throws {
-        let transport = MessageListTransport(messages: ["D", "E", "Got it", "OK", "Got it", "OK", "B", "C"], step: 4)
+        let transport = MessageListTransport(messages: ["D", "E", "Got it", "OK", "Got it", "OK", "B", "C"],
+                                             step: 4, identifiesMessages: true)
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
@@ -202,7 +203,7 @@ final class ChatHarnessTests: XCTestCase {
     func testCountedScrollDoesNotUseADragDistanceAsProofOfOverlap() async throws {
         let transport = MessageListTransport(
             messages: ["D", "E", "F", "G", "Got it", "OK", "Got it", "OK", "A", "B", "C", "Z"],
-            visibleCount: 6, step: 6, spacing: 120
+            visibleCount: 6, step: 6, spacing: 120, identifiesMessages: true
         )
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
@@ -2077,16 +2078,19 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
     private let step: Int
     private let spacing: Int
     private let failsDrag: Bool
+    private let identifiesMessages: Bool
     private var top: Int
     var topMessage: Int { lock.withLock { top } }
 
     init(messages: [String] = (1...8).map { String(format: "Message %02d", $0) },
-         visibleCount: Int = 4, step: Int = 2, spacing: Int = 100, failsDrag: Bool = false) {
+         visibleCount: Int = 4, step: Int = 2, spacing: Int = 100, failsDrag: Bool = false,
+         identifiesMessages: Bool = false) {
         self.messages = messages
         self.visibleCount = visibleCount
         self.step = step
         self.spacing = spacing
         self.failsDrag = failsDrag
+        self.identifiesMessages = identifiesMessages
         top = messages.count - visibleCount + 1
     }
 
@@ -2103,8 +2107,9 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
         case "/source":
             let first = topMessage
             let rows = (0..<visibleCount).map { line in
-                let title = messages[first + line - 1]
-                return #"<XCUIElementTypeStaticText label="\#(title)" x="20" y="\#(140 + line * spacing)" width="250" height="40"/>"#
+                let index = first + line - 1
+                let name = identifiesMessages ? #" name="message-\#(index)""# : ""
+                return #"<XCUIElementTypeStaticText\#(name) label="\#(messages[index])" x="20" y="\#(140 + line * spacing)" width="250" height="40"/>"#
             }.joined()
             value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
         case "/wda/pressAndDragWithVelocity", "/actions":

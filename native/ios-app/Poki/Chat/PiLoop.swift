@@ -32,6 +32,10 @@ final class PiLoop {
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
+    var finalText: String? {
+        guard case .assistant(let reply)? = messages.last, reply.stopReason == .stop else { return nil }
+        return Self.textBlocks(reply).joined(separator: "\n\n")
+    }
     var hasCurrentCustomBackups: Bool {
         guard let endpoint else { return true }
         return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
@@ -154,11 +158,7 @@ final class PiLoop {
                 if gate.stopped { agent.abort() }
             case .messageEnd(.assistant(let reply)):
                 if reply.stopReason == .error { failure.set(reply.errorMessage ?? "") }
-                let texts = reply.content.compactMap { block -> String? in
-                    guard case .text(let content) = block else { return nil }
-                    let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return text.isEmpty ? nil : text
-                }
+                let texts = Self.textBlocks(reply)
                 if !texts.isEmpty { await MainActor.run { texts.forEach(onText) } }
             default: break
             }
@@ -187,6 +187,14 @@ final class PiLoop {
             return .failed(Self.words(message, provider: provider))
         }
         return .done
+    }
+
+    private nonisolated static func textBlocks(_ reply: AssistantMessage) -> [String] {
+        reply.content.compactMap { block in
+            guard case .text(let content) = block else { return nil }
+            let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
+        }
     }
 
     /// Ends the task after the step under way: nothing more is sent to the phone or the model.
