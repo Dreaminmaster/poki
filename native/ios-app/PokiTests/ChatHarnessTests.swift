@@ -604,7 +604,9 @@ final class ChatHarnessTests: XCTestCase {
         let name = "Read the recovery label \(UUID().uuidString)"
         let fixture = SkillStore(url: nil)
         let memory = try XCTUnwrap(fixture.remember(note, by: "Poki"))
-        let skill = Skill(name: name, description: "", app: nil, steps: [SkillStep(action: ["wait": 0])],
+        let settings = "com.apple.Preferences"
+        let skill = Skill(name: name, description: "", app: settings,
+                          steps: [SkillStep(action: ["launch": .string(settings)])],
                           params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
                           lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
         XCTAssertTrue(fixture.save(skill))
@@ -695,6 +697,61 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(card.memoryUse?.skills, [name])
     }
 
+    func testTaskCardOmitsSourcesWhenTheSkillCannotSendItsFirstStep() async throws {
+        let name = "Open the saved Settings version panel"
+        let bundle = "com.apple.Preferences"
+        let target = try JSONDecoder().decode(SkillTarget.self, from: Data(
+            #"{"type":"Button","label":"General","x":195,"y":122}"#.utf8
+        ))
+        let fixture = SkillStore(url: nil)
+        XCTAssertTrue(fixture.save(Skill(name: name, description: "", app: bundle,
+                                         steps: [SkillStep(action: ["tap": "@"], target: target)],
+                                         params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                                         lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())))
+        let memory = try XCTUnwrap(fixture.remember("Use the saved Settings version panel for this check.", by: "Poki"))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Read the version in Settings"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["run": name]], "used_memory_ids": [memory.id]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The saved target was missing.",
+                "details": [], "answer": ["kind": "field"],
+            ]),
+            FakeCompletions.text("I couldn't open the version panel."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Privacy" }),
+                        automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer {
+            library.forget(item.id)
+            library.forget(memory.id)
+            SessionStore.shared.delete(chat.sessionID)
+        }
+
+        let result = await chat.runDelegated("Check the device version with the saved Settings panel.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(memory.id) })
+        let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(4).first))
+        XCTAssertTrue(answer.contains("Button \"General\" is not on screen"), answer)
+        XCTAssertTrue(answer.contains("no step was sent"), answer)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        XCTAssertNotNil(card.ended)
+        XCTAssertEqual(card.failed, true)
+        XCTAssertTrue(card.memoryUse?.skills.isEmpty ?? true, "The card must omit the skill when no step was sent")
+        XCTAssertTrue(card.memoryUse?.notes.isEmpty ?? true, "The card must omit memory for the unsent operation")
+    }
+
     func testTaskCardKeepsLiveSkillAttributionAcrossTaskEndings() async throws {
         enum Ending: String, CaseIterable { case completed, declined, stopped, failed }
         let defaults = UserDefaults.standard
@@ -708,6 +765,8 @@ final class ChatHarnessTests: XCTestCase {
                                          steps: [SkillStep(action: ["launch": .string(bundle)])],
                                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
                                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())))
+        let opening = try XCTUnwrap(fixture.remember("Start the version check by opening Settings.", by: "Poki"))
+        let followUp = try XCTUnwrap(fixture.remember("Use the selected follow-up control in Settings.", by: "Poki"))
         let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
         let library = MemoryLibrary.shared
         let store = SessionStore.shared
@@ -717,13 +776,14 @@ final class ChatHarnessTests: XCTestCase {
         }
 
         for ending in Ending.allCases {
-            var actions: [[String: Any]] = [["run": name]]
+            var actions: [[String: Any]] = [["run": name, "used_memory_ids": [opening.id]]]
             let needsApproval = ending == .declined || ending == .stopped
-            if needsApproval { actions.append(["tap": 1]) }
-            if ending == .failed { actions.append(["wait": -1]) }
+            if needsApproval { actions.append(["tap": 1, "used_memory_ids": [followUp.id]]) }
+            if ending == .failed { actions.append(["wait": -1, "used_memory_ids": [followUp.id]]) }
             let server = try FakeCompletions(replies: [
                 FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Finish the check"], "currentStep": 2]),
                 FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("skills", ["action": "list"]),
                 FakeCompletions.tool("do", ["actions": actions]),
                 FakeCompletions.tool("finish_task", [
                     "success": ending == .completed, "summary": "Settings check ended.",
@@ -743,6 +803,8 @@ final class ChatHarnessTests: XCTestCase {
             let item = try XCTUnwrap(library.items.first { $0.text == name })
             defer {
                 library.forget(item.id)
+                library.forget(opening.id)
+                library.forget(followUp.id)
                 store.delete(session)
             }
             var approvalRequested = false
@@ -754,6 +816,7 @@ final class ChatHarnessTests: XCTestCase {
                     XCTAssertNotNil(savedCard)
                     XCTAssertNil(savedCard?.ended, "Approval is still pending")
                     XCTAssertEqual(savedCard?.memoryUse?.skills, [name], "The saved card while awaiting approval")
+                    XCTAssertEqual(savedCard?.memoryUse?.notes.map(\.id), [opening.id])
                     chat?.stop()
                 } else {
                     app?.resolve(approval, approved: false)
@@ -769,9 +832,10 @@ final class ChatHarnessTests: XCTestCase {
                                       stopped: card.stopped == true, saveFailed: card.saveFailed == true || card.failed == true)
             XCTAssertEqual(state, ending == .completed ? .done : ending == .stopped ? .stopped : .failed, ending.rawValue)
             XCTAssertEqual(card.memoryUse?.skills, [name], "\(ending) task card")
+            XCTAssertEqual(card.memoryUse?.notes.map(\.id), [opening.id], "Only the sent action's memory for \(ending)")
             XCTAssertNotNil(card.ended, ending.rawValue)
             if ending != .stopped {
-                let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(3).first))
+                let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(4).first))
                 XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
                 if ending == .declined {
                     XCTAssertEqual(result.success, false, result.text)

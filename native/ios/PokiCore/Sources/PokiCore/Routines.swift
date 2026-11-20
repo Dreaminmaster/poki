@@ -1124,7 +1124,7 @@ extension Computer {
 
     /// `{run: "name"}` or `{run: {name, with: {text_1: "…"}}}`: replays a saved skill's steps in order,
     /// waiting for each target on screen and stopping cleanly at the first screen that differs.
-    func runSkill(_ spec: JSON, until: Double, onReplayStarted: (@Sendable (String) async -> Void)? = nil) async throws -> String {
+    func runSkill(_ spec: JSON, until: Double) async throws -> String {
         let name = spec.string ?? spec["name"]?.string ?? spec["skill"]?.string ?? ""
         guard let store = memory, let skill = store.skill(named: name), !skill.stale else {
             let known = memory?.usableSkills.prefix(12).map { "\"\($0.name)\"" }.joined(separator: ", ") ?? ""
@@ -1132,9 +1132,6 @@ extension Computer {
         }
         var params = skill.params
         if case .object(let given) = spec["with"] { for (k, v) in given { if let t = v.text { params[k] = t } } }
-        try Task.checkCancellation()
-        await onReplayStarted?(skill.name)
-        try Task.checkCancellation()
         return try await replay(skill, params: params, store: store, until: until)
     }
 
@@ -1237,7 +1234,10 @@ extension Computer {
         var front = lastForeground
         if let app = skill.startingApp, lastForeground?.bundleID != app, skill.steps.first?.action["launch"] == nil, !config.isPoki(Foreground(bundleID: app, name: nil)) {
             do {
-                _ = try await perform(["launch": .string(app)], until: until)
+                // Bringing up the starting app prepares the replay. The saved steps do the work.
+                _ = try await Runner.$beforeInput.withValue(nil) {
+                    try await perform(["launch": .string(app)], until: until)
+                }
                 log.append("launched \(app)")
                 front = Foreground(bundleID: app, name: nil)
             } catch { throw stop(0, "\(app) could not be launched (\(error))") }
@@ -1400,7 +1400,11 @@ extension Computer {
             }
             let began = now()
             let kind: String, text: String
-            do { (kind, text) = try await perform(action, until: min(until, now() + actionCap(action))) }
+            do {
+                (kind, text) = try await Runner.$inputSkill.withValue(saved ? skill.name : nil) {
+                    try await perform(action, until: min(until, now() + actionCap(action)))
+                }
+            }
             catch let failure as ActionFailure {
                 refs[Self.runRef] = nil
                 throw stop(index, failure.message, failure.delivery)

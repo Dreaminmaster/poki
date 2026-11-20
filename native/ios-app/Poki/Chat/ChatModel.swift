@@ -864,14 +864,14 @@ final class ChatModel {
         store.flush(sessionID: sessionID)
     }
 
-    private func recordReportedMemories(_ ids: [String]) {
-        guard !ids.isEmpty else { return }
+    private func recordReportedMemories(_ ids: [String], skill: String? = nil) {
+        guard !ids.isEmpty || skill != nil else { return }
         var reported = Set(ids.prefix(20))
         let notes = offeredMemories.reversed().compactMap { note -> TaskMemoryUse.Note? in
             guard reported.remove(note.id) != nil else { return nil }
             return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
         }
-        recordMemoryUse(notes: notes)
+        recordMemoryUse(notes: notes, skill: skill)
     }
 
     private func saveTaskMemory(token: Int) -> Bool {
@@ -1176,11 +1176,14 @@ final class ChatModel {
             return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):
             if let refusal = selectRoute(.web) { return refusal }
-            if Harness.memoryUsingActions.contains(name) {
-                recordReportedMemories(args["used_memory_ids"] as? [String] ?? [])
-            }
+            let ids = args["used_memory_ids"] as? [String] ?? []
+            let taskToken = runToken
             showBrowser(opening: name == "web_open")
-            return await WebTools.perform(name, arguments: call.arguments)
+            return await WebTools.perform(name, arguments: call.arguments, beforeAction: ids.isEmpty ? nil : { [weak self] in
+                guard let self, self.runToken == taskToken else { return false }
+                self.recordReportedMemories(ids)
+                return true
+            })
         case "find_app":
             let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
             return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
@@ -1197,18 +1200,30 @@ final class ChatModel {
             return await app.runTool(call.name, arguments: call.arguments, conversation: sessionID)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
-            if call.name == "do", let actions = args["actions"] as? [[String: Any]], !actions.isEmpty {
-                recordReportedMemories(args["used_memory_ids"] as? [String] ?? [])
+            var phoneArguments = call.arguments
+            var notesByAction: [[String]] = []
+            if call.name == "do", var actions = args["actions"] as? [[String: Any]] {
+                let singleActionIDs = actions.count == 1 ? args["used_memory_ids"] as? [String] ?? [] : []
+                notesByAction = actions.indices.map { index in
+                    actions[index].removeValue(forKey: "used_memory_ids") as? [String] ?? singleActionIDs
+                }
+                var phoneArgs = args
+                phoneArgs.removeValue(forKey: "used_memory_ids")
+                phoneArgs["actions"] = actions
+                if let data = try? JSONSerialization.data(withJSONObject: phoneArgs) {
+                    phoneArguments = String(decoding: data, as: UTF8.self)
+                }
             }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             let taskToken = runToken
-            let response = await app.runTool(call.name, arguments: call.arguments, localSession: splitViewSession,
-                                             expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)") { [weak self] skill in
-                guard let self else { return }
-                await MainActor.run {
-                    guard self.runToken == taskToken else { return }
-                    self.recordMemoryUse(skill: skill)
+            let response = await app.runTool(call.name, arguments: phoneArguments, localSession: splitViewSession,
+                                             expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)") { [weak self, notesByAction] index, skill in
+                try await MainActor.run {
+                    try Task.checkCancellation()
+                    guard let self, self.runToken == taskToken else { throw CancellationError() }
+                    let ids = notesByAction.indices.contains(index) ? notesByAction[index] : []
+                    self.recordReportedMemories(ids, skill: skill)
                 }
             }
             guard taskToken == runToken, usesSplitView else { return response }

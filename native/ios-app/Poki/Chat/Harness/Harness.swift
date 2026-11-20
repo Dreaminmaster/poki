@@ -61,7 +61,7 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        parts.append("When a saved memory changes a phone or browser action, include its ID in used_memory_ids on that action's tool call. Do not wait until finish_task to report it. For a memory used only to answer, report its ID with finish_task. Do not report memories you only read.")
+        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report a memory used only to answer with finish_task. Do not report memories you only read.")
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
@@ -135,7 +135,9 @@ enum Harness {
         var tool = tool
         properties["used_memory_ids"] = [
             "type": "array", "items": string, "maxItems": 20,
-            "description": "IDs of supplied saved memories that changed the actions in this call. Omit this field for memories you only read or that did not affect the actions.",
+            "description": tool.name == "do"
+                ? "For a single action only. Prefer used_memory_ids on the individual object in actions so each memory is attached to the action it changed."
+                : "IDs of supplied saved memories that changed this action. Omit memories you only read.",
         ] as [String: Any]
         tool.schema["properties"] = properties
         return tool

@@ -314,9 +314,27 @@ public final class Runner: @unchecked Sendable {
         _ = try? await session(timeout: timeout)
     }
 
+    typealias BeforeInput = @Sendable (String?) async throws -> Void
+    @TaskLocal static var beforeInput: BeforeInput?
+    @TaskLocal static var inputSkill: String?
+
+    /// Send checked device input. Session setup and screen reads use call/raw directly.
+    func input(_ path: String, _ body: JSON, timeout: Double = 4, countsAsMiss: Bool = true,
+               inSession: Bool = true) async throws -> JSON {
+        if inSession {
+            return try await callInSession("POST", path, body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: true)
+        }
+        return try await request("POST", path, body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: true)
+    }
+
     /// One request outside the session. `countsAsMiss: false` for a request that may rightly take long
     /// (a gesture): its timeout is not taken as a sign that the runner is gone.
     public func raw(_ method: String, _ path: String, _ body: JSON? = nil, timeout: Double = 4, countsAsMiss: Bool = true) async throws -> JSON {
+        try await request(method, path, body, timeout: timeout, countsAsMiss: countsAsMiss)
+    }
+
+    private func request(_ method: String, _ path: String, _ body: JSON?, timeout: Double, countsAsMiss: Bool,
+                         sendsInput: Bool = false) async throws -> JSON {
         let target = URL(string: url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)!
         let queued = !Self.standalone.contains("\(method) \(Self.short(path))")
         let busyBefore = queued ? busyWith : nil
@@ -326,7 +344,12 @@ public final class Runner: @unchecked Sendable {
         let result: (status: Int, body: Data)
         do {
             result = try await withDeadline(timeout + 0.5, "the runner's answer to \(method) \(Self.short(path))") { [transport] in
-                try await transport.send(method: method, url: target, body: body?.data(), timeout: timeout)
+                let payload = body?.data()
+                if sendsInput, let beforeInput = Self.beforeInput {
+                    try Task.checkCancellation()
+                    try await beforeInput(Self.inputSkill)
+                }
+                return try await transport.send(method: method, url: target, body: payload, timeout: timeout)
             }
         } catch TransportError.refused {
             // A refused connection is a runner process that is gone: what it was finishing went with it.
@@ -497,12 +520,17 @@ public final class Runner: @unchecked Sendable {
 
     /// A request inside the session, made again once on a new session when WDA no longer knows it.
     public func call(_ method: String, _ path: String, _ body: JSON? = nil, timeout: Double = 4, countsAsMiss: Bool = true) async throws -> JSON {
+        try await callInSession(method, path, body, timeout: timeout, countsAsMiss: countsAsMiss)
+    }
+
+    private func callInSession(_ method: String, _ path: String, _ body: JSON?, timeout: Double, countsAsMiss: Bool,
+                               sendsInput: Bool = false) async throws -> JSON {
         let id = try await session(timeout: timeout)
         do {
-            return try await raw(method, "/session/\(id)\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss)
+            return try await request(method, "/session/\(id)\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: sendsInput)
         } catch let error as RunnerError where error.code == "invalid session id" || error.message.lowercased().contains("invalid session id") || (error.status == 404 && error.code == nil) {
             state.update { if $0.session == id { $0.session = nil } }
-            return try await raw(method, "/session/\(try await session(timeout: timeout))\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss)
+            return try await request(method, "/session/\(try await session(timeout: timeout))\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: sendsInput)
         }
     }
 
