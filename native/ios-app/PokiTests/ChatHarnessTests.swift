@@ -141,8 +141,7 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testCountedMessageScrollRejectsARepeatedSequenceAfterAFullPageDrag() async throws {
-        let transport = MessageListTransport(messages: ["D", "E", "Got it", "OK", "Got it", "OK", "B", "C"],
-                                             step: 4, identifiesMessages: true)
+        let transport = MessageListTransport(messages: ["D", "E", "Got it", "OK", "Got it", "OK", "B", "C"], step: 4)
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
@@ -203,7 +202,7 @@ final class ChatHarnessTests: XCTestCase {
     func testCountedScrollDoesNotUseADragDistanceAsProofOfOverlap() async throws {
         let transport = MessageListTransport(
             messages: ["D", "E", "F", "G", "Got it", "OK", "Got it", "OK", "A", "B", "C", "Z"],
-            visibleCount: 6, step: 6, spacing: 120, identifiesMessages: true
+            visibleCount: 6, step: 6, spacing: 120
         )
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
@@ -282,6 +281,34 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("“OK”"), result.text)
     }
 
+    func testCountedScrollRequiresAtLeastAThirdOfThePreviousPageToOverlap() async throws {
+        let recent = (1...10).map { "Recent \($0)" }
+        for overlap in [3, 4] {
+            let older = (1...(10 - overlap)).map { "Older \($0)" }
+            let transport = MessageListTransport(messages: older + recent, visibleCount: 10,
+                                                 step: older.count, spacing: 60)
+            let next = Array(11..<(11 + older.count)) + Array(1...overlap)
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("count_messages", ["target": 1, "refs": Array(1...10)]),
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 520]]], "full": true]),
+                FakeCompletions.tool("count_messages", ["target": 1, "refs": next]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Done."),
+            ])
+            let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+            XCTAssertEqual(transport.topMessage, 1)
+            XCTAssertEqual(result.success, overlap == 4, result.text)
+            if overlap == 3 {
+                XCTAssertTrue(result.text.contains("0 of 1 older messages"), result.text)
+            } else {
+                XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Older 6"), result.text)
+            }
+        }
+    }
+
     func testExplicitCountWordingRequiresVerification() async throws {
         let requests: [(String, Int?)] = [
             ("往上翻一百条消息", 100),
@@ -292,12 +319,18 @@ final class ChatHarnessTests: XCTestCase {
             ("翻最近二十五条聊天记录", 25),
             ("向上滾動兩百條訊息", 200),
             ("去 40 条消息前", 40),
+            ("往上翻100条聊天消息", 100),
+            ("往上翻100条群聊消息", 100),
+            ("上述群聊里，九十九条", 99),
+            ("这次只翻 １５０ 条私聊记录", 150),
             ("Scroll up 100 messages.", 100),
             ("Scroll back by 15 older messages.", 15),
             ("Go back two hundred messages.", 200),
             ("Scroll up through the last 50 messages.", 50),
             ("Scroll 30 messages up.", 30),
             ("Go to the message 12 messages earlier.", 12),
+            ("Scroll up 100 chat messages.", 100),
+            ("Go back 45 msgs.", 45),
             ("去聊天记录最早的地方", nil),
             ("Scroll to the chat from 100 days ago.", nil),
             ("Scroll through the 100 Club chat.", nil),
@@ -344,6 +377,43 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(chat.entries.contains { if case .poki("我找到了两个群。你说的是哪个群？") = $0.kind { true } else { false } })
 
         let finished = expectation(description: "The reply continues the counted scroll")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        XCTAssertEqual(result?.success, false, result?.summary ?? "")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    func testWaitingForACountedScrollReplyDoesNotNeedQuestionPunctuation() async throws {
+        let question = "我找到了两个群，请问你说的是哪个群"
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("wait_for_counted_scroll_reply", ["question": question]),
+            FakeCompletions.text(question),
+        ])
+        let transport = MessageListTransport()
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "The counted task waits for the owner's group")
+        var firstResult: TaskResult?
+        ChatModel.afterTask = { firstResult = $0.result; asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertNil(firstResult, firstResult?.summary ?? "")
+        XCTAssertTrue(said(chat).contains(question))
+
+        server.replaceReplies([
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let finished = expectation(description: "The reply continues the counted task")
         var result: TaskResult?
         ChatModel.afterTask = { result = $0.result; finished.fulfill() }
         try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
@@ -1877,6 +1947,8 @@ final class FakeCompletions: @unchecked Sendable {
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
+
+    func replaceReplies(_ next: [String]) { lock.withLock { replies = next } }
 
     init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
          holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
