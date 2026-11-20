@@ -95,13 +95,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 用你的 Apple 账户为自己签名，无需 Mac 即可续签和更新。请重新登录以继续使用。"
+            "value" : "Poki 使用你的 Apple 账户为自己生成安装签名，无需 Mac 即可续期和更新。请重新登录以继续使用。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 用你的 Apple 帳號為自己簽名，無需 Mac 即可續簽和更新。請重新登入以繼續使用。"
+            "value" : "Poki 使用你的 Apple 帳號為自己產生安裝簽名，無需 Mac 即可續期和更新。請重新登入以繼續使用。"
           }
         }
       }
@@ -5160,13 +5160,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先在“使用准备”中选择并开启 本机通道。"
+            "value" : "请先在“使用准备”中选择并开启本机通道。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先在「使用準備」中選擇並開啟 本機通道。"
+            "value" : "請先在「使用準備」中選擇並開啟本機通道。"
           }
         },
         "en" : {
@@ -6442,13 +6442,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“使用准备”中开启 本机通道，待检查通过后重新配对。"
+            "value" : "请在“使用准备”中开启本机通道，待检查通过后重新配对。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請在「使用準備」中開啟 本機通道，待檢查通過後重新配對。"
+            "value" : "請在「使用準備」中開啟本機通道，待檢查通過後重新配對。"
           }
         },
         "en" : {
@@ -11595,7 +11595,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请开启 本机通道，Poki 才能连接。"
+            "value" : "请开启本机通道，Poki 才能连接。"
           }
         },
         "en" : {
@@ -11607,7 +11607,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請開啟 本機通道，Poki 才能連線。"
+            "value" : "請開啟本機通道，Poki 才能連線。"
           }
         }
       }
@@ -15628,13 +15628,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请重连 本机通道并检查 Wi-Fi。若 10.7.0.1 仍无应答，请到“使用准备 › 配对”重新配对并检查开发者模式。"
+            "value" : "请重连本机通道并检查 Wi-Fi。若 10.7.0.1 仍无应答，请到“使用准备 › 配对”重新配对并检查开发者模式。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請重連 本機通道並檢查 Wi-Fi。若 10.7.0.1 仍無應答，請到「使用準備 › 配對」重新配對並檢查開發者模式。"
+            "value" : "請重連本機通道並檢查 Wi-Fi。若 10.7.0.1 仍無應答，請到「使用準備 › 配對」重新配對並檢查開發者模式。"
           }
         },
         "en" : {
@@ -16375,7 +16375,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启 本机通道 ›"
+            "value" : "开启本机通道 ›"
           }
         },
         "en" : {
@@ -16387,7 +16387,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟 本機通道 ›"
+            "value" : "開啟本機通道 ›"
           }
         }
       }
@@ -21898,6 +21898,28 @@
         }
       }
     },
+    "Memory Library" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memory"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记忆库"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "記憶庫"
+          }
+        }
+      }
+    },
     "%@ Needed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -26629,13 +26651,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请连接 Wi-Fi，然后在「连接」中检查本地连接。"
+            "value" : "请连接 Wi-Fi，然后在「连接」中检查本机通道。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請連上 Wi-Fi，然後在「連線」中檢查本機連線。"
+            "value" : "請連上 Wi-Fi，然後在「連線」中檢查本機通道。"
           }
         }
       }
@@ -26693,13 +26715,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "映像仍未挂载。请检查本地连接后重试。"
+            "value" : "映像仍未挂载。请检查本机通道后重试。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "映像仍未掛載。請檢查本機連線後再試一次。"
+            "value" : "映像仍未掛載。請檢查本機通道後再試一次。"
           }
         }
       }
@@ -36965,13 +36987,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "屏幕历史记录将文字保存在这台 iPhone 上，不记录已排除的应用和密码栏。当 Poki 或已连接的代理查询历史记录时，相关文字可能会发送给所选 AI 服务提供商或已连接的代理。"
+            "value" : "屏幕记录将文字保存在这台 iPhone 上，不记录已排除的应用和密码栏。当 Poki 或已连接的代理查询屏幕记录时，相关文字可能会发送给所选 AI 服务提供商或已连接的代理。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "螢幕歷史記錄將文字保存在這台 iPhone 上，不記錄已排除的應用程式和密碼欄。當 Poki 或已連線的代理程式查詢歷史記錄時，相關文字可能會傳送給所選 AI 服務提供者或已連線的代理程式。"
+            "value" : "螢幕記錄將文字保存在這台 iPhone 上，不記錄已排除的應用程式和密碼欄。當 Poki 或已連線的代理程式查詢螢幕記錄時，相關文字可能會傳送給所選 AI 服務提供者或已連線的代理程式。"
           }
         }
       }
@@ -37339,13 +37361,13 @@
             "zh-Hans" : {
                 "stringUnit" : {
                     "state" : "translated",
-                    "value" : "“记忆”会保存供所有外部智能体共享的技能和备忘。诊断包含日志、检查、后台保持、地址与实时活动预览。"
+                    "value" : "“记忆库”会保存供所有外部智能体共享的技能和备忘。连接检查包含日志、检查、后台保持、地址与实时活动预览。"
                 }
             },
             "zh-Hant" : {
                 "stringUnit" : {
                     "state" : "translated",
-                    "value" : "「記憶」會儲存供所有外部智慧體共享的技能和備忘。診斷包含日誌、檢查、背景保持、位址與即時動態預覽。"
+                    "value" : "「記憶庫」會儲存供所有外部智慧體共享的技能和備忘。連線檢查包含日誌、檢查、背景保持、位址與即時動態預覽。"
                 }
             }
         }
@@ -37361,13 +37383,13 @@
             "zh-Hans" : {
                 "stringUnit" : {
                     "state" : "translated",
-                    "value" : "Poki 在此 iPhone 上用于对话和语音的模型。“记忆”会保存供所有外部智能体共享的技能和备忘。"
+                    "value" : "Poki 在此 iPhone 上用于对话和语音的模型。“记忆库”会保存供所有外部智能体共享的技能和备忘。"
                 }
             },
             "zh-Hant" : {
                 "stringUnit" : {
                     "state" : "translated",
-                    "value" : "Poki 在此 iPhone 上用於對話和語音的模型。「記憶」會儲存供所有外部智慧體共享的技能和備忘。"
+                    "value" : "Poki 在此 iPhone 上用於對話和語音的模型。「記憶庫」會儲存供所有外部智慧體共享的技能和備忘。"
                 }
             }
         }
@@ -37405,13 +37427,13 @@
             "zh-Hans" : {
                 "stringUnit" : {
                     "state" : "translated",
-                    "value" : "仅在自动操作状态开启时显示系统横幅，智能体请求时开启、闲置时关闭。“记忆”会保存供所有外部智能体共享的技能和备忘。"
+                    "value" : "仅在自动操作状态开启时显示运行提示条，智能体请求时开启、闲置时关闭。“记忆库”会保存供所有外部智能体共享的技能和备忘。"
                 }
             },
             "zh-Hant" : {
                 "stringUnit" : {
                     "state" : "translated",
-                    "value" : "僅在自動操作狀態開啟時顯示系統橫幅，智慧體請求時開啟、閒置時關閉。「記憶」會儲存供所有外部智慧體共享的技能和備忘。"
+                    "value" : "僅在自動操作狀態開啟時顯示運行提示條，智慧體請求時開啟、閒置時關閉。「記憶庫」會儲存供所有外部智慧體共享的技能和備忘。"
                 }
             }
         }
