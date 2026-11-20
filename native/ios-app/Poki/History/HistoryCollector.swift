@@ -96,23 +96,38 @@ final class HistoryCollector {
         }
     }
 
-    /// The shortcut's way in: answered at once, so the shortcut turns cellular back on without a
-    /// wait, and the tunnel is caught in the background as the network changes (the owner,
-    /// 2026-11-19: with cellular off the proxy's connection is gone, so holding the answer there
-    /// only hangs). The outcome is noted when it is known.
-    func reconnectSoon(_ model: AppModel, by source: String) -> Bool {
+    /// The longest the shortcut's request is held, so cellular stays off just long enough.
+    private static let holdFor: TimeInterval = 6
+
+    /// The shortcut's way in. The request is held only until the tunnel opens, at most a few
+    /// seconds, and the tunnel is tried on in the background for longer. The owner's phone
+    /// (build 58, 2026-11-19): the tunnel opened 1.6 and 2.4 s after cellular went off, once the
+    /// proxy's VPN was back, and every try after cellular came back was refused; a request
+    /// answered at once turned cellular back on before that moment came. Holding the whole try
+    /// (build 57) hung for 25 s instead.
+    func reconnectSoon(_ model: AppModel, by source: String) async -> Bool {
         HistoryBridge.hurry(Self.catchFor)
-        guard !catching else {
+        let asked = Date()
+        if catching {
             AppLog.shared.add("loopback", "reconnect asked by \(source) again: still trying")
-            return true
+        } else {
+            catching = true
+            AppLog.shared.add("loopback", "reconnect asked by \(source): holding up to \(Int(Self.holdFor)) s, trying for \(Self.catchFor) s")
+            Task { @MainActor in
+                _ = await self.reconnect(model, by: source, within: TimeInterval(Self.catchFor))
+                self.catching = false
+            }
         }
-        catching = true
-        AppLog.shared.add("loopback", "reconnect asked by \(source): answered at once, trying for \(Self.catchFor) s")
-        Task { @MainActor in
-            _ = await self.reconnect(model, by: source, within: TimeInterval(Self.catchFor))
-            self.catching = false
+        while Date().timeIntervalSince(asked) < Self.holdFor {
+            if let open = HistoryCapture.shared.lastTunnelAt, open > asked {
+                AppLog.shared.add("loopback", "reconnect: tunnel open after \(String(format: "%.1f", Date().timeIntervalSince(asked))) s, answering")
+                return true
+            }
+            if !HistoryCapture.shared.enabled { return model.loopback.isWorking }
+            try? await Task.sleep(for: .milliseconds(100))
         }
-        return true
+        AppLog.shared.add("loopback", "reconnect: no tunnel in \(Int(Self.holdFor)) s, answering, still trying")
+        return false
     }
 
     /// Opens the connection again now, without waiting out a run's next try, and says whether it
