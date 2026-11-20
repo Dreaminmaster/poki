@@ -318,7 +318,7 @@ final class VoiceModel {
     private var liveSpeechStopped = false
     private enum LiveDelegationState: Equatable {
         case active, cancelled, acknowledgment, duplicate
-        case awaitingFirstTool(audio: Range<Int>, identifiedByItem: Bool)
+        case awaitingFirstTool(audio: Range<Int>, fallback: LiveCallerSpeech.TextReceipt?)
 
         var canRunTools: Bool {
             switch self {
@@ -338,10 +338,15 @@ final class VoiceModel {
     private var liveDelegations: [String: LiveDelegationState] = [:]
     private var liveHasCancellation = false
     private struct LiveCallerSpeech {
-        struct Transcript {
+        struct Transcript: Equatable {
             let audio: Range<Int>?
             let received: Date
             let inputRevision: Int
+        }
+
+        struct TextReceipt: Equatable {
+            let text: String
+            let transcript: Transcript
         }
 
         var text = ""
@@ -353,6 +358,7 @@ final class VoiceModel {
         var inputRevision = 0
         var recordedInputs: Set<String> = []
         var pending: Transcript?
+        var replayWithoutPendingSpeech = false
         var executedAudio: Set<Range<Int>> = []
         var lastTranscriptsByText: [String: Transcript] = [:]
 
@@ -360,11 +366,13 @@ final class VoiceModel {
             self.itemID = itemID
             text = ""
             pending = nil
+            replayWithoutPendingSpeech = false
         }
 
         mutating func recordInput(id: String?) {
             if let id, !recordedInputs.insert(id).inserted { return }
             inputRevision += 1
+            replayWithoutPendingSpeech = false
         }
 
         var normalizedText: String {
@@ -373,16 +381,31 @@ final class VoiceModel {
             return normalized
         }
 
-        var alreadyHandled: Bool {
+        func isReplay(itemID: String?, audio: Range<Int>?) -> Bool {
             if let itemID { return handledItems.contains(itemID) }
-            guard let pending else { return false }
-            if let audio = pending.audio { return executedAudio.contains(where: audio.overlaps) }
-            guard let previous = lastTranscriptsByText[normalizedText] else { return false }
+            if let audio { return executedAudio.contains(where: audio.overlaps) }
+            return false
+        }
+
+        var alreadyHandled: Bool {
+            if replayWithoutPendingSpeech { return true }
+            if itemID != nil || pending?.audio != nil { return isReplay(itemID: itemID, audio: pending?.audio) }
+            guard let pending, let previous = lastTranscriptsByText[normalizedText] else { return false }
             return pending.inputRevision == previous.inputRevision
                 && (0...3).contains(pending.received.timeIntervalSince(previous.received))
         }
 
+        var pendingTextReceipt: TextReceipt? {
+            guard itemID == nil, let pending else { return nil }
+            return TextReceipt(text: normalizedText, transcript: pending)
+        }
+
+        mutating func discardReplay() {
+            if pending == nil { replayWithoutPendingSpeech = true }
+        }
+
         mutating func append(_ delta: String, audio: Range<Int>?, received: Date) {
+            replayWithoutPendingSpeech = false
             text += delta
             var combined = pending?.audio
             if let audio {
@@ -397,15 +420,18 @@ final class VoiceModel {
         mutating func markHandled() {
             if let itemID {
                 handledItems.insert(itemID)
-            } else if let pending {
-                let normalized = normalizedText
-                if !normalized.isEmpty {
-                    lastTranscriptsByText[normalized] = pending
-                }
+            } else if let receipt = pendingTextReceipt, receipt.transcript.audio == nil {
+                remember(receipt)
             }
-            text = ""
-            pending = nil
-            if !hasSpeechStartEvents { itemID = nil }
+            clearPendingSpeech()
+        }
+
+        mutating func remember(_ receipt: TextReceipt) {
+            if !receipt.text.isEmpty { lastTranscriptsByText[receipt.text] = receipt.transcript }
+        }
+
+        mutating func clearPendingSpeech() {
+            begin(itemID: hasSpeechStartEvents ? itemID : nil)
         }
     }
     private var liveCallerSpeech = LiveCallerSpeech()
@@ -1134,7 +1160,13 @@ final class VoiceModel {
             appendLiveCaption(text, role: role, start: start ?? 0, end: end ?? 0)
             if role == .you {
                 let audio: Range<Int>? = if let start, let end, start >= 0, end > start { start..<end } else { nil }
-                appendLiveSpeech(text, audio: audio, itemID: event["item_id"] as? String)
+                let itemID = event["item_id"] as? String
+                if liveCallerSpeech.isReplay(itemID: itemID ?? liveCallerSpeech.itemID, audio: audio) {
+                    liveCallerSpeech.discardReplay()
+                    endIfDone()
+                    return
+                }
+                appendLiveSpeech(text, audio: audio, itemID: itemID)
                 let utterance = Self.liveSpeechParts(liveCallerSpeech.text).filter { !Self.liveBackchannels.contains($0) }
                 if !liveCallerSpeech.alreadyHandled, Self.liveRequestsStop(utterance) {
                     cancelLiveTask()
@@ -1150,17 +1182,17 @@ final class VoiceModel {
             endIfDone()
         case "session.delegation.created":
             if let id = (event["delegation"] as? [String: Any])?["id"] as? String, liveDelegations[id] == nil {
+                if liveCallerSpeech.alreadyHandled {
+                    liveCallerSpeech.clearPendingSpeech()
+                    liveDelegations[id] = .duplicate
+                    return
+                }
                 let parts = Self.liveSpeechParts(liveCallerSpeech.text)
-                let repeated = liveCallerSpeech.alreadyHandled
                 let audio = liveCallerSpeech.pending?.audio
-                let identifiedByItem = liveCallerSpeech.itemID != nil
+                let fallback = liveCallerSpeech.pendingTextReceipt
                 liveCallerSpeech.markHandled()
                 if !parts.isEmpty, parts.allSatisfy(Self.liveBackchannels.contains) {
                     liveDelegations[id] = .acknowledgment
-                    return
-                }
-                if repeated {
-                    liveDelegations[id] = .duplicate
                     return
                 }
                 let request = parts.filter { !Self.liveBackchannels.contains($0) }
@@ -1168,7 +1200,7 @@ final class VoiceModel {
                 if liveHasCancellation && !newRequest {
                     liveDelegations[id] = .cancelled
                 } else if let audio {
-                    liveDelegations[id] = .awaitingFirstTool(audio: audio, identifiedByItem: identifiedByItem)
+                    liveDelegations[id] = .awaitingFirstTool(audio: audio, fallback: fallback)
                 } else {
                     liveDelegations[id] = .active
                 }
@@ -1420,12 +1452,13 @@ final class VoiceModel {
                 return
             }
             if live, call.session == session, let id = call.delegation {
-                if case .awaitingFirstTool(let audio, let identifiedByItem) = liveDelegations[id] {
+                if case .awaitingFirstTool(let audio, let fallback) = liveDelegations[id] {
                     // Two delegations can arrive before either tool starts.
-                    if !identifiedByItem && liveCallerSpeech.executedAudio.contains(where: audio.overlaps) {
+                    if fallback != nil && liveCallerSpeech.executedAudio.contains(where: audio.overlaps) {
                         liveDelegations[id] = .duplicate
                     } else {
                         liveCallerSpeech.executedAudio.insert(audio)
+                        if let fallback { liveCallerSpeech.remember(fallback) }
                         liveDelegations[id] = .active
                     }
                 }
