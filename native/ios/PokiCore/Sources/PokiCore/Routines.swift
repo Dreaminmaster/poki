@@ -283,6 +283,9 @@ public struct MemoryChangeRecord: Codable, Equatable, Sendable {
     public var previous: String?
     /// The note as it was before an edit (its app, source and lock too), to put back.
     public var before: MemoryNote?
+    /// A whole page written at once (`writePage`): the page after, and as it was before (nil: it is new).
+    public var page: MemoryPage?
+    public var pageBefore: MemoryPage?
     public var undone: Bool?
 
     public static let added = "added", edited = "edited", forgot = "forgot"
@@ -338,12 +341,20 @@ public struct SkillRunLog: Codable, Equatable, Sendable {
 
 public typealias RoutineRunLog = SkillRunLog
 
-/// The file: skills, notes and the latest runs. Reads both v1 (`routines`) and v2 (`skills`).
+/// The file: skills, memory pages and the latest runs. Reads both v1 (`routines`) and v2 (`skills`),
+/// and a file from before pages (a flat `notes` list), whose notes become the lines of their pages.
 struct MemoryFile: Codable {
     var schema = SkillStore.schema
     var exported: Date?
     var skills: [Skill] = []
-    var notes: [MemoryNote] = []
+    /// The memory: one page per area, About You (no app) and each app.
+    var pages: [MemoryPage] = []
+    /// Every page's lines in page order: what the notes were. Changing it files each line under its
+    /// app's page, keeping the pages' own summary, order and lock.
+    var notes: [MemoryNote] {
+        get { pages.flatMap(\.lines) }
+        set { pages = MemoryPage.regroup(newValue, into: pages) }
+    }
     var runs: [SkillRunLog] = []
     /// What the app adds to a backup (its saved sessions), opaque here.
     var extras: [String: JSON]?
@@ -363,14 +374,14 @@ struct MemoryFile: Codable {
         self.schema = schema
         self.exported = exported
         self.skills = skills
-        self.notes = notes
+        self.pages = MemoryPage.regroup(notes, into: [])
         self.runs = runs
         self.extras = extras
         self.changes = changes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schema, exported, skills, routines, notes, runs, extras, changes
+        case schema, exported, skills, routines, pages, notes, runs, extras, changes
     }
 
     init(from decoder: Decoder) throws {
@@ -381,7 +392,11 @@ struct MemoryFile: Codable {
             ?? c.decodeIfPresent([Skill].self, forKey: .routines)
             ?? []
         skills = loaded.map { $0.migrated() }
-        notes = try c.decodeIfPresent([MemoryNote].self, forKey: .notes) ?? []
+        if let saved = try c.decodeIfPresent([MemoryPage].self, forKey: .pages) {
+            pages = saved
+        } else {
+            pages = MemoryPage.regroup(try c.decodeIfPresent([MemoryNote].self, forKey: .notes) ?? [], into: [])
+        }
         runs = try c.decodeIfPresent([SkillRunLog].self, forKey: .runs) ?? []
         extras = try c.decodeIfPresent([String: JSON].self, forKey: .extras)
         changes = try c.decodeIfPresent([MemoryChangeRecord].self, forKey: .changes)
@@ -392,6 +407,8 @@ struct MemoryFile: Codable {
         try c.encode(schema, forKey: .schema)
         try c.encodeIfPresent(exported, forKey: .exported)
         try c.encode(skills, forKey: .skills)
+        try c.encode(pages, forKey: .pages)
+        // The flat list too, for a Poki or Poki Setup from before pages: it still reads every line.
         try c.encode(notes, forKey: .notes)
         try c.encode(runs, forKey: .runs)
         try c.encodeIfPresent(extras, forKey: .extras)
@@ -458,7 +475,7 @@ public final class SkillStore: @unchecked Sendable {
         return d
     }()
 
-    private func withFile<T>(_ change: Bool = false, _ body: (inout MemoryFile) throws -> T) rethrows -> T {
+    func withFile<T>(_ change: Bool = false, _ body: (inout MemoryFile) throws -> T) rethrows -> T {
         lock.lock()
         let result = try body(&file)
         let snapshot = change ? file : nil
@@ -663,6 +680,12 @@ public final class SkillStore: @unchecked Sendable {
             let change = changes[c]
             let locks: Bool? = change.by == Self.owner ? nil : true
             func routineIndex(_ name: String?) -> Int? { name.flatMap { n in f.skills.firstIndex { $0.name.caseInsensitiveCompare(n) == .orderedSame } } }
+            if change.page != nil || change.pageBefore != nil {
+                guard Self.undoPage(change, in: &f) else { return false }
+                changes[c].undone = true
+                f.changes = changes
+                return true
+            }
             switch (change.action, change.note, change.routine) {
             case (MemoryChangeRecord.forgot, var note?, _):
                 guard !f.notes.contains(where: { $0.id == note.id || $0.text.caseInsensitiveCompare(note.text) == .orderedSame }) else { return false }
@@ -702,14 +725,14 @@ public final class SkillStore: @unchecked Sendable {
         }
     }
 
-    private static func log(_ f: inout MemoryFile, _ change: MemoryChangeRecord) {
+    static func log(_ f: inout MemoryFile, _ change: MemoryChangeRecord) {
         var changes = f.changes ?? []
         changes.insert(change, at: 0)
         if changes.count > maxChanges { changes.removeLast(changes.count - maxChanges) }
         f.changes = changes
     }
 
-    private static func newID() -> String { UUID().uuidString.lowercased() }
+    static func newID() -> String { UUID().uuidString.lowercased() }
 
     /// Drops the oldest unlocked items over the cap; locked ones are never dropped.
     private static func trim<T>(_ items: inout [T], to cap: Int, keeping kept: (T) -> Bool) {
@@ -857,7 +880,7 @@ public final class SkillStore: @unchecked Sendable {
     }
 
     public func taskBrief(for task: String, apps: [String], limit: Int = 12) -> TaskBrief {
-        let (skills, notes) = withFile { ($0.skills, $0.notes) }
+        let (skills, notes, pages) = withFile { ($0.skills, $0.notes, $0.pages) }
         let targetApps = Self.appIDs(apps)
         let terms = Self.tokens(task)
         let ranked = rankedSkills(in: skills, terms: terms, apps: targetApps)
@@ -890,11 +913,25 @@ public final class SkillStore: @unchecked Sendable {
             fit,
             within: Self.maxBriefLength / 2
         ) { "- \($0.briefLine)" }
-        let (noteLines, includedNotes) = section(
-            "Saved memories, newest first. Apply relevant memories and report only the IDs that affected this task in finish_task:",
-            Array(eligible),
-            within: room
-        ) { "- [\($0.id)] \($0.text)" }
+        // Room for the pages' headings and the index of the other pages.
+        let header = "Saved memory, one page per area (About You holds everywhere, an app's page holds in that app). Apply what is relevant and report only the IDs of lines that affected this task in finish_task:"
+        let (picked, includedNotes) = section(header, Array(eligible), within: max(0, room - 400)) { "- [\($0.id)] \($0.text)" }
+        var noteLines: [String] = []
+        if !picked.isEmpty {
+            noteLines.append(header)
+            let ids = Set(includedNotes.map(\.id))
+            for page in pages {
+                let shown = page.lines.filter { ids.contains($0.id) }
+                guard !shown.isEmpty else { continue }
+                noteLines.append("\(page.title)\(page.summary.map { " (\($0))" } ?? ""):")
+                noteLines += shown.map { "- [\($0.id)] \($0.text)" }
+            }
+        }
+        let shownPages = Set(includedNotes.map { $0.app?.lowercased() ?? "" })
+        let others = pages.filter { !shownPages.contains($0.app?.lowercased() ?? "") }.prefix(12)
+        if !others.isEmpty {
+            noteLines.append("Other memory pages (skills {action: \"page\", app} reads one): " + others.map { $0.title + ($0.summary.map { " (\($0))" } ?? "") }.joined(separator: "; "))
+        }
         return TaskBrief(text: (noteLines + skillLines).joined(separator: "\n"), notes: includedNotes)
     }
 
@@ -1517,15 +1554,17 @@ extension PokiCore {
     /// use the steps recorded for that chat task.
     public func saveTaskMemory(arguments: String, conversation: String, task: String) -> Bool {
         guard let args = try? JSON.parse(arguments),
-              let action = args["action"]?.string, ["save", "remember"].contains(action) else { return false }
+              let action = args["action"]?.string, ["save", "remember", "write_page"].contains(action) else { return false }
         return !skillsCall(args, session: nil, conversation: conversation, recordingTask: task).isError
     }
 
     static let skillsTool: JSON = [
         "name": "skills",
-        "description": "The agent's memory library on this phone, shared by every agent that drives it. Skills are saved procedures in apps: the do actions of a task, each target kept as what it is (role and label), so do {run: \"name\"} replays it in one call, waits for each target, and stops cleanly at a screen that differs. Notes are short facts about the owner. action: list (skills and notes) | show (one skill's steps, name) | save (the do actions sent since this task began, as name, with description; expect: texts that must be on screen at the end, chosen from the last screen when left out; read: labels whose values a run reports) | edit (name; rename, description, expect, read, steps as JSON to replace them) | forget (name) | remember (text: a fact worth keeping, never a password) | forget_note (id or text) | export (the whole memory as JSON, to review or move) | import (data: such JSON; newer skills win). Save a skill after an app task that worked and that someone may ask for again; save it again under the same name to fix one that stopped.",
+        "description": "The agent's memory library on this phone, shared by every agent that drives it. Skills are saved procedures in apps: the do actions of a task, each target kept as what it is (role and label), so do {run: \"name\"} replays it in one call, waits for each target, and stops cleanly at a screen that differs. Memory is kept as pages: About You for what holds everywhere, and one page per app (app: its bundle id), each line a fact with an id. action: list (the skills and every page) | page (one page whole with the app's skills; app, or none for About You) | write_page (rewrite one page: app, text with one fact a line, summary: one line for the index; keep what still holds, fold in what is new, drop what is no longer true; lines the owner locked stay) | show (one skill's steps, name) | save (the do actions sent since this task began, as name, with description; expect: texts that must be on screen at the end, chosen from the last screen when left out; read: labels whose values a run reports) | edit (name; rename, description, expect, read, steps as JSON to replace them) | forget (name) | remember (text: a fact worth keeping, never a password; app: the bundle id when it holds only in that app) | forget_note (id or text) | export (the whole memory as JSON, to review or move) | import (data: such JSON; newer skills win). Save a skill after an app task that worked and that someone may ask for again; save it again under the same name to fix one that stopped.",
         "inputSchema": ["type": "object", "properties": [
-            "action": ["type": "string", "enum": ["list", "show", "save", "edit", "forget", "remember", "forget_note", "export", "import"]],
+            "action": ["type": "string", "enum": ["list", "page", "write_page", "show", "save", "edit", "forget", "remember", "forget_note", "export", "import"]],
+            "app": ["type": "string", "description": "A memory page's app (bundle id); left out, About You."],
+            "summary": ["type": "string"],
             "name": ["type": "string"], "description": ["type": "string"], "rename": ["type": "string"],
             "text": ["type": "string"], "data": ["type": "string"],
             "expect": ["type": "array", "items": ["type": "string"]], "read": ["type": "array", "items": ["type": "string"]],
@@ -1550,10 +1589,27 @@ extension PokiCore {
             let skills = store.usableSkills, notes = store.notes
             var lines = ["skills (\(skills.count)):"] + skills.map { "- \($0.summary)\($0.isLocked ? " (locked)" : "")" }
             if skills.isEmpty { lines = ["skills: none saved yet. After a task that worked, skills {action: \"save\", name, description} keeps its steps so do {run: name} repeats them in one call."] }
-            lines.append(notes.isEmpty ? "notes: none" : "notes (\(notes.count)):")
-            lines += notes.map { "- [\($0.id)] \($0.text) (by \($0.by)\($0.isLocked ? ", locked" : ""))" }
+            let pages = store.pages
+            lines.append(pages.isEmpty ? "memory pages: none yet" : "memory pages (\(pages.count)):")
+            for page in pages {
+                lines.append("\(page.title)\(page.summary.map { " (\($0))" } ?? "")\(page.isLocked ? ", locked" : ""):")
+                lines += page.lines.map { "- [\($0.id)] \($0.text) (by \($0.by)\($0.isLocked ? ", locked" : ""))" }
+            }
             if !computer.trace.isEmpty { lines.append("this task has \(computer.trace.count) recorded steps so far (save keeps them)") }
             return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, offeredMemories: notes)
+        case "page":
+            let app = args["app"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+            return ToolResult(text: store.pageText(app), jpeg: nil, offeredMemories: store.page(app)?.lines ?? [])
+        case "write_page":
+            let app = args["app"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+            guard let text = args["text"]?.string else { return fail("give text: the whole page, one fact a line") }
+            let front = computer.lastForeground.flatMap { f in computer.config.isPoki(f) || f.bundleID == "com.apple.springboard" ? nil : f.bundleID }
+            switch store.writePage(app: app, text: text, summary: args["summary"]?.string, by: by, heard: conversation.map { NoteOrigin(session: $0, app: front) }) {
+            case .locked:
+                return fail("the page \(locked)")
+            case .written(let page, let kept):
+                return ToolResult(text: "skills: wrote the page \(page.title) (\(page.lines.count) lines\(kept > 0 ? "; \(kept) the owner locked stayed" : ""))", jpeg: nil)
+            }
         case "show":
             guard let r = store.skill(named: name), !r.stale else { return fail("no skill named \"\(name)\"") }
             var lines = [r.summary]
@@ -1609,7 +1665,9 @@ extension PokiCore {
             // Heard in a conversation of Poki's own: kept with it, and with the app in front then.
             let front = computer.lastForeground.flatMap { f in computer.config.isPoki(f) || f.bundleID == "com.apple.springboard" ? nil : f.bundleID }
             let heard = conversation.map { NoteOrigin(session: $0, app: front) }
-            guard let note = store.remember(text, by: by, heard: heard) else { return fail("give the text to remember") }
+            let app = args["app"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+            if store.page(app)?.isLocked == true { return fail("the page \(app ?? "About You") \(locked)") }
+            guard let note = store.remember(text, by: by, app: app, heard: heard) else { return fail("give the text to remember") }
             return ToolResult(text: "skills: remembered [\(note.id)] \(note.text)", jpeg: nil)
         case "forget_note":
             let which = args["text"]?.string ?? name
@@ -1627,7 +1685,7 @@ extension PokiCore {
                 return ToolResult(text: "skills: \(summary)", jpeg: nil)
             } catch { return fail("\(error)") }
         default:
-            return fail("unknown action; the actions are list, show, save, edit, forget, remember, forget_note, export, import")
+            return fail("unknown action; the actions are list, page, write_page, show, save, edit, forget, remember, forget_note, export, import")
         }
     }
 }

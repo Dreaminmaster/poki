@@ -1158,7 +1158,8 @@ final class ChatModel {
             let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
             return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
         case "skills", "routines":
-            if let action = args["action"] as? String, action == "save" || action == "remember" {
+            // A page write waits for the task's end like a note does: a failed task keeps nothing.
+            if let action = args["action"] as? String, ["save", "remember", "write_page"].contains(action) {
                 let required = action == "save" ? "name" : "text"
                 guard let value = (args[required] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
                     return PokiCore.ToolAnswer(text: "Give the \(required) to save.", jpeg: nil, isError: true)
