@@ -1,6 +1,167 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Use This Relay?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use This Relay?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此中转？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此中轉？"
+          }
+        }
+      }
+    },
+    "Use This Pairing File?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use This Pairing File?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此配对文件？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此配對檔案？"
+          }
+        }
+      }
+    },
+    "A link asks Poki to connect through %@. Whoever runs that relay can see your screen and act on this iPhone through Poki. Allow it only if you set up this relay yourself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A link asks Poki to connect through %@. Whoever runs that relay can see your screen and act on this iPhone through Poki. Allow it only if you set up this relay yourself."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有链接要求 Poki 通过 %@ 连接。运行该中转的人可以通过 Poki 查看你的屏幕并操作此 iPhone。仅在这是你本人搭建的中转时才允许。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有連結要求 Poki 透過 %@ 連線。執行該中轉的人可以透過 Poki 查看你的螢幕並操作此 iPhone。僅在這是你本人架設的中轉時才允許。"
+          }
+        }
+      }
+    },
+    "A link carries a pairing file for Poki. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A link carries a pairing file for Poki. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有链接为 Poki 带来了配对文件。它会替换此 iPhone 现有的配对，文件有误时自动化将停止工作。仅在这是你本人用 Poki Setup 生成的文件时才允许。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有連結為 Poki 帶來了配對檔案。它會取代此 iPhone 現有的配對，檔案有誤時自動化將停止運作。僅在這是你本人用 Poki Setup 產生的檔案時才允許。"
+          }
+        }
+      }
+    },
+    "A link asks Poki to fetch a pairing file from %@. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A link asks Poki to fetch a pairing file from %@. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有链接要求 Poki 从 %@ 获取配对文件。它会替换此 iPhone 现有的配对，文件有误时自动化将停止工作。仅在这是你本人用 Poki Setup 生成的文件时才允许。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有連結要求 Poki 從 %@ 取得配對檔案。它會取代此 iPhone 現有的配對，檔案有誤時自動化將停止運作。僅在這是你本人用 Poki Setup 產生的檔案時才允許。"
+          }
+        }
+      }
+    },
+    "The pairing link was not used." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The pairing link was not used."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未使用该配对链接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未使用該配對連結。"
+          }
+        }
+      }
+    },
+    "This pairing link is incomplete. Make a new code in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This pairing link is incomplete. Make a new code in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配对链接不完整。请在 Poki Setup 中重新生成配对码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配對連結不完整。請在 Poki Setup 中重新產生配對碼。"
+          }
+        }
+      }
+    },
     "Also uses" : {
       "localizations" : {
         "en" : {
