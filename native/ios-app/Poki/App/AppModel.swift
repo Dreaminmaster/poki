@@ -2301,8 +2301,7 @@ final class AppModel {
 
     /// A pairing file as bytes: from Files, AirDrop, a `poki://pairing` link or Poki Setup on a computer.
     func importPairingFile(_ data: Data, how: String) throws {
-        // A lockdown pairing plist or an RPPairing file; both are property lists.
-        _ = try PropertyListSerialization.propertyList(from: data, format: nil)
+        try Self.checkPairingFileFormat(data)
         try data.write(to: AppFiles.pairingFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         // Chosen by hand: it replaces the phone's own pairing as well.
         try? FileManager.default.removeItem(at: AppFiles.phonePairingFile)
@@ -2312,6 +2311,11 @@ final class AppModel {
         pairingTrouble = nil; pairingVerifiedAt = nil
         pairingNote = AppLocalization.text(LocalizedStringResource("Pairing file received."))
         log.add("pairing", "pairing file \(how)")
+    }
+
+    private static func checkPairingFileFormat(_ data: Data) throws {
+        // Lockdown and RPPairing files are both property lists.
+        _ = try PropertyListSerialization.propertyList(from: data, format: nil)
     }
 
     /// What the last pairing link or file did, for the pairing page.
@@ -2334,11 +2338,15 @@ final class AppModel {
 
     /// While one link waits for the owner, another is turned away, not queued and not put in its place:
     /// the alert on screen keeps the request it shows, so Allow never applies a link the owner did not see.
-    private func ask(_ kind: LinkAsk.Kind, host: String) {
+    private func canAskAboutLink() -> Bool {
         guard linkAsk == nil else {
             log.add("app", "a link came while another waits for the owner; it was not used")
-            return
+            return false
         }
+        return true
+    }
+
+    private func ask(_ kind: LinkAsk.Kind, host: String) {
         linkAsk = LinkAsk(kind: kind, host: host)
         if case .relay = kind {
             log.add("app", "a link asks to change the relay to \(host), waiting for the owner")
@@ -2384,7 +2392,7 @@ final class AppModel {
     /// A link Poki was opened with. `poki://pairing?url=…&sha256=…` fetches a pairing file (Poki
     /// Setup serves it on the local network and shows the link as a code); `poki://pairing?data=…`
     /// carries one in base64url; `poki://setup?relay=…` sets the relay. A file URL is a pairing file
-    /// opened from AirDrop or Files. Returns the setup step to show, or nil when the link was none of these.
+    /// opened from AirDrop or Files. Returns the setup step to show, or nil when no step should open.
     ///
     /// A pairing or relay link from outside Poki only asks (`linkAsk`): nothing changes until the owner
     /// allows it. `scanned` is Poki's own scanner on the pairing page, which the owner pointed at the
@@ -2400,12 +2408,18 @@ final class AppModel {
         func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host() {
         case "pairing":
+            guard scanned || canAskAboutLink() else { return nil }
             if let text = item("data"), let data = Data(base64URL: text) {
-                if scanned {
-                    do { try importPairingFile(data, how: "scanned") } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
-                } else {
-                    pairingNote = nil
-                    ask(.pairingData(data), host: "")
+                do {
+                    if scanned {
+                        try importPairingFile(data, how: "scanned")
+                    } else {
+                        try Self.checkPairingFileFormat(data)
+                        pairingNote = nil
+                        ask(.pairingData(data), host: "")
+                    }
+                } catch {
+                    pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)"))
                 }
             } else if let from = item("url").flatMap(URL.init(string:)), ["http", "https"].contains(from.scheme?.lowercased() ?? ""), let host = from.host(), !host.isEmpty {
                 // The checksum is not optional: without it a link could have Poki fetch and keep any file.
@@ -2427,7 +2441,7 @@ final class AppModel {
             // screen and act on the phone, so the link only asks. The relay already in use needs no answer.
             guard let text = item("relay") else { return nil }
             guard let address = RelayAddress(text) else { log.add("relay", "link carried no relay address"); return nil }
-            if address != relayAddress { ask(.relay(address), host: address.origin.absoluteString) }
+            if address != relayAddress, canAskAboutLink() { ask(.relay(address), host: address.origin.absoluteString) }
             return nil
         default: return nil
         }

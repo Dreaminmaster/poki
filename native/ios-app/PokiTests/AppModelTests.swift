@@ -1819,14 +1819,22 @@ final class FrontendSubtractionTests: XCTestCase {
             let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
             defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
             let before = model.relayAddress
+            let missingChecksum = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist"))
+            _ = model.open(link: missingChecksum)
+            let previousNote = try XCTUnwrap(model.pairingNote)
             XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fmine.example"))))
             let shown = try XCTUnwrap(model.linkAsk)
             XCTAssertEqual(shown.host, "https://mine.example")
             XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))))
             XCTAssertEqual(model.linkAsk?.id, shown.id, "the second link does not replace the one on screen")
             let sum = String(repeating: "ab", count: 32)
-            _ = model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.66%3A4000%2Fp.plist&sha256=\(sum)")))
-            XCTAssertEqual(model.linkAsk?.id, shown.id, "nor does a pairing link")
+            let download = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist&sha256=\(sum)"))
+            let inline = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
+            for link in [download, inline, missingChecksum] {
+                XCTAssertNil(model.open(link: link), "discarded pairing links do not open the pairing page")
+                XCTAssertEqual(model.pairingNote, previousNote, "discarded pairing links leave the previous message alone")
+                XCTAssertEqual(model.linkAsk?.id, shown.id, "discarded pairing links do not replace the request")
+            }
 
             model.answerLink(allow, to: UUID())
             XCTAssertEqual(model.linkAsk?.id, shown.id, "an answer to another request does nothing")
@@ -1839,6 +1847,14 @@ final class FrontendSubtractionTests: XCTestCase {
                 XCTAssertEqual(model.relayAddress, before, "Don't Allow leaves the relay as it was")
             }
         }
+    }
+
+    func testInvalidInlinePairingDataShowsAnErrorWithoutAsking() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let invalid = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
+        XCTAssertEqual(model.open(link: invalid), .pairing)
+        XCTAssertNil(model.linkAsk, "invalid property-list bytes cannot be approved")
+        XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
     }
 
     /// A pairing link from outside asks before it replaces the pairing file, and one that fetches a
