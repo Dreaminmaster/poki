@@ -737,6 +737,7 @@ public final class PokiCore: @unchecked Sendable {
         // The owner's time on an approval, and the runner's start, come on top of the tool's own time.
         let deadline = config.toolDeadline + (name == "do" ? config.approvalWait : 0) + config.runnerWait + 1
             + (local ? Computer.authorizationWait : 0)
+        let replayedSkills = LockedBox<[String]>([])
         var output: ToolResult
         computer.failureLog.value = nil
         do {
@@ -747,12 +748,15 @@ public final class PokiCore: @unchecked Sendable {
                     }
                     return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps, localTask: localTask)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask)
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask) { name in
+                    replayedSkills.update { $0.append(name) }
+                }
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
             output = ToolResult(text: "error: \(error); what was sent is unknown. Call look to see the screen.", jpeg: nil, isError: true)
         }
+        output.replayedSkills = replayedSkills.value
         if local, session == nil, let localTask, localTask == computer.recordingTask,
            !output.isError, let app = output.readApp?.lowercased(), app != "com.apple.springboard",
            let memory = computer.memory, computer.memoryAppsOffered.insert(app).inserted {

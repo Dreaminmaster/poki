@@ -969,7 +969,7 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onSkillReplayed: @escaping @Sendable (String) -> Void) async -> ToolResult {
         var actions = actions
         var bound: String?
         if config.appNames() {
@@ -991,7 +991,7 @@ final class Computer: @unchecked Sendable {
             }
             if let kept = sessionApp, kept.session == session { bound = kept.bundle }
         }
-        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask))
+        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onSkillReplayed: onSkillReplayed))
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
             authorizationRead = (read.revision, localTask, result.isError ? [] : evidence)
@@ -1036,7 +1036,7 @@ final class Computer: @unchecked Sendable {
         return action
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onSkillReplayed: @escaping @Sendable (String) -> Void) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
         var started = now()
@@ -1112,7 +1112,7 @@ final class Computer: @unchecked Sendable {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
                 if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice)
+                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, onSkillReplayed: onSkillReplayed)
                     result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
                     return result
                 }
@@ -1141,7 +1141,6 @@ final class Computer: @unchecked Sendable {
         var did: [String] = []
         var error: String?
         var lastKind: String?
-        var replayedSkills: [String] = []
         var toRun = actions
         // What the screen said before these actions, for the send check: a message that was already there does not count as sent.
         let textsBefore = lastAll.filter { !$0.fromPicture && !Self.fieldTypes.contains($0.type) }.map(\.text)
@@ -1162,7 +1161,7 @@ final class Computer: @unchecked Sendable {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
-                    (did, error, lastKind, replayedSkills) = await run(Array(actions[..<at]), started: started, until: until)
+                    (did, error, lastKind) = await run(Array(actions[..<at]), started: started, until: until, onSkillReplayed: onSkillReplayed)
                     if error != nil {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
@@ -1213,7 +1212,7 @@ final class Computer: @unchecked Sendable {
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
-        let (moreDid, moreError, moreKind, moreReplayedSkills) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved)
+        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved, onSkillReplayed: onSkillReplayed)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -1312,7 +1311,6 @@ final class Computer: @unchecked Sendable {
             }
             result.text = lines.joined(separator: "\n")
         }
-        result.replayedSkills = replayedSkills + moreReplayedSkills
         return result
     }
 
@@ -1468,9 +1466,8 @@ final class Computer: @unchecked Sendable {
     /// deadline. Stops at the first that fails.
     /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
     /// approved an action, by its number in the do.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:]) async -> (did: [String], error: String?, lastKind: String?, replayedSkills: [String]) {
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onSkillReplayed: @escaping @Sendable (String) -> Void) async -> (did: [String], error: String?, lastKind: String?) {
         var did: [String] = []
-        var replayedSkills: [String] = []
         var error: String?
         var logError: String?
         var lastKind: String?
@@ -1500,11 +1497,9 @@ final class Computer: @unchecked Sendable {
             let givenUp = runner.actionsGivenUp.value
             let recorded = recordable(action)
             do {
-                let replayed = ActionKind(action) == .run ? LockedBox<String?>(nil) : nil
                 let (kind, text) = try await withDeadline(left, "action \(index + 1)") { [self] in
-                    try await perform(action, until: actionsUntil, backTarget: check.backTarget) { replayed?.value = $0 }
+                    try await perform(action, until: actionsUntil, backTarget: check.backTarget, onSkillReplayed: onSkillReplayed)
                 }
-                if let name = replayed?.value { replayedSkills.append(name) }
                 if let recorded { trace.append(recorded) }
                 lastKind = kind
                 did.append("\(text) (sent, \(Int(((now() - began) * 1000).rounded())) ms)")
@@ -1552,7 +1547,7 @@ final class Computer: @unchecked Sendable {
                 break
             }
         }
-        return (did, error, lastKind, replayedSkills)
+        return (did, error, lastKind)
     }
 
     /// Why an action that presses the screen is held back on the screen as it is now, after an action
