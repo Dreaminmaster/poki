@@ -208,12 +208,12 @@ public struct Skill: Codable, Equatable, Sendable {
 
     public var otherApps: [String] {
         var seen = Set<String>()
-        return steps.compactMap(Self.operatedApp).filter { $0 != app && seen.insert($0).inserted }
+        return Self.operatedApps(from: steps).filter { $0 != app && seen.insert($0).inserted }
     }
 
     var startingApp: String? { Self.normalizedApp(steps.first?.app) ?? app }
 
-    private static func normalizedApp(_ raw: String?) -> String? {
+    fileprivate static func normalizedApp(_ raw: String?) -> String? {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty,
               trimmed.caseInsensitiveCompare("com.apple.springboard") != .orderedSame,
@@ -224,17 +224,30 @@ public struct Skill: Codable, Equatable, Sendable {
     }
 
     static func inferredApp(from steps: [SkillStep]) -> String? {
-        steps.reversed().lazy.compactMap(operatedApp).first
+        operatedApps(from: steps).last
     }
 
-    private static func operatedApp(_ step: SkillStep) -> String? {
-        if step.action["launch"] != nil {
-            let launched = step.action["launch"]?.string ?? step.action["launch"]?["bundle"]?.string
-            return normalizedApp(launched)
+    private static func operatedApps(from steps: [SkillStep]) -> [String] {
+        var apps: [String] = []
+        // Launch and Home can leave the previous foreground in the recorded steps until the next read.
+        var staleForeground: String?
+        for step in steps {
+            if let recorded = step.app, recorded != staleForeground { staleForeground = nil }
+            switch ActionKind(step.action) {
+            case .launch?:
+                let launch = step.action["launch"]
+                let destination = launch?.string ?? launch?["bundle"]?.string
+                if let app = normalizedApp(destination) { apps.append(app) }
+                staleForeground = destination == step.app ? nil : step.app
+            case .button?:
+                if step.action["button"]?.text?.lowercased() == "home" { staleForeground = step.app }
+            case .wait?, .waitUntil?, .handoff?, .run?, .path?, nil:
+                continue
+            default:
+                if step.app != staleForeground, let app = normalizedApp(step.app) { apps.append(app) }
+            }
         }
-        guard step.action["wait"] == nil, step.action["wait_until"] == nil,
-              step.action["button"]?.string != "home" else { return nil }
-        return normalizedApp(step.app)
+        return apps
     }
 }
 
@@ -340,7 +353,9 @@ public typealias RoutineRunLog = SkillRunLog
 
 /// The file: skills, notes and the latest runs. Reads both v1 (`routines`) and v2 (`skills`).
 struct MemoryFile: Codable {
+    private static let currentAppRule = 1
     var schema = SkillStore.schema
+    var appRule: Int? = MemoryFile.currentAppRule
     var exported: Date?
     var skills: [Skill] = []
     var notes: [MemoryNote] = []
@@ -370,17 +385,17 @@ struct MemoryFile: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schema, exported, skills, routines, notes, runs, extras, changes
+        case schema, appRule, exported, skills, routines, notes, runs, extras, changes
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schema = try c.decodeIfPresent(String.self, forKey: .schema) ?? SkillStore.schema
+        appRule = try c.decodeIfPresent(Int.self, forKey: .appRule)
         exported = try c.decodeIfPresent(Date.self, forKey: .exported)
-        let loaded = try c.decodeIfPresent([Skill].self, forKey: .skills)
+        skills = try c.decodeIfPresent([Skill].self, forKey: .skills)
             ?? c.decodeIfPresent([Skill].self, forKey: .routines)
             ?? []
-        skills = loaded.map { $0.migrated() }
         notes = try c.decodeIfPresent([MemoryNote].self, forKey: .notes) ?? []
         runs = try c.decodeIfPresent([SkillRunLog].self, forKey: .runs) ?? []
         extras = try c.decodeIfPresent([String: JSON].self, forKey: .extras)
@@ -390,12 +405,36 @@ struct MemoryFile: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(schema, forKey: .schema)
+        try c.encodeIfPresent(appRule, forKey: .appRule)
         try c.encodeIfPresent(exported, forKey: .exported)
         try c.encode(skills, forKey: .skills)
         try c.encode(notes, forKey: .notes)
         try c.encode(runs, forKey: .runs)
         try c.encodeIfPresent(extras, forKey: .extras)
         try c.encodeIfPresent(changes, forKey: .changes)
+    }
+
+    @discardableResult
+    mutating func regroupLegacySkills() -> Bool {
+        guard (appRule ?? 0) < Self.currentAppRule else { return false }
+        skills = skills.map { $0.migrated() }
+        if var changes {
+            for i in changes.indices {
+                let previous = changes[i].routine?.migrated()
+                changes[i].routine = previous
+                guard let name = changes[i].routineName else { continue }
+                if let current = skills.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                    changes[i].routineApp = current.app
+                } else if let previous {
+                    changes[i].routineApp = previous.app
+                } else {
+                    changes[i].routineApp = Skill.normalizedApp(changes[i].routineApp)
+                }
+            }
+            self.changes = changes
+        }
+        appRule = Self.currentAppRule
+        return true
     }
 }
 
@@ -422,7 +461,14 @@ public final class SkillStore: @unchecked Sendable {
         self.url = url
         self.backupDirectory = backupDirectory
         if let url, let data = try? Data(contentsOf: url) {
-            if let saved = try? Self.decoder.decode(MemoryFile.self, from: data) {
+            if var saved = try? Self.decoder.decode(MemoryFile.self, from: data) {
+                if Self.supportedSchemas.contains(saved.schema), saved.regroupLegacySkills() {
+                    saved.schema = Self.schema
+                    // Poki Setup may have left a restore in the backup directory for startup to import.
+                    if let upgraded = try? Self.encoder.encode(saved) {
+                        try? upgraded.write(to: url, options: .atomic)
+                    }
+                }
                 file = saved
             } else {
                 // A file this version cannot read is set aside, not written over with an empty memory.
@@ -744,11 +790,12 @@ public final class SkillStore: @unchecked Sendable {
     /// notes are added unless the same text is there. Accepts both v1 and v2 backups.
     @discardableResult
     public func importData(_ data: Data, by: String) throws -> String {
-        let incoming: MemoryFile
+        var incoming: MemoryFile
         do { incoming = try Self.decoder.decode(MemoryFile.self, from: data) }
         catch { throw ImportError("not a Poki agent backup: \(error)") }
         guard incoming.schema.hasPrefix("poki.agent-backup/") else { throw ImportError("not a Poki agent backup (schema \(incoming.schema))") }
         guard Self.supportedSchemas.contains(incoming.schema) else { throw ImportError("a backup of a newer Poki (\(incoming.schema)); update Poki to import it") }
+        incoming.regroupLegacySkills()
         var added = 0, replaced = 0, kept = 0, notes = 0
         // An agent's import brings what it says, but not the owner's say: nothing comes locked, and
         // nothing claims to be the owner's, an import's or Dream's. A note's "edited" and "heard"
@@ -756,7 +803,6 @@ public final class SkillStore: @unchecked Sendable {
         let agent = !Self.isReserved(by)
         withFile(true) { f in
             for var r in incoming.skills where !r.name.isEmpty {
-                r = r.migrated()
                 if agent { r.locked = nil; if Self.isReserved(r.savedBy) { r.savedBy = by } }
                 if let i = f.skills.firstIndex(where: { $0.name.caseInsensitiveCompare(r.name) == .orderedSame }) {
                     // The owner locked ours: a newer copy from elsewhere does not replace it.
@@ -1329,10 +1375,10 @@ extension Computer {
             var recorded = step
             if let element = refs[Self.runRef], step.target?.type == SkillTarget.anyType { recorded.target = SkillTarget(element) }
             refs[Self.runRef] = nil
+            recorded.app = front?.bundleID ?? lastForeground?.bundleID ?? step.app
             if let spec = action["launch"] { front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil) }
             done = index + 1
             log.append("\(index + 1) \(text.prefix(80)) (\(Int(((now() - began) * 1000).rounded())) ms)")
-            recorded.app = lastForeground?.bundleID ?? step.app
             recorded.optional = nil
             // A path's typed text is what a saved skill's parameter is made of.
             trace.append(RecordedStep(step: recorded, typed: kind == "type" ? action["type"]?.string : nil, keysBefore: []))
