@@ -178,6 +178,25 @@ final class RoutineTests: XCTestCase {
         XCTAssertTrue(brief.contains("note 49: "), brief)
     }
 
+    func testTaskBriefKeepsAnAppMemoryAfterTwentyNewerMemoriesForAnotherApp() {
+        let store = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let preference = "Include the build number when reporting the iOS version."
+        let global = "Use concise answers."
+        store.remember(preference, by: SkillStore.owner, app: settings)
+        for i in 1...20 {
+            store.remember("Calculator preference \(i)", by: SkillStore.owner, app: calculator)
+        }
+        store.remember(global, by: SkillStore.owner)
+
+        let brief = store.brief(for: "Find the iOS version in Settings", apps: [settings])
+
+        XCTAssertTrue(brief.contains(preference))
+        XCTAssertTrue(brief.contains(global))
+        XCTAssertFalse(brief.contains("Calculator preference"))
+    }
+
     func testAStaleRoutineIsNotOfferedAndASaveOverItStartsItsRecordAgain() async {
         let store = RoutineStore(url: nil)
         let (core, _, pages) = core(store)
@@ -187,6 +206,9 @@ final class RoutineTests: XCTestCase {
         for _ in 0..<2 { pages.show(0); _ = await core.call("look", [:]); _ = await core.call("do", ["actions": [["run": "iOS version"]]]) }
         XCTAssertTrue(store.routine(named: "iOS version")!.stale)
         XCTAssertFalse(store.brief(for: "what iOS version is this").contains("iOS version:"))
+        let listed = await core.call("skills", ["action": "list"])
+        XCTAssertFalse(listed.text.contains("iOS version:"), listed.text)
+        XCTAssertTrue(store.routine(named: "iOS version")!.stale)
     }
 
     func testTheFirstLookOfATaskNamesTheRoutinesAndFinishOffersToSave() async {

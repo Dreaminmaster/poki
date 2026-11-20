@@ -507,6 +507,34 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(RoutineStore.shared.note(note)?.heard?.session, chat.sessionID)
     }
 
+    func testFailedTaskDoesNotSaveItsRecordedStepsOrMemory() async throws {
+        let name = "Incomplete skill \(UUID().uuidString)"
+        let note = "Unverified detail \(UUID().uuidString)"
+        defer {
+            SkillStore.shared.forget(name)
+            SkillStore.shared.forgetNote(note)
+        }
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+            FakeCompletions.tool("skills", ["action": "save", "name": name]),
+            FakeCompletions.tool("skills", ["action": "remember", "text": note]),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "The requested screen could not be verified.", "details": [], "answer": ["kind": "field"]]),
+            FakeCompletions.text("I could not verify the requested screen."),
+        ])
+        let chat = chat(on: server, transport: transport, automation: automation)
+
+        let result = await chat.runDelegated("Verify a setting and keep the confirmed procedure.")
+        let app = try XCTUnwrap(app)
+        let saved = await app.runTool("skills", arguments: Self.json(["action": "list"]))
+
+        XCTAssertEqual(result.success, false)
+        XCTAssertFalse(saved.text.contains(name))
+        XCTAssertFalse(saved.text.contains(note))
+    }
+
     /// finish_task's requested facts and the kind of answer go back to the agent that handed the task
     /// over, and the task's record keeps the answer with the element it was read from.
     func testTheFinishedTaskAnswersWithTheRequestedFacts() async throws {
