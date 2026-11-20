@@ -349,6 +349,62 @@ final class ApprovalTests: XCTestCase {
         return wda
     }
 
+    func testPhotosSwipeDoesNotAskToPayForThePhotoLabel() async {
+        let wda = FakeWDA()
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]]) }
+        wda.tree([Node("Image", "Payment receipt", [0, 140, 390, 690])], app: "Photos")
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            wda.tree([Node("Image", "Next photo", [0, 140, 390, 690])], app: "Photos")
+            return (200, ["value": .null])
+        }
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["swipe": "left"]], "full": true])
+
+        XCTAssertNil(core.pendingApproval, result.text)
+        XCTAssertTrue(result.text.contains("Next photo"), result.text)
+    }
+
+    func testAssistiveTouchDragAndBackDoNotAskToPayForThePhotoLabel() async {
+        let wda = FakeWDA()
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]]) }
+        let photo = Node("Image", "Payment receipt", [0, 140, 390, 690])
+        let back = Node("Button", "返回", [8, 50, 60, 40])
+        wda.tree([back, photo, Node("Button", "AssistiveTouch", [325, 775, 50, 50])], app: "Photos")
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            wda.tree([back, photo, Node("Button", "AssistiveTouch", [0, 425, 50, 50])], app: "Photos")
+            return (200, ["value": .null])
+        }
+        wda.set("POST /wda/tap") { [wda] _ in
+            wda.tree([Node("NavigationBar", "Library", [0, 50, 390, 44])], app: "Photos")
+            return (200, ["value": .null])
+        }
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [
+            ["drag": ["from": [350, 800], "to": [24, 450], "ms": 400]], ["wait": 300], ["tap": 1],
+        ], "full": true])
+
+        XCTAssertNil(core.pendingApproval, result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressAndDragWithVelocity").count, 1, result.text)
+        XCTAssertTrue(result.text.contains("Library"), result.text)
+    }
+
+    func testTappingPayRequestsOwnerApprovalBeforeAnyTouch() async throws {
+        let wda = FakeWDA()
+        wda.tree([Node("Button", "Pay $12.00", [16, 380, 358, 120])], app: "Shop")
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.approvalMode = { .off } }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["tap": 1]]])
+
+        XCTAssertTrue(result.text.contains("approval_required"), result.text)
+        XCTAssertEqual(try XCTUnwrap(core.pendingApproval).reason, "a payment (\"pay\")")
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+    }
+
     func testABatchReportsEverySensitiveActionBeforeOwnerApproval() async throws {
         let wda = FakeWDA()
         wda.source([("Button", "Photo"), ("Button", "Call"), ("Button", "Delete"), ("Button", "Pay")], app: "Photos")
