@@ -234,12 +234,21 @@ struct CellularShortcutSection: View {
     var body: some View {
         Section {
             Button {
-                reconnect.asked = true
-                openURL(HistoryReconnect.shortcut)
+                openURL(reconnect.take())
             } label: {
                 SettingsRow(title: "Get the Shortcut", symbol: "square.2.layers.3d", accessory: .leaves)
             }
             .accessibilityIdentifier("cellularShortcut.get")
+            if reconnect.canRun {
+                // It asks Poki first and changes nothing while the connection is fine, so it can
+                // be run whenever the loopback is off (the owner, 2026-11-20).
+                Button {
+                    openURL(HistoryReconnect.run)
+                } label: {
+                    SettingsRow(title: "Run the Shortcut", symbol: "play", accessory: .leaves)
+                }
+                .accessibilityIdentifier("cellularShortcut.run")
+            }
             NavigationLink {
                 HistoryShortcutGuide().settingsPage().onAppear { reconnect.asked = true }
             } label: {
@@ -250,22 +259,19 @@ struct CellularShortcutSection: View {
         } header: {
             SettingsHeader("On Cellular")
         } footer: {
-            Text("On cellular, iOS lets Poki keep its connection but not open a new one. The shortcut runs when Wi-Fi disconnects. It turns Cellular Data off for a moment, lets Poki connect, and turns it back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
+            Text("On cellular, iOS lets Poki keep its connection but not open a new one. The Poki Loopback shortcut runs when Wi-Fi disconnects, and you can run it whenever the loopback is off. It asks Poki first and changes nothing when the connection is fine. Otherwise it turns Wi-Fi and Cellular Data off for a moment, lets Poki connect, and turns them back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
         }
     }
 }
 
-/// The Wi-Fi automation built by hand, for an iPhone where the shared shortcut arrives without it
-/// or without Poki's action.
+/// The Wi-Fi automation added by hand, for an iPhone where the shared shortcut arrives without it.
+/// The shortcut itself comes from the link there too, so the automation only has to run it.
 struct HistoryShortcutGuide: View {
     private let steps: [LocalizedStringKey] = [
+        "Add Poki Loopback with Get the Shortcut on the page before, and choose your VPN app when it asks.",
         "Open Shortcuts and go to Automation.",
         "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately.",
-        "Add Set VPN, choose Connect and your VPN.",
-        "Add Set Cellular Data and set it to Off.",
-        "Add Set VPN again with the same VPN. With no network at all the first one may not start.",
-        "Add Reconnect Poki from the actions of Poki.",
-        "Add Set Cellular Data and set it to On.",
+        "Choose Poki Loopback as the shortcut to run.",
     ]
 
     var body: some View {
@@ -278,7 +284,7 @@ struct HistoryShortcutGuide: View {
                     }
                 }
             } footer: {
-                Text("On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps make the same one.")
+                Text("On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps add the automation that runs it.")
             }
         }
         .navigationTitle(AppLocalization.text("Set Up by Hand"))

@@ -15,13 +15,19 @@ import SwiftUI
 /// `true` when there is nothing to do (the tunnel still answers, or Wi-Fi is there), and otherwise
 /// `false` once the proxy's VPN has been steady for a few seconds: turned off any sooner after
 /// Wi-Fi dropped, cellular took the VPN down with it and no connection could be made at all.
+///
+/// The shared shortcut, Poki Loopback (the owner's, 2026-11-20), asks in that order: Set VPN, `/ready`,
+/// and only on `false` Wi-Fi off, Cellular Data off, `/reconnect`, Cellular Data on, Wi-Fi on. So it
+/// changes nothing while the connection is fine, and can be run at any time the loopback is off.
 @MainActor
 final class HistoryReconnect: ObservableObject {
     static let shared = HistoryReconnect()
 
     static let port: UInt16 = 47684
-    /// The shared shortcut with its Wi-Fi automation. The owner's link (2026-11-19).
-    static let shortcut = URL(string: "https://www.icloud.com/shortcuts/4475df3df79a42fe8a0b99e88a11bc6e")!
+    /// The shared shortcut, Poki Loopback, with its Wi-Fi automation. The owner's link (2026-11-20).
+    static let shortcut = URL(string: "https://www.icloud.com/shortcuts/cef403d76ef04d0586d03dd69476b96e")!
+    /// Runs the shared shortcut by the name it arrives with.
+    static let run = URL(string: "shortcuts://run-shortcut?name=Poki%20Loopback")!
 
     /// When a shortcut last asked, and whether a read came through.
     @Published private(set) var lastAt: Date? = UserDefaults.standard.object(forKey: "history.reconnect.at") as? Date
@@ -31,6 +37,22 @@ final class HistoryReconnect: ObservableObject {
     /// longer waits on this page for it.
     @Published var asked = UserDefaults.standard.bool(forKey: "loopback.cellularAsked") {
         didSet { UserDefaults.standard.set(asked, forKey: "loopback.cellularAsked") }
+    }
+
+    /// The link of the shared shortcut the owner last opened from Poki. The one before it had
+    /// another name (Poki Loopback Cellular) and did not ask `/ready`, so it is not run by name.
+    @Published private(set) var opened = UserDefaults.standard.string(forKey: "loopback.shortcutLink") {
+        didSet { UserDefaults.standard.set(opened, forKey: "loopback.shortcutLink") }
+    }
+
+    /// Whether the owner got the shortcut that can be run at any time: Run the Shortcut is offered.
+    var canRun: Bool { opened == Self.shortcut.absoluteString }
+
+    /// The owner opens the shared shortcut's link: the link to open, noted as shown and as theirs.
+    func take() -> URL {
+        asked = true
+        opened = Self.shortcut.absoluteString
+        return Self.shortcut
     }
 
     /// The shortcut asked Poki to reconnect at least once on this iPhone: it is set up. Screen

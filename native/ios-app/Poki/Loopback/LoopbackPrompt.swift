@@ -52,6 +52,8 @@ struct LoopbackPrompt: ViewModifier {
         case openSetup
         /// On cellular with the reconnect shortcut set up: Wi-Fi or the shortcut brings it back.
         case wiFi
+        /// On cellular with the shortcut that can be run at any time: running it brings it back.
+        case run
         /// On cellular without the shortcut: iOS will not start the loopback, and the shortcut is
         /// what keeps it going there (offered with the loopback in Setup too).
         case shortcut
@@ -59,6 +61,7 @@ struct LoopbackPrompt: ViewModifier {
 
     private var action: Action {
         if model.loopback.cellularOnly { let reconnect = HistoryReconnect.shared
+            if reconnect.canRun, reconnect.isSetUp { return .run }
             return reconnect.lastAt == nil && !reconnect.asked ? .shortcut : .wiFi }
         if let app = ProxyApps.all.first(where: { $0.id == model.setup.proxyApp }), app.isInstalled, let url = URL(string: "\(app.scheme)://") {
             return .proxy(name: app.name, url: url)
@@ -89,9 +92,11 @@ struct LoopbackPrompt: ViewModifier {
             if let url = URL(string: "poki://setup") { UIApplication.shared.open(url) }
         case .wiFi:
             shown = false
+        case .run:
+            shown = false
+            UIApplication.shared.open(HistoryReconnect.run)
         case .shortcut:
-            HistoryReconnect.shared.asked = true
-            UIApplication.shared.open(HistoryReconnect.shortcut)
+            UIApplication.shared.open(HistoryReconnect.shared.take())
         }
     }
 
@@ -148,6 +153,8 @@ private struct LoopbackPromptSheet: View {
         let reads: String
         if action == .shortcut {
             reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. The Poki shortcut turns it on again when Wi-Fi disconnects. Add it once and Poki keeps reading on cellular."))
+        } else if action == .run {
+            reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Run the Poki Loopback shortcut and Poki turns it on again."))
         } else if action == .wiFi {
             reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Connect to Wi-Fi and Poki turns it on again."))
         } else if let lastRead {
@@ -164,6 +171,7 @@ private struct LoopbackPromptSheet: View {
         case .proxy(let name, _): AppLocalization.text(LocalizedStringResource("Open \(name)"))
         case .openSetup: AppLocalization.text(LocalizedStringResource("Open Setup"))
         case .wiFi: AppLocalization.text(LocalizedStringResource("OK"))
+        case .run: AppLocalization.text(LocalizedStringResource("Run the Shortcut"))
         case .shortcut: AppLocalization.text(LocalizedStringResource("Get the Shortcut"))
         }
     }
