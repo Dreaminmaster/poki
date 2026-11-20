@@ -12,13 +12,13 @@ enum TaskCardState: Equatable {
     case running, needsYou, yourTurn, done, failed, stopped
 
     /// From a plan's steps: `live` is the task under way; `waiting` and `handedOver` are what holds it.
-    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false) {
+    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false) {
         if live {
             if handedOver { self = .yourTurn }
             else if waiting || steps.contains(where: { $0.state == .waiting }) { self = .needsYou }
             else { self = .running }
         } else if stopped { self = .stopped }
-        else if steps.contains(where: { $0.state == .failed }) { self = .failed }
+        else if saveFailed || steps.contains(where: { $0.state == .failed }) { self = .failed }
         else if steps.allSatisfy({ $0.state == .done }) { self = .done }
         else { self = .stopped }
     }
@@ -50,6 +50,7 @@ struct TaskCard: View {
     /// second line then says how long it took and out of how many steps it stopped.
     var ended: Date? = nil
     var plannedTotal: Int? = nil
+    var memoryUse: TaskMemoryUse? = nil
     /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
     /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
     @State private var open: Bool?
@@ -69,6 +70,13 @@ struct TaskCard: View {
     /// Over: the result card (board 定稿 07), the app's icon, what was done, where and how long, and a
     /// mark for how it ended.
     private var over: Bool { state == .done || state == .failed || state == .stopped }
+    private var usedNotes: [MemoryItem] {
+        (memoryUse?.notes ?? []).compactMap { reference in
+            guard let item = MemoryLibrary.shared.item(reference.id),
+                  item.kind == .memory, Int64(item.updated.timeIntervalSince1970) == reference.updatedAtSeconds else { return nil }
+            return item
+        }
+    }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: over ? 20 : 26, style: .continuous)
@@ -124,6 +132,12 @@ struct TaskCard: View {
             VStack(alignment: .leading, spacing: over ? 2 : 1) {
                 Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? nil : 1)
                 subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? nil : 1)
+                let usedNames = (memoryUse?.skills ?? []) + usedNotes.map(\.text)
+                if !usedNames.isEmpty {
+                    Text("Used: \(usedNames.formatted(.list(type: .and)))")
+                        .font(.footnote).foregroundStyle(soft).lineLimit(big ? nil : 1)
+                        .accessibilityIdentifier("taskCard.memoryUse")
+                }
                 // At the accessibility text sizes the title wraps and the label goes under it.
                 if big, !over || asker != nil { pill }
             }
@@ -214,6 +228,12 @@ struct TaskCard: View {
     // MARK: The steps, what Poki sees, and how far it is
 
     @ViewBuilder private var details: some View {
+        ForEach(memoryUse?.skills ?? [], id: \.self) { name in
+            Text("Skill: \(name)").font(.subheadline).foregroundStyle(ink)
+        }
+        ForEach(usedNotes) { note in
+            Text("Memory reported by Poki: \(note.text)").font(.subheadline).foregroundStyle(ink)
+        }
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(steps) { step in

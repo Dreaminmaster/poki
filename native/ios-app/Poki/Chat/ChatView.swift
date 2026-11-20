@@ -763,14 +763,14 @@ struct ChatTranscript<Footer: View>: View {
                 .transition(PlanMotion.stepTransition)
         case .plan(let steps):
             let ask = asking(at: i)
-            let current = live && isLastPlan(i)
+            let current = live && entry.ended == nil && isLastPlan(i)
             TaskCard(title: entry.title ?? ask.title, steps: steps,
                      state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver,
-                                          stopped: entry.stopped == true),
+                                          stopped: entry.stopped == true, saveFailed: entry.saveFailed == true || entry.failed == true),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
                      asker: ask.from, app: current ? app : entry.app, usedBrowser: ChatEntry.taskUsedBrowser(in: entries, at: i), started: entry.at, shot: current ? shot : nil,
-                     ended: current ? nil : entry.ended, plannedTotal: entry.total)
+                     ended: current ? nil : entry.ended, plannedTotal: entry.total, memoryUse: entry.memoryUse)
                 .contentShape(.contextMenuPreview, .rect(cornerRadius: 26, style: .continuous))
 
                 .padding(.vertical, 6)

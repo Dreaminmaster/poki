@@ -2104,10 +2104,14 @@ final class AppModel {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "poki-reply", content: content, trigger: nil))
     }
 
+    func saveTaskMemories(_ writes: [TaskMemoryWrite], conversation: String, task: String) -> [Int] {
+        core.saveTaskMemories(writes, conversation: conversation, task: task)
+    }
+
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
     func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
-        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps) }
+        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask) }
         if !sessionOn {
             if !sessionStarting { startSession() }
             if let task = sessionStartTask { await task.value }

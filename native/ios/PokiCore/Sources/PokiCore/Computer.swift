@@ -13,6 +13,9 @@ public struct ToolResult: Sendable {
     /// that goes nowhere can be told from a task that moves. Nil when no tree was read.
     var screen: String?
     var waitingForOwner = false
+    var replayedSkills: [String] = []
+    var offeredMemories: [MemoryNote] = []
+    var readApp: String?
     var automationAuthorizationDeclined = false
     var screenEvidence: ScreenEvidence? = nil
 }
@@ -138,6 +141,8 @@ final class Computer: @unchecked Sendable {
     /// The agent's memory library, and this task's recorded steps (what skills {save} keeps).
     var memory: SkillStore?
     var trace: [RecordedStep] = []
+    var recordingTask: String?
+    var memoryAppsOffered: Set<String> = []
     /// A skill ran whole in this task (the finish line does not offer to save it again).
     var skillRanWhole = false
     /// The app a session named with `app`: kept across its calls until it lets go of it.
@@ -486,7 +491,8 @@ final class Computer: @unchecked Sendable {
         // A screenshot helps the caller recover from a failed action without hiding the failure.
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
                           screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
-                          waitingForOwner: handoffWaiting, screenEvidence: evidence)
+                          waitingForOwner: handoffWaiting, readApp: treeRead ? reading.foreground?.bundleID : nil,
+                          screenEvidence: evidence)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
@@ -568,8 +574,8 @@ final class Computer: @unchecked Sendable {
             return ToolResult(text: "not_sent: the two visible apps do not match the planned Split View pair.",
                               jpeg: nil, isError: true, splitViewNeedsRead: true)
         }
-        let begins = beginsTask() || (pane != nil && origin?.session != session)
-        if begins { beginRecording(); typedText = nil }
+        let begins = beginsTask() || recordingTask != localTask || (pane != nil && origin?.session != session)
+        if begins { beginRecording(task: localTask); typedText = nil }
         async let locked = isLocked()
         var result = restartNote(await readAndReply(until: until, full: full))
         if let selectedPane {
@@ -1110,8 +1116,8 @@ final class Computer: @unchecked Sendable {
         }
         if let selectedPane, selectedPane.session != session { return workspaceInUse() }
         // The app the owner is in before anything is sent: the read before may be another task's.
-        if beginsTask() {
-            beginRecording()
+        if beginsTask() || recordingTask != localTask {
+            beginRecording(task: localTask)
             typedText = nil
             if let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), let bundle = front["bundleId"]?.string {
                 origin = (Foreground(bundleID: bundle, name: front["name"]?.string), session, now())
@@ -1187,6 +1193,7 @@ final class Computer: @unchecked Sendable {
         var did: [String] = []
         var error: String?
         var lastKind: String?
+        var replayedSkills: [String] = []
         var toRun = actions
         // What the screen said before these actions, for the send check: a message that was already there does not count as sent.
         let textsBefore = lastAll.filter { !$0.fromPicture && !Self.fieldTypes.contains($0.type) }.map(\.text)
@@ -1207,7 +1214,7 @@ final class Computer: @unchecked Sendable {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
-                    (did, error, lastKind) = await run(Array(actions[..<at]), started: started, until: until)
+                    (did, error, lastKind, replayedSkills) = await run(Array(actions[..<at]), started: started, until: until)
                     if error != nil {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
@@ -1258,7 +1265,7 @@ final class Computer: @unchecked Sendable {
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
-        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved)
+        let (moreDid, moreError, moreKind, moreReplayedSkills) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -1357,6 +1364,7 @@ final class Computer: @unchecked Sendable {
             }
             result.text = lines.joined(separator: "\n")
         }
+        result.replayedSkills = replayedSkills + moreReplayedSkills
         return result
     }
 
@@ -1512,8 +1520,9 @@ final class Computer: @unchecked Sendable {
     /// deadline. Stops at the first that fails.
     /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
     /// approved an action, by its number in the do.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:]) async -> (did: [String], error: String?, lastKind: String?) {
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:]) async -> (did: [String], error: String?, lastKind: String?, replayedSkills: [String]) {
         var did: [String] = []
+        var replayedSkills: [String] = []
         var error: String?
         var logError: String?
         var lastKind: String?
@@ -1543,9 +1552,11 @@ final class Computer: @unchecked Sendable {
             let givenUp = runner.actionsGivenUp.value
             let recorded = recordable(action)
             do {
+                let replayed = ActionKind(action) == .run ? LockedBox<String?>(nil) : nil
                 let (kind, text) = try await withDeadline(left, "action \(index + 1)") { [self] in
-                    try await perform(action, until: actionsUntil, backTarget: check.backTarget)
+                    try await perform(action, until: actionsUntil, backTarget: check.backTarget) { replayed?.value = $0 }
                 }
+                if let name = replayed?.value { replayedSkills.append(name) }
                 if let recorded { trace.append(recorded) }
                 lastKind = kind
                 did.append("\(text) (sent, \(Int(((now() - began) * 1000).rounded())) ms)")
@@ -1593,7 +1604,7 @@ final class Computer: @unchecked Sendable {
                 break
             }
         }
-        return (did, error, lastKind)
+        return (did, error, lastKind, replayedSkills)
     }
 
     /// Why an action that presses the screen is held back on the screen as it is now, after an action

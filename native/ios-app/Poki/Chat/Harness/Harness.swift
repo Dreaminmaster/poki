@@ -30,15 +30,15 @@ enum Harness {
     """
 
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
-    @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
+    @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
         if inSplitView {
             var parts = [splitViewInstructions]
             if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
-            return parts.joined(separator: "\n\n")
+            return (parts.joined(separator: "\n\n"), [])
         }
         let namedBundleIDs = AppIconStore.bundleIDs(namedIn: task)
-        let brief = PokiCore.memoryBrief(for: task, apps: namedBundleIDs)
+        let brief = SkillStore.shared.taskBrief(for: task, apps: namedBundleIDs)
         var parts = [instructions]
         parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.
@@ -61,9 +61,10 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        if let apps = appIDs(for: task) { parts.append(apps) }
-        if !brief.isEmpty { parts.append(brief) }
-        return parts.joined(separator: "\n\n")
+        parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
+        if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
+        if !brief.text.isEmpty { parts.append(brief.text) }
+        return (parts.joined(separator: "\n\n"), brief.notes)
     }
 
     /// A result card's send button names the recipient only when the notes do (the card's description).
@@ -75,8 +76,8 @@ enum Harness {
     /// (KnownApps). Without them the model guessed: a tester's 淘宝 and 美团 tasks (Nov 13 2026) were
     /// refused as "no app with that bundle id is installed", and the agent told the owner to install
     /// apps they had. nil when the request names no listed app.
-    @MainActor private static func appIDs(for task: String) -> String? {
-        let apps = AppIconStore.bundleIDs(namedIn: task).compactMap { KnownApps.byID[$0.lowercased()] }
+    private static func appIDs(_ bundleIDs: [String]) -> String? {
+        let apps = bundleIDs.compactMap { KnownApps.byID[$0.lowercased()] }
         guard !apps.isEmpty else { return nil }
         let lines = apps.map { app -> String in
             let names = app.names.joined(separator: " / ")
@@ -152,6 +153,7 @@ enum Harness {
         schema: object([
             "success": ["type": "boolean"], "summary": string,
             "details": ["type": "array", "items": object(["label": string, "value": string], ["label", "value"])],
+            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "IDs from the task's saved memories that changed what you did or answered. Omit this when none affected the task. Skill replays are recorded separately."],
             "answer": object([
                 "kind": ["type": "string", "enum": ["action", "field", "list"]],
                 "items": ["type": "array", "items": object(["ref": string, "field": ["type": "string", "enum": ["label", "value"]], "prefix": string, "suffix": string], ["ref", "field"])],

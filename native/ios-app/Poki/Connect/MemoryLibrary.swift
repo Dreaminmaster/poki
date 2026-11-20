@@ -329,11 +329,16 @@ final class MemoryLibrary {
     func reload() {
         guard let store else { return }
         let routines = store.routines
+        let staleNames = Set(routines.filter(\.stale).map { $0.name.lowercased() })
         var next: [MemoryItem] = store.notes.map(Self.item)
-        next += routines.map(Self.item)
+        next += routines.filter { !$0.stale }.map(Self.item)
         next += Self.habits()
         items = next
-        changes = store.changes.compactMap { Self.change($0, routines: routines) }
+        changes = store.changes.compactMap { record in
+            if let name = record.routineName, staleNames.contains(name.lowercased()) { return nil }
+            guard record.routine?.stale != true else { return nil }
+            return Self.change(record, routines: routines)
+        }
         let seen = UserDefaults.standard.object(forKey: seenKey) as? Date ?? .distantPast
         unread = changes.contains { $0.actor != .owner && $0.at > seen && !$0.undone }
     }
