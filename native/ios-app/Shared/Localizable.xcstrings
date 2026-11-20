@@ -42539,6 +42539,310 @@
           }
         }
       }
+    },
+    "Set Up the Shortcut First" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先设置快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先設定捷徑"
+          }
+        }
+      }
+    },
+    "Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史需要让 Poki 在蜂窝网络下保持连接的快捷指令。请在下方添加并运行一次，然后再打开屏幕历史。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史需要讓 Poki 在行動網路下保持連線的捷徑。請在下方加入並執行一次，然後再打開螢幕歷史。"
+          }
+        }
+      }
+    },
+    "Run the Shortcut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行捷徑"
+          }
+        }
+      }
+    },
+    "Get the Shortcut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "获取快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取得捷徑"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and it is off. The last read was %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，但它现在是关闭的。上次读取是在%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，但它現在是關閉的。上次讀取是在%@。"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and it is off. Turn it on so Poki can keep reading." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，但它现在是关闭的。打开它，Poki 才能继续读取。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，但它現在是關閉的。打開它，Poki 才能繼續讀取。"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Connect to Wi-Fi and Poki turns it on again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，而在蜂窝网络下 iOS 不允许启动它。连接 Wi-Fi 后 Poki 会重新打开它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而在行動網路下 iOS 不允許啟動它。連接 Wi-Fi 後 Poki 會重新打開它。"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. The Poki shortcut turns it on again when Wi-Fi disconnects. Add it once and Poki keeps reading on cellular." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，而在蜂窝网络下 iOS 不允许启动它。Poki 快捷指令会在 Wi-Fi 断开时重新打开它。添加一次，Poki 在蜂窝网络下也能继续读取。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而在行動網路下 iOS 不允許啟動它。Poki 捷徑會在 Wi-Fi 斷開時重新打開它。加入一次，Poki 在行動網路下也能繼續讀取。"
+          }
+        }
+      }
+    },
+    "Set Up by Hand" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手動設定"
+          }
+        }
+      }
+    },
+    "Did Not Connect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能連線"
+          }
+        }
+      }
+    },
+    "On Cellular" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用蜂窝网络时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用行動網路時"
+          }
+        }
+      }
+    },
+    "On cellular, iOS lets Poki keep its connection but not open a new one. The Poki Loopback shortcut runs when Wi-Fi disconnects, and you can run it whenever the loopback is off. It asks Poki first and changes nothing when the connection is fine. Otherwise it turns Wi-Fi and Cellular Data off for a moment, lets Poki connect, and turns them back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。Poki Loopback 快捷指令会在 Wi-Fi 断开时运行，回环连接关闭时你也可以随时运行它。它会先询问 Poki，连接正常时不做任何改动。否则它会短暂关闭 Wi-Fi 和蜂窝数据，让 Poki 连接，然后重新打开。添加时，请打开它的自动化，关闭“运行前确认”，并选择你的 VPN App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。Poki Loopback 捷徑會在 Wi-Fi 中斷時執行，回環連線關閉時你也可以隨時執行它。它會先詢問 Poki，連線正常時不做任何更動。否則它會短暫關閉 Wi-Fi 和行動數據，讓 Poki 連線，然後重新打開。加入時，請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
+          }
+        }
+      }
+    },
+    "Open Shortcuts and go to Automation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“快捷指令”，进入“自动化”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開「捷徑」，進入「自動化」。"
+          }
+        }
+      }
+    },
+    "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为 Wi-Fi 添加自动化，选择“断开网络连接”，并选择“立即运行”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為 Wi-Fi 加入自動化，選擇「中斷網路連線」，並選擇「立即執行」。"
+          }
+        }
+      }
+    },
+    "Choose Poki Loopback as the shortcut to run." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择 Poki Loopback 作为要运行的快捷指令。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇 Poki Loopback 作為要執行的捷徑。"
+          }
+        }
+      }
+    },
+    "Add Poki Loopback with Get the Shortcut on the page before, and choose your VPN app when it asks." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先在上一页用“获取快捷指令”添加 Poki Loopback，并在询问时选择你的 VPN App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先在上一頁用「取得捷徑」加入 Poki Loopback，並在詢問時選擇你的 VPN App。"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Run the Poki Loopback shortcut and Poki turns it on again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，而在蜂窝网络下 iOS 不允许启动它。运行 Poki Loopback 快捷指令，Poki 会重新打开它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而在行動網路下 iOS 不允許啟動它。執行 Poki Loopback 捷徑，Poki 會重新打開它。"
+          }
+        }
+      }
+    },
+    "On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps add the automation that runs it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在较旧的 iOS 版本上，自动化是“快捷指令”中单独的标签页，不会随共享的快捷指令一起添加。按这些步骤添加运行它的自动化。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在較舊的 iOS 版本上，自動化是「捷徑」中獨立的標籤頁，不會隨分享的捷徑一起加入。按這些步驟加入執行它的自動化。"
+          }
+        }
+      }
+    },
+    "Turn On the Loopback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开回环连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開回環連線"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

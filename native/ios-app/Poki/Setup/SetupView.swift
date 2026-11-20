@@ -55,7 +55,9 @@ struct SetupView: View {
         // opening finds it already on (a proxy app set up before Poki: the page opened on `checking`),
         // and when Poki's own session opens without it (ESP-448).
         .onChange(of: model.isDone(.loopback)) { was, now in
-            if step == .loopback, !was, now { advanceSoon() }
+            // Not past the cellular shortcut the first time: it is asked for on this page (the
+            // owner, 2026-11-19), and the button below still goes on.
+            if step == .loopback, !was, now, HistoryReconnect.shared.asked { advanceSoon() }
         }
         .onAppear { model.loopback.resume(); reconnectBuiltIn() }
         .onChange(of: step) { _, now in if now == .loopback { reconnectBuiltIn() } }
@@ -321,6 +323,9 @@ private struct LoopbackPage: View {
             }
         }
 
+        // The loopback on cellular is set up with the loopback itself.
+        CellularShortcutSection()
+
         // The external app is the way (ESP-168): every app's steps can be read at any time.
         Section {
             // The free one first: a new person usually has no proxy app.
@@ -338,7 +343,9 @@ private struct LoopbackPage: View {
         }
         .disabled(externalLocked)
 
-        if model.tunnel.available {
+        // Poki's own connection is no longer offered (the owner, Nov 19 2026). Only an iPhone that
+        // still uses it from before sees its state, and the way to the proxy app.
+        if model.tunnel.available && model.setup.loopback == .builtIn {
             Section {
                 switch model.tunnel.state {
                 case .connecting:
@@ -351,17 +358,14 @@ private struct LoopbackPage: View {
                     LabeledContent("Built-in Connection") { ProgressView() }
                 case .failed(let message):
                     Label(AppLocalization.bundle.localizedString(forKey: message, value: message, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                    enableButton
                 case .off, .unavailable:
-                    enableButton
+                    EmptyView()
                 }
-                if model.setup.loopback == .builtIn {
-                    Button("Use the Current VPN") { model.chooseConnection(.proxy) }.disabled(connectionLocked)
-                }
+                Button("Use the Current VPN") { model.chooseConnection(.proxy) }.disabled(connectionLocked)
             } header: {
                 Text("Other Ways")
             } footer: {
-                Text(model.connectionInUse ? "Stop Poki and finish pairing before changing the local connection." : "No extra app needed. Poki connects only to this iPhone; your normal traffic and DNS stay on their usual routes. iOS shows it as a VPN, so it may disconnect another VPN app.")
+                if model.connectionInUse { Text("Stop Poki and finish pairing before changing the local connection.") }
             }
         }
     }
@@ -392,14 +396,6 @@ private struct LoopbackPage: View {
 
     private var connectionLocked: Bool { model.connectionInUse || model.tunnel.busy }
     private var externalLocked: Bool { model.setup.loopback == .builtIn && connectionLocked }
-
-    private var enableButton: some View {
-        Button("Enable Local Connection") {
-            model.chooseConnection(.builtIn)
-            Task { try? await model.tunnel.connect(); model.loopback.check() }
-        }
-        .disabled(model.tunnel.busy || (model.connectionInUse && model.setup.loopback != .builtIn))
-    }
 
     private func headline(_ monitor: LoopbackMonitor) -> LocalizedStringKey {
         switch monitor.state {
@@ -656,7 +652,10 @@ private struct BackgroundPage: View {
             } else if !model.background.allowed {
                 Button("Allow Location Access") { model.background.requestPermission() }
             } else if !model.background.always {
-                Button("Change to Always Allow") { model.background.requestPermission() }
+                // iOS shows its own Always Allow prompt once. After that the change is made in Settings.
+                if !model.background.askedAlways {
+                    Button("Change to Always Allow") { model.background.requestPermission() }
+                }
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
             }
         } footer: {
@@ -852,9 +851,6 @@ struct SetupStepPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.loopback.resume()
-            if step == .loopback, model.setup.loopback == .builtIn, model.tunnel.available, !model.tunnel.connected, !model.tunnel.busy, !model.connectionInUse {
-                Task { try? await model.tunnel.connect(); model.loopback.check() }
-            }
         }
         .onDisappear { if step == .pairing { model.leftPairing() } }
     }

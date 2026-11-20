@@ -166,6 +166,8 @@ struct TestingOptionsView: View {
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }
             }
+            // Whether a connection opened with no cellular stays open on cellular (issue 484).
+            CellularTrickSection()
         }
         .navigationTitle(AppLocalization.text("Testing Options"))
         .navigationBarTitleDisplayMode(.inline)

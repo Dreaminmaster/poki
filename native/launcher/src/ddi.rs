@@ -57,7 +57,12 @@ pub fn files_present(dir: &str) -> bool {
 
 /// Mounts the image. The services list of this tunnel was fixed when it opened, so the caller opens
 /// a new tunnel afterwards to use the services.
+/// The supervisor and Screen History can both find the image missing after a restart; one mount
+/// runs at a time, and the second caller finds it mounted on its next tunnel.
+static MOUNTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub async fn mount(device: &mut Device, dir: &str) -> Result<()> {
+    let _one = MOUNTING.lock().await;
     let ios = device.ios_version().await.unwrap_or_default();
     match method_for(&ios).unwrap_or_else(|| method_of_files(dir)) {
         Method::Cryptex => mount_cryptex(device, dir).await,

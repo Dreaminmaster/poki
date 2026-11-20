@@ -464,6 +464,38 @@
           }
         }
       }
+    },
+    "Reconnect Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新连接 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新連接 Poki"
+          }
+        }
+      }
+    },
+    "Poki opens its connection to this iPhone again and says whether it worked. Use it in a shortcut that turns Cellular Data off first and back on afterwards." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会重新打开与这台 iPhone 的连接，并告知是否成功。请在快捷指令中先关闭蜂窝数据，运行后再打开。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會重新打開與這台 iPhone 的連線，並告知是否成功。請在捷徑中先關閉行動數據，執行後再打開。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

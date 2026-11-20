@@ -145,6 +145,12 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// connection to testmanagerd and waits for the invalidation handler. Run it in a fresh Poki process
 /// before anything opens the shared session. The dictionary says what each step returned and when.
 - (NSDictionary<NSString *, id> *)separateSessionTrialAt:(CGPoint)point hold:(double)hold;
+/// Screen History's question (issue 484): what this process can read with Automation Mode off. Uses
+/// the session as it is, opening one without Automation Mode when none is open, and asks for the app
+/// in front and its element tree. Never turns Automation Mode on. Keys: code, automation_on,
+/// automation_on_after, accessibility_loaded, front_ok, front_bundle, tree_ok, tree_elements, and
+/// each part's seconds and error.
+- (NSDictionary<NSString *, id> *)quietReadTrial;
 @end
 
 NS_ASSUME_NONNULL_END

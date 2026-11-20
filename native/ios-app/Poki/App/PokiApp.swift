@@ -47,7 +47,10 @@ struct PokiApp: App {
         // The three-dimensional bear loads while the app starts, to be there when Poki's picture first shows.
         BearModel.shared.load()
         let model = AppModel()
+        // Started by iOS in the background (a change of place, a shortcut) with Screen History on:
+        // reading starts without waiting for Poki to be opened.
         HistoryCapture.shared.monitor(model: model)
+        BackgroundRefresh.register { model.background.woke("background refresh") }
         _model = State(initialValue: model)
         let chat = ChatModel(app: model)
         _chat = State(initialValue: chat)
@@ -314,6 +317,7 @@ struct RootView: View {
             Text("The update is almost in. Poki will close to finish it. Open Poki again afterwards.")
         }
         .modifier(AutomationNotices(enabled: !detailsOpen))
+        .modifier(LoopbackPrompt(enabled: !detailsOpen && !welcoming && model.signer.installMessage == nil))
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 model.becameActive()
@@ -324,6 +328,7 @@ struct RootView: View {
                 Task { await model.verifyPairing() }
             } else if phase == .background {
                 model.wentToBackground()
+                if model.background.isOn { BackgroundRefresh.schedule() } else { BackgroundRefresh.cancel() }
             }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
@@ -387,6 +392,9 @@ struct RootView: View {
             if showsSidebar { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
         } else if url.host() == "setup", !url.absoluteString.contains("relay=") {
             openDetails([DetailsRoute.connection])
+        } else if url.host() == "reconnect" {
+            // A shortcut's last resort when Poki was not running: it opens Poki, which reconnects.
+            Task { _ = await HistoryCollector.shared.reconnect(model, by: "a link") }
         } else if url.host() == "log" {
             openDetails([DetailsRoute.history])
         } else if url.host() == "approvals" {

@@ -2925,6 +2925,53 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
     return out;
 }
 
+- (NSDictionary<NSString *, id> *)quietReadTrial {
+    NSMutableDictionary *out = [NSMutableDictionary new];
+    NSError *error = nil;
+    id session = nil;
+    NSTimeInterval t = NSProcessInfo.processInfo.systemUptime;
+    @try {
+        session = [_sessions openWithoutAutomation:&error];
+    } @catch (NSException *e) {
+        out[@"code"] = @"exception"; out[@"detail"] = e.reason ?: @""; return out;
+    }
+    out[@"open_seconds"] = @(NSProcessInfo.processInfo.systemUptime - t);
+    if (!session) { out[@"code"] = error.localizedDescription ?: @"no_session"; return out; }
+    uint64_t generation = _sessions.generation;
+    out[@"generation"] = @(generation);
+    out[@"automation_on"] = @([_sessions automationOn]);
+    t = NSProcessInfo.processInfo.systemUptime;
+    id app = nil, ax = nil;
+    @try {
+        ax = [self accessibilityFor:generation];
+        @synchronized (self) { out[@"accessibility_loaded"] = @(_accessibilityGeneration == generation); }
+        __weak PKInProcess *weakSelf = self;
+        app = PKForegroundElement(ax, self.displayGeometry, NULL, ^NSString *(int pid) { return [weakSelf bundleForPID:pid session:session]; });
+        int pid = PKAXPid(app);
+        out[@"front_pid"] = @(pid);
+        if (pid) out[@"front_bundle"] = [self bundleForPID:pid session:session] ?: @"?";
+        out[@"front_ok"] = @(app != nil);
+    } @catch (NSException *e) {
+        out[@"front_error"] = [NSString stringWithFormat:@"%@: %@", e.name, e.reason];
+    }
+    out[@"front_seconds"] = @(NSProcessInfo.processInfo.systemUptime - t);
+    t = NSProcessInfo.processInfo.systemUptime;
+    @try {
+        NSString *code = nil;
+        id root = app ? PKSnapshotTree(ax, app, &code) : nil;
+        out[@"tree_ok"] = @(root != nil);
+        out[@"tree_elements"] = @(root ? PKCount(root) : 0);
+        if (code && !root) out[@"tree_error"] = code;
+    } @catch (NSException *e) {
+        out[@"tree_error"] = [NSString stringWithFormat:@"%@: %@", e.name, e.reason];
+    }
+    out[@"tree_seconds"] = @(NSProcessInfo.processInfo.systemUptime - t);
+    // A read must not have turned Automation Mode on by itself.
+    out[@"automation_on_after"] = @([_sessions automationOn]);
+    out[@"code"] = @"done";
+    return out;
+}
+
 - (NSDictionary<NSString *, id> *)separateSessionTrialAt:(CGPoint)point hold:(double)hold {
     NSMutableDictionary *out = [NSMutableDictionary new];
     NSTimeInterval t0 = NSProcessInfo.processInfo.systemUptime;

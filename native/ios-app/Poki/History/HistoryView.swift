@@ -137,6 +137,7 @@ struct ScreenHistorySettingsView: View {
     @ObservedObject private var lock = HistoryLock.shared
     @State private var size: (entries: Int, bytes: Int64) = (0, 0)
     @State private var clearing = false
+    @State private var needsShortcut = false
 
     private var permissionsValue: String? {
         if capture.listMode == .include {
@@ -148,16 +149,24 @@ struct ScreenHistorySettingsView: View {
 
     private var recordingStatus: LocalizedStringKey {
         if !capture.enabled { return "Off" }
-        return capture.status == .reading ? "Recording" : "Paused, Waiting to Resume"
+        if capture.status == .reading { return "Recording" }
+        // A run that waits says why: the iPhone is locked, an agent's task, or no local connection.
+        if capture.isRunning, let held = capture.held { return LocalizedStringKey(HistoryNames.status(held)) }
+        return "Paused, Waiting to Resume"
     }
 
     var body: some View {
         List {
             Section {
-                Toggle(isOn: $capture.enabled) {
+                Toggle(isOn: HistoryReconnect.gated($capture.enabled, refused: $needsShortcut)) {
                     SettingsRow(title: "Screen History", symbol: "rectangle.stack")
                 }
                 .accessibilityIdentifier("screenHistory.enabled")
+                .alert("Set Up the Shortcut First", isPresented: $needsShortcut) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on.")
+                }
                 SettingsRow(title: "Status", caption: recordingStatus, symbol: "dot.radiowaves.left.and.right")
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("screenHistory.status")
@@ -193,6 +202,9 @@ struct ScreenHistorySettingsView: View {
                 .accessibilityIdentifier("screenHistory.excludedApps")
             }
 
+            // Always here: Screen History cannot be turned on before the shortcut ran once.
+            CellularShortcutSection()
+
             Section {
                 Button("Clear History", role: .destructive) {
                     clearing = true
@@ -217,6 +229,80 @@ struct ScreenHistorySettingsView: View {
             Button("Everything", role: .destructive) { Task { await capture.clearEverything() } }
             Button("Cancel", role: .cancel) {}
         }
+    }
+}
+
+/// The shortcut that keeps the loopback on cellular: its link, the same automation by hand, and when
+/// it last ran. Shown where the loopback is set up (the owner, 2026-11-19: asked for in the same
+/// step) and in Screen History's settings.
+struct CellularShortcutSection: View {
+    @ObservedObject private var reconnect = HistoryReconnect.shared
+    @Environment(\.openURL) private var openURL
+
+    private var lastRun: String {
+        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
+        if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
+        return at.formatted(.relative(presentation: .named))
+    }
+
+    var body: some View {
+        Section {
+            Button {
+                openURL(reconnect.take())
+            } label: {
+                SettingsRow(title: "Get the Shortcut", symbol: "square.2.layers.3d", accessory: .leaves)
+            }
+            .accessibilityIdentifier("cellularShortcut.get")
+            if reconnect.canRun {
+                // It asks Poki first and changes nothing while the connection is fine, so it can
+                // be run whenever the loopback is off (the owner, 2026-11-20).
+                Button {
+                    openURL(HistoryReconnect.run)
+                } label: {
+                    SettingsRow(title: "Run the Shortcut", symbol: "play", accessory: .leaves)
+                }
+                .accessibilityIdentifier("cellularShortcut.run")
+            }
+            NavigationLink {
+                HistoryShortcutGuide().settingsPage().onAppear { reconnect.asked = true }
+            } label: {
+                SettingsRow(title: "Set Up by Hand", symbol: "list.number")
+            }
+            SettingsRow(title: "Last Run", symbol: "arrow.triangle.2.circlepath", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
+                .accessibilityIdentifier("cellularShortcut.lastRun")
+        } header: {
+            SettingsHeader("On Cellular")
+        } footer: {
+            Text("On cellular, iOS lets Poki keep its connection but not open a new one. The Poki Loopback shortcut runs when Wi-Fi disconnects, and you can run it whenever the loopback is off. It asks Poki first and changes nothing when the connection is fine. Otherwise it turns Wi-Fi and Cellular Data off for a moment, lets Poki connect, and turns them back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
+        }
+    }
+}
+
+/// The Wi-Fi automation added by hand, for an iPhone where the shared shortcut arrives without it.
+/// The shortcut itself comes from the link there too, so the automation only has to run it.
+struct HistoryShortcutGuide: View {
+    private let steps: [LocalizedStringKey] = [
+        "Add Poki Loopback with Get the Shortcut on the page before, and choose your VPN app when it asks.",
+        "Open Shortcuts and go to Automation.",
+        "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately.",
+        "Choose Poki Loopback as the shortcut to run.",
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(verbatim: "\(index + 1)").font(.body.monospacedDigit().weight(.semibold)).foregroundStyle(.secondary)
+                        Text(step)
+                    }
+                }
+            } footer: {
+                Text("On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps add the automation that runs it.")
+            }
+        }
+        .navigationTitle(AppLocalization.text("Set Up by Hand"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
