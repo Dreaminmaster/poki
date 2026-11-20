@@ -83,9 +83,9 @@ final class HistoryLock: ObservableObject {
         case protectedDataUnavailable
         case protectedDataAvailable
         case beginBiometrics(UUID)
-        case finishBiometrics(attempt: UUID, passed: Bool)
+        case finishBiometrics(attempt: UUID, passed: Bool, allowAgentAccess: Bool)
         case setPIN(String)
-        case unlockWithPIN(String)
+        case unlockWithPIN(String, allowAgentAccess: Bool)
         case removePIN
         case setBiometrics(Bool)
         case readStarting
@@ -194,11 +194,11 @@ final class HistoryLock: ObservableObject {
         return nil
     }
 
-    func unlockWithBiometrics() async {
+    func unlockWithBiometrics(allowAgentAccess: Bool = false) async {
         let attempt = UUID()
         guard transition(.beginBiometrics(attempt)) else { return }
         let passed = await boundary.evaluateBiometrics(AppLocalization.text("Unlock Screen History"))
-        _ = transition(.finishBiometrics(attempt: attempt, passed: passed))
+        _ = transition(.finishBiometrics(attempt: attempt, passed: passed, allowAgentAccess: allowAgentAccess))
     }
 
     /// Asks for Face ID or Touch ID again, for something that cannot be undone. The page stays as it is.
@@ -215,7 +215,7 @@ final class HistoryLock: ObservableObject {
     @discardableResult
     func setPIN(_ pin: String) -> Bool { transition(.setPIN(pin)) }
 
-    func unlock(pin: String) -> Bool { transition(.unlockWithPIN(pin)) }
+    func unlock(pin: String, allowAgentAccess: Bool = false) -> Bool { transition(.unlockWithPIN(pin, allowAgentAccess: allowAgentAccess)) }
 
     /// Removes the PIN. Refused unless Face ID or Touch ID stays as the way in.
     @discardableResult
@@ -297,7 +297,7 @@ final class HistoryLock: ObservableObject {
             next = .locked(methods: methods, evaluatingBiometrics: attempt, cooldown: cooldown)
             accepted = true
 
-        case .finishBiometrics(let attempt, let passed):
+        case .finishBiometrics(let attempt, let passed, _):
             guard case .locked(let methods, let active?, let cooldown) = current, active == attempt else {
                 return refuse(current)
             }
@@ -331,7 +331,7 @@ final class HistoryLock: ObservableObject {
             next = .unlocked(methods: methods)
             accepted = true
 
-        case .unlockWithPIN(let pin):
+        case .unlockWithPIN(let pin, _):
             switch current {
             case .locked(let methods, let attempt, var cooldown) where methods.hasPIN:
                 if let until = cooldown.blockedUntil, until > now {
@@ -401,12 +401,10 @@ final class HistoryLock: ObservableObject {
         apply(next, preserveAgentGrant: preserve)
         if accepted, unlocked {
             switch event {
-            case .finishBiometrics(_, true), .unlockWithPIN:
-                publishAgentGrant(true)
-            case .setPIN:
-                // First-time setup is an owner action on an unconfigured lock. Replacing
-                // an existing PIN revokes access until the new credential is authenticated.
-                if current == .unconfigured { publishAgentGrant(true) }
+            case .finishBiometrics(_, true, let consent), .unlockWithPIN(_, let consent):
+                // Creating a PIN, viewing history and automatic Face ID never authorize an agent.
+                // Only a separately initiated, successful authentication with explicit consent does.
+                publishAgentGrant(consent)
             default: break
             }
         }
@@ -654,8 +652,6 @@ struct BacktapeLockScreen: View {
                         Text("Screen History Is Locked").font(.title2.weight(.semibold))
                         Text("Unlock to view what Screen History kept on this iPhone.")
                             .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        Text("Unlocking allows Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Lock Screen History or turn it off to revoke access.")
-                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 32)
                     if lock.usesBiometrics {
@@ -820,9 +816,6 @@ struct HistoryUnlockSections: View {
                     }
                 }
             }
-            Section {
-                Text("Unlocking allows Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Lock Screen History or turn it off to revoke access.").font(.footnote).foregroundStyle(.secondary)
-            }
         }
         .task { await lock.unlockWithBiometrics() }
         .task(id: lock.blockedUntil) {
@@ -874,5 +867,59 @@ struct HistoryLockSettings: View {
         }
         .navigationTitle(AppLocalization.text("Screen History Lock"))
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Explicit, one-shot owner consent. No automatic Face ID on appearance, and no setup flow here.
+/// The parent locks before presenting this sheet, so a fresh credential is required.
+struct HistoryAgentConsentPage: View {
+    @ObservedObject private var lock = HistoryLock.shared
+    @ObservedObject private var capture = HistoryCapture.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var pin = ""
+    @State private var failed = false
+
+    var body: some View {
+        List {
+            Section {
+                Text("Allow Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Relevant text may be sent to the selected AI provider or connected agent. Lock Screen History or turn it off to revoke access.")
+            }
+            if lock.usesBiometrics {
+                Section {
+                    Button("Authenticate and Allow") {
+                        Task {
+                            await lock.unlockWithBiometrics(allowAgentAccess: true)
+                            if HistoryCapture.agentQueryAllowed { dismiss() }
+                            else { failed = true }
+                        }
+                    }
+                    .disabled(!capture.enabled)
+                }
+            }
+            if lock.hasPIN {
+                Section {
+                    SecureField("PIN", text: $pin).keyboardType(.numberPad).textContentType(.oneTimeCode)
+                    Button("Authenticate and Allow") {
+                        let accepted = lock.unlock(pin: pin, allowAgentAccess: true)
+                        pin = ""
+                        if accepted && HistoryCapture.agentQueryAllowed { dismiss() }
+                        else { failed = true }
+                    }
+                    .disabled(!capture.enabled || !HistoryLock.valid(pin))
+                }
+            }
+            if !lock.hasPIN && !lock.usesBiometrics {
+                Section { Text("Unlock or set up Screen History first, then return here to allow agent access.") }
+            }
+            if failed {
+                Section { Text("Authentication failed or agent access is unavailable. Try again.").foregroundStyle(.secondary) }
+            }
+        }
+        .navigationTitle("Allow Agent Access")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { lock.lock(); dismiss() } } }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            pin = ""
+        }
     }
 }

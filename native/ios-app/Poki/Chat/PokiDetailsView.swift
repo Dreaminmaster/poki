@@ -497,7 +497,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 SettingsHeader("Memory")
             } footer: {
-                Text("The run log lists each routine run, where it stopped and how long it took, with no typed text. It helps the Poki maintainers make routines more reliable.")
+                Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
             }
 
             Section {

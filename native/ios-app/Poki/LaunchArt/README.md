@@ -11,10 +11,13 @@ light fades into the light itself.
 | `LaunchBackdrop.png` | The home page's light at rest, light appearance, 402 by 874 points at one pixel a point | `scripts/make-launch-backdrop.sh`, which has a Debug build draw `HomeBackdrop` itself |
 | `LaunchBear.png` | The bear cut out of the app icon, on a clear ground | The design's own cut-out |
 
-`scripts/make-assets.sh` copies the light into the asset catalogue and draws the word and the bear with
-its shadow from these with `scripts/make-launch-art.swift`. The word's colour and weight are set once,
+`scripts/make-assets.sh` writes standalone PNGs to `Poki/LaunchImages`, including the word and the bear
+with its shadow drawn by `scripts/make-launch-art.swift`. Xcode copies these files into the app bundle.
+The storyboard names the PNG files explicitly so the system's launch-screen renderer does not depend
+on an asset catalogue cached from an older installation. The app's curtain loads the same storyboard.
+The word's colour and weight are set once,
 at the top of that script. After a change to the home page's light, run `make-launch-backdrop.sh`
-again; `LaunchScreenTests` fails while the picture and the light differ.
+again; `LaunchScreenTests` checks the packaged PNGs, the layout, and the picture against the home page's light.
 
 The light is drawn for one appearance only. In Dark Mode the launch screen is the same, and the
 curtain fades it into the dark home page.

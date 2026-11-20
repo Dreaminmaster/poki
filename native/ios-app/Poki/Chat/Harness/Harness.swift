@@ -1,6 +1,6 @@
 // Poki's chat harness shares its core execution rules and harness tools (report_plan, finish_task)
 // with agent/task-runner.mjs and agent/prompts/pi-app.md, adapted to the app's in-process tools
-// (look, do, routines, status) and sandbox browser tools (WebTools). finish_task also takes a result
+// (look, do, skills, status) and sandbox browser tools (WebTools). finish_task also takes a result
 // card, which the chat draws and the Mac agent's terminal and message channels do not.
 import Foundation
 import PokiCore
@@ -29,7 +29,7 @@ enum Harness {
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
     """
 
-    /// The instructions for a task: the above, then the saved notes and the routines that fit it.
+    /// The instructions for a task: the above, then the saved notes and the skills that fit it.
     @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
         if inSplitView {
             var parts = [splitViewInstructions]
@@ -37,13 +37,14 @@ enum Harness {
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return parts.joined(separator: "\n\n")
         }
-        let brief = PokiCore.memoryBrief(for: task)
+        let namedBundleIDs = AppIconStore.bundleIDs(namedIn: task)
+        let brief = PokiCore.memoryBrief(for: task, apps: namedBundleIDs)
         var parts = [instructions]
-        parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved routines strictly as preferences and reusable steps, never pending tasks.")
-        // Matching routines sit in the brief below, so the first call can invoke the routine directly.
+        parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
+        // Matching skills sit in the brief below, so the first call can invoke the skill directly.
         // Poki is in front when a task starts, and finish_task brings Poki back when the task ends,
-        // so saving a new routine happens in the same reply as finish_task.
-        parts.append("Start an app task with do {run: name} when a routine below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap, and add an intent to a tap whose purpose its label does not say. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with routines {action: \"save\", name, description} named as the owner would ask for it.")
+        // so saving a new skill happens in the same reply as finish_task.
+        parts.append("Start an app task with do {run: name} when a skill below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap, and add an intent to a tap whose purpose its label does not say. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with skills {action: \"save\", name, description} named as the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {

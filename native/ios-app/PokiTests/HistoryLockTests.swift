@@ -230,11 +230,11 @@ final class HistoryLockTests: XCTestCase {
             lock.lock()
             return true
         }
-        await lock.unlockWithBiometrics()
+        await lock.unlockWithBiometrics(allowAgentAccess: true)
         XCTAssertFalse(lock.unlocked)
         XCTAssertFalse(grants.contains(true), "The obsolete attempt must never grant access")
         phone.evaluate = nil
-        await lock.unlockWithBiometrics()
+        await lock.unlockWithBiometrics(allowAgentAccess: true)
         XCTAssertTrue(lock.unlocked)
         XCTAssertEqual(grants.last, true)
     }
@@ -245,17 +245,20 @@ final class HistoryLockTests: XCTestCase {
         var grants: [Bool] = []
         let lock = phone.launch(agentGrantChanged: { grants.append($0) })
         XCTAssertTrue(lock.setPIN("2468"))
+        XCTAssertFalse(grants.contains(true), "PIN setup is view-only")
+        lock.lock()
+        XCTAssertTrue(lock.unlock(pin: "2468", allowAgentAccess: true))
         XCTAssertEqual(grants.last, true)
         phone.onPINWrite = { XCTAssertEqual(grants.last, false, "Revoke before replacing the PIN") }
         XCTAssertTrue(lock.setPIN("1357"))
         XCTAssertEqual(grants.last, false, "PIN replacement requires fresh authentication")
-        XCTAssertTrue(lock.unlock(pin: "1357"))
+        XCTAssertTrue(lock.unlock(pin: "1357", allowAgentAccess: true))
         XCTAssertEqual(grants.last, true)
 
         phone.biometrics = .usable
         XCTAssertTrue(lock.setBiometrics(true))
         XCTAssertEqual(grants.last, false, "Changing authentication settings must revoke the grant")
-        XCTAssertTrue(lock.unlock(pin: "1357"))
+        XCTAssertTrue(lock.unlock(pin: "1357", allowAgentAccess: true))
         phone.failPINWrite = true
         XCTAssertFalse(lock.setPIN("8642"))
         XCTAssertFalse(lock.unlocked)
@@ -268,18 +271,44 @@ final class HistoryLockTests: XCTestCase {
         var grants: [Bool] = []
         let lock = phone.launch(agentGrantChanged: { grants.append($0) })
         XCTAssertTrue(lock.setPIN("2468"))
+        XCTAssertFalse(grants.contains(true), "PIN setup is view-only")
+        lock.lock()
+        XCTAssertTrue(lock.unlock(pin: "2468", allowAgentAccess: true))
         XCTAssertEqual(grants.last, true)
         phone.deviceLocked = true
         lock.refresh()
         XCTAssertEqual(lock.state, .deviceLocked)
         XCTAssertEqual(grants.last, false)
-        XCTAssertFalse(lock.unlock(pin: "2468"))
+        XCTAssertFalse(lock.unlock(pin: "2468", allowAgentAccess: true))
         phone.deviceLocked = false
         lock.refresh()
         XCTAssertFalse(lock.unlocked)
         XCTAssertEqual(grants.last, false)
-        XCTAssertTrue(lock.unlock(pin: "2468"))
+        XCTAssertTrue(lock.unlock(pin: "2468", allowAgentAccess: true))
         XCTAssertEqual(grants.last, true)
+    }
+
+    func testSetupAndOrdinaryUnlockNeverGrantAgentAccess() async {
+        let phone = Phone()
+        phone.biometrics = .unavailable
+        var grants: [Bool] = []
+        let lock = phone.launch(agentGrantChanged: { grants.append($0) })
+        XCTAssertTrue(lock.setPIN("2468"))
+        XCTAssertTrue(lock.unlocked)
+        lock.lock()
+        XCTAssertTrue(lock.unlock(pin: "2468"))
+        XCTAssertFalse(grants.contains(true))
+        lock.lock()
+        XCTAssertFalse(lock.unlock(pin: "1111", allowAgentAccess: true))
+        XCTAssertFalse(grants.contains(true))
+        XCTAssertTrue(lock.unlock(pin: "2468", allowAgentAccess: true))
+        XCTAssertEqual(grants.last, true)
+        lock.lock()
+        phone.biometrics = .usable
+        lock.refresh()
+        await lock.unlockWithBiometrics()
+        XCTAssertTrue(lock.unlocked)
+        XCTAssertEqual(grants.last, false)
     }
 
     func testTimedGrantExpiresAtDeadlineAndCannotBeRenewedByReads() {

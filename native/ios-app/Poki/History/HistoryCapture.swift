@@ -119,7 +119,7 @@ final class HistoryCapture: ObservableObject {
     nonisolated static var agentQueryAllowed: Bool { agentQueryRevision != nil }
     nonisolated static var agentQueryUnavailableMessage: String {
         guard isEnabled else { return PokiCore.screenHistoryOffMessage }
-        return "Screen History is locked or temporarily unavailable. Unlock it in Poki before querying."
+        return "Screen History agent access is locked or expired. Choose Allow Agent Access in Poki to authenticate and grant access."
     }
 
     /// HistoryLock owns authentication; true starts a fresh, bounded grant. False revokes it.

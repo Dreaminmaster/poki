@@ -58,7 +58,7 @@ final class ScreenHistoryTests: XCTestCase {
         let lock = HistoryLock.shared
         if lock.unlocked { lock.lock() }
         if lock.hasPIN {
-            guard lock.unlock(pin: fixturePIN) else {
+            guard lock.unlock(pin: fixturePIN, allowAgentAccess: true) else {
                 throw XCTSkip("An existing non-fixture history PIN is configured; use a disposable simulator.")
             }
         } else {
@@ -66,6 +66,9 @@ final class ScreenHistoryTests: XCTestCase {
                 throw XCTSkip("Biometrics are enrolled; use a fresh simulator without biometric enrollment.")
             }
             XCTAssertTrue(lock.setPIN(fixturePIN), "Failed to create fixture PIN")
+            XCTAssertNil(HistoryCapture.agentQueryRevision, "PIN setup must not grant agent access")
+            lock.lock()
+            XCTAssertTrue(lock.unlock(pin: fixturePIN, allowAgentAccess: true))
         }
         XCTAssertTrue(lock.unlocked, "The real history lock must be open")
         #else
@@ -426,7 +429,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(locked.isError)
         XCTAssertFalse(locked.text.contains(canary))
 
-        XCTAssertTrue(lock.unlock(pin: fixturePIN))
+        XCTAssertTrue(lock.unlock(pin: fixturePIN, allowAgentAccess: true))
         XCTAssertTrue(Harness.tools.map(\.name).contains("screen_history"))
         let reopened = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertFalse(reopened.isError, reopened.text)
@@ -437,7 +440,7 @@ final class ScreenHistoryTests: XCTestCase {
         let denied = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertTrue(denied.isError, "Re-enabling must not restore an old grant")
         XCTAssertFalse(denied.text.contains(canary))
-        XCTAssertTrue(lock.unlock(pin: fixturePIN))
+        XCTAssertTrue(lock.unlock(pin: fixturePIN, allowAgentAccess: true))
         let fresh = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertFalse(fresh.isError, fresh.text)
         XCTAssertTrue(fresh.text.contains(canary), fresh.text)
@@ -464,6 +467,33 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(denied.isError)
         XCTAssertFalse(denied.text.contains(canary))
         XCTAssertTrue(HistoryCapture.validateAgentAnswer(permitted, revision: revision).isError)
+    }
+
+    func testMCPHistoryQueryIsRevokedOnDeviceLockAfterBackground() async throws {
+        try unlockHistoryForFixture()
+        let canary = "SYNTHETIC_MCP_DEVICE_LOCK_CANARY"
+        HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
+        let core = PokiCore(config: CoreConfig(screenHistory: HistoryStore.agentSource), host: AppCoreHost())
+        let initialization = await core.handle(RelayRequest(id: "init", method: "POST", headers: [:], body: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"History fixture","version":"1"},"capabilities":{}}}"#))
+        let session = try XCTUnwrap(initialization.headers["mcp-session-id"])
+        let headers = ["mcp-session-id": session]
+        func request(_ id: String) async -> String {
+            let body = #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"screen_history","arguments":{"period":"last_hour"}}}"#
+            return await core.handle(RelayRequest(id: id, method: "POST", headers: headers, body: body)).body
+        }
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        XCTAssertFalse(HistoryLock.shared.unlocked)
+        let allowed = await request("allowed")
+        XCTAssertTrue(allowed.contains(canary), allowed)
+        NotificationCenter.default.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
+        defer { NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil) }
+        XCTAssertNil(HistoryCapture.agentQueryRevision)
+        let denied = await request("denied")
+        XCTAssertFalse(denied.contains(canary), denied)
+        XCTAssertTrue(denied.contains("locked") || denied.contains("unavailable"), denied)
+        NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+        let stillDenied = await request("still-denied")
+        XCTAssertFalse(stillDenied.contains(canary), stillDenied)
     }
 
     func testInFlightTimedGrantDiscardsReadAtExpiry() async throws {
@@ -532,7 +562,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(answer.isError, answer.text)
         XCTAssertTrue(answer.text.contains(canary), answer.text)
         HistoryLock.shared.lock()
-        XCTAssertTrue(HistoryLock.shared.unlock(pin: fixturePIN))
+        XCTAssertTrue(HistoryLock.shared.unlock(pin: fixturePIN, allowAgentAccess: true))
         let safe = HistoryCapture.validateAgentAnswer(answer, revision: revision)
         XCTAssertTrue(safe.isError)
         XCTAssertFalse(safe.text.contains(canary))
@@ -567,7 +597,7 @@ final class ScreenHistoryTests: XCTestCase {
             DispatchQueue.main.sync {
                 MainActor.assumeIsolated {
                     HistoryCapture.shared.enabled = turn == 3
-                    if turn == 3 { _ = HistoryLock.shared.unlock(pin: pin) }
+                    if turn == 3 { _ = HistoryLock.shared.unlock(pin: pin, allowAgentAccess: true) }
                 }
             }
         })
@@ -651,15 +681,15 @@ final class ScreenHistoryTests: XCTestCase {
         case .lockThenUnlock:
             lock.lock()
             XCTAssertFalse(HistoryCapture.agentQueryAllowed)
-            XCTAssertTrue(lock.unlock(pin: fixturePIN))
+            XCTAssertTrue(lock.unlock(pin: fixturePIN, allowAgentAccess: true))
         case .deviceLock:
             XCTAssertFalse(capture.isRunning)
             NotificationCenter.default.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
             XCTAssertFalse(lock.unlocked, "Device lock must revoke even with no recording run")
             XCTAssertFalse(HistoryCapture.agentQueryAllowed)
-            XCTAssertFalse(lock.unlock(pin: fixturePIN), "Protected data is still unavailable")
+            XCTAssertFalse(lock.unlock(pin: fixturePIN, allowAgentAccess: true), "Protected data is still unavailable")
             NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
-            XCTAssertTrue(lock.unlock(pin: fixturePIN))
+            XCTAssertTrue(lock.unlock(pin: fixturePIN, allowAgentAccess: true))
         case .changePIN:
             // This regenerates the real credential's salt and grant, using only the fixture PIN.
             XCTAssertTrue(lock.setPIN(fixturePIN))

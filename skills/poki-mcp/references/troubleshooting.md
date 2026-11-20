@@ -29,7 +29,7 @@ On the Mac `poki-mcp` server, `get_device_info`, `observe_device`, `list_crashes
 
 ### Poki iPhone app MCP connector
 
-When the MCP client connects to the standalone Poki iPhone app through its relay connector (`poki` server exposing `status`, `look`, `do`, `routines`):
+When the MCP client connects to the standalone Poki iPhone app through its relay connector (`poki` server exposing `status`, `look`, `do`, `skills`):
 
 | Tool | Arguments | Key return fields |
 | --- | --- | --- |

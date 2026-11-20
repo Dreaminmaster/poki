@@ -5,6 +5,13 @@ import XCTest
 
 @MainActor
 final class LaunchScreenTests: XCTestCase {
+    func testLaunchPicturesLoadWithoutTheAssetCatalog() throws {
+        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchBear@3x"] {
+            let file = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "png"))
+            XCTAssertNotNil(UIImage(contentsOfFile: file.path), "\(name) must decode without Assets.car")
+        }
+    }
+
     private func launchView() throws -> (UIViewController, UIView) {
         let controller = try XCTUnwrap(UIStoryboard(name: "LaunchScreen", bundle: .main).instantiateInitialViewController())
         return (controller, try XCTUnwrap(controller.view))

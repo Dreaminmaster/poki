@@ -8,7 +8,7 @@ const read = rel => readFileSync(resolve(root, rel), 'utf8');
 const words = text => text.trim().split(/\s+/).filter(Boolean).length;
 
 const harnessTools = new Set([
-  'look', 'do', 'routines', 'status',
+  'look', 'do', 'skills', 'status',
   'web_open', 'web_read', 'web_click', 'web_type', 'web_handoff',
   'report_plan', 'finish_task',
 ]);
@@ -46,7 +46,7 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.match(combined, /purchase/);
   assert.match(harnessSwift, /swipe down on the Home Screen to search/);
   assert.match(harnessSwift, /Say an app is not installed only after find_app says so/);
-  assert.match(harnessSwift, /routines \{action: \\"save\\"/);
+  assert.match(harnessSwift, /skills \{action: \\"save\\"/);
 
   assert.ok(words(agentSystem) < 559, `agent-system.md grew to ${words(agentSystem)} words`);
 

@@ -1,6 +1,45 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Also uses" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also uses"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还用到"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還用到"
+          }
+        }
+      }
+    },
+    "Apple's sign-in service is temporarily unavailable (HTTP 503). Wait a few minutes, then try signing in again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 的登录服务暂时无法使用（HTTP 503）。请等几分钟，再试一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 的登入服務暫時無法使用（HTTP 503）。請等幾分鐘，再試一次。"
+          }
+        }
+      }
+    },
     "Your Apple session has expired. Sign in again." : {
       "localizations" : {
         "en" : {
@@ -36273,6 +36312,86 @@
         }
       }
     },
+    "Allow Agent Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许代理访问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許代理程式存取"
+          }
+        }
+      }
+    },
+    "Authenticate and Allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验证身份并授权"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "驗證身分並授權"
+          }
+        }
+      }
+    },
+    "Allow Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Relevant text may be sent to the selected AI provider or connected agent. Lock Screen History or turn it off to revoke access." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Poki 和已连接的代理在最多 5 分钟内查询屏幕历史，即使你切换到其他应用。相关文本可能发送至所选 AI 服务商或已连接的代理。锁定或关闭屏幕历史即可撤销访问权限。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許 Poki 和已連線的代理程式在最多 5 分鐘內查詢螢幕歷史，即使你切換到其他應用程式。相關文字可能傳送至所選 AI 服務供應商或已連線的代理程式。鎖定或關閉螢幕歷史即可撤銷存取權限。"
+          }
+        }
+      }
+    },
+    "Unlock or set up Screen History first, then return here to allow agent access." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先解锁或设置屏幕历史，然后返回这里授权代理访问。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先解鎖或設定螢幕歷史，然後返回此處授權代理程式存取。"
+          }
+        }
+      }
+    },
+    "Authentication failed or agent access is unavailable. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "身份验证失败或代理访问不可用，请重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "身分驗證失敗或代理程式存取無法使用，請重試。"
+          }
+        }
+      }
+    },
     "Lock Screen History Now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -36365,22 +36484,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "解鎖螢幕歷史"
-          }
-        }
-      }
-    },
-    "Unlocking allows Poki and connected agents to query Screen History for up to 5 minutes, even when you switch apps. Lock Screen History or turn it off to revoke access." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解锁后，Poki 和已连接的代理可在最多 5 分钟内查询屏幕历史，即使你切换到其他应用。锁定或关闭屏幕历史即可撤销访问权限。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解鎖後，Poki 和已連線的代理程式可在最多 5 分鐘內查詢螢幕歷史，即使你切換到其他應用程式。鎖定或關閉螢幕歷史即可撤銷存取權限。"
           }
         }
       }
@@ -36953,18 +37056,18 @@
         }
       }
     },
-    "When on, Poki can answer questions from text kept on this iPhone. Excluded apps and password fields are left out, and nothing leaves this iPhone." : {
+    "Screen History stores text on this iPhone and leaves out excluded apps and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启后，Poki 可以根据保存在这台 iPhone 上的屏幕文字回答你的问题。已排除的应用和密码栏不会被记录，所有内容都只留在这台 iPhone 上。"
+            "value" : "屏幕历史记录将文字保存在这台 iPhone 上，不记录已排除的应用和密码栏。当 Poki 或已连接的代理查询历史记录时，相关文字可能会发送给所选 AI 服务提供商或已连接的代理。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟後，Poki 可以根據保存在這台 iPhone 上的螢幕文字回答你的問題。已排除的應用和密碼欄不會被記錄，所有內容都只留在這台 iPhone 上。"
+            "value" : "螢幕歷史記錄將文字保存在這台 iPhone 上，不記錄已排除的應用程式和密碼欄。當 Poki 或已連線的代理程式查詢歷史記錄時，相關文字可能會傳送給所選 AI 服務提供者或已連線的代理程式。"
           }
         }
       }
@@ -37232,6 +37335,182 @@
           }
         }
       }
+    },
+    "%@ skills" : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "%@ skills"
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "%@ 个技能"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "%@ 個技能"
+                }
+            }
+        }
+    },
+    "Clear all skills and notes on this iPhone?" : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Clear all skills and notes on this iPhone?"
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "要清除此 iPhone 上的所有技能和备忘吗？"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "要清除此 iPhone 上的所有技能和備忘嗎？"
+                }
+            }
+        }
+    },
+    "Exports all skills and notes into a single file. Importing merges entries and keeps newer versions. You can also back up and restore data using Poki Setup on your computer." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Exports all skills and notes into a single file. Importing merges entries and keeps newer versions. You can also back up and restore data using Poki Setup on your computer."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "将全部技能和备忘导出为单个文件。导入时会合并条目，同名技能保留较新版本。你也可以通过电脑上的 Poki Setup 备份和恢复此文件。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "將全部技能和備忘匯出為單一檔案。匯入時會合併項目，同名技能保留較新版本。你也可以透過電腦上的 Poki Setup 備份與還原此檔案。"
+                }
+            }
+        }
+    },
+    "Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "记录每次技能的运行结果、停止位置和耗时，不包含输入文本，用于帮助维护者提升技能稳定性。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "記錄每次技能的執行結果、停止位置與耗時，不包含輸入文字，用於協助維護者提升技能穩定性。"
+                }
+            }
+        }
+    },
+    "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "“记忆”会保存供所有外部智能体共享的技能和备忘。诊断包含日志、检查、后台保持、地址与实时活动预览。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "「記憶」會儲存供所有外部智慧體共享的技能和備忘。診斷包含日誌、檢查、背景保持、位址與即時動態預覽。"
+                }
+            }
+        }
+    },
+    "The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Poki 在此 iPhone 上用于对话和语音的模型。“记忆”会保存供所有外部智能体共享的技能和备忘。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Poki 在此 iPhone 上用於對話和語音的模型。「記憶」會儲存供所有外部智慧體共享的技能和備忘。"
+                }
+            }
+        }
+    },
+    "When a task succeeds, an agent saves a skill to repeat it in one step next time, and stops if the screen changes. Swipe to forget." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "When a task succeeds, an agent saves a skill to repeat it in one step next time, and stops if the screen changes. Swipe to forget."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "任务完成后，Poki 会将其保存为技能，方便下次一步重放，并在界面变化时自动停下。向左轻扫可忘记技能。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "任務完成後，Poki 會將其儲存為技能，方便下次一步重放，並在畫面變化時自動停下。向左輕掃可忘記技能。"
+                }
+            }
+        }
+    },
+    "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "iOS shows the automation banner only during an active session. Poki opens it on agent request and closes it when idle. Memory stores skills and notes shared across agents."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "仅在自动操作状态开启时显示系统横幅，智能体请求时开启、闲置时关闭。“记忆”会保存供所有外部智能体共享的技能和备忘。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "僅在自動操作狀態開啟時顯示系統橫幅，智慧體請求時開啟、閒置時關閉。「記憶」會儲存供所有外部智慧體共享的技能和備忘。"
+                }
+            }
+        }
     },
     "Apps by Name" : {
       "localizations" : {

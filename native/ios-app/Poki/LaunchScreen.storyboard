@@ -13,13 +13,13 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
+                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop.png" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
                                 <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                             </imageView>
-                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWordmark" translatesAutoresizingMaskIntoConstraints="NO" id="word">
+                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWordmark.png" translatesAutoresizingMaskIntoConstraints="NO" id="word">
                                 <rect key="frame" x="130.5" y="262.5" width="132" height="64"/>
                             </imageView>
-                            <imageView opaque="NO" tag="3" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBear" translatesAutoresizingMaskIntoConstraints="NO" id="bear">
+                            <imageView opaque="NO" tag="3" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBear.png" translatesAutoresizingMaskIntoConstraints="NO" id="bear">
                                 <rect key="frame" x="-48.5" y="517" width="497" height="329"/>
                             </imageView>
                         </subviews>
@@ -44,8 +44,8 @@
         </scene>
     </scenes>
     <resources>
-        <image name="LaunchBackdrop" width="402" height="874"/>
-        <image name="LaunchBear" width="508" height="336.66665649414062"/>
-        <image name="LaunchWordmark" width="132" height="64"/>
+        <image name="LaunchBackdrop.png" width="402" height="874"/>
+        <image name="LaunchBear.png" width="508" height="336.66665649414062"/>
+        <image name="LaunchWordmark.png" width="132" height="64"/>
     </resources>
 </document>
