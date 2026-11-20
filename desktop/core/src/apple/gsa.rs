@@ -361,6 +361,9 @@ impl Client {
                 return Err(apple_error(&root_st));
             }
         }
+        if http_status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            return Err(Error::msg("Apple's sign-in service is temporarily unavailable (HTTP 503). Wait a few minutes, then try signing in again."));
+        }
         if !http_status.is_success() {
             return Err(Error::msg(format!("Apple's sign-in service answered HTTP {http_status}.")));
         }
@@ -780,7 +783,7 @@ fn next_step(hsc: i64, au: Option<&str>) -> Step<'_> {
 }
 
 pub const RATE_LIMITED: &str = "Apple has had too many sign-in attempts or codes for this Apple Account. Wait about an hour before you sign in again, because each new try asks Apple for another code.";
-const SESSION_EXPIRED: &str = "Your Apple session has expired. Sign in again.";
+pub const SESSION_EXPIRED: &str = "Your Apple session has expired. Sign in again.";
 const WRONG_CODE_MARKER: &str = "That verification code is incorrect.";
 pub const WRONG_CODE_FIRST: &str = "That verification code is incorrect. Check the 6-digit code and enter the newest code you received.";
 pub const WRONG_CODE_WAIT: &str = "That verification code is incorrect. Stop and wait a few minutes before trying again so Apple does not lock this Apple Account, then enter the newest 6-digit code.";
@@ -1143,6 +1146,7 @@ mod rate_limit_regressions {
         sms_send_with_slash: usize,
         device_validate: usize,
         sms_validate: usize,
+        list_teams: usize,
     }
 
     impl Counts {
@@ -1174,6 +1178,9 @@ mod rate_limit_regressions {
         /// new session, and app tokens asked for with the 409 session from before the code get
         /// hsc 401 with ec -22411.
         apple_after_code: bool,
+        /// How many listTeams calls the developer portal answers with 1100 ("Your session has
+        /// expired. Please log in.") before it lists the team.
+        portal_turns_away: usize,
     }
 
     impl Default for MockBehavior {
@@ -1196,6 +1203,7 @@ mod rate_limit_regressions {
                 second_apptokens: None,
                 on_apptokens: None,
                 apple_after_code: false,
+                portal_turns_away: 0,
             }
         }
     }
@@ -1337,7 +1345,9 @@ mod rate_limit_regressions {
                                 match op {
                                     "init" => {
                                         counts.lock().unwrap().srp_init += 1;
-                                        if b.srp_status != 200 {
+                                        if b.srp_status == 503 {
+                                            (503, "text/html", b"<h1>503 Service Unavailable</h1>".to_vec())
+                                        } else if b.srp_status != 200 {
                                             (b.srp_status, "text/plain", b"rate limited".to_vec())
                                         } else {
                                             *last_a.lock().unwrap() = data(req, "A2k").unwrap().to_vec();
@@ -1484,6 +1494,29 @@ mod rate_limit_regressions {
                                     });
                                     (400, "application/json", err.to_string().into_bytes())
                                 }
+                            }
+                            ("POST", p) if p.starts_with("/services/QH65B2/listTeams.action") => {
+                                let call_num = {
+                                    let mut c = counts.lock().unwrap();
+                                    c.list_teams += 1;
+                                    c.list_teams
+                                };
+                                let mut d = plist::Dictionary::new();
+                                if call_num <= b.portal_turns_away {
+                                    d.insert("resultCode".into(), 1100.into());
+                                    d.insert("userString".into(), "Your session has expired. Please log in.".into());
+                                } else {
+                                    let mut membership = plist::Dictionary::new();
+                                    membership.insert("name".into(), "Free Developer Program".into());
+                                    let mut team = plist::Dictionary::new();
+                                    team.insert("teamId".into(), "TEAM123".into());
+                                    team.insert("name".into(), "Test Team".into());
+                                    team.insert("type".into(), "Individual".into());
+                                    team.insert("memberships".into(), plist::Value::Array(vec![plist::Value::Dictionary(membership)]));
+                                    d.insert("resultCode".into(), 0.into());
+                                    d.insert("teams".into(), plist::Value::Array(vec![plist::Value::Dictionary(team)]));
+                                }
+                                (200, "text/x-xml-plist", plist_xml(d))
                             }
                             _ => (404, "text/plain", b"not found".to_vec()),
                         }
@@ -1721,6 +1754,20 @@ mod rate_limit_regressions {
             signer.finish_sign_in(pending, "654321").await.unwrap();
             assert_eq!(mock.counts.lock().unwrap().srp_complete, 2, "signs in once more after the code");
             assert_eq!(mock.counts.lock().unwrap().sms_send, 1);
+        });
+    }
+
+    #[test]
+    fn sign_in_with_http_503_tells_the_user_to_try_again_later() {
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior { srp_status: 503, ..MockBehavior::default() }).await;
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let error = signer.sign_in_as("person@example.com", "correct-horse-battery", false, CodeCaller::IosSignIn).await.unwrap_err();
+
+            assert_eq!(error.to_string(), "Apple's sign-in service is temporarily unavailable (HTTP 503). Wait a few minutes, then try signing in again.");
+            assert!(!signer.account.is_rate_limited(time::OffsetDateTime::now_utc().unix_timestamp()));
+            assert_eq!(mock.counts.lock().unwrap().total_codes_sent(), 0);
         });
     }
 
@@ -2314,6 +2361,110 @@ mod rate_limit_regressions {
         });
         seeded.password = Some("correct-horse-battery".into());
         store::save(&seeded).unwrap();
+    }
+
+    /// A stored account whose GSA session Apple no longer takes, with this Xcode token and password.
+    fn seed_account_for_teams(xcode_token: Option<AppToken>, password: Option<&str>) {
+        seed_expired_session_with_kept_password();
+        let mut stored = store::load().unwrap();
+        stored.xcode_token = xcode_token;
+        stored.password = password.map(str::to_string);
+        store::save(&stored).unwrap();
+    }
+
+    fn xcode_token_until(expires_at: i64) -> AppToken {
+        AppToken { app: super::super::XCODE_APP_ID.into(), token: "saved-xcode-token".into(), expires_at }
+    }
+
+    fn point_portal_at(mock: &MockGsa) {
+        super::super::portal::TEST_BASE.with(|b| *b.borrow_mut() = Some(format!("{}/services/QH65B2", mock.base_url)));
+    }
+
+    #[test]
+    fn teams_tries_a_kept_password_apple_turns_away_only_once() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            // The password was changed on another device: the kept one is wrong now, and the stored
+            // Xcode token and the GSA session have both run out.
+            let mock = start_mock_gsa(MockBehavior { apptokens_ec: -22406, ..MockBehavior::default() }).await;
+            point_portal_at(&mock);
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            seed_account_for_teams(Some(xcode_token_until(now - 60)), Some("old-password"));
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let err = signer.teams().await.unwrap_err();
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!(c.srp_complete, 1, "one renewal round must try the kept password once, not again after Apple turned it away");
+            assert_eq!(c.apptokens, 1);
+            assert_eq!(c.list_teams, 0);
+            assert!(!super::super::portal::turned_token_away(&err), "a wrong password is not the portal's answer: {err}");
+        });
+    }
+
+    #[test]
+    fn teams_without_a_kept_password_asks_apple_for_one_app_token() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior { apptokens_ec: -22406, ..MockBehavior::default() }).await;
+            point_portal_at(&mock);
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            seed_account_for_teams(Some(xcode_token_until(now - 60)), None);
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let err = signer.teams().await.unwrap_err();
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!(c.apptokens, 1, "an expired session with no kept password needs one apptokens request");
+            assert_eq!(c.srp_init, 0);
+            assert_eq!(c.list_teams, 0);
+            assert_eq!(err.to_string(), SESSION_EXPIRED, "the app offers Sign In Again for this sentence");
+        });
+    }
+
+    #[test]
+    fn portal_turning_the_saved_token_away_gets_one_fresh_token() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior { portal_turns_away: 1, ..MockBehavior::default() }).await;
+            point_portal_at(&mock);
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            seed_account_for_teams(Some(xcode_token_until(now + 86_400)), Some("correct-horse-battery"));
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let teams = signer.teams().await.unwrap();
+            assert_eq!(teams.len(), 1);
+            assert_eq!(teams[0].team_id, "TEAM123");
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!(c.list_teams, 2);
+            assert_eq!(c.apptokens, 1);
+            assert_eq!(c.srp_init, 0, "a session Apple still takes needs no sign-in");
+            assert_eq!(store::load().unwrap().xcode_token.unwrap().token, "xcode-auth-token-ok");
+        });
+    }
+
+    #[test]
+    fn portal_turning_a_fresh_token_away_is_not_tried_again() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior { portal_turns_away: usize::MAX, ..MockBehavior::default() }).await;
+            point_portal_at(&mock);
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
+            // The saved token is turned away, and so is the fresh one: one more try, then Sign In Again.
+            seed_account_for_teams(Some(xcode_token_until(now + 86_400)), None);
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+            let err = signer.teams().await.unwrap_err();
+            assert_eq!(err.to_string(), SESSION_EXPIRED);
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!((c.list_teams, c.apptokens, c.srp_init), (2, 1, 0));
+
+            // With no saved token, the token the portal turns away is the one just fetched: no second try.
+            seed_account_for_teams(None, None);
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+            let err = signer.teams().await.unwrap_err();
+            assert_eq!(err.to_string(), SESSION_EXPIRED);
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!((c.list_teams, c.apptokens, c.srp_init), (3, 2, 0));
+        });
     }
 
     /// What the CLI leaves behind after Apple took a code without opening the session.

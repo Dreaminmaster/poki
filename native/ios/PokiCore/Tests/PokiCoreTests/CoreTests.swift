@@ -54,6 +54,162 @@ final class LoopbackWaitTests: XCTestCase {
     }
 }
 
+final class AutomationAuthorizationTests: XCTestCase {
+    func testOriginalLookReadsTheScreenAfterTheOwnerAllowsAutomation() async {
+        let (core, wda, host) = makeCore { $0.runnerWait = 0 }
+        host.state.value = .awaitingAutomationAuthorization("the owner is entering the passcode")
+        host.readRunnerState.value = {
+            wda.source([("StaticText", "Screen after authorization")])
+            return .running
+        }
+
+        let screen = await core.callTool("look", arguments: "{}")
+
+        XCTAssertFalse(screen.isError, screen.text)
+        XCTAssertTrue(screen.text.contains("Screen after authorization"), screen.text)
+        XCTAssertNotNil(screen.jpeg)
+    }
+
+    func testDecliningAutomationEndsTheOriginalLookWithoutReadingTheScreen() async {
+        let (core, wda, host) = makeCore { $0.runnerWait = 0 }
+        host.state.value = .awaitingAutomationAuthorization("the owner is entering the passcode")
+        host.readRunnerState.value = { .failed("the owner cancelled automation authorization", fix: nil) }
+
+        let screen = await core.callTool("look", arguments: "{}")
+
+        XCTAssertTrue(screen.isError, screen.text)
+        XCTAssertTrue(screen.text.contains("the owner cancelled automation authorization"), screen.text)
+        XCTAssertNil(screen.jpeg)
+        XCTAssertTrue(wda.sent.isEmpty)
+    }
+
+    func testAnActionWaitingForAuthorizationRequiresAReadOfTheNewScreen() async {
+        let (core, wda, host) = makeCore { $0.runnerWait = 0 }
+        host.state.value = .awaitingAutomationAuthorization("the owner is entering the passcode")
+        host.readRunnerState.value = { .running }
+
+        let step = await core.callTool("do", arguments: #"{"actions":[{"tap":[20,100]}]}"#)
+
+        XCTAssertTrue(step.text.contains("Call look to read the current screen"), step.text)
+        XCTAssertTrue(step.text.contains("Nothing was sent"), step.text)
+        XCTAssertTrue(wda.sent.isEmpty)
+    }
+
+    func testNewAutomationSessionRequiresAFreshLookBeforeAnyCoordinateCanBeSent() async {
+        for initial in [RunnerState.starting("opening automation"), .awaitingAutomationAuthorization("waiting for the owner")] {
+            let (core, wda, host) = makeCore()
+            host.state.value = .automationReady(revision: 1)
+            let oldScreen = await core.callTool("look", arguments: "{}")
+            XCTAssertTrue(oldScreen.text.contains("General"), oldScreen.text)
+
+            host.state.value = initial
+            host.readRunnerState.value = { .automationReady(revision: 2) }
+            wda.source([("Button", "New content")])
+            let press = #"{"actions":[{"tap":[20,100]}]}"#
+            let first = await core.callTool("do", arguments: press)
+            host.state.value = .automationReady(revision: 2)
+            let second = await core.callTool("do", arguments: press)
+
+            XCTAssertTrue(first.text.contains("Nothing was sent"), first.text)
+            XCTAssertTrue(second.text.contains("Nothing was sent"), second.text)
+            XCTAssertFalse(wda.sent.contains { $0.hasSuffix("/wda/tap") })
+
+            let freshScreen = await core.callTool("look", arguments: "{}")
+            XCTAssertTrue(freshScreen.text.contains("New content"), freshScreen.text)
+            let third = await core.callTool("do", arguments: press)
+            XCTAssertTrue(third.text.contains("did: tap"), third.text)
+            XCTAssertEqual(wda.sent.filter { $0.hasSuffix("/wda/tap") }.count, 1)
+        }
+    }
+
+    func testElementTreeOnlyAfterAuthorizationDoesNotAllowTappingTheCachedScreenshot() async {
+        let (core, wda, host) = makeCore()
+        host.state.value = .automationReady(revision: 1)
+        let previous = await core.callTool("look", arguments: "{}")
+        XCTAssertNotNil(previous.jpeg)
+
+        host.state.value = .automationReady(revision: 2)
+        wda.source([("Button", "Current button")])
+        wda.set("GET /screenshot") { _ in (500, ["value": ["error": "screenshot unavailable"]]) }
+        let current = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(current.text.contains("Current button"), current.text)
+        XCTAssertTrue(current.text.contains("the screenshot is the one of the read before"), current.text)
+        XCTAssertEqual(current.jpeg, previous.jpeg)
+
+        let coordinate = await core.callTool("do", arguments: #"{"actions":[{"tap":[20,100]}]}"#)
+        XCTAssertTrue(coordinate.isError, coordinate.text)
+        XCTAssertFalse(wda.sent.contains { $0.hasSuffix("/wda/tap") })
+
+        let byElement = await core.callTool("do", arguments: #"{"actions":[{"tap":1}]}"#)
+        XCTAssertTrue(byElement.text.contains("did: tap"), byElement.text)
+        XCTAssertTrue(byElement.text.contains("Current button"), byElement.text)
+        XCTAssertEqual(wda.sent.filter { $0.hasSuffix("/wda/tap") }.count, 1)
+    }
+
+    func testScreenshotOnlyAfterAuthorizationAllowsCoordinatesButNotOldElementNumbers() async {
+        let (core, wda, host) = makeCore()
+        host.state.value = .automationReady(revision: 1)
+        let previous = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(previous.text.contains("General"), previous.text)
+
+        host.state.value = .automationReady(revision: 2)
+        wda.set("GET /source") { _ in (500, ["value": ["error": "tree unavailable"]]) }
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(Data("current screen".utf8).base64EncodedString())]) }
+        let current = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(current.text.contains("no element tree"), current.text)
+        XCTAssertNotNil(current.jpeg)
+        XCTAssertNotEqual(current.jpeg, previous.jpeg)
+
+        let byOldElement = await core.callTool("do", arguments: #"{"actions":[{"tap":1}]}"#)
+        XCTAssertTrue(byOldElement.isError, byOldElement.text)
+        XCTAssertFalse(wda.sent.contains { $0.hasSuffix("/wda/tap") })
+
+        let coordinate = await core.callTool("do", arguments: #"{"actions":[{"tap":{"x":20,"y":100}}]}"#)
+        XCTAssertTrue(coordinate.text.contains("did: tap"), coordinate.text)
+        XCTAssertEqual(wda.sent.filter { $0.hasSuffix("/wda/tap") }.count, 1)
+    }
+
+    func testBackUsesAnEdgeSwipeWhenOnlyTheScreenshotIsFreshAfterAuthorization() async {
+        let (core, wda, host) = makeCore()
+        host.state.value = .automationReady(revision: 1)
+        wda.tree([Node("Button", "Back", [8, 50, 60, 40])], app: "Settings")
+        let previous = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(previous.text.contains("Button \"Back\""), previous.text)
+
+        host.state.value = .automationReady(revision: 2)
+        wda.set("GET /source") { _ in (500, ["value": ["error": "tree unavailable"]]) }
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(Data("current screen".utf8).base64EncodedString())]) }
+        let current = await core.callTool("look", arguments: "{}")
+        XCTAssertTrue(current.text.contains("no element tree"), current.text)
+        XCTAssertNotNil(current.jpeg)
+        XCTAssertNotEqual(current.jpeg, previous.jpeg)
+
+        let back = await core.callTool("do", arguments: #"{"actions":[{"back":true}]}"#)
+
+        XCTAssertFalse(back.isError, back.text)
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty, back.text)
+        let gestures = wda.bodies("POST /wda/pressAndDragWithVelocity")
+        XCTAssertEqual(gestures.count, 1, back.text)
+        XCTAssertEqual(gestures.first?["fromX"]?.double, 2)
+        XCTAssertEqual(gestures.first?["toX"]?.double, 234)
+    }
+
+    func testOriginalLookSurvivesSlowOpeningBeforeTheAuthorizationPrompt() async {
+        let (core, wda, host) = makeCore { $0.runnerWait = 0 }
+        let opening = RunnerState.openingAutomationSession("opening the in-process automation session")
+        let states = LockedBox([opening, .awaitingAutomationAuthorization("waiting for the owner"), .automationReady(revision: 1)])
+        host.state.value = opening
+        host.readRunnerState.value = { states.update { $0.isEmpty ? .automationReady(revision: 1) : $0.removeFirst() } }
+        wda.source([("Button", "Page after approval")])
+
+        let result = await core.callTool("look", arguments: "{}")
+
+        XCTAssertTrue(result.text.contains("Page after approval"), result.text)
+        XCTAssertNotNil(result.jpeg)
+    }
+
+}
+
 final class ToolTests: XCTestCase {
     func testSentDialogTouchesDoNotConfirmAnUnchangedScreen() async {
         let (core, wda, _) = makeCore()
@@ -1299,7 +1455,7 @@ final class MCPTests: XCTestCase {
         let note = await post(core, ["jsonrpc": "2.0", "method": "notifications/initialized"], session: session)
         XCTAssertEqual(note.status, 202)
         let list = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/list"], session: session).body)
-        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "routines", "status"])
+        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "skills", "status"])
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "look", "arguments": .object([:])]], session: session).body)
         XCTAssertEqual(call["result"]?["content"]?[1]?["type"], "image")
         XCTAssertEqual(call["result"]?["isError"], false)
@@ -1344,7 +1500,7 @@ final class MCPTests: XCTestCase {
         let session = try XCTUnwrap(initialized.headers["mcp-session-id"])
         XCTAssertEqual(signals.value, [.started(id: session, client: "claude-ai", version: "1.2")])
         let list = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/list"], session: session).body)
-        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "routines", "status", "ask_poki"])
+        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "skills", "status", "ask_poki"])
         XCTAssertEqual(list["result"]?["tools"]?[4]?["inputSchema"]?["required"]?[0], "task")
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "ask_poki", "arguments": ["task": "read the time"]]], session: session).body)
         let text = call["result"]?["content"]?[0]?["text"]?.string ?? ""

@@ -77,7 +77,7 @@ struct AppleIntelligenceDetail: View {
             } header: {
                 Text("Use This Model For")
             } footer: {
-                Text("As the decision model it helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
+                Text("As the decision model it helps a skill go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
             }
         }
         .settingsPage()

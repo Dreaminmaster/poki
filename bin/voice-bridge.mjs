@@ -100,7 +100,7 @@ function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', la
     instructions: instructions(language),
     output_modalities: ['audio'],
     audio: {
-      input: { turn_detection: turn, noise_reduction: { type: 'near_field' }, transcription: { model: 'gpt-4o-mini-transcribe' } },
+      input: { turn_detection: turn, noise_reduction: { type: 'near_field' }, transcription: { model: 'gpt-4o-mini-transcribe', language: 'zh' } },
       output: { voice },
     },
     tools: voiceTools.map(({ name, description, parameters }) => ({ type: 'function', name, description: description + silent, parameters })),

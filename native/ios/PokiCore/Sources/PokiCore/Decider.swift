@@ -5,7 +5,7 @@ import FoundationNetworking
 
 // A decision model answers a question that has fixed answers, in one short call: state in, one of the
 // listed options out, with a probability for each. It writes no text, so it cannot name an element
-// that is not on the screen. Poki uses one where a routine or a path would otherwise stop and hand
+// that is not on the screen. Poki uses one where a skill or a path would otherwise stop and hand
 // the whole task back to the agent's model: a popup in the way, a button that was renamed or moved.
 //
 // The wire format is the "System One" API that TypeSafe's Jev introduced and Cloudflare's Clef
@@ -63,9 +63,24 @@ public struct DecisionAnswer: Sendable, Equatable {
     }
 }
 
+/// Why a decision did not come. `description` is one of Poki's own fixed sentences (with at most a
+/// status code or a question's id in it) and is what a run's answer and its saved log hold. What the
+/// provider or the system said in its own words is in `detail`: for the owner's settings page and the
+/// app's log, never for a result an agent reads or a file that is kept.
 public struct DeciderError: Error, CustomStringConvertible, Equatable {
     public var description: String
-    public init(_ description: String) { self.description = description }
+    public var detail: String?
+    public init(_ description: String, detail: String? = nil) {
+        self.description = description
+        self.detail = detail.flatMap { $0.isEmpty ? nil : String($0.prefix(160)) }
+    }
+    /// Any failure of a decision as a safe one: a deadline, a `DeciderError` as it is, and anything
+    /// else (a network error, an error thrown by the host's model call) by a fixed sentence.
+    public static func safe(_ error: Error, timeout: Double? = nil) -> DeciderError {
+        if let known = error as? DeciderError { return known }
+        if error is DeadlineExceeded { return DeciderError(timeout.map { "no answer within \(Int($0)) s" } ?? "no answer in time") }
+        return DeciderError("the request did not go through", detail: error.localizedDescription)
+    }
 }
 
 /// Something that answers decision questions. The app gives PokiCore one made from the owner's
@@ -265,7 +280,7 @@ public struct SystemOneDecider: Decider {
         guard let reply = try? JSON.parse(String(decoding: data, as: UTF8.self)) else { throw DeciderError("the answer was not JSON") }
         guard let given = reply["answers"]?.array else {
             let said = reply["error"]?["message"]?.string ?? reply["error"]?.string
-            throw DeciderError(said.map { "the provider said: \($0.prefix(160))" } ?? "the answer held no answers")
+            throw DeciderError(said == nil ? "the answer held no answers" : "the provider reported an error", detail: said)
         }
         var out: [String: DecisionAnswer] = [:]
         for q in questions {
@@ -323,7 +338,7 @@ public struct SystemOneDecider: Decider {
         guard let reply = try? JSON.parse(String(decoding: data, as: UTF8.self)) else { throw DeciderError("the answer was not JSON") }
         guard let given = (reply["answers"] ?? reply["result"]?["answers"])?.object else {
             let said = reply["errors"]?[0]?["message"]?.string ?? reply["detail"]?.string ?? reply["error"]?.string ?? reply["error"]?["message"]?.string
-            throw DeciderError(said.map { "the provider said: \($0.prefix(160))" } ?? "the answer held no answers")
+            throw DeciderError(said == nil ? "the answer held no answers" : "the provider reported an error", detail: said)
         }
         var out: [String: DecisionAnswer] = [:]
         for q in questions {
@@ -361,10 +376,10 @@ public struct SystemOneDecider: Decider {
         let send = self.send, posted = request
         let (status, data) = try await withDeadline(max(0.3, timeout), "the decision") { try await send(posted) }
         guard (200..<300).contains(status) else {
-            // The provider's own words when it gives any; never the request, which holds the screen.
+            // The provider's own words go to `detail` only; never the request, which holds the screen.
             let reply = try? JSON.parse(String(decoding: data, as: UTF8.self))
             let said = reply?["errors"]?[0]?["message"]?.string ?? reply?["detail"]?.string ?? reply?["error"]?.string ?? reply?["error"]?["message"]?.string ?? ""
-            throw DeciderError("the provider answered \(status)\(said.isEmpty ? "" : ": \(said.prefix(160))")")
+            throw DeciderError("the provider answered \(status)", detail: said)
         }
         return try format == .openai ? Self.openAIAnswers(in: data, to: questions) : Self.answers(in: data, to: questions)
     }
@@ -376,10 +391,8 @@ public struct SystemOneDecider: Decider {
         do {
             _ = try await decide(state: "A connection check from Poki is running.", questions: [question], timeout: timeout)
             return .success(Int(((now() - began) * 1000).rounded()))
-        } catch let error as DeciderError {
-            return .failure(error)
         } catch {
-            return .failure(DeciderError(error is DeadlineExceeded ? "no answer within \(Int(timeout)) s" : "\(error.localizedDescription)"))
+            return .failure(DeciderError.safe(error, timeout: timeout))
         }
     }
 }
@@ -472,10 +485,8 @@ public struct PromptDecider: Decider {
         do {
             _ = try await decide(state: "A connection check from Poki is running.", questions: [question], timeout: timeout)
             return .success(Int(((now() - began) * 1000).rounded()))
-        } catch let error as DeciderError {
-            return .failure(error)
         } catch {
-            return .failure(DeciderError(error is DeadlineExceeded ? "no answer within \(Int(timeout)) s" : "\(error.localizedDescription)"))
+            return .failure(DeciderError.safe(error, timeout: timeout))
         }
     }
 }

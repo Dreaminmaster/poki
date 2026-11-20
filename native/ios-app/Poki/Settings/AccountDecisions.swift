@@ -11,7 +11,9 @@ enum AccountDecisions {
     /// OpenAI's decision model, on its Decisions API.
     static let luna = "gpt-6-luna"
 
-    static func canDecide(_ provider: ModelProvider) -> Bool { ModelAccounts.canChat(provider) }
+    /// Custom providers have their own pages now and are not offered here yet: a pick left from when
+    /// the one custom account could decide reads as Off.
+    static func canDecide(_ provider: ModelProvider) -> Bool { provider != .custom && ModelAccounts.canChat(provider) }
 
     /// The account's models that can decide: Luna first for an OpenAI API key, then its chat models,
     /// the fast ones first.
@@ -27,7 +29,7 @@ enum AccountDecisions {
     /// The decider for an account's model. An account that is gone gives no answer when asked, which
     /// is an error for the run and never a guess.
     static func decider(_ provider: ModelProvider, model: String) -> Decider? {
-        guard provider.wired, !model.isEmpty else { return nil }
+        guard canDecide(provider), !model.isEmpty else { return nil }
         if provider == .openai, model == luna {
             return DeciderSettings(provider: .openai, model: luna).decider(token: ModelKeys.key(.openai) ?? "")
         }
@@ -96,7 +98,7 @@ struct DecisionFeature: View {
             } header: {
                 Text("Decision Model")
             } footer: {
-                Text("A small, fast model works best. It helps a routine go on when a prompt is in the way or a button was renamed, acts only when the answer is clear and never taps anything that needs your approval. It gets the goal of the task and the names of the elements on screen, with no screenshot. Only one decision model is in use at a time.")
+                Text("A small, fast model works best. It helps a skill go on when a prompt is in the way or a button was renamed, acts only when the answer is clear and never taps anything that needs your approval. It gets the goal of the task and the names of the elements on screen, with no screenshot. Only one decision model is in use at a time.")
             }
         }
         .settingsPage()

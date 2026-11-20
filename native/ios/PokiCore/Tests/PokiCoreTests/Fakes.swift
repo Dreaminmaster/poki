@@ -140,6 +140,7 @@ struct Node {
 final class FakeHost: CoreHost, @unchecked Sendable {
     let state = LockedBox<RunnerState>(.running)
     let restarts = LockedBox(0)
+    let readRunnerState = LockedBox<(@Sendable () -> RunnerState)?>(nil)
     let texts = LockedBox<[RecognizedText]?>(nil)
     let widths = LockedBox<[Int]>([])
     let warmUps = LockedBox(0)
@@ -148,6 +149,7 @@ final class FakeHost: CoreHost, @unchecked Sendable {
     func signingKey() throws -> RelayKey { FakeKey() }
     func accessHashes() -> [String] { ["abc123"] }
     func jpeg(fromPNG png: Data, width: Int, quality: Double) throws -> Data { widths.update { $0.append(width) }; return Data("jpeg:\(png.count)".utf8) }
+    var currentRunner: RunnerState { readRunnerState.value?() ?? state.value }
     func runnerState() -> RunnerState { state.value }
     func restartRunner() { restarts.update { $0 += 1 } }
     let ownScreenshot = LockedBox<Data?>(nil)

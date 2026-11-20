@@ -4,7 +4,7 @@ import FoundationModels
 import PokiCore
 import SwiftUI
 
-/// The decision model: a small, fast model which a routine or a path asks how to go on where it would
+/// The decision model: a small, fast model which a skill or a path asks how to go on where it would
 /// otherwise stop (a prompt in the way, a button renamed or moved). It is a model on this iPhone
 /// (Apple Intelligence, under Settings › Models › Local Models) or a model of one of the
 /// owner's model accounts (under the account, Decisions). There is no other switch: it is in use
@@ -94,7 +94,7 @@ enum QuickFixes {
         case .none: return nil
         case .apple: return OnDeviceDecisions.appleAvailable ? AppLocalization.text("Apple Intelligence") : nil
         case .account:
-            guard let pick = accountPick, ModelAccounts.isSetUp(pick.provider) else { return nil }
+            guard let pick = accountPick, ModelAccounts.isSetUp(pick.provider), AccountDecisions.canDecide(pick.provider) else { return nil }
             return AccountDecisions.name(pick.provider, pick.model)
         }
     }

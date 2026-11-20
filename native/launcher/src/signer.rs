@@ -60,6 +60,9 @@ impl From<core::Error> for Failure {
     fn from(e: core::Error) -> Self {
         let code = match &e {
             core::Error::NeedsCode(_) => "needs_code",
+            // The Apple session ran out and no kept password opened a new one: the app offers Sign In
+            // Again. Only this sentence, since Apple's -20101 also means a wrong password at sign-in.
+            core::Error::NeedsPerson(m) if m == core::apple::gsa::SESSION_EXPIRED => "session_expired",
             core::Error::NeedsPerson(_) => "needs_person",
             core::Error::Apple { .. } => "apple",
             _ => e.kind(),
