@@ -153,7 +153,7 @@ struct JobProgress: View {
     @State private var showSteps = false
 
     /// The install's steps as the core reports them, by how long each usually takes.
-    static let install: [String: Double] = ["phone": 2, "pair": 3, "devmode": 2, "account": 3, "release": 16, "sign": 18, "profiles": 3, "install": 40, "pairing_file": 4, "seed": 9]
+    static let install: [String: Double] = ["phone": 2, "pair": 3, "devmode": 2, "account": 3, "release": 16, "sign": 18, "profiles": 3, "install": 40, "pairing_file": 4, "seed": 9, "mount": 8]
 
     /// A renewal: the release, signing and installing.
     static let renew: [String: Double] = ["release": 16, "sign": 18, "profiles": 3, "install": 40]

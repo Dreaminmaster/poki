@@ -2,7 +2,7 @@
 //! team, sign Poki for it, install it, hand the pairing file over, remember the phone.
 use crate::apple::anisette::{Provider, Source};
 use crate::apple::gsa::{self, AppToken, Outcome as SignInOutcome, Pending};
-use crate::apple::portal::{FEATURE_APP_GROUPS, Portal, Team};
+use crate::apple::portal::{self, FEATURE_APP_GROUPS, Portal, Team};
 use crate::apple::{identity, store};
 #[cfg(feature = "device")]
 use crate::device::{self, Phone};
@@ -357,9 +357,29 @@ impl Signer {
     }
 
     pub async fn teams(&mut self) -> Result<Vec<Team>> {
+        let saved = self.account.xcode_token.clone();
         let token = self.token().await?;
+        match self.list_teams(&token).await {
+            // The portal turned away the saved Xcode token though Apple's own time on it has not run
+            // out. Drop it and ask once more with a fresh one: from the session, or with a kept password
+            // from one fresh sign-in. Without a password this ends in SESSION_EXPIRED, and the app asks
+            // the person to sign in again. Only the portal's answer leads here. When token() itself
+            // fails, such as a kept password Apple no longer takes, nothing is tried again, since every
+            // wrong password brings Apple's account lock closer. Nor when token() had only just fetched
+            // the token: another one from the same session would fare no better.
+            Err(e) if portal::turned_token_away(&e) && saved.is_some_and(|s| s.token == token.token) => {
+                self.account.xcode_token = None;
+                self.persist()?;
+                let token = self.token().await?;
+                self.list_teams(&token).await
+            }
+            other => other,
+        }
+    }
+
+    async fn list_teams(&mut self, token: &AppToken) -> Result<Vec<Team>> {
         let session = self.account.session.clone().unwrap();
-        let mut portal = Portal::new(&session, &token, self.client.anisette())?;
+        let mut portal = Portal::new(&session, token, self.client.anisette())?;
         portal.teams().await
     }
 
@@ -675,6 +695,15 @@ pub async fn run(signer: &mut Signer, opts: Options, reporter: &Reporter) -> Res
     if opts.seed_ddi {
         if let Err(e) = device::ddi::seed_container(&phone, &built.bundle_id, reporter).await {
             reporter.note("pairing_file", format!("Developer disk image not pre-seeded ({e}); Poki downloads it itself."));
+        }
+        // Mount it too, from here, so automation can start before Poki ever reaches its loopback.
+        // Poki mounts it again by itself after a restart; a failure here only means it will.
+        if !matches!(device::ddi::mounted(&phone).await, Ok(true)) {
+            if let Err(e) = device::ddi::mount(&phone, reporter).await {
+                tracing::warn!(error = %e, "mounting the developer disk image from the computer failed");
+                reporter.note("mount", format!("The developer disk image was not mounted from this computer ({e}). Poki mounts it itself when it connects."));
+                reporter.done("mount", None);
+            }
         }
     }
     let handoff = if let (true, Some(record)) = (opts.hand_off || !handed, &record) {

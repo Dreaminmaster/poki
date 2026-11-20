@@ -85,7 +85,7 @@ export function Steps({ steps }: { steps: Step[] }) {
 }
 
 /** How much of the bar each install step takes, by how long it usually runs. */
-export const INSTALL_WEIGHTS: Record<string, number> = { phone: 2, pair: 3, devmode: 2, account: 3, release: 16, sign: 18, profiles: 3, install: 40, pairing_file: 4, seed: 9 };
+export const INSTALL_WEIGHTS: Record<string, number> = { phone: 2, pair: 3, devmode: 2, account: 3, release: 16, sign: 18, profiles: 3, install: 40, pairing_file: 4, seed: 9, mount: 8 };
 export const RENEW_WEIGHTS: Record<string, number> = { release: 16, sign: 18, profiles: 3, install: 40 };
 
 /** A job as one bar: the step under way and its detail under the bar, the steps behind Details. */

@@ -221,6 +221,8 @@ final class ApprovalTests: XCTestCase {
         let delete: [Double] = [8, 44, 60, 40]
         let samples: [ActionKind: [JSON]] = [
             .run: [["run": "checkout"]],
+            .path: [["path": ["goal": "pay", "steps": [["tap": "Pay"]]]], ["path": ["goal": "clear", "steps": [["tap": "Delete"]]]], ["path": [["tap": [195, 122]]]],
+                    ["path": ["steps": [["long_press": "Delete"], ["tap": ["label": "Pay", "type": "Button"]]]]], ["path": ["steps": [["swipe": "left"], ["tap": "Pay"]]]]],
             .tap: [["tap": 1], ["tap": [195, 122]], ["tap": ["x": 40, "y": 64]]],
             .type: [["type": "x", "ref": 1], ["type": "x", "ref": 2]],
             .back: [["back": true]],
@@ -1297,7 +1299,7 @@ final class MCPTests: XCTestCase {
         let note = await post(core, ["jsonrpc": "2.0", "method": "notifications/initialized"], session: session)
         XCTAssertEqual(note.status, 202)
         let list = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/list"], session: session).body)
-        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "routines", "status"])
+        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "skills", "status"])
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "look", "arguments": .object([:])]], session: session).body)
         XCTAssertEqual(call["result"]?["content"]?[1]?["type"], "image")
         XCTAssertEqual(call["result"]?["isError"], false)
@@ -1342,7 +1344,7 @@ final class MCPTests: XCTestCase {
         let session = try XCTUnwrap(initialized.headers["mcp-session-id"])
         XCTAssertEqual(signals.value, [.started(id: session, client: "claude-ai", version: "1.2")])
         let list = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/list"], session: session).body)
-        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "routines", "status", "ask_poki"])
+        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "skills", "status", "ask_poki"])
         XCTAssertEqual(list["result"]?["tools"]?[4]?["inputSchema"]?["required"]?[0], "task")
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "ask_poki", "arguments": ["task": "read the time"]]], session: session).body)
         let text = call["result"]?["content"]?[0]?["text"]?.string ?? ""
@@ -1687,7 +1689,7 @@ final class ReturnToOriginTests: XCTestCase {
     /// front, so the read is made again until it is (cdebb5d), and only then does the phone go back
     /// to the app the task began in (ESP-176). The answer shows the work's screen, not the origin's.
     func testALaunchThatFinishesReadsTheLaunchedAppBeforeGoingBack() async {
-        let (core, wda, _) = makeCore()
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }  // the fixed pause: the reads of a quick read would already see the app arrive
         let front = LockedBox("ai.x.grok"), pending = LockedBox<String?>(nil), lagging = LockedBox(0)
         wda.set("GET /wda/activeAppInfo") { _ in
             if let target = pending.value {

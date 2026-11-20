@@ -117,13 +117,13 @@ struct AgentsView: View {
                     }
                     NavigationLink(value: SettingsRoute.memory) {
                         LabeledContent {
-                            Text("\(RoutineStore.shared.routines.count) routines")
+                            Text("\(RoutineStore.shared.routines.count) skills")
                         } label: { Label("Memory", systemImage: "brain") }
                     }
                 } header: {
                     Text("Poki Agent")
                 } footer: {
-                    Text("The model Poki’s chat and voice use on this iPhone. Memory holds the routines and notes every agent shares.")
+                    Text("The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents.")
                 }
 
                 Section {

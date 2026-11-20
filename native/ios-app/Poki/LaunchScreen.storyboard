@@ -3,7 +3,6 @@
     <device id="retina6_12" orientation="portrait" appearance="light"/>
     <dependencies>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="22131"/>
-        <capability name="Named colors" minToolsVersion="9.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
@@ -14,16 +13,29 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView opaque="NO" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="ActivityBear-ready" translatesAutoresizingMaskIntoConstraints="NO" id="bear">
-                                <rect key="frame" x="128.5" y="358" width="136" height="136"/>
+                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop.png" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
+                                <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                            </imageView>
+                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWordmark.png" translatesAutoresizingMaskIntoConstraints="NO" id="word">
+                                <rect key="frame" x="130.5" y="262.5" width="132" height="64"/>
+                            </imageView>
+                            <imageView opaque="NO" tag="3" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBear.png" translatesAutoresizingMaskIntoConstraints="NO" id="bear">
+                                <rect key="frame" x="-48.5" y="517" width="497" height="329"/>
                             </imageView>
                         </subviews>
-                        <color key="backgroundColor" name="AccentColor"/>
+                        <color key="backgroundColor" red="0.96078431372549022" green="0.96862745098039216" blue="0.98039215686274506" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
-                            <constraint firstItem="bear" firstAttribute="centerX" secondItem="root" secondAttribute="centerX" id="cx"/>
-                            <constraint firstItem="bear" firstAttribute="centerY" secondItem="root" secondAttribute="centerY" id="cy"/>
-                            <constraint firstItem="bear" firstAttribute="width" constant="136" id="w"/>
-                            <constraint firstItem="bear" firstAttribute="height" constant="136" id="h"/>
+                            <constraint firstItem="backdrop" firstAttribute="top" secondItem="root" secondAttribute="top" id="bt"/>
+                            <constraint firstItem="backdrop" firstAttribute="bottom" secondItem="root" secondAttribute="bottom" id="bb"/>
+                            <constraint firstItem="backdrop" firstAttribute="leading" secondItem="root" secondAttribute="leading" id="bl"/>
+                            <constraint firstItem="backdrop" firstAttribute="trailing" secondItem="root" secondAttribute="trailing" id="br"/>
+                            <constraint firstItem="word" firstAttribute="centerX" secondItem="root" secondAttribute="centerX" id="wx"/>
+                            <constraint firstItem="word" firstAttribute="centerY" secondItem="root" secondAttribute="centerY" multiplier="0.6922" id="wy"/>
+                            <constraint firstItem="bear" firstAttribute="centerX" secondItem="root" secondAttribute="centerX" constant="4" id="px"/>
+                            <constraint firstItem="bear" firstAttribute="bottom" secondItem="root" secondAttribute="bottom" constant="2" id="pb"/>
+                            <constraint firstItem="bear" firstAttribute="width" secondItem="root" secondAttribute="width" multiplier="1.215311" constant="19.445" priority="750" id="pw"/>
+                            <constraint firstItem="bear" firstAttribute="height" secondItem="bear" secondAttribute="width" multiplier="0.66273" id="pa"/>
+                            <constraint firstItem="bear" firstAttribute="height" relation="lessThanOrEqual" secondItem="root" secondAttribute="height" multiplier="0.485" id="ph"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -32,9 +44,8 @@
         </scene>
     </scenes>
     <resources>
-        <image name="ActivityBear-ready" width="136" height="136"/>
-        <namedColor name="AccentColor">
-            <color red="0.12549019607843137" green="0.5176470588235295" blue="0.9921568627450981" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-        </namedColor>
+        <image name="LaunchBackdrop.png" width="402" height="874"/>
+        <image name="LaunchBear.png" width="508" height="336.66665649414062"/>
+        <image name="LaunchWordmark.png" width="132" height="64"/>
     </resources>
 </document>

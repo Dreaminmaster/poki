@@ -1,7 +1,65 @@
 import Foundation
+import PokiCore
 import SwiftUI
 import UIKit
 import notify
+
+/// A process-local lease for screen text already fetched by asynchronous agent queries.
+/// Revoking a lease does not try to undo an answer already delivered to the caller.
+private final class HistoryQueryPermissionLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+    private var deletions = 0
+    private var enabled = UserDefaults.standard.bool(forKey: "history.enabled")
+    private var unlocked = false
+
+    var revision: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    /// Read the complete grant under the same lock as its revision.
+    var grant: UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        return enabled && unlocked && deletions == 0 ? value : nil
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        lock.lock()
+        self.enabled = enabled
+        value &+= 1
+        lock.unlock()
+    }
+
+    func setUnlocked(_ unlocked: Bool) {
+        lock.lock()
+        self.unlocked = unlocked
+        value &+= 1
+        lock.unlock()
+    }
+
+    func revoke() {
+        lock.lock()
+        value &+= 1
+        lock.unlock()
+    }
+
+    func beginDeletion() {
+        lock.lock()
+        value &+= 1
+        deletions += 1
+        lock.unlock()
+    }
+
+    func endDeletion() {
+        lock.lock()
+        deletions = max(0, deletions - 1)
+        value &+= 1
+        lock.unlock()
+    }
+}
 
 /// iPhone History's capture and its privacy controls (issue 356), as an experiment.
 ///
@@ -30,16 +88,47 @@ final class HistoryCapture: ObservableObject {
 
     nonisolated static let enabledKey = "history.enabled"
     nonisolated static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
+    nonisolated private static let queryLease = HistoryQueryPermissionLease()
+    nonisolated static var accessRevision: UInt64 { queryLease.revision }
+    nonisolated static var agentQueryRevision: UInt64? {
+        guard isEnabled else { return nil }
+        return queryLease.grant
+    }
+    nonisolated static var agentQueryAllowed: Bool { agentQueryRevision != nil }
+    nonisolated static var agentQueryUnavailableMessage: String {
+        guard isEnabled else { return PokiCore.screenHistoryOffMessage }
+        return "Screen History is locked or temporarily unavailable. Unlock it in Poki before querying."
+    }
+
+    /// HistoryLock owns authentication; publish its decision to the synchronous agent gate.
+    nonisolated static func setAgentHistoryUnlocked(_ unlocked: Bool) {
+        queryLease.setUnlocked(unlocked)
+    }
+
+    nonisolated static func validateAgentAnswer(_ answer: PokiCore.ToolAnswer, revision: UInt64?) -> PokiCore.ToolAnswer {
+        guard !answer.isError else { return answer }
+        guard let revision, agentQueryRevision == revision else {
+            return PokiCore.ToolAnswer(text: PokiCore.screenHistoryRevokedMessage, jpeg: nil, isError: true)
+        }
+        return answer
+    }
 
     @Published var enabled: Bool {
         didSet {
+            Self.queryLease.setEnabled(enabled)
             save(enabled, Self.enabledKey)
             if !enabled { stop() }
         }
     }
-    @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
-    @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
-    @Published var included: [String] { didSet { save(included, "history.included") } }
+    @Published var listMode: ListMode {
+        didSet { Self.queryLease.revoke(); save(listMode.rawValue, "history.listMode") }
+    }
+    @Published var excluded: [String] {
+        didSet { Self.queryLease.revoke(); save(excluded, "history.excluded") }
+    }
+    @Published var included: [String] {
+        didSet { Self.queryLease.revoke(); save(included, "history.included") }
+    }
     @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); prune() } }
     /// How long the hour, day and week summaries outlive the tape, in days. 0 is as long as the tape.
     @Published var summaryDays: Int { didSet { save(summaryDays, "history.summaryDays"); prune() } }
@@ -229,16 +318,29 @@ final class HistoryCapture: ObservableObject {
         if why == .locked { HistoryStore.shared.close() }
     }
 
-    private func watchLock() {
-        guard lockToken == NOTIFY_TOKEN_INVALID else { return }
+    /// Monitor device lock independently of a recording run. The observer lives for the
+    /// application lifetime; a locked phone must revoke reads even when capture is idle.
+    func watchLock() {
         let changed: @Sendable (Int32) -> Void = { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.lockedOrDark else { return }
-                self.end(self.run, .locked)
+            // notify_register_dispatch delivers on DispatchQueue.main.
+            MainActor.assumeIsolated {
+                self?.deviceLockChanged()
             }
         }
-        notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
-        notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
+        if lockToken == NOTIFY_TOKEN_INVALID {
+            notify_register_dispatch("com.apple.springboard.lockstate", &lockToken, DispatchQueue.main, changed)
+        }
+        if screenToken == NOTIFY_TOKEN_INVALID {
+            notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
+        }
+        deviceLockChanged()
+    }
+
+    private func deviceLockChanged() {
+        guard lockedOrDark else { return }
+        HistoryLock.shared.lock()
+        HistoryStore.shared.close()
+        end(run, .locked)
     }
 
     /// One read from the launcher. Only a screen whose text changed carries text.
@@ -271,6 +373,8 @@ final class HistoryCapture: ObservableObject {
     // MARK: Deleting
 
     func clear(last seconds: TimeInterval) async {
+        Self.queryLease.beginDeletion()
+        defer { Self.queryLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.delete(from: Date().addingTimeInterval(-seconds), to: Date().addingTimeInterval(60))
         HistoryStore.shared.note("cleared", "\(Int(seconds))")
@@ -278,12 +382,16 @@ final class HistoryCapture: ObservableObject {
     }
 
     func clearEverything() async {
+        Self.queryLease.beginDeletion()
+        defer { Self.queryLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.deleteEverything()
         changes += 1
     }
 
     func delete(from start: Date, to end: Date) async {
+        Self.queryLease.beginDeletion()
+        defer { Self.queryLease.endDeletion() }
         BacktapeNotes.shared.reset()
         await HistoryStore.shared.delete(from: start, to: end)
         changes += 1

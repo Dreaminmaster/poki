@@ -22,6 +22,9 @@ struct PokiApp: App {
         SettingsVault.restore()
         AppLocalization.publish()
         SettingsVault.watch()
+        // Install history lock observers before any local or external agent can query the store.
+        _ = HistoryLock.shared
+        HistoryCapture.shared.watchLock()
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
         FieldDictation.keepButtonForUpgrade()
@@ -35,6 +38,9 @@ struct PokiApp: App {
         }
         #if DEBUG && targetEnvironment(simulator)
         TestCredential.importIfGiven()
+        #endif
+        #if DEBUG
+        LaunchBackdropRender.writeIfAsked()
         #endif
         // A memory backup Poki Setup put back (Documents/AgentBackup) is merged in off the main thread.
         Self.scheduleStartupWork()
@@ -97,6 +103,8 @@ struct RootView: View {
     @AppStorage(AppInterfaceSize.defaultsKey) private var interfaceSize = AppInterfaceSize.system
     @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
     @Namespace private var profile
+    /// The launch screen is still over the first frame, letting go (`LaunchCurtain`).
+    @State private var curtain = true
 
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
 
@@ -276,6 +284,9 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Tint.page.ignoresSafeArea())
+        .overlay {
+            if curtain { LaunchCurtain(done: { curtain = false }).ignoresSafeArea().allowsHitTesting(false) }
+        }
         .onGeometryChange(for: Bool.self) { geometry in
             geometry.size.width >= Self.sidebarWidth + 1 + Self.minimumChatWidth
         } action: { showsSidebar = $0 }

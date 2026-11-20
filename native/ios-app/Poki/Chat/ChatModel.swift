@@ -764,7 +764,8 @@ final class ChatModel {
         if let loop, loop.provider == provider, loop.model.id == model.id,
            loop.model.baseUrl == model.baseUrl, !changedWorkspace { return loop }
         // A different workspace starts without old screen evidence.
-        let next = PiLoop(provider: provider, model: model, tools: inSplitView ? Harness.splitViewTools : Harness.tools,
+        let next = PiLoop(provider: provider, model: model,
+                          tools: Harness.toolSpecs(inSplitView: inSplitView, includeScreenHistory: true),
                           inSplitView: inSplitView, carrying: changedWorkspace ? [] : loop?.messages ?? []) { [weak self] call in
             guard let self else { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
             return await self.perform(call)
@@ -934,7 +935,8 @@ final class ChatModel {
         for _ in 0..<Self.maxTurns {
             let turn: ModelTurn
             do {
-                turn = try await client.next(instructions: instructions, tools: Harness.tools)
+                turn = try await client.next(instructions: Harness.historyInstructions(instructions, allowed: HistoryCapture.agentQueryAllowed),
+                                             tools: Harness.tools)
             } catch {
                 client.forgetUnansweredQuestion()
                 if stopped { return }
@@ -951,7 +953,10 @@ final class ChatModel {
                         client.answer(call, PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true))
                         continue
                     }
-                    client.answer(call, await perform(call))
+                    let revision = call.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
+                    let answer = await perform(call)
+                    client.answer(call, call.name == "screen_history"
+                        ? HistoryCapture.validateAgentAnswer(answer, revision: revision) : answer)
                 }
                 if stopped { return }
             case .again:
@@ -980,7 +985,12 @@ final class ChatModel {
         let token = runToken
         awaitingModel = false
         let started = Date()
-        let answer = await performCall(call)
+        let historyRevision = call.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
+        let rawAnswer = await performCall(call)
+        // Main-actor boundary: validate again after the await before recording or returning
+        // any private text. A valid answer may have become stale on the way back from Core.
+        let answer = call.name == "screen_history"
+            ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: historyRevision) : rawAnswer
         let record = CallRecord(name: call.name, arguments: call.arguments, answer: String(answer.text.prefix(2000)), ms: Int(Date().timeIntervalSince(started) * 1000), ok: !answer.isError)
         taskCalls.append(record)
         guard sessionID == session else {
@@ -1017,8 +1027,8 @@ final class ChatModel {
                     return splitViewRefusal("Use look with pane left or right to confirm the two visible apps first.")
                 }
                 let actions = args["actions"] as? [[String: Any]] ?? []
-                if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["button"] != nil }) {
-                    return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run routines. Finish with finish_task.")
+                if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["path"] != nil || $0["button"] != nil }) {
+                    return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run skills. Finish with finish_task.")
                 }
             case "report_plan", "finish_task", "status", "screen_history": break
             default:
@@ -1075,7 +1085,7 @@ final class ChatModel {
             return response
         default:
             // A note Poki keeps remembers this conversation: the Memory page links back to it.
-            return await app.runTool(call.name, arguments: call.arguments, conversation: call.name == "routines" ? sessionID : nil)
+            return await app.runTool(call.name, arguments: call.arguments, conversation: call.name == "skills" || call.name == "routines" ? sessionID : nil)
         }
     }
 

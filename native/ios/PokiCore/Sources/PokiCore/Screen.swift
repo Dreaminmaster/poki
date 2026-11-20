@@ -183,12 +183,13 @@ extension Runner {
     /// its main thread all the same), so a look never waits on a session open and a session ended
     /// after a slow action does not cost the next read anything. The settings (deadline, detection
     /// point, depth) live in WDA's process, set by the first session of the runner's life.
-    func tree(timeout: Double, format: String = "json", workspace: Bool = false) async throws -> (elements: [Element], foreground: Foreground) {
+    /// `countsAsMiss: false` for a read given less time than a read may take.
+    func tree(timeout: Double, format: String = "json", workspace: Bool = false, countsAsMiss: Bool = true) async throws -> (elements: [Element], foreground: Foreground) {
         let xml = format.lowercased() == "xml"
         await ensureSettings(timeout: min(timeout, 3))
-        async let source = raw("GET", "/source?format=\(xml ? "xml" : "json")&excluded_attributes=visible,accessible,enabled,index", timeout: timeout)
+        async let source = raw("GET", "/source?format=\(xml ? "xml" : "json")&excluded_attributes=visible,accessible,enabled,index", timeout: timeout, countsAsMiss: countsAsMiss)
         // /activeAppInfo queues behind /source, which confirms the selected pane before reading it.
-        async let app = try? raw("GET", "/wda/activeAppInfo", timeout: workspace ? timeout : min(timeout, 2))
+        async let app = try? raw("GET", "/wda/activeAppInfo", timeout: workspace ? timeout : min(timeout, 2), countsAsMiss: countsAsMiss)
         let appValue = await app
         let bundleID = appValue?["bundleId"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         let appName = appValue?["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }

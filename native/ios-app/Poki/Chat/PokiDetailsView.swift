@@ -241,9 +241,13 @@ struct PokiDetailsView: View {
         return AppLocalization.text(LocalizedStringResource(on ? "On" : "Off"))
     }
 
-    private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
-    /// The version is the page's last line, so the row only speaks up when an update waits.
-    private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
+    private var updateWaits: Bool { !isSample && (model.signer.sessionExpired || model.signer.updateNotReady || model.signer.next?.kind == "update") }
+    /// The version is the page's last line, so the row only speaks up when an update waits, or when
+    /// Apple's sign-in ran out and nothing renews until the owner signs in again.
+    private var updatesValue: String? {
+        if !isSample, model.signer.sessionExpired { return AppLocalization.text(LocalizedStringResource("Sign In Again")) }
+        return updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil
+    }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
@@ -757,7 +761,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 SettingsHeader("Memory")
             } footer: {
-                Text("The run log lists each routine run, where it stopped and how long it took, with no typed text. It helps the Poki maintainers make routines more reliable.")
+                Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
             }
 
             Section {

@@ -143,8 +143,8 @@ struct SettingsHome: View {
                 Text("This iPhone")
             } footer: {
                 Text(model.automationPath == .inProcess
-                     ? "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory holds the routines and notes every agent shares."
-                     : "Memory holds the routines and notes every agent shares. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
+                     ? "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents."
+                     : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
             }
         }
         .navigationTitle(AppLocalization.text("Agents and Relay"))

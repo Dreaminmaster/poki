@@ -112,8 +112,8 @@ public final class GymScorecard {
         let first = text.split(separator: "\n").first.map(String.init) ?? ""
         var notes: [String] = []
         if Double(ms) / 1000 > budget { notes.append("slow: over \(Int(budget)) s") }
-        // The routines tool reads and writes the phone's memory only: it never sends a picture.
-        if pictures.isEmpty, name != "routines" { notes.append("no picture") }
+        // The skills tool reads and writes the phone's memory only: it never sends a picture.
+        if pictures.isEmpty, name != "skills", name != "routines" { notes.append("no picture") }
         log("=== \(scenario) / \(step): \(ms) ms, \(pictures.count) image(s)\n\(text)\n")
         rows.append(GymRow(scenario: scenario, step: step, ms: ms, ok: notes.isEmpty, note: notes.isEmpty ? first.prefix(70).description : notes.joined(separator: "; ")))
         for n in notes { failures.append("\(scenario) / \(step): \(n)") }
@@ -492,6 +492,15 @@ public final class GymScorecard {
         check(ran.contains("run \"gym about\"") && ran.contains("end check passed"), "the routine runs whole in one call and its end check passes (\(ran.split(separator: "\n").first(where: { $0.contains("run \"") }) ?? ran.prefix(120)))")
         log("ROUTINE by hand: \(byHand.count) calls, \(byHandMs) ms; run: 1 call, \(runMs) ms")
         rows.append(GymRow(scenario: "routine", step: "by hand \(byHand.count) calls \(byHandMs) ms, run 1 call \(runMs) ms", ms: 0, ok: true, note: "timing"))
+        // 13c. The same way as a path: written ahead by the text of its targets, nothing saved, no model.
+        _ = await call("finish (before the path)", "do", ["actions": [], "finish": true], budget: 20)
+        let pathFrom = rows.count
+        let pathed = await call("the same as a path", "do", ["actions": [["launch": ["bundle": "com.apple.Preferences", "fresh": true]],
+            ["path": ["goal": "read the iOS version", "steps": [["tap": "General", "expect": "About"], ["tap": "About"]], "dismiss": ["Not Now"], "read": ["iOS Version", "Model Name"]]]]], budget: 30)
+        let pathMs = rows[pathFrom...].reduce(0) { $0 + $1.ms }
+        check(pathed.contains("path: 2 steps"), "a path crosses the same screens in one call (\(pathed.split(separator: "\n").first(where: { $0.contains("path") }) ?? pathed.prefix(120)))")
+        log("PATH by hand: \(byHand.count) calls, \(byHandMs) ms; path: 1 call, \(pathMs) ms; run: 1 call, \(runMs) ms")
+        rows.append(GymRow(scenario: "routine", step: "by hand \(byHand.count) calls \(byHandMs) ms, path 1 call \(pathMs) ms", ms: 0, ok: true, note: "timing"))
         // The same path without its launch steps, run from the About screen: General is not there.
         _ = await call("save a copy", "routines", ["action": "save", "name": "gym about no launch"])
         if let r = shown.range(of: "steps as JSON (edit takes this shape): "),
