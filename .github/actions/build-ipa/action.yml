@@ -36,10 +36,12 @@ runs:
     # Duo. Its own UIScreen is then the letterbox, the picture XCTest takes is the whole panel, and
     # every screen read ends in screenshot_does_not_match_active_display (#419). So the IPA is
     # built with the newest released Xcode of the runner, and never with an SDK before 27.1.
+    # Siri AI calls Poki's actions as tools (Poki/Entry/SendTaskIntent.swift), which needs the iOS
+    # 27.3 SDK: an older SDK does not know @AppIntent(.tool). So the newest Xcode is always used,
+    # and never an SDK before 27.3.
     # A runner image can carry a new Xcode before that Xcode's Metal Toolchain (image 20261119:
     # Xcode 27.3 without it, and the build ended in "cannot execute tool 'metal' due to missing
-    # Metal Toolchain"). The newest Xcode that has the toolchain is used, and only when none has
-    # it is the toolchain downloaded for the newest one.
+    # Metal Toolchain"). Then the toolchain is downloaded for it.
     - name: Use the newest Xcode
       shell: bash
       run: |
@@ -53,33 +55,21 @@ runs:
           esac
           return 0
         }
-        NEWEST=""
-        XCODE=""
-        for candidate in $(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V -r); do
-          [ -n "$NEWEST" ] || NEWEST="$candidate"
-          sudo xcode-select -s "$candidate/Contents/Developer"
-          # An older Xcode is no way out once its SDK is before 27.1 (see above).
-          [ "$(printf '%s\n' 27.1 "$(xcrun --sdk iphoneos --show-sdk-version)" | sort -V | head -1)" = 27.1 ] || break
-          if has_metal; then XCODE="$candidate"; break; fi
-          echo "$candidate has no Metal Toolchain"
-        done
-        if [ -z "$XCODE" ]; then
-          XCODE="$NEWEST"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
-          echo "No Xcode on this runner has the Metal Toolchain: downloading it for $XCODE"
+        XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
+        sudo xcode-select -s "$XCODE/Contents/Developer"
+        xcodebuild -version
+        if ! has_metal; then
+          echo "$XCODE has no Metal Toolchain on this runner: downloading it"
           xcodebuild -downloadComponent MetalToolchain
           if ! has_metal; then
             echo "::error::The Metal Toolchain is missing for $XCODE and could not be downloaded."
             exit 1
           fi
-        elif [ "$XCODE" != "$NEWEST" ]; then
-          echo "::warning::$NEWEST has no Metal Toolchain on this runner. Building with $XCODE."
         fi
-        xcodebuild -version
         SDK="$(xcrun --sdk iphoneos --show-sdk-version)"
         echo "iOS SDK $SDK"
-        if [ "$(printf '%s\n' 27.1 "$SDK" | sort -V | head -1)" != 27.1 ]; then
-          echo "::error::The iOS SDK is $SDK. Poki needs 27.1 or later to fill the iPhone Duo's displays; run this job on the xcode-27 runner."
+        if [ "$(printf '%s\n' 27.3 "$SDK" | sort -V | head -1)" != 27.3 ]; then
+          echo "::error::The iOS SDK is $SDK. Poki needs 27.3 or later, for the iPhone Duo's displays and for Siri AI's tools; run this job on the xcode-27 runner."
           exit 1
         fi
 
@@ -145,6 +135,7 @@ runs:
             -destination generic/platform=iOS -derivedDataPath "build/app-$edition" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ARCHS=arm64 \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
+            POKI_SIRI_TOOLS_FLAG=POKI_SIRI_TOOLS \
             2>&1 | tee "build/app-$edition.log" | grep --line-buffered -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* |^=== BUILD TARGET|^SwiftDriver |^Ld "
           native/ios-app/scripts/package-app.sh \
             "build/app-$edition/Build/Products/Release-iphoneos/Poki.app" \

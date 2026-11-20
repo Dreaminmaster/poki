@@ -3,6 +3,15 @@ import AppIntents
 /// Starts a task in Poki's chat without opening Poki, the way a reply from Poki's notification does.
 /// Ordinary tasks can open the chat if they need attention. Split View tasks report an error in the
 /// shortcut itself so a failed start cannot replace one of the owner's two apps.
+///
+/// Siri AI (iOS 27.3, Siri AI Developer Preview) calls it as a tool: "Hey Siri, ask Poki to …" hands
+/// the request over in the person's words. Siri reads the title and the descriptions below, so they
+/// are written for someone who has never seen Poki. A tool makes Poki's App Shortcuts unavailable
+/// to Siri (they stay in Spotlight, Shortcuts and the Action Button), so every action Siri used to
+/// reach through them is a tool too: Talk to Poki and Poki Anytime.
+#if POKI_SIRI_TOOLS
+@AppIntent(.tool)
+#endif
 struct SendTaskToPokiIntent: ForegroundContinuableIntent {
     private struct SplitViewStartError: LocalizedError {
         let words: LocalizedStringResource
@@ -10,7 +19,7 @@ struct SendTaskToPokiIntent: ForegroundContinuableIntent {
     }
 
     static let title = LocalizedStringResource("Send Task to Poki", table: "Entry")
-    static let description = IntentDescription(LocalizedStringResource("Poki starts the task on this iPhone and tells you when it is done.", table: "Entry"))
+    static let description = IntentDescription(LocalizedStringResource("Gives Poki a task to do on this iPhone. Poki is an assistant that uses the apps on this iPhone the way you would, tapping and typing for you, and tells you when it is done.", table: "Entry"))
     static let openAppWhenRun = false
     @available(iOS 26.0, *)
     static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
@@ -18,10 +27,13 @@ struct SendTaskToPokiIntent: ForegroundContinuableIntent {
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: LocalizedStringResource("Task", table: "Entry"),
+               description: LocalizedStringResource("What Poki should do, in your own words, with every detail you gave, such as the app to use, names, times and amounts.", table: "Entry"),
                requestValueDialog: IntentDialog(LocalizedStringResource("What should Poki do?", table: "Entry")))
     var task: String
 
-    @Parameter(title: LocalizedStringResource("Use Split View", table: "Entry"), default: false)
+    @Parameter(title: LocalizedStringResource("Use Split View", table: "Entry"),
+               description: LocalizedStringResource("Off unless you ask for Split View. When on, Poki works in the two apps open side by side.", table: "Entry"),
+               default: false)
     var inSplitView: Bool
 
     static var parameterSummary: some ParameterSummary {

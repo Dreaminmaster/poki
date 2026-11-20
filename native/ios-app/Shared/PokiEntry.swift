@@ -30,6 +30,11 @@ final class PokiEntry {
 }
 
 /// Opens Poki's chat and starts voice there. A task Poki is already doing is shown, not interrupted.
+/// A tool for Siri AI in the app only (POKI_SIRI_TOOLS is never set for the widget extension, which
+/// carries this intent for its control): see SendTaskToPokiIntent.
+#if POKI_SIRI_TOOLS
+@AppIntent(.tool)
+#endif
 struct TalkToPokiIntent: AppIntent {
     static let title = LocalizedStringResource("Talk to Poki", table: "Entry")
     static let description = IntentDescription(LocalizedStringResource("Opens Poki and starts talking. If Poki is doing a task, it shows that task and leaves it running.", table: "Entry"))
