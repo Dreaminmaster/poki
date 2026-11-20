@@ -405,7 +405,8 @@ final class ChatHarnessTests: XCTestCase {
             switch expected {
             case .messages(let target):
                 XCTAssertEqual(result.success, false, "\(request): \(result.text)")
-                XCTAssertTrue(result.text.contains("0 of \(target) older messages"), "\(request): \(result.text)")
+                let displayedTarget = target.formatted(.number.locale(Locale(identifier: "en_US")))
+                XCTAssertTrue(result.text.contains("0 of \(displayedTarget) older messages"), "\(request): \(result.text)")
             case .screens:
                 XCTAssertEqual(transport.topMessage, 1, request)
                 XCTAssertEqual(result.success, true, "\(request): \(result.text)")
