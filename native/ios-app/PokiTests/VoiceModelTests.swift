@@ -356,6 +356,38 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
+    func testLiveRevisedTranscriptDoesNotReplayExecutedAudio() async {
+        var operations: [String] = []
+        let h = Harness(phoneTool: { _, arguments in
+            operations.append(arguments)
+            return ("verified result", false, nil)
+        })
+        await h.liveTalk()
+
+        func delegate(_ id: String, text: String, audio: Range<Int>) {
+            h.link.play(["type": "session.input_transcript.delta", "delta": text,
+                         "start_ms": audio.lowerBound, "end_ms": audio.upperBound],
+                        ["type": "session.delegation.created", "delegation": ["id": id]])
+        }
+
+        delegate("first", text: "向下滚动", audio: 200..<400)
+        h.link.call("first", "do", arguments: "first", delegation: "first")
+        await h.time.settle()
+        XCTAssertEqual(operations, ["first"])
+
+        delegate("revised", text: "往下滚动", audio: 200..<500)
+        h.link.call("revised", "do", arguments: "revised", delegation: "revised")
+        await h.time.settle()
+        XCTAssertEqual(operations, ["first"], "Revised text must not replay previously executed audio.")
+
+        delegate("no-tool", text: "往下滚动", audio: 400..<600)
+        delegate("fresh", text: "往下滚动", audio: 400..<600)
+        h.link.call("fresh", "do", arguments: "fresh", delegation: "fresh")
+        await h.time.settle()
+        XCTAssertEqual(operations, ["first", "fresh"], "Replays and delegations without a tool must not consume unused audio.")
+        h.voice.stop()
+    }
+
     func testLiveEndWaitsForServerConfirmationOrReleasesAfterTimeout() async {
         let confirmed = Harness()
         await confirmed.liveTalk()
