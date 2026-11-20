@@ -52,13 +52,8 @@ final class ChatScrollTests: XCTestCase {
     /// unmount the composer, discard unsent text, or replace the active conversation.
     func testSearchJumpAndCancellationKeepUnsentChatDraft() throws {
         let savedChat = UserDefaults.standard.object(forKey: "pokiChat")
-        let savedDraft = UserDefaults.standard.object(forKey: "pokiDraft")
         UserDefaults.standard.set("demo", forKey: "pokiChat")
-        UserDefaults.standard.set("Draft that must remain unsent", forKey: "pokiDraft")
-        defer {
-            UserDefaults.standard.set(savedChat, forKey: "pokiChat")
-            UserDefaults.standard.set(savedDraft, forKey: "pokiDraft")
-        }
+        defer { UserDefaults.standard.set(savedChat, forKey: "pokiChat") }
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         let chat = ChatModel(app: app)
         let feed = Feed()
@@ -68,7 +63,14 @@ final class ChatScrollTests: XCTestCase {
         }.environment(app).environment(chat))
         settle { Self.find(CapsuleTextView.self, in: window) != nil }
         let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
-        XCTAssertEqual(field.plainText, "Draft that must remain unsent")
+        // ChatView's standalone draft is local state, not RootView's persisted pokiDraft.
+        // Exercise the actual composer input before navigation, as the owner would.
+        let draft = "Draft that must remain unsent"
+        field.becomeFirstResponder()
+        field.insertText(draft)
+        settle { field.plainText == draft }
+        XCTAssertEqual(field.plainText, draft)
+        field.resignFirstResponder()
         let originalID = chat.sessionID
         let originalEntries = chat.entries
 
