@@ -206,7 +206,7 @@ final class VoiceModelTests: XCTestCase {
         h.voice.stop()
     }
 
-    func testLiveShortStopQuietsPlaybackWithoutCancellingPhoneWork() async {
+    func testLiveShortStopQuietsPlaybackAndRejectsLaterPhoneWork() async {
         for stop in [["停"], ["停止"], ["别动"], [" stop. "], [" 停", ",别", "做了"], ["停，别做了"]] {
             var executed: [String] = []
             let h = Harness(phoneTool: { name, _ in
@@ -230,9 +230,31 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertEqual(h.link.remoteVolume, 0, "An acknowledgment must not bring the stopped reply back.")
             h.link.call("next-step", "do")
             await h.time.settle()
-            XCTAssertEqual(executed, ["open_app", "do"], "Playback control alone must leave the delegated work intact.")
+            XCTAssertEqual(executed, ["open_app"], "A spoken stop must reject the remaining phone steps.")
             h.voice.stop()
         }
+    }
+
+    func testAStoppedLiveReplyStaysMutedWhenTheRunningStepReturns() async {
+        let time = FakeTime()
+        let h = Harness(time: time, phoneTool: { _, _ in
+            await time.clock.sleep(.seconds(1))
+            return ("Settings is open", false, nil)
+        })
+        await h.liveTalk()
+        h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        h.link.call("open-settings", "open_app")
+        await time.settle()
+        h.link.play(["type": "session.input_transcript.delta", "delta": "停", "start_ms": 200, "end_ms": 400])
+        XCTAssertEqual(h.link.remoteVolume, 0)
+        await time.advance(1)
+
+        XCTAssertEqual(h.voice.calls.first(where: { $0.id == "open-settings" })?.output, "Settings is open")
+        XCTAssertEqual(h.link.remoteVolume, 0, "A late result must not reopen the speaker.")
+        XCTAssertFalse(h.link.sent.contains { event in
+            event["type"] as? String == "response.create" || event["type"] as? String == "session.commentary.append"
+        }, "A stopped result must not request speech.")
+        h.voice.stop()
     }
 
     func testLiveBackchannelsKeepPlaybackAndDoNotStartOrCancelPhoneWork() async {
@@ -260,30 +282,64 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
-    func testLiveOnlySuppressesIdenticalWholeTurnsWithinTwoSeconds() async {
+    func testLiveDeduplicatesByItemOrIdenticalTextWithinTheSameSpeechSegment() async {
         var operations: [String] = []
         let h = Harness(phoneTool: { _, arguments in
             operations.append(arguments)
             return ("verified result", false, nil)
         })
         await h.liveTalk()
-        let turns: [(id: String, segments: [String], end: Int)] = [
-            ("original", ["打开", "微信"], 500),
-            ("repeated", [" 打开微信！ "], 2_500),
-            ("similar", ["打开微信", "设置"], 3_000),
-            ("later", ["打开微信"], 4_650),
-        ]
-        for turn in turns {
-            for (index, delta) in turn.segments.enumerated() {
-                let end = turn.end - (turn.segments.count - index - 1) * 200
-                h.link.play(["type": "session.input_transcript.delta", "delta": delta, "start_ms": end - 200, "end_ms": end])
-            }
-            h.link.play(["type": "session.delegation.created", "offset_ms": turn.end, "delegation": ["id": turn.id]])
-            h.link.call(turn.id, "do", arguments: turn.id, delegation: turn.id)
+        func turn(_ request: String, text: String, end: Int, item: String? = nil) async {
+            var caption: [String: Any] = ["type": "session.input_transcript.delta", "delta": text, "start_ms": end - 200, "end_ms": end]
+            caption["item_id"] = item
+            h.link.play(caption, ["type": "session.delegation.created", "offset_ms": end, "delegation": ["id": request]])
+            h.link.call(request, "do", arguments: request, delegation: request)
             await h.time.settle()
         }
-        XCTAssertEqual(operations, ["original", "similar", "later"])
+        h.link.play(["type": "input_audio_buffer.speech_started"])
+        await turn("original", text: "打开微信", end: 500)
+        await turn("duplicate", text: " 打开微信！ ", end: 750)
+        h.link.play(["type": "input_audio_buffer.speech_started"],
+                    ["type": "session.input_transcript.delta", "delta": "好的。", "start_ms": 780, "end_ms": 950],
+                    ["type": "input_audio_buffer.speech_started"])
+        await turn("said-again", text: "打开微信", end: 1_300)
+        await turn("similar", text: "打开微信设置", end: 1_600)
+        h.link.play(["type": "input_audio_buffer.speech_started", "item_id": "user-1"])
+        await turn("with-id", text: "向下滚动", end: 1_900, item: "user-1")
+        h.link.play(["type": "input_audio_buffer.speech_started", "item_id": "user-1"])
+        await turn("same-id", text: "往下滚动", end: 2_200, item: "user-1")
+        h.link.play(["type": "input_audio_buffer.speech_started", "item_id": "user-2"])
+        await turn("different-id", text: "向下滚动", end: 2_500, item: "user-2")
+
+        XCTAssertEqual(operations, ["original", "said-again", "similar", "with-id", "different-id"])
         h.voice.stop()
+    }
+
+    func testLiveEndWaitsForServerConfirmationOrReleasesAfterTimeout() async {
+        let confirmed = Harness()
+        await confirmed.liveTalk()
+        confirmed.voice.stop()
+        confirmed.voice.stop()
+        XCTAssertFalse(confirmed.voice.isOn)
+        XCTAssertEqual(confirmed.link.sent.compactMap { $0["type"] as? String }.filter { $0 == "session.close" }, ["session.close"])
+        XCTAssertFalse(confirmed.link.closed)
+        XCTAssertEqual(confirmed.microphone, [true])
+        confirmed.link.call("after-end", "open_app")
+        XCTAssertTrue(confirmed.voice.calls.isEmpty)
+        confirmed.link.play(["type": "session.closed", "reason": "close_requested", "usage": ["seconds": 2]])
+        XCTAssertTrue(confirmed.link.closed)
+        XCTAssertEqual(confirmed.microphone, [true, false])
+        XCTAssertEqual(confirmed.voice.phase, .off)
+
+        let unconfirmed = Harness()
+        await unconfirmed.liveTalk()
+        await unconfirmed.time.advance(8)
+        XCTAssertFalse(unconfirmed.voice.isOn, "The idle timer must also request a graceful close.")
+        XCTAssertFalse(unconfirmed.link.closed)
+        XCTAssertEqual(unconfirmed.microphone, [true])
+        await unconfirmed.time.advance(10)
+        XCTAssertTrue(unconfirmed.link.closed, "The microphone must be released if the server never confirms.")
+        XCTAssertEqual(unconfirmed.microphone, [true, false])
     }
 
     func testRealtimeOnlyRequestsOneResponsePerCommittedUserItem() async {
@@ -329,9 +385,7 @@ final class VoiceModelTests: XCTestCase {
         h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
         h.link.call("batch", "do")
         await fulfillment(of: [firstStarted], timeout: 2)
-        h.link.play(["type": "session.input_transcript.delta", "delta": "请先别把这条消息发出去", "start_ms": 100, "end_ms": 300],
-                    ["type": "session.delegation.created", "delegation": ["id": "cancel"]])
-        h.link.call("cancel-batch", "cancel_current_task", delegation: "cancel")
+        h.link.play(["type": "session.input_transcript.delta", "delta": "停", "start_ms": 100, "end_ms": 300])
         releaseFirst.finish()
         await fulfillment(of: [batchFinished], timeout: 2)
         let operations = await transport.operations
@@ -353,11 +407,13 @@ final class VoiceModelTests: XCTestCase {
             })
             await h.liveTalk()
             var muteAfterStopCaption: Double?
+            var toolsBeforeStop: Int?
             for event in events {
                 h.link.play(event)
                 if event["type"] as? String == "session.input_transcript.delta",
                    (event["delta"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == "停" {
                     muteAfterStopCaption = h.link.remoteVolume
+                    toolsBeforeStop = executed.count
                 }
                 await h.time.settle()
             }
@@ -366,7 +422,9 @@ final class VoiceModelTests: XCTestCase {
                 XCTAssertEqual(muteAfterStopCaption, 1)
             } else {
                 XCTAssertEqual(muteAfterStopCaption, 0, "Playback must stop on the recorded \(scenario).")
-                XCTAssertTrue(executed.contains { $0.name == "do" }, "Phone work can continue until the semantic cancellation is received.")
+                let beforeStop = try XCTUnwrap(toolsBeforeStop)
+                XCTAssertGreaterThan(beforeStop, 0, "The recording must reach a running phone task.")
+                XCTAssertEqual(executed.count, beforeStop, "No recorded phone step may start after the stop transcript.")
             }
             h.voice.stop()
         }
