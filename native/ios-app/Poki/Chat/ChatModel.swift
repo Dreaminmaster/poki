@@ -161,7 +161,7 @@ final class ChatModel {
     private var taskResult: TaskResult?
     private var offeredMemories: [MemoryNote] = []
     private var replayedSkills: [String] = []
-    private var pendingMemoryWrites: [String] = []
+    private var pendingMemoryWrites: [(arguments: String, skillName: String?)] = []
     /// The task under way as the owner asked it.
     private var taskText = ""
     private var client: ModelClient?
@@ -821,11 +821,23 @@ final class ChatModel {
             offeredMemories.removeAll()
             replayedSkills.removeAll()
         }
-        guard completed, !Task.isCancelled, let result = taskResult, result.success else { return }
-        for arguments in pendingMemoryWrites {
-            if !app.saveTaskMemory(arguments: arguments, conversation: sessionID, task: "\(sessionID)#\(token)") {
-                AppLog.shared.add("chat", "a memory write could not be saved")
+        guard completed, !Task.isCancelled, var result = taskResult, result.success else { return }
+        var failures: [String] = []
+        for write in pendingMemoryWrites {
+            if !app.saveTaskMemory(arguments: write.arguments, conversation: sessionID, task: "\(sessionID)#\(token)") {
+                if let name = write.skillName {
+                    failures.append(AppLocalization.text(LocalizedStringResource("Couldn’t save the skill “\(name)”.")))
+                } else {
+                    failures.append(AppLocalization.text(LocalizedStringResource("Couldn’t save that memory.")))
+                }
             }
+        }
+        if !failures.isEmpty {
+            let notice = failures.joined(separator: "\n")
+            add(.poki(notice))
+            result.success = false
+            result.summary = notice
+            taskResult = result
         }
         let reported = Set(result.usedMemoryIDs)
         let notes = offeredMemories.filter { reported.contains($0.id) }.map {
@@ -1127,10 +1139,10 @@ final class ChatModel {
         case "skills", "routines":
             if let action = args["action"] as? String, action == "save" || action == "remember" {
                 let required = action == "save" ? "name" : "text"
-                guard let value = args[required] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                guard let value = (args[required] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
                     return PokiCore.ToolAnswer(text: "Give the \(required) to save.", jpeg: nil, isError: true)
                 }
-                pendingMemoryWrites.append(call.arguments)
+                pendingMemoryWrites.append((call.arguments, action == "save" ? value : nil))
                 return PokiCore.ToolAnswer(text: "Queued. This is saved only if the task finishes successfully.", jpeg: nil, isError: false)
             }
             return await app.runTool(call.name, arguments: call.arguments, conversation: sessionID)

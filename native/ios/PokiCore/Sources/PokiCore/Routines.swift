@@ -810,22 +810,40 @@ public final class SkillStore: @unchecked Sendable {
 
     /// Non-stale skills ranked by current app and task terms. Unrelated skills (score 0) are omitted.
     public func matchingSkills(for task: String, apps: [String] = [], limit: Int = 12) -> [Skill] {
-        matchingSkills(in: withFile { $0.skills }, for: task, apps: Self.appIDs(apps), limit: limit)
+        rankedSkills(in: withFile { $0.skills }, terms: Self.tokens(task), apps: Self.appIDs(apps))
+            .prefix(limit).map(\.skill)
     }
 
     private static func appIDs(_ apps: [String]) -> Set<String> {
         Set(apps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })
     }
 
-    private func matchingSkills(in skills: [Skill], for task: String, apps: Set<String>, limit: Int) -> [Skill] {
-        let taskTokens = Self.tokens(task)
-        return skills.filter { !$0.stale }.compactMap { skill -> (Skill, Int)? in
+    private func rankedSkills(in skills: [Skill], terms: Set<String>, apps: Set<String>) -> [(skill: Skill, score: Int)] {
+        skills.filter { !$0.stale }.compactMap { skill -> (skill: Skill, score: Int)? in
             let skillTokens = Self.tokens(skill.name + " " + skill.description)
-            let termScore = skillTokens.intersection(taskTokens).count * 3
+            let termScore = skillTokens.intersection(terms).count * 3
             let appScore = (skill.app.map { apps.contains($0.lowercased()) } ?? false) ? 4 : 0
             let score = termScore + appScore
             return score > 0 ? (skill, score) : nil
-        }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.updated > $1.0.updated }.prefix(limit).map(\.0)
+        }.sorted { $0.score != $1.score ? $0.score > $1.score : $0.skill.updated > $1.skill.updated }
+    }
+
+    private static func inferredMemoryApp(terms: Set<String>, skills: [(skill: Skill, score: Int)], notes: [MemoryNote]) -> String? {
+        var scores: [String: Int] = [:]
+        func consider(_ app: String, score: Int) {
+            guard score > 0 else { return }
+            let id = app.lowercased()
+            scores[id] = max(scores[id, default: 0], score)
+        }
+        for (skill, score) in skills {
+            if let app = skill.app { consider(app, score: score) }
+        }
+        for note in notes {
+            if let app = note.app { consider(app, score: tokens(note.text).intersection(terms).count * 3) }
+        }
+        guard let best = scores.values.max() else { return nil }
+        let candidates = scores.filter { $0.value == best }
+        return candidates.count == 1 ? candidates.first?.key : nil
     }
 
     public func brief(for task: String, app: String? = nil, apps: [String] = [], limit: Int = 12) -> String {
@@ -841,9 +859,15 @@ public final class SkillStore: @unchecked Sendable {
     public func taskBrief(for task: String, apps: [String], limit: Int = 12) -> TaskBrief {
         let (skills, notes) = withFile { ($0.skills, $0.notes) }
         let targetApps = Self.appIDs(apps)
-        let fit = matchingSkills(in: skills, for: task, apps: targetApps, limit: limit)
+        let terms = Self.tokens(task)
+        let ranked = rankedSkills(in: skills, terms: terms, apps: targetApps)
+        let fit = ranked.prefix(limit).map(\.skill)
+        var memoryApps = targetApps
+        if memoryApps.isEmpty, let inferred = Self.inferredMemoryApp(terms: terms, skills: ranked, notes: notes) {
+            memoryApps.insert(inferred)
+        }
         let eligible = notes.reversed().filter { note in
-            note.app.map { targetApps.contains($0.lowercased()) } ?? true
+            note.app.map { memoryApps.contains($0.lowercased()) } ?? true
         }.prefix(20)
         var room = Self.maxBriefLength
         func section<Item>(_ header: String, _ items: [Item], within limit: Int, line: (Item) -> String) -> ([String], [Item]) {
