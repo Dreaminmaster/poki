@@ -741,13 +741,13 @@ extension Computer {
             let fields = elements.filter { !$0.fromPicture && $0.type == field.type }
             if let id = field.identifier, !id.isEmpty {
                 let identified = fields.filter { $0.identifier == id }
-                if identified.count == 1, let match = identified.first { return match.value ?? "" }
+                if identified.count == 1, let match = identified.first { return match.value }
             }
             let nearby = fields.filter {
                 $0.label == field.label && ($0.frame.contains(field.frame.centre) || field.frame.contains($0.frame.centre))
             }
             guard nearby.count == 1, let match = nearby.first else { return nil }
-            return match.value ?? ""
+            return match.value
         }
         var restored = false
         func restore() async {
@@ -770,7 +770,7 @@ extension Computer {
                 try await longPress(holdPoint, seconds: 0.7, within: field.frame)
             }
             var item: Element?
-            var beforeTap = field.value ?? ""
+            var beforeTap: String?
             var appBeforeTap: String?
             let menuBy = min(until - 0.3, now() + 2)
             while item == nil, now() < menuBy {
@@ -778,7 +778,7 @@ extension Computer {
                 if let seen = try? await runner.tree(timeout: max(0.3, min(1.2, menuBy - now())), format: config.treeFormat) {
                     item = seen.elements.first { e in Self.pasteWords.contains { e.text.lowercased() == $0 } }
                     if item != nil {
-                        beforeTap = pasteValue(in: seen.elements) ?? beforeTap
+                        beforeTap = pasteValue(in: seen.elements)
                         appBeforeTap = seen.foreground.bundleID
                     }
                 }
@@ -790,21 +790,23 @@ extension Computer {
             try await Runner.$afterInput.withValue(nil) {
                 try await tap(try pastePoint(item, delivery: .sent), within: item.frame)
             }
-            // The paste has landed when the field shows the text; until then the clipboard stays.
+            // Attribution needs a readable value before and after the tap. When a driver reports
+            // the placeholder as the field value and the pasted text matches it, leave the
+            // source unrecorded because the reads cannot establish a change.
             let landedBy = min(until - 0.3, now() + 2.5)
-            var landed = false
-            while !landed, !Task.isCancelled, now() < landedBy {
-                await sleep(seconds: 0.25)
-                if let seen = try? await runner.tree(timeout: 0.8, format: config.treeFormat),
-                   appBeforeTap == nil || seen.foreground.bundleID == appBeforeTap,
-                   let value = pasteValue(in: seen.elements) {
-                    landed = !text.isEmpty && value != beforeTap && value.contains(text)
+            if let beforeTap, !text.isEmpty {
+                while !Task.isCancelled, now() < landedBy {
+                    await sleep(seconds: 0.25)
+                    guard !Task.isCancelled,
+                          let seen = try? await runner.tree(timeout: 0.8, format: config.treeFormat),
+                          appBeforeTap == nil || seen.foreground.bundleID == appBeforeTap,
+                          let value = pasteValue(in: seen.elements) else { break }
+                    if value != beforeTap, value.contains(text) {
+                        if now() <= landedBy { await runner.confirmInput() }
+                        await restore()
+                        return ""
+                    }
                 }
-            }
-            if landed {
-                if now() <= landedBy { await runner.confirmInput() }
-                await restore()
-                return ""
             }
             // iOS may be asking the owner to allow the paste: the owner's clipboard goes back once
             // the text is in the field, or after 45 s, from a task of its own.

@@ -869,7 +869,7 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testPasteRecordsMemoryOnlyWhenTheFieldReceivesTheText() async throws {
-        enum Outcome: CaseIterable { case refused, stopped, pasted }
+        enum Outcome: CaseIterable { case refused, stopped, pasted, refusedWithoutBaseline }
         let text = "Maple-83"
         let fixture = SkillStore(url: nil)
         let memory = try XCTUnwrap(fixture.remember("Use Maple-83 in the Settings search field.", by: "Poki"))
@@ -882,7 +882,10 @@ final class ChatHarnessTests: XCTestCase {
             _ = automation.prepare()
             let check = AsyncStream.makeStream(of: Void.self)
             let gate = ChatTransportGate()
-            let transport = PasteReceiptTransport(session: automation, fillsField: outcome == .pasted) {
+            let missingBaseline = outcome == .refusedWithoutBaseline
+            let original = missingBaseline ? text + String(repeating: "x", count: 400) : ""
+            let transport = PasteReceiptTransport(session: automation, fillsField: outcome == .pasted,
+                                                  hidesFieldBeforePaste: missingBaseline, initialField: original) {
                 check.continuation.yield(())
                 await gate.holdFirstRequest()
             }
@@ -890,7 +893,7 @@ final class ChatHarnessTests: XCTestCase {
                 FakeCompletions.tool("report_plan", ["steps": ["Fill Settings search"], "currentStep": 1]),
                 FakeCompletions.tool("skills", ["action": "list"]),
                 FakeCompletions.tool("do", ["actions": [
-                    ["type": text, "via": "paste", "used_memory_ids": [memory.id]],
+                    ["type": text, "via": "paste", "clear": missingBaseline, "used_memory_ids": [memory.id]],
                 ]]),
                 FakeCompletions.tool("finish_task", [
                     "success": outcome == .pasted, "summary": "Settings search checked.",
@@ -922,7 +925,7 @@ final class ChatHarnessTests: XCTestCase {
             XCTAssertNotNil(waitingCard, "The menu tap was acknowledged and the field confirmation was still pending")
             XCTAssertNil(waitingCard?.memoryUse, "An acknowledged menu tap alone must leave no source: \(outcome)")
             let field = await transport.field
-            XCTAssertEqual(field, outcome == .pasted ? text : "")
+            XCTAssertEqual(field, outcome == .pasted || missingBaseline ? text : "")
             let card = try XCTUnwrap(store.session(session)?.entries.last { if case .plan = $0.kind { true } else { false } })
             XCTAssertNotNil(card.ended)
             if outcome == .stopped { XCTAssertEqual(card.stopped, true) }
@@ -930,6 +933,7 @@ final class ChatHarnessTests: XCTestCase {
                 XCTAssertTrue(card.failed == true)
                 XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains("the field did not show the text") })
             }
+            if missingBaseline { XCTAssertEqual(card.failed, true, "The paste was refused after clearing the field") }
             XCTAssertEqual(card.memoryUse?.notes.map(\.id) ?? [], outcome == .pasted ? [memory.id] : [],
                            "Only a paste confirmed in the field can leave a memory source: \(outcome)")
             if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "paste-memory-\(outcome)") }
@@ -2459,15 +2463,19 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
 private actor PasteReceiptTransport: HTTPTransport {
     private let screen: SessionScreenTransport
     private let fillsField: Bool
+    private let hidesFieldBeforePaste: Bool
     private let beforeVerification: @Sendable () async -> Void
     private var clipboard = Data("Owner clipboard".utf8)
     private var menu = false
     private var awaitingVerification = false
-    private(set) var field = ""
+    private(set) var field: String
 
-    init(session: FakeAutomation, fillsField: Bool, beforeVerification: @escaping @Sendable () async -> Void) {
+    init(session: FakeAutomation, fillsField: Bool, hidesFieldBeforePaste: Bool, initialField: String,
+         beforeVerification: @escaping @Sendable () async -> Void) {
         screen = SessionScreenTransport(session: session)
         self.fillsField = fillsField
+        self.hidesFieldBeforePaste = hidesFieldBeforePaste
+        field = initialField
         self.beforeVerification = beforeVerification
     }
 
@@ -2480,6 +2488,11 @@ private actor PasteReceiptTransport: HTTPTransport {
         case "/wda/setPasteboard":
             if let body, let content = (try? JSON.parse(body))?["content"]?.string,
                let data = Data(base64Encoded: content) { clipboard = data }
+            value = .null
+        case "/wda/keys":
+            if let body, let keys = (try? JSON.parse(body))?["value"]?.array {
+                field.removeLast(min(field.count, keys.filter { $0.string == "\u{8}" }.count))
+            }
             value = .null
         case "/wda/touchAndHold":
             menu = true
@@ -2499,7 +2512,9 @@ private actor PasteReceiptTransport: HTTPTransport {
                 if fillsField { field = String(decoding: clipboard, as: UTF8.self) }
             }
             let paste = menu ? #"<XCUIElementTypeMenuItem name="Paste" label="Paste" x="150" y="50" width="80" height="40" />"# : ""
-            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeTextField name="Search" label="Search" value="\#(field)" x="16" y="100" width="358" height="44" /><XCUIElementTypeKeyboard x="0" y="500" width="390" height="344" />\#(paste)</XCUIElementTypeApplication></AppiumAUT>"#)
+            let searchField = menu && hidesFieldBeforePaste ? "" :
+                #"<XCUIElementTypeTextField name="Search" label="Search" value="\#(field)" x="16" y="100" width="358" height="44" />"#
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844">\#(searchField)<XCUIElementTypeKeyboard x="0" y="500" width="390" height="344" />\#(paste)</XCUIElementTypeApplication></AppiumAUT>"#)
         default:
             return try await screen.send(method: method, url: url, body: body, timeout: timeout)
         }
