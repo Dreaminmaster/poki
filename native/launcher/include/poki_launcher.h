@@ -65,6 +65,10 @@ int32_t poki_signer_call(const char *request_json, poki_event_cb cb, void *conte
 // for every round of a run (with "look": "same" or "skipped" when the round found the app in
 // front and read no screen, and "cost_ms": what the round asked of the phone), then one {"event": "result", "ok": true, "value": {...}} or
 // {"event": "result", "ok": false, "error": "...", "fix": "...", "code": "..."}.
+// With "direct_points" and "watch": true a run listens to the phone's own notices of the app in
+// front and to its frame counts, and they say when a round is made: its line then carries "due"
+// ("arrived", "woke", "pace", "safety" or "blind"), and progress lines {"event": "watch", ...} and
+// {"event": "frames", ...} say what the phone sends.
 // Returns -1 when the request is unreadable (no events follow), else 0.
 int32_t poki_history_call(const char *request_json, poki_event_cb cb, void *context);
 // Ends the run in progress; it answers with what it measured so far.

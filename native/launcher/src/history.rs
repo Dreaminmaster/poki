@@ -9,7 +9,9 @@
 //!   elements. The screen's text is counted, and returned only when `include_text` is set.
 //! - `watch`: one subscription kept open for `seconds`. Answers with every tree dump as it arrived.
 //! - `run`: a read every `interval_ms` for `duration_s`. Reports each read as it is made, then the
-//!   reads made, the failures and the longest gap between two reads.
+//!   reads made, the failures and the longest gap between two reads. With `direct_points` and
+//!   `watch` it reads when the phone says that an app came to the front or that the screen moved
+//!   (see `due`), and at the interval only while the phone says nothing.
 //!
 //! Nothing is stored. Password fields and keyboard keys are left out of the text before it is counted.
 
@@ -181,26 +183,52 @@ async fn answer_check(checked: &mut u64, device: &mut Option<Device>, emit: &imp
     given_up
 }
 
-/// What reading costs the phone, and how a run keeps it small (the owner, 2026-11-19 and again
-/// 2026-11-20: Screen History visibly slowed the iPhone down, which is not acceptable):
-/// - A round is a look: accessibility is asked for, one hit test says which app is in front, and
-///   accessibility is given back. Between rounds nothing is asked of the phone at all. Until
-///   2026-11-20 one subscription was kept for the whole run, which kept accessibility on in every
-///   app all day, and a hit test was made every five seconds.
-/// - The app's screen is read (a deep snapshot: the app walks its whole screen on its main
-///   thread) only when the app is another than at the last read, or was last read a while ago:
-///   twice the interval after a read that showed something new, doubling for each read that did
-///   not, up to `IDLE_MAX`.
-/// - A read may take the phone at most one part in `BUSY_SHARE` of the time: after a screen that
-///   took long to read, the next read of that app waits that many times as long.
-/// - An app whose screens are never kept (`Policy`) is not read at all.
+/// What reading costs the phone, and how a run keeps it small without missing what the owner
+/// does (the owner, 2026-11-20: Screen History visibly slowed the iPhone down, "Unacceptable",
+/// and of a first fix that only looked every 30 seconds: "Cant miss things"):
+/// - While a client needs accessibility it is on in every app, and the phone sends the client
+///   the front app's whole tree again at every change of the screen. Until 2026-11-20 one
+///   subscription was kept for the whole run. Now accessibility is asked for when a screen is
+///   to be read and given back at once. Between rounds nothing is asked of any app.
+/// - Which app is in front is heard from the phone's own notices of app states (`ax::front`),
+///   which cost the apps nothing. An app that comes to the front is read `ARRIVE` later and a
+///   second time soon after (`SECOND`), and while the Home Screen or an app that is never kept
+///   (`Policy`) shows, no round is made but a look now and then (`SAFETY`).
+/// - The app in front is read again `REREAD` after a read that showed something new, and twice
+///   as long after each read that did not, up to `IDLE_MAX`. The screen's frame count says more:
+///   a screen that drew nothing since it was read is left alone, one that moves again after a
+///   quiet time is read at the first pace again, and a round waits a moment for a scroll to end.
+/// - A snapshot is made on the app's main thread. After one that took long, the next read of
+///   that app waits `BUSY_SHARE` times as long.
+/// - With no notices (an iOS that sends none, or before the first), the run looks which app is
+///   in front at its interval. Notices that a look found wrong are not believed until they say
+///   something new, and after `DOUBTS` of those only when they say that an app came to the front.
 /// - After the iPhone is unlocked or an agent's task ends, the first round waits `SETTLE`.
+const REREAD: Duration = Duration::from_secs(10);
 const IDLE_MAX: Duration = Duration::from_secs(240);
-const BUSY_SHARE: u32 = 100;
+const BUSY_SHARE: u32 = 50;
 const REREAD_MAX: Duration = Duration::from_secs(600);
-const SETTLE: Duration = Duration::from_secs(10);
-/// Rounds in a row that found the same app and read nothing, after which rounds come half as often.
+const SETTLE: Duration = Duration::from_secs(2);
+/// How long after an app came to the front its screen is read. Asking for accessibility takes
+/// most of a second more, so a visit of two seconds is still caught.
+const ARRIVE: Duration = Duration::from_millis(500);
+/// An app that came to the front is read unless this same process was read less than this ago.
+const RETURN: Duration = Duration::from_secs(3);
+/// How soon an app that just came to the front is read a second time: the first read may have
+/// found it still loading, and by now it shows what it came to show.
+const SECOND: Duration = Duration::from_secs(4);
+/// With the Home Screen or a left-out app in front a look is made all the same, first after this
+/// long and half as often each time it finds the same again, up to `SAFETY_MAX`: a notice that
+/// was missed must not end reading for good.
+const SAFETY: Duration = Duration::from_secs(60);
+const SAFETY_MAX: Duration = Duration::from_secs(600);
+/// How long a round that is due waits for the screen to stop moving.
+const HOLD: Duration = Duration::from_secs(4);
+/// Rounds in a row that found the same app and read nothing, after which a run that was not
+/// asked to listen for notices looks half as often.
 const STEADY_AFTER: u32 = 4;
+/// How often the notices may be found wrong before "no app is in front" is no longer believed.
+const DOUBTS: u32 = 3;
 /// A subscription that is not answered in this time has failed.
 const SUBSCRIBE_WITHIN: Duration = Duration::from_secs(6);
 /// Subscriptions that failed in a row on a tunnel that still answers, after which the tunnel is
@@ -218,16 +246,289 @@ fn paced(interval: Duration, slow: u32, max: Duration) -> Duration {
 }
 
 /// How long an app is left alone after its screen was read. `unchanged`: the reads in a row that
-/// showed the same text. `cost`: the time the phone spent on the read.
-fn reread_after(interval: Duration, new_app: bool, unchanged: u32, cost: Duration) -> Duration {
-    let wait = if new_app { interval } else { paced(interval.saturating_mul(2), unchanged, IDLE_MAX) };
-    wait.max(cost.saturating_mul(BUSY_SHARE)).min(REREAD_MAX.max(interval))
+/// showed the same text. `snapshot`: the time the app spent on the read.
+fn reread_after(unchanged: u32, snapshot: Duration) -> Duration {
+    paced(REREAD, unchanged, IDLE_MAX).max(snapshot.saturating_mul(BUSY_SHARE)).min(REREAD_MAX)
 }
 
-/// The wait between two rounds that found an app. `steady`: the rounds in a row that found the
-/// same app as the round before and read nothing.
+/// How long an app that just came to the front is left alone after its first read. One that
+/// took long over the read is given more time here too.
+fn second_after(snapshot: Duration) -> Duration {
+    SECOND.max(snapshot.saturating_mul(BUSY_SHARE / 5))
+}
+
+/// The wait between two looks of a run that was not asked to listen for notices. `steady`: the
+/// rounds in a row that found the same app as the round before and read nothing.
 fn round_wait(interval: Duration, steady: u32) -> Duration {
     if steady >= STEADY_AFTER { interval.saturating_mul(2) } else { interval }
+}
+
+/// What the phone's notices say is in front, while a run waits.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Shown {
+    /// Nothing is heard: no notices on this iOS, none yet, or they were found wrong.
+    Unknown,
+    /// No app is in the foreground: the Home Screen.
+    Home,
+    /// An app whose screens are never kept.
+    LeftOut,
+    /// An app whose screen is read.
+    App,
+}
+
+/// What the frame counts say, when they can be believed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Moves {
+    /// Nothing was drawn since the last read: the screen shows what was read.
+    still: bool,
+    /// Nothing was drawn since the last round began: the app it found is still in front.
+    unstirred: bool,
+    /// The screen moved again after a quiet time, this long ago.
+    woke: Option<Duration>,
+    /// The screen is moving now.
+    moving: bool,
+}
+
+/// What the hints say while a run waits for its next round.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Hint {
+    shown: Shown,
+    /// The app in front changed after the last round began, this long ago.
+    changed: Option<Duration>,
+    moves: Option<Moves>,
+}
+
+/// The waits after a round that found the screen, each counted from when that round began.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Waits {
+    /// Until a run that hears nothing looks again.
+    blind: Duration,
+    /// Until the app in front may be read again, at the pace its screen has set.
+    again: Duration,
+    /// Until it may be read again at the first pace, when its screen shows new things.
+    afresh: Duration,
+    /// Until a look is made though the notices say that nothing is to be read.
+    safety: Duration,
+    /// The round found an app whose screens are never kept, or the Home Screen.
+    left_out: bool,
+}
+
+/// Why a round is made. It goes into the round's line as "due", so the app's log shows what
+/// drives the reading on a phone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Why {
+    /// An app came to the front.
+    Arrived,
+    /// The screen moved again after a quiet time.
+    Woke,
+    /// The app in front is read again at its pace.
+    Pace,
+    /// The notices say that nothing is to be read: a look all the same.
+    Safety,
+    /// Nothing is heard of the app in front: a look at the run's interval.
+    Blind,
+}
+
+impl Why {
+    fn name(self) -> &'static str {
+        match self {
+            Why::Arrived => "arrived",
+            Why::Woke => "woke",
+            Why::Pace => "pace",
+            Why::Safety => "safety",
+            Why::Blind => "blind",
+        }
+    }
+}
+
+/// Whether the next round is due, and why. `waited`: since the last round began.
+fn due(waited: Duration, waits: &Waits, hint: &Hint) -> Option<Why> {
+    let after = |wait: Duration, why: Why| (waited >= wait).then_some(why);
+    match (hint.shown, hint.moves) {
+        // An app came to the front: it is read, whatever was read before.
+        (Shown::App, _) if hint.changed.is_some() => hint.changed.filter(|ago| *ago >= ARRIVE).map(|_| Why::Arrived),
+        (Shown::Home | Shown::LeftOut, _) => after(waits.safety, Why::Safety),
+        // No app can have come to the front on a screen that drew nothing: the one the last
+        // round found is still there, and is read again only when it drew since it was read.
+        (Shown::Unknown, Some(moves)) if moves.unstirred => {
+            if waits.left_out || moves.still { after(waits.safety, Why::Safety) } else { after(waits.again, Why::Pace) }
+        }
+        (Shown::Unknown, _) => after(waits.blind.min(waits.again), Why::Blind),
+        (Shown::App, None) => after(waits.again, Why::Pace),
+        (Shown::App, Some(moves)) => {
+            // New things show after a quiet time: read once the scroll ends, or soon anyway.
+            if waited >= waits.afresh && moves.woke.is_some_and(|ago| !moves.moving || ago >= HOLD) {
+                return Some(Why::Woke);
+            }
+            let wait = if moves.still { waits.again.max(IDLE_MAX) } else { waits.again };
+            (waited >= wait && (!moves.moving || waited >= wait + HOLD)).then_some(Why::Pace)
+        }
+    }
+}
+
+/// The phone's notices of app states and its frame counts (`ax::front`), kept going on the run's
+/// tunnel. Each is started again a while after it failed or ended, and a run goes on without.
+#[derive(Default)]
+struct Hints {
+    watch: Option<ax::front::Watch>,
+    frames: Option<ax::front::Frames>,
+    watch_again: Option<Instant>,
+    watch_failed: u32,
+    frames_again: Option<Instant>,
+    frames_failed: u32,
+    /// The watch's count of changes when the last round began.
+    changes: u64,
+    /// The count of changes at which a round found the watch wrong: until it changes again,
+    /// the watch is not believed. And how often that happened in this run.
+    doubted: Option<u64>,
+    doubts: u32,
+    /// The frame counts as the round under way began.
+    mark: Option<ax::front::Motion>,
+    /// The first notice and the first believable frame count were said in a line.
+    said_notice: bool,
+    said_moves: bool,
+}
+
+/// The first wait before a hint that failed or ended is tried again. It doubles up to ten minutes.
+const HINT_AGAIN: Duration = Duration::from_secs(30);
+
+impl Hints {
+    /// The tunnel is gone, and what ran inside it with it. On a new tunnel both are tried at
+    /// once again; on the same one, each is tried later every time it failed or ended.
+    fn lose(&mut self) {
+        (self.watch, self.frames, self.mark) = (None, None, None);
+        (self.watch_again, self.watch_failed, self.frames_again, self.frames_failed) = (None, 0, None, 0);
+    }
+
+    /// Starts what is not running, and says in a line what started, failed or ended. The frames
+    /// are not counted during a hold: the screen is dark then, or an agent's.
+    async fn keep(&mut self, device: &mut Device, emit: &impl Fn(Value), frames: bool) {
+        let now = Instant::now();
+        if let Some(ended) = self.watch.as_ref().and_then(|watch| watch.front().ended) {
+            self.watch = None;
+            self.watch_again = Some(now + paced(HINT_AGAIN, self.watch_failed, Duration::from_secs(600)));
+            self.watch_failed += 1;
+            emit(json!({"event": "watch", "on": false, "error": ended}));
+        }
+        if self.watch.is_none() && self.watch_again.is_none_or(|again| now >= again) {
+            let asked = Instant::now();
+            match ax::front::Watch::start(&mut device.adapter, &device.rsd).await {
+                Ok(watch) => {
+                    self.watch = Some(watch);
+                    self.watch_again = None;
+                    self.changes = 0;
+                    self.doubted = None;
+                    self.said_notice = false;
+                    emit(json!({"event": "watch", "on": true, "ms": milliseconds(asked.elapsed())}));
+                }
+                Err(error) => {
+                    self.watch_again = Some(Instant::now() + paced(HINT_AGAIN, self.watch_failed, Duration::from_secs(600)));
+                    self.watch_failed += 1;
+                    emit(json!({"event": "watch", "on": false, "error": error}));
+                }
+            }
+        }
+        if !frames {
+            if self.frames.take().is_some() {
+                self.frames_again = None;
+                self.mark = None;
+            }
+            return;
+        }
+        if let Some(ended) = self.frames.as_ref().and_then(|frames| frames.motion().1) {
+            self.frames = None;
+            self.mark = None;
+            self.frames_again = Some(now + paced(HINT_AGAIN, self.frames_failed, Duration::from_secs(600)));
+            self.frames_failed += 1;
+            emit(json!({"event": "frames", "on": false, "error": ended}));
+        }
+        if self.frames.is_none() && self.frames_again.is_none_or(|again| now >= again) {
+            match ax::front::Frames::start(&mut device.adapter, &device.rsd).await {
+                Ok(frames) => {
+                    self.frames = Some(frames);
+                    self.frames_again = None;
+                    self.said_moves = false;
+                    emit(json!({"event": "frames", "on": true}));
+                }
+                Err(error) => {
+                    self.frames_again = Some(Instant::now() + paced(HINT_AGAIN, self.frames_failed, Duration::from_secs(600)));
+                    self.frames_failed += 1;
+                    emit(json!({"event": "frames", "on": false, "error": error}));
+                }
+            }
+        }
+    }
+
+    /// What the watch knows, while it runs and is believed.
+    fn front(&self) -> Option<ax::front::Front> {
+        let front = self.watch.as_ref()?.front();
+        (front.ended.is_none() && front.changes > 0 && self.doubted != Some(front.changes)).then_some(front)
+    }
+
+    /// What the hints say now. Says once, in a line, what the first notice carried and that the
+    /// frame counts can be believed: the log then shows what this iOS sends.
+    fn hint(&mut self, emit: &impl Fn(Value)) -> Hint {
+        let now = Instant::now();
+        if !self.said_notice && let Some(front) = self.watch.as_ref().map(|watch| watch.front()).filter(|front| front.notices > 0) {
+            self.said_notice = true;
+            emit(json!({"event": "watch", "notice": true, "fields": front.fields}));
+        }
+        let moves = self.frames.as_ref().map(|frames| frames.motion().0).filter(|motion| motion.told(now)).map(|motion| Moves {
+            still: motion.still(),
+            unstirred: motion.unstirred(),
+            woke: motion.woke(now),
+            moving: motion.moving(now),
+        });
+        if moves.is_some() && !self.said_moves {
+            self.said_moves = true;
+            emit(json!({"event": "frames", "told": true}));
+        }
+        let Some(front) = self.front() else { return Hint { shown: Shown::Unknown, changed: None, moves } };
+        let shown = match &front.app {
+            Some(app) if !app.bundle.as_deref().is_some_and(left_out) => Shown::App,
+            // "Nothing to read" was wrong too often: it is no longer taken from the notices.
+            _ if self.doubts >= DOUBTS => Shown::Unknown,
+            Some(_) => Shown::LeftOut,
+            None => Shown::Home,
+        };
+        let changed = (front.changes != self.changes).then(|| front.changed_at.map(|at| now.saturating_duration_since(at)).unwrap_or(ARRIVE));
+        Hint { shown, changed, moves }
+    }
+
+    /// A round begins: what the watch said so far is taken in, and the frames drawn from now on
+    /// may be another app's.
+    fn begin(&mut self) {
+        if let Some(watch) = &self.watch {
+            self.changes = watch.front().changes;
+        }
+        self.mark = self.frames.as_ref().map(|frames| frames.begin());
+    }
+
+    /// A round found the screen. `kept`: an app whose screen is read is in front.
+    fn looked(&mut self, kept: bool, emit: &impl Fn(Value)) {
+        let Some(front) = self.watch.as_ref().map(|watch| watch.front()) else { return };
+        // Notices that came while the round was under way say nothing of what it found.
+        if front.changes != self.changes || front.changes == 0 || front.ended.is_some() {
+            return;
+        }
+        let nothing = front.app.as_ref().is_none_or(|app| app.bundle.as_deref().is_some_and(left_out));
+        if kept && nothing && self.doubted != Some(front.changes) {
+            // An app is in front while the notices say that none is, or only one that is left
+            // out: they are wrong, and are not believed until they say something new.
+            self.doubted = Some(front.changes);
+            self.doubts += 1;
+            emit(json!({"event": "watch", "doubted": self.doubts}));
+        } else if !kept && nothing {
+            self.doubted = None;
+        }
+    }
+
+    /// A round is over. `read`: it read a screen.
+    fn end(&mut self, read: bool) {
+        if let (Some(frames), Some(before)) = (&self.frames, self.mark.take()) {
+            frames.passed(&before, read);
+        }
+    }
 }
 
 /// The apps whose screens are kept, as the app last said. A screen that would be thrown away is
@@ -263,6 +564,11 @@ pub fn set_policy(lists: &Value) {
 
 fn policy() -> Policy {
     POLICY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone().unwrap_or_default()
+}
+
+/// Whether this app's screens are never kept, as the app last said.
+fn left_out(app: &str) -> bool {
+    POLICY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|policy| policy.skips(app))
 }
 
 /// What a round does with the app it found.
@@ -553,6 +859,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut last_read: Option<(u64, Instant)> = None;
     let mut reread = Duration::ZERO;
     let mut unchanged = 0u32;
+    // How long the app spent on the last read, and whether the round to come is for an app that
+    // has just come to the front.
+    let mut last_snapshot = Duration::ZERO;
+    let mut arrived = false;
     // The process the round before found, and the rounds in a row that found it again and read nothing.
     let mut last_pid: Option<u64> = None;
     let mut steady = 0u32;
@@ -568,7 +878,17 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut hunt = Hunt::default();
     let mut checked = 0;
     let mut round: Option<Instant> = None;
+    // The phone's own notices of the app in front and of the screen moving, for a run that asks
+    // for them: they say when a round is due, and cost the apps nothing.
+    let hinted = points.is_some() && request["watch"].as_bool().unwrap_or(false);
+    let mut hints = Hints::default();
+    // Why the round to come is made, when the hints said so.
+    let mut next: Option<Why> = None;
     loop {
+        let why = next.take();
+        if device.is_none() {
+            hints.lose();
+        }
         // No round starts sooner than ROUND_MIN after the one before, whatever ended its wait.
         if let Some(last) = round {
             while last.elapsed() < ROUND_MIN && RUN.load(Ordering::SeqCst) == me {
@@ -604,6 +924,11 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                     }
                 }
             }
+            // The notices go on through a hold, so the app the owner unlocks into is known at
+            // once. The frames are not counted: the screen is dark, or an agent's.
+            if hinted && let Some(open) = device.as_mut() {
+                hints.keep(open, &emit, false).await;
+            }
             line["tunnel"] = device.is_some().into();
             // One line each round, so the caller can tell a held run from a silent one.
             emit(line);
@@ -623,6 +948,9 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             continue;
         }
         let mut line = json!({"n": stats.reads + stats.looks + stats.failures + 1, "at_s": at.as_secs()});
+        if let Some(why) = why {
+            line["due"] = why.name().into();
+        }
         let mut trace = ax::direct::Trace::default();
         let result = async {
             if device.is_none() {
@@ -630,6 +958,9 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 stats.connections += 1;
             }
             // The tunnel is opened first, whatever else waits: the moment for it may be short.
+            if hinted {
+                hints.keep(device.as_mut().unwrap(), &emit, true).await;
+            }
             if let Some(until) = settle.take() {
                 while Instant::now() < until && RUN.load(Ordering::SeqCst) == me && !PAUSED.load(Ordering::SeqCst) {
                     answer_check(&mut checked, &mut device, &emit).await;
@@ -647,6 +978,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             // With points to hit test, the app is found the way the screen shows it; the service's
             // own dump can name the wrong app. Accessibility is asked for now and given back
             // below, whatever the round brings: while a client needs it, it is on in every app.
+            hints.begin();
             trace.stage = "subscribe";
             let subscribing = Instant::now();
             let mut direct = match tokio::time::timeout(SUBSCRIBE_WITHIN, ax::direct::Direct::connect(&mut open.adapter, &open.rsd)).await {
@@ -670,8 +1002,12 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         }
         .await;
         let took = milliseconds(asked.elapsed());
-        // The wait until the next round, while the run has a tunnel.
-        let with_tunnel;
+        // The wait until the next round, while the run has a tunnel, of a run that hears nothing
+        // of the app in front. After a round that found the screen, a run that listens has more
+        // waits than this one, and the hints choose among them.
+        let blind;
+        let mut waits = None;
+        let mut read = false;
         match result {
             Ok(Round::Held) => continue,
             Ok(Round::Looked { seen, mut look, tree }) => {
@@ -712,8 +1048,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                     line["snapshot_ms"] = json!(trace.snapshot_ms);
                     line["bytes"] = json!(trace.snapshot_bytes);
                     // Read once, whatever becomes of it: the process is left alone for a while.
-                    let cost = if points.is_some() { Duration::from_millis(trace.asked_ms) } else { Duration::from_millis(took) };
-                    let new_app = pid.is_none() || last_read.map(|(read, _)| read) != pid;
+                    let snapshot = Duration::from_millis(trace.snapshot_ms.unwrap_or(took));
+                    // An app that has just come to the front, or one the run did not read last.
+                    let fresh = arrived || (pid.is_some() && last_read.map(|(read, _)| read) != pid);
+                    read = true;
                     if let Some((_, summary)) = &kept {
                         let text = hash_of(&summary["text"]);
                         let changed = last_text != Some(text);
@@ -721,7 +1059,11 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                         unchanged = if changed { 0 } else { unchanged + 1 };
                         line["changed"] = changed.into();
                     }
-                    reread = reread_after(interval, new_app && kept.is_some(), unchanged, cost);
+                    reread = reread_after(unchanged, snapshot);
+                    if fresh && kept.is_some() {
+                        reread = reread.min(second_after(snapshot));
+                    }
+                    last_snapshot = snapshot;
                     last_read = pid.map(|pid| (pid, asked));
                 }
                 if !app.is_null() {
@@ -756,7 +1098,23 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                     }
                 }
                 last_pid = pid;
-                with_tunnel = round_wait(interval, steady);
+                arrived = false;
+                // A run that listens and hears nothing must not look less often for that.
+                blind = if hinted { interval } else { round_wait(interval, steady) };
+                let least = Duration::from_secs(1);
+                let since_read = last_read.map(|(_, read)| asked.saturating_duration_since(read)).unwrap_or_default();
+                waits = Some(match look {
+                    // An app that is never kept is in front: nothing of it is to be read again.
+                    Look::Skipped => Waits { blind, again: blind, afresh: blind, safety: paced(SAFETY, steady, SAFETY_MAX), left_out: true },
+                    Look::Read | Look::Same => Waits {
+                        blind,
+                        again: reread.saturating_sub(since_read).max(least),
+                        afresh: reread_after(0, last_snapshot).saturating_sub(since_read).max(least),
+                        safety: paced(SAFETY, steady, SAFETY_MAX),
+                        left_out: false,
+                    },
+                });
+                hints.looked(look != Look::Skipped, &emit);
             }
             Err(failure) => {
                 // A screen that shows no app (locked or off) is an answer, and the tunnel stays.
@@ -766,10 +1124,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 if no_app {
                     idle += 1;
                     unsubscribed = 0;
-                    with_tunnel = paced(interval, idle, IDLE_MAX);
+                    blind = paced(interval, idle, IDLE_MAX);
                 } else {
                     failing += 1;
-                    with_tunnel = paced(RETRY, failing, FAILING_MAX);
+                    blind = paced(RETRY, failing, FAILING_MAX);
                     if device.is_some() && points.is_none() {
                         // The service's own dump did not come: the next read opens a new tunnel.
                         device = None;
@@ -802,13 +1160,39 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 line["tunnel"] = device.is_some().into();
             }
         }
+        hints.end(read);
         emit(line);
         // Waits in short pieces, so Stop is answered at once. The wait is asked again each piece:
         // with no tunnel it turns short the moment a hurry begins, and stays 200 ms during one.
-        // Nothing is asked of the phone while the run waits.
+        // Nothing is asked of any app while the run waits. After a round that found the screen,
+        // the phone's own notices can end the wait early (an app came to the front) or stretch
+        // it (the Home Screen shows, or nothing was drawn).
         while RUN.load(Ordering::SeqCst) == me && !PAUSED.load(Ordering::SeqCst) {
-            if asked.elapsed() >= wait_for(device.is_none(), since_start() < EAGER, with_tunnel, failing) {
-                break;
+            match waits.as_ref().filter(|_| hinted && device.is_some()) {
+                Some(waits) => {
+                    if let Some(reason) = due(asked.elapsed(), waits, &hints.hint(&emit)) {
+                        match reason {
+                            // Read, unless this very process was read a moment ago.
+                            Why::Arrived => {
+                                arrived = true;
+                                reread = reread.min(RETURN);
+                            }
+                            // Read at the first pace again.
+                            Why::Woke => {
+                                unchanged = 0;
+                                reread = reread.min(reread_after(0, last_snapshot));
+                            }
+                            Why::Pace | Why::Safety | Why::Blind => {}
+                        }
+                        next = Some(reason);
+                        break;
+                    }
+                }
+                None => {
+                    if asked.elapsed() >= wait_for(device.is_none(), since_start() < EAGER, blind, failing) {
+                        break;
+                    }
+                }
             }
             // A check is answered where the run waits; a tunnel given up is tried again now.
             if answer_check(&mut checked, &mut device, &emit).await {
@@ -1185,18 +1569,152 @@ mod tests {
 
     #[test]
     fn a_screen_is_left_alone_longer_the_less_it_changes() {
-        let (half, quick) = (Duration::from_secs(30), Duration::from_millis(200));
-        // A new app is read again a round later (it was still drawing); the same app after two
-        // rounds when its screen changed, and twice as long after each read that showed the same.
-        assert_eq!(reread_after(half, true, 0, quick).as_secs(), 30);
-        let waits: Vec<u64> = (0..5).map(|unchanged| reread_after(half, false, unchanged, quick).as_secs()).collect();
-        assert_eq!(waits, [60, 120, 240, 240, 240]);
-        // A screen that took the phone long to read is left alone a hundred times as long.
-        assert_eq!(reread_after(half, true, 0, Duration::from_millis(1500)).as_secs(), 150);
-        assert_eq!(reread_after(half, false, 0, Duration::from_millis(900)).as_secs(), 90);
-        assert_eq!(reread_after(half, false, 0, Duration::from_secs(30)), REREAD_MAX);
-        // A run asked to read more slowly than the caps keeps its own interval.
-        assert_eq!(reread_after(Duration::from_secs(900), true, 0, quick).as_secs(), 900);
+        let quick = Duration::from_millis(100);
+        // Ten seconds after a read that showed something new, and twice as long after each read
+        // that showed the same.
+        let waits: Vec<u64> = (0..7).map(|unchanged| reread_after(unchanged, quick).as_secs()).collect();
+        assert_eq!(waits, [10, 20, 40, 80, 160, 240, 240]);
+        // A screen that took the app long to read is left alone fifty times as long.
+        assert_eq!(reread_after(0, Duration::from_millis(900)).as_secs(), 45);
+        assert_eq!(reread_after(0, Duration::from_secs(30)), REREAD_MAX);
+        // An app that just came to the front is read a second time soon, a slow one less soon.
+        assert_eq!(second_after(quick), SECOND);
+        assert_eq!(second_after(Duration::from_millis(900)).as_secs(), 9);
+    }
+
+    const WAITS: Waits = Waits { blind: Duration::from_secs(15), again: Duration::from_secs(10), afresh: Duration::from_secs(10), safety: Duration::from_secs(60), left_out: false };
+
+    fn seconds(seconds: u64) -> Duration {
+        Duration::from_secs(seconds)
+    }
+
+    #[test]
+    fn an_app_that_comes_to_the_front_is_read_whatever_was_read_before() {
+        let arrived = |ago: u64| Hint { shown: Shown::App, changed: Some(Duration::from_millis(ago)), moves: None };
+        // Half a second after it came: a second after the last round, or minutes after it.
+        assert_eq!(due(seconds(1), &WAITS, &arrived(200)), None);
+        assert_eq!(due(seconds(1), &WAITS, &arrived(500)), Some(Why::Arrived));
+        assert_eq!(due(seconds(500), &WAITS, &arrived(200)), None);
+        // The frame counts do not hold it up: its first screen moves as it comes.
+        let moving = Hint { moves: Some(Moves { still: false, unstirred: false, woke: None, moving: true }), ..arrived(500) };
+        assert_eq!(due(seconds(1), &WAITS, &moving), Some(Why::Arrived));
+        // The owner goes to the Home Screen or to an app that is left out: no round for that,
+        // only a look after a good while.
+        for shown in [Shown::Home, Shown::LeftOut] {
+            let gone = Hint { shown, changed: Some(seconds(5)), moves: None };
+            assert_eq!(due(seconds(59), &WAITS, &gone), None);
+            assert_eq!(due(seconds(60), &WAITS, &gone), Some(Why::Safety));
+        }
+        // The looks at a left-out app come half as often each time, up to ten minutes.
+        let looks: Vec<u64> = (0..6).map(|steady| paced(SAFETY, steady, SAFETY_MAX).as_secs()).collect();
+        assert_eq!(looks, [60, 120, 240, 480, 600, 600]);
+    }
+
+    #[test]
+    fn the_app_in_front_is_read_again_at_the_pace_of_its_screen() {
+        let app = Hint { shown: Shown::App, changed: None, moves: None };
+        assert_eq!(due(seconds(9), &WAITS, &app), None);
+        assert_eq!(due(seconds(10), &WAITS, &app), Some(Why::Pace));
+        let frames = |still: bool, woke: Option<u64>, moving: bool| Hint { moves: Some(Moves { still, unstirred: still, woke: woke.map(seconds), moving }), ..app };
+        // A screen that drew nothing since it was read is left alone.
+        assert_eq!(due(seconds(239), &WAITS, &frames(true, None, false)), None);
+        assert_eq!(due(seconds(240), &WAITS, &frames(true, None, false)), Some(Why::Pace));
+        // One that drew something (the clock) is read at its pace.
+        assert_eq!(due(seconds(10), &WAITS, &frames(false, None, false)), Some(Why::Pace));
+        // A read that is due waits for a scroll to end, though not for long.
+        assert_eq!(due(seconds(10), &WAITS, &frames(false, None, true)), None);
+        assert_eq!(due(seconds(14), &WAITS, &frames(false, None, true)), Some(Why::Pace));
+        // The owner scrolls a page that was read many times and had stayed the same: it is read
+        // as soon as the scroll ends, or four seconds into one that goes on.
+        let slow = Waits { again: seconds(160), ..WAITS };
+        assert_eq!(due(seconds(30), &slow, &frames(false, None, false)), None);
+        assert_eq!(due(seconds(30), &slow, &frames(false, Some(1), false)), Some(Why::Woke));
+        assert_eq!(due(seconds(30), &slow, &frames(false, Some(1), true)), None);
+        assert_eq!(due(seconds(30), &slow, &frames(false, Some(4), true)), Some(Why::Woke));
+        // Never sooner than the first pace, and later for an app that is slow to read.
+        assert_eq!(due(seconds(9), &slow, &frames(false, Some(1), false)), None);
+        let heavy = Waits { afresh: seconds(45), ..slow };
+        assert_eq!(due(seconds(30), &heavy, &frames(false, Some(1), false)), None);
+        assert_eq!(due(seconds(45), &heavy, &frames(false, Some(1), false)), Some(Why::Woke));
+    }
+
+    #[test]
+    fn a_run_that_hears_no_notices_looks_at_its_interval() {
+        let nothing = Hint { shown: Shown::Unknown, changed: None, moves: None };
+        // The app it read is read again at its pace, when that comes sooner than the next look.
+        assert_eq!(due(seconds(9), &WAITS, &nothing), None);
+        assert_eq!(due(seconds(10), &WAITS, &nothing), Some(Why::Blind));
+        let left_out = Waits { again: seconds(15), left_out: true, ..WAITS };
+        assert_eq!(due(seconds(14), &left_out, &nothing), None);
+        assert_eq!(due(seconds(15), &left_out, &nothing), Some(Why::Blind));
+        // With frame counts alone: no app can have come to the front on a screen that drew nothing.
+        let frames = |still: bool, unstirred: bool| Hint { moves: Some(Moves { still, unstirred, woke: None, moving: false }), ..nothing };
+        assert_eq!(due(seconds(59), &WAITS, &frames(true, true)), None);
+        assert_eq!(due(seconds(60), &WAITS, &frames(true, true)), Some(Why::Safety));
+        assert_eq!(due(seconds(10), &WAITS, &frames(false, false)), Some(Why::Blind));
+        // The app the last round found and did not read drew before that round: read at its pace.
+        assert_eq!(due(seconds(10), &WAITS, &frames(false, true)), Some(Why::Pace));
+        // The Home Screen, drawn on before the last look and still since: nothing to read there.
+        assert_eq!(due(seconds(59), &left_out, &frames(false, true)), None);
+    }
+
+    #[tokio::test]
+    async fn notices_a_look_finds_wrong_are_not_believed() {
+        // The app lists are the process's own.
+        let _turn = ONE_RUN.lock().await;
+        set_policy(&json!({"skip": ["com.tencent.xin"]}));
+        let lines = std::sync::Mutex::new(vec![]);
+        let emit = |line: Value| lines.lock().unwrap().push(line);
+        let mut hints = Hints { watch: Some(ax::front::Watch::fake()), ..Default::default() };
+        let say = |hints: &Hints, pid: u64, bundle: &str, foreground: bool| hints.watch.as_ref().unwrap().say(pid, bundle, foreground);
+        // Before the first notice of a foreground app nothing is known.
+        assert_eq!(hints.hint(&emit).shown, Shown::Unknown);
+        say(&hints, 5, "com.apple.Maps", false);
+        assert_eq!(hints.hint(&emit).shown, Shown::Unknown);
+        // An app comes to the front after the last round began.
+        say(&hints, 7, "com.apple.mobilesafari", true);
+        let hint = hints.hint(&emit);
+        assert_eq!((hint.shown, hint.changed.is_some()), (Shown::App, true));
+        // The round that reads it takes the news in.
+        hints.begin();
+        hints.looked(true, &emit);
+        assert_eq!(hints.hint(&emit), Hint { shown: Shown::App, changed: None, moves: None });
+        // The owner opens an app that is left out, then goes to the Home Screen.
+        say(&hints, 8, "com.tencent.xin", true);
+        say(&hints, 7, "com.apple.mobilesafari", false);
+        assert_eq!(hints.hint(&emit).shown, Shown::LeftOut);
+        say(&hints, 8, "com.tencent.xin", false);
+        assert_eq!(hints.hint(&emit).shown, Shown::Home);
+        // A look that finds an app there all the same: the notices are wrong, and the run looks
+        // at its interval until they say something new.
+        hints.begin();
+        hints.looked(true, &emit);
+        assert_eq!(hints.hint(&emit).shown, Shown::Unknown);
+        assert_eq!(lines.lock().unwrap().last().unwrap()["doubted"], 1);
+        hints.begin();
+        hints.looked(true, &emit);
+        assert_eq!(hints.doubts, 1);
+        say(&hints, 9, "com.apple.Maps", true);
+        assert_eq!(hints.hint(&emit).shown, Shown::App);
+        // Wrong three times: "nothing is in front" is no longer taken from them, but an app that
+        // comes to the front still is.
+        for _ in 0..2 {
+            say(&hints, 9, "com.apple.Maps", false);
+            hints.begin();
+            hints.looked(true, &emit);
+            say(&hints, 9, "com.apple.Maps", true);
+        }
+        assert_eq!(hints.doubts, 3);
+        say(&hints, 9, "com.apple.Maps", false);
+        assert_eq!(hints.hint(&emit).shown, Shown::Unknown);
+        say(&hints, 8, "com.tencent.xin", true);
+        assert_eq!(hints.hint(&emit).shown, Shown::Unknown);
+        say(&hints, 9, "com.apple.Maps", true);
+        assert_eq!(hints.hint(&emit).shown, Shown::App);
+        // The first notice was said once, with the fields it had and no app's name.
+        let said: Vec<Value> = lines.lock().unwrap().iter().filter(|line| line["notice"] == true).cloned().collect();
+        assert_eq!(said.len(), 1);
+        *POLICY.lock().unwrap() = None;
     }
 
     #[test]

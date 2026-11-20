@@ -148,11 +148,13 @@ final class HistoryCapture: ObservableObject {
     static let runMinutes = [3, 5]
     /// The wait before a single read, time to leave Poki and put another app in front.
     static let waitSeconds = 10
-    /// Seconds between two looks of a run at which app is in front. A look asks the phone which
-    /// app shows and reads its screen only when that app is kept and was not read a moment ago
-    /// (the launcher's history.rs has the pace). Every 5 seconds, with accessibility left on in
-    /// between, made the iPhone noticeably slow (the owner, 2026-11-20).
-    static let interval = 30
+    /// Seconds between two looks of a run that hears nothing of the app in front. A run asks the
+    /// phone to tell when an app comes to the front and reads it then, so no visit is missed (the
+    /// owner, 2026-11-20, of a first fix that only looked every 30 seconds: "Cant miss things").
+    /// Only on an iPhone that tells nothing does it look at this pace (the launcher's history.rs
+    /// has the rules). Every 5 seconds, with accessibility left on in between, made the iPhone
+    /// noticeably slow (the owner, the same day).
+    static let interval = 15
 
     /// The run in progress. Ending a run moves it on, so a late answer from an older one is ignored.
     private var run = 0
@@ -189,7 +191,14 @@ final class HistoryCapture: ObservableObject {
         var leftOut = 0
         var askedMs = 0
         var slowestMs = 0
+        /// How many looks each reason brought: an app that came to the front, a screen that moved
+        /// again, the pace of a screen that changes, a look to be safe, a look that heard nothing.
+        var due: [String: Int] = [:]
     }
+
+    /// What was said in this run about the phone's own notices. They start again at every unlock,
+    /// and each thing is said once.
+    private var hintsSaid: Set<String> = []
 
     private static let tallyEvery: TimeInterval = 600
     private var background: UIBackgroundTaskIdentifier = .invalid
@@ -277,6 +286,11 @@ final class HistoryCapture: ObservableObject {
         tellLists()
     }
 
+    private func sayOnce(_ key: String, _ text: String) {
+        guard hintsSaid.count < 40, hintsSaid.insert(key).inserted else { return }
+        AppLog.shared.add("history", text)
+    }
+
     /// Counts a look of the launcher's, and says the sum once every ten minutes.
     private func count(_ line: [String: Any]) {
         let number = { (key: String) in (line[key] as? NSNumber)?.intValue ?? 0 }
@@ -286,6 +300,7 @@ final class HistoryCapture: ObservableObject {
             tally.slowestMs = max(tally.slowestMs, number("snapshot_ms"))
         }
         if line["look"] as? String == "skipped" { tally.leftOut += 1 }
+        if let due = line["due"] as? String { tally.due[due, default: 0] += 1 }
         tally.askedMs += number("subscribe_ms") + number("cost_ms")
         if Date().timeIntervalSince(tally.since) >= Self.tallyEvery { sayTally() }
     }
@@ -297,7 +312,10 @@ final class HistoryCapture: ObservableObject {
         let ran = max(1, Date().timeIntervalSince(was.since))
         let seconds = String(format: "%.1f", Double(was.askedMs) / 1000)
         let share = String(format: "%.2f", Double(was.askedMs) / 10 / ran)
-        AppLog.shared.add("history", "cost in \(Int((ran / 60).rounded())) min: \(was.looks) looks, \(was.reads) screens read (slowest \(was.slowestMs) ms), \(was.leftOut) left out; the iPhone was asked for \(seconds) s in all, \(share)% of the time")
+        // Why the looks were made, most often first. With none named, the iPhone told nothing.
+        let due = was.due.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", ")
+        let made = due.isEmpty ? "" : "; made for \(due)"
+        AppLog.shared.add("history", "cost in \(Int((ran / 60).rounded())) min: \(was.looks) looks, \(was.reads) screens read (slowest \(was.slowestMs) ms), \(was.leftOut) left out; the iPhone was asked for \(seconds) s in all, \(share)% of the time\(made)")
     }
 
     // MARK: The controls
@@ -367,6 +385,7 @@ final class HistoryCapture: ObservableObject {
         notified = false
         host = nil
         tally = Tally()
+        hintsSaid = []
         tellLists()
         Self.withdrawNotice()
         background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
@@ -441,6 +460,9 @@ final class HistoryCapture: ObservableObject {
                     "ddi_dir": AppFiles.ddiDirectory.path,
                     "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": max(10, left),
                     "include_text": true, "include_tree": true,
+                    // The phone's own notices of the app in front and of the screen moving say
+                    // when to read. They ask nothing of the apps.
+                    "watch": true,
                 ]
                 do {
                     _ = try await HistoryBridge.call(request) { [weak self] line in
@@ -614,6 +636,30 @@ final class HistoryCapture: ObservableObject {
             answer = .dead(Self.brief(line["error"] as? String ?? ""), givenUp: line["given_up"] as? Bool == true)
         case "none":
             answer = .missing
+        case "watch":
+            // The phone's notices of the app that comes to the front. What it sends is said, so
+            // the log shows whether this iOS tells; no app is named.
+            if line["notice"] as? Bool == true {
+                let fields = (line["fields"] as? [String] ?? []).joined(separator: " ")
+                sayOnce("notice", "first app notice, with \(fields.isEmpty ? "no field known" : fields)")
+            } else if line["doubted"] != nil {
+                if number("doubted") <= 3 { sayOnce("doubted \(number("doubted"))", "app notices found wrong, time \(number("doubted"))") }
+            } else if line["on"] as? Bool == true {
+                sayOnce("watch on", "app notices on in \(number("ms")) ms")
+            } else {
+                let why = Self.brief(line["error"] as? String ?? "")
+                sayOnce("watch off \(why)", "app notices off: \(why)")
+            }
+        case "frames":
+            // The count of frames the screen draws: a screen that draws nothing is not read again.
+            if line["told"] as? Bool == true {
+                sayOnce("frames told", "frame counts believed")
+            } else if line["on"] as? Bool == true {
+                sayOnce("frames on", "frame counts on")
+            } else {
+                let why = Self.brief(line["error"] as? String ?? "")
+                sayOnce("frames off \(why)", "frame counts off: \(why)")
+            }
         default:
             return
         }
