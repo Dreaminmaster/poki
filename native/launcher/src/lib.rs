@@ -278,9 +278,9 @@ pub unsafe extern "C" fn poki_history_call(request_json: *const c_char, cb: Even
     let Some(text) = (unsafe { read_str(request_json) }) else { return -1 };
     let Ok(request) = serde_json::from_str::<Value>(&text) else { return -1 };
     let callback = Callback { function: cb, context };
+    let request = history::handle(request, move |line| callback.call(&serde_json::json!({"event": "progress", "progress": line})));
     runtime().spawn(async move {
-        let result = history::handle(request, move |line| callback.call(&serde_json::json!({"event": "progress", "progress": line}))).await;
-        let event = match result {
+        let event = match request.await {
             Ok(value) => serde_json::json!({"event": "result", "ok": true, "value": value}),
             Err(e) => serde_json::json!({"event": "result", "ok": false, "error": e.detail, "fix": e.fix, "code": e.code}),
         };

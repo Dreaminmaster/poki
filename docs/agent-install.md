@@ -88,13 +88,13 @@ Asked for on Nov 8: Poki Setup's first page asks for a model key, and an agent b
 
 ## Version, UI and renewal checks
 
-Read the release selected by the installer, its installed version and build, and the phone's Settings > Signing & Updates > Poki Version. The Mac's saved install record is not a phone readback. Release suffixes such as `beta.1` are not the IPA's numeric build. See the skill's version-mismatch branch.
+Read the release selected by the installer, its installed version and build, and the phone's Settings > Signing & Updates > Version. The Mac's saved install record is not a phone readback. Release suffixes such as `beta.1` are not the IPA's numeric build. See the skill's version-mismatch branch.
 
-In current builds, Settings opens from the button at the bottom of the conversations drawer. Models > Add Account contains model accounts. Connection > Local Connection opens Turn On Loopback. Signing & Updates is a separate Settings row with Poki Version and Signing Options > Apple Account. Older builds may use Automation > Setup, General > Updates, or Connection > Signing & Updates. These names are checked against the views and localization strings, not a live UI session.
+In current builds, Settings opens from the button at the bottom of the conversations drawer. Models > Add Account contains model accounts. Connection > Local Connection opens Turn On Loopback. Signing & Updates is a separate Settings row with Version and Apple Account. Older builds may use Automation > Setup, General > Updates, Connection > Signing & Updates, or Signing & Updates > Signing Options > Apple Account. These names are checked against the views and localization strings, not a live UI session.
 
 The installer closes its headless helper when it exits (`src/install/run.mjs:598-600`). It does not leave a renewal service running. The Poki Setup Mac app stays open after its last window closes (`desktop/mac/Sources/PokiSetup/App.swift:48`), checks every six hours (`AppModel.swift:113-120`) and renews with two days or fewer remaining (`desktop/core/src/keeper.rs:6,33-35`). The renewal task requires a kept password (`AppModel.swift:330-333`) and a reachable trusted phone. Keep the Mac awake and Poki Setup running for that method. Automatic renewal while locked, asleep or disconnected is not verified here.
 
-The phone can instead prepare its own refresh after a separate Apple Account sign-in, but the owner still taps Install. For the reported 0.4.0 update that installed successfully but stays on Finishing the update, swipe Poki away and reopen it, then read back the version. That operation does not delete app data. The status text itself can appear before completion (`native/ios-app/Poki/Signing/SelfSigner.swift:395-405`), so it cannot prove success.
+The phone can instead prepare its own renewal after a separate Apple Account sign-in, but the owner still taps Install. For the reported 0.4.0 update that installed successfully but stays on Finishing the update, swipe Poki away and reopen it, then read back the version. That operation does not delete app data. The status text itself can appear before completion (`stepAside()` in `native/ios-app/Poki/Signing/SelfSigner.swift`), so it cannot prove success.
 
 ## Checks on a real iPhone (not done yet)
 

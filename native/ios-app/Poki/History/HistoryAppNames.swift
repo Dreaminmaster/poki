@@ -102,6 +102,8 @@ enum HistoryAppNames {
         let low = id.lowercased()
         guard low.hasPrefix("com.apple."), KnownApps.byID[low] == nil else { return false }
         if let known = verdicts[low] { return known }
+        // An app iOS names under an icon is an app, whether or not its icon is at hand.
+        if installed(id) != nil { verdicts[low] = false; return false }
         // Without iOS's own icons there is nothing to tell an app by, so nothing more is left out.
         guard UserDefaults.standard.string(forKey: "pokiSystemIcons") != "off", AppIconStore.shared.icon("com.apple.Preferences") != nil else { return false }
         let process = AppIconStore.shared.icon(id) == nil

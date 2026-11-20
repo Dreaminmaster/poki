@@ -37,14 +37,22 @@ struct ChatView: View {
     @State private var homeBottom: CGFloat?
     /// How far Poki's picture rises from the home page into the top bar.
     @State private var flightRise: CGFloat = 0
+    @State private var wardrobeOpen = false
 
-    /// A tap on Poki, on the home page or in the chat: the bear says hi and Poki's card opens.
     private func tapPoki() {
+        writing = false
+        adding = false
         pokes += 1
+        wardrobeOpen = true
+    }
+
+    private func showPokiStatus() {
         openDetails(isGreeting ? homeBottom : nil)
     }
     /// The message field has the keyboard.
     @State private var writing = false
+    /// Plus's ways to add a photo or a file stand over the message field.
+    @State private var adding = false
     @State private var standaloneDraft = ""
     private var draft: Binding<String> { sharedDraft ?? $standaloneDraft }
     /// Taps on New Conversation on the home page, for the message field (`ComposerInputView.restarts`).
@@ -53,6 +61,8 @@ struct ChatView: View {
     @State private var pageHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.coveredByDrawer) private var coveredByDrawer
+    @Environment(\.inDuoSplitView) private var inDuoSplitView
 
     private var sampleScene: String? { UserDefaults.standard.string(forKey: "pokiChat") }
 
@@ -108,14 +118,26 @@ struct ChatView: View {
     }
 
     var body: some View {
+        ZStack {
+            chatContent.accessibilityHidden(wardrobeOpen)
+            BearWardrobeOverlay(isPresented: $wardrobeOpen)
+        }
+        .environment(\.bearOutfitPreview, wardrobeOpen)
+    }
+
+    @ViewBuilder private var chatContent: some View {
         let status = PokiStatus.current(model: model, chat: chat)
         let home = isGreeting
+        // The Duo's left pane can inherit a leading inset from the unfolded display.
+        let homeEdges: Edge.Set = home && openThreads != nil && !coveredByDrawer && inDuoSplitView
+            ? .leading : []
         ZStack {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
-                           shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise) {
+                           shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise,
+                           cardActions: cardActions) {
                 if !home, let hint = currentSetupHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
                 }
@@ -134,13 +156,15 @@ struct ChatView: View {
             .allowsHitTesting(home)
             .accessibilityHidden(!home)
         }
+        .contentShape(.rect)
+        .gesture(TapGesture().onEnded { if adding { adding = false } else { writing = false } }, isEnabled: writing || adding)
         .opacity(bare ? 0 : 1)
         // The conversation passes under the top bar's floating controls through the system's soft
         // scroll edge (`topBar`), with no line under them.
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: tapPoki)
+                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: showPokiStatus)
             }
         }
         .bottomBar(softEdge: true) {
@@ -150,7 +174,7 @@ struct ChatView: View {
                     Label(ActivityWords.local("Waiting for Split View"), systemImage: "rectangle.split.2x1")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ComposerInputView(input: draft, focused: $writing, running: busy, progress: progress, restarts: restarts,
+                ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
             }
@@ -162,7 +186,9 @@ struct ChatView: View {
             GeometryReader { proxy in
                 if !bare {
                     PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
-                               tap: tapPoki, landed: { homeBottom = $0 }, travel: { flightRise = $0 })
+                               tap: tapPoki, statusCard: showPokiStatus, landed: { homeBottom = $0 }, travel: { flightRise = $0 })
+                        .offset(y: home && wardrobeOpen ? -46 : 0)
+                        .animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.14), value: wardrobeOpen)
                 }
             }
         }
@@ -186,11 +212,18 @@ struct ChatView: View {
         .animation(.snappy, value: model.approvals.first?.id)
         .animation(.snappy, value: model.handoffText)
         .animation(.snappy, value: chat.demoAsk?.id)
+        .ignoresSafeArea(.container, edges: homeEdges)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: chat.running) { was, now in
             if was, !now, endedWell { DoneLinger.shared.celebrate() }
         }
         .onChange(of: MessageFieldAsk.shared.pending, initial: true) { if MessageFieldAsk.shared.take() { writing = true } }
+    }
+
+    /// A result card's taps: select an item, or send a button's sentence as your message.
+    private var cardActions: ResultCardActions {
+        let chat = chat
+        return ResultCardActions(busy: busy, choose: { chat.choose($1, on: $0) }, say: { chat.send($0) })
     }
 
     /// How far your first words rise: from the message field to their place under the top bar.
@@ -258,7 +291,7 @@ struct ChatView: View {
         for entry in chat.entries.reversed() {
             switch entry.kind {
             case .note(.problem): return false
-            case .plan(let steps): return !steps.contains { $0.state == .failed }
+            case .plan(let steps): return entry.stopped != true && !steps.contains { $0.state == .failed }
             case .you, .request: return false
             default: continue
             }
@@ -587,6 +620,8 @@ struct ChatTranscript<Footer: View>: View {
     /// How far your first words rise out of the message field when they open the conversation
     /// (the chat only); nil where a first message just appears.
     var rise: CGFloat? = nil
+    /// What a result card can do here; nil where the conversation is only shown.
+    var cardActions: ResultCardActions? = nil
     @ViewBuilder var footer: () -> Footer
 
     /// Your first message is all there is: its bubble rises from the message field, and Poki's dots
@@ -730,7 +765,8 @@ struct ChatTranscript<Footer: View>: View {
             let ask = asking(at: i)
             let current = live && isLastPlan(i)
             TaskCard(title: entry.title ?? ask.title, steps: steps,
-                     state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver),
+                     state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver,
+                                          stopped: entry.stopped == true),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
                      asker: ask.from, app: current ? app : entry.app, usedBrowser: ChatEntry.taskUsedBrowser(in: entries, at: i), started: entry.at, shot: current ? shot : nil,
@@ -761,6 +797,10 @@ struct ChatTranscript<Footer: View>: View {
             BrowserCard(id: entry.id, visit: visit)
                 .padding(.top, 6)
                 .transition(PlanMotion.stepTransition)
+        case .card(let card):
+            ResultCardView(entry: entry.id, card: card, chosen: entry.chosen, actions: cardActions)
+                .padding(.vertical, 6)
+                .transition(PlanMotion.stepTransition)
         }
     }
 
@@ -785,7 +825,7 @@ struct ChatTranscript<Footer: View>: View {
     private func isLast(_ i: Int, poki: Bool) -> Bool {
         !entries[(i + 1)...].contains { entry in
             switch entry.kind {
-            case .poki, .plan: poki
+            case .poki, .plan, .card: poki
             case .you, .request: !poki
             default: false
             }
@@ -1211,6 +1251,8 @@ struct ComposerInputView: View {
     @Binding var input: String
     /// The message field has the keyboard; the home page's suggestions set it.
     @Binding var focused: Bool
+    /// Plus is open: its ways to add stand over the message field until one is picked or the page is tapped.
+    @Binding var adding: Bool
     var running: Bool
     /// How far the running task is, 0 to 1, for the ring around Stop; nil when unknown.
     var progress: Double? = nil
@@ -1254,6 +1296,7 @@ struct ComposerInputView: View {
     @ScaledMetric(relativeTo: .body) private var scaledControlInset = 6.0
     @ScaledMetric(relativeTo: .body) private var scaledControlSpacing = 8.0
     @ScaledMetric(relativeTo: .body) private var fieldHeight = 112.0
+    @ScaledMetric(relativeTo: .body) private var wayIconWidth = 28.0
 
     private var buttonDiameter: CGFloat { min(56, max(36, scaledButtonDiameter)) }
     private var buttonHitSide: CGFloat { max(44, buttonDiameter) }
@@ -1282,6 +1325,7 @@ struct ComposerInputView: View {
                     withAnimation(.snappy) { attachments.removeAll { $0.id == item.id } }
                 }
             }
+            if adding, voice.talkState == nil, !needsKey, attachments.count < Self.most { ways }
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             Group {
@@ -1334,6 +1378,7 @@ struct ComposerInputView: View {
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: expanded)
         }
         .animation(.snappy, value: dictation.on)
+        .animation(.snappy, value: adding)
         .animation(TalkMotion.enter, value: voice.talkState != nil)
         .animation(TalkMotion.enter, value: needsKey)
         .onChange(of: voice.isOn, initial: true) { _, on in talkStarted = on ? Date() : nil }
@@ -1390,6 +1435,7 @@ struct ComposerInputView: View {
             .ignoresSafeArea()
         }
         .onChange(of: restarts) {
+            adding = false
             if !input.isEmpty || !attachments.isEmpty {
                 input = ""
                 withAnimation(.snappy) { attachments = [] }
@@ -1487,15 +1533,7 @@ struct ComposerInputView: View {
     /// photo from the camera, or a picture or PDF from Files. Everything else is on Poki's card at the
     /// top and in Settings.
     private var plus: some View {
-        Menu {
-            Button("Photos", systemImage: "photo") { choosingPhotos = true }
-                .accessibilityIdentifier("composer.photos")
-            Button("Take Photo", systemImage: "camera") { takingPhoto = true }
-                .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-                .accessibilityIdentifier("composer.camera")
-            Button("Files", systemImage: "folder") { choosingFiles = true }
-                .accessibilityIdentifier("composer.files")
-        } label: {
+        Button { adding.toggle() } label: {
             Image(systemName: "plus")
                 .font(.title3.weight(.medium)).dynamicTypeSize(...DynamicTypeSize.xxxLarge).foregroundStyle(Color(.label))
                 .frame(width: buttonDiameter, height: buttonDiameter)
@@ -1503,14 +1541,52 @@ struct ComposerInputView: View {
                 .frame(width: buttonHitSide, height: buttonHitSide)
                 .contentShape(.interaction, Rectangle())
         }
-        // Photos first, as on the board, though the menu opens upward from the button.
-        .menuOrder(.fixed)
+        .buttonStyle(.plain)
         .disabled(attachments.count >= Self.most)
         .accessibilityLabel(Text("Add Photos or Files"))
+        .accessibilityAddTraits(adding ? .isSelected : [])
         .accessibilityIdentifier("composer.plus")
         .accessibilityShowsLargeContentViewer {
             Label("Add Photos or Files", systemImage: "plus")
         }
+    }
+
+    /// Plus's three ways, on their own glass right over the message field, which stays where it is.
+    /// A system menu can't do this here: it opens out of the glass around it, and that is the
+    /// whole composer.
+    private var ways: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            way("Photos", "photo", "composer.photos") { choosingPhotos = true }
+            way("Take Photo", "camera", "composer.camera", enabled: UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
+            way("Files", "folder", "composer.files") { choosingFiles = true }
+        }
+        .padding(.vertical, 6)
+        .fixedSize()
+        // A card over the conversation like the approval's, without its tint.
+        .glassSurface(in: RoundedRectangle(cornerRadius: 26, style: .continuous), fallback: .card)
+        .glassAppearing()
+        // Beside the card is the composer's bar, over the conversation's tap that closes it.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        .onTapGesture { adding = false }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(.escape) { adding = false }
+    }
+
+    private func way(_ title: LocalizedStringKey, _ symbol: String, _ id: String, enabled: Bool = true,
+                     _ pick: @escaping () -> Void) -> some View {
+        Button { adding = false; pick() } label: {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).frame(width: wayIconWidth)
+                Text(title)
+            }
+            .font(.body).foregroundStyle(enabled ? Color(.label) : Color(.tertiaryLabel))
+            .padding(.horizontal, 20).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityIdentifier(id)
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {
@@ -1589,6 +1665,7 @@ struct ComposerInputView: View {
         dictation.cancel(model)
         let text = input
         send(text, attachments)
+        adding = false
         withAnimation(.snappy) { attachments = [] }
         sends += 1
         sent = (text, Date())

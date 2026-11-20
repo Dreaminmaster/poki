@@ -378,6 +378,10 @@ final class BacktapeNotes {
     static let shared = BacktapeNotes()
 
     private(set) var notes: [String: BacktapeNote] = [:]
+    /// Tiles whose note is a draft of a span that was still in flight. A draft is never final:
+    /// once its span closes it is written again from the closed span, and stays grey till then.
+    private(set) var drafted: Set<String> = []
+    @ObservationIgnored private var closers: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var wanted: [String: BacktapeTile] = [:]
     @ObservationIgnored private var failed: Set<String> = []
     @ObservationIgnored private var worker: Task<Void, Never>?
@@ -401,9 +405,11 @@ final class BacktapeNotes {
 
     func appeared(_ tile: BacktapeTile) {
         wanted[tile.id] = tile
+        if drafted.contains(tile.id), tile.end <= Date() { work(); return }
         guard notes[tile.id] == nil else { return }
         if tile.end > Date() {
-            if let draft = Self.draft(tile) { notes[tile.id] = draft }
+            if let draft = Self.draft(tile) { notes[tile.id] = draft; drafted.insert(tile.id) }
+            closeLater(tile)
             work()
             return
         }
@@ -418,6 +424,29 @@ final class BacktapeNotes {
 
     func disappeared(_ tile: BacktapeTile) {
         wanted[tile.id] = nil
+        closers.removeValue(forKey: tile.id)?.cancel()
+    }
+
+    /// Whether the tile's words may still change: its span is not over, or its note is a draft
+    /// from before it ended that has not been written again yet.
+    func pending(_ tile: BacktapeTile) -> Bool {
+        tile.end > Date() || drafted.contains(tile.id)
+    }
+
+    /// When a visible span in flight ends, its note is written again from the closed span, even
+    /// though the tile never left the screen.
+    private func closeLater(_ tile: BacktapeTile) {
+        guard closers[tile.id] == nil else { return }
+        let me = generation
+        closers[tile.id] = Task { [weak self] in
+            let wait = tile.end.timeIntervalSinceNow
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait + 1)) }
+            guard !Task.isCancelled, let self, self.generation == me else { return }
+            self.closers[tile.id] = nil
+            guard self.wanted[tile.id] != nil else { return }
+            self.failed.remove(tile.id)
+            self.work()
+        }
     }
 
     /// Whether a note is still to come for this tile, so its place is held.
@@ -431,13 +460,16 @@ final class BacktapeNotes {
         worker?.cancel()
         worker = nil
         notes = [:]
+        drafted = []
         failed = []
+        closers.values.forEach { $0.cancel() }
+        closers = [:]
     }
 
     private func next() -> BacktapeTile? {
         let centre = focus ?? Date()
         return wanted.values
-            .filter { notes[$0.id] == nil && !failed.contains($0.id) }
+            .filter { (notes[$0.id] == nil || (drafted.contains($0.id) && $0.end <= Date())) && !failed.contains($0.id) }
             .min { abs($0.start.timeIntervalSince(centre)) < abs($1.start.timeIntervalSince(centre)) }
     }
 
@@ -457,6 +489,7 @@ final class BacktapeNotes {
                     guard !Task.isCancelled, generation == me else { return }
                     if let kept {
                         notes[tile.id] = kept
+                        drafted.remove(tile.id)
                         continue
                     }
                 }
@@ -469,9 +502,13 @@ final class BacktapeNotes {
                 if let written {
                     if flying {
                         Self.drafts[tile.id] = (tile.span.entries.count, Date(), written)
+                        drafted.insert(tile.id)
+                        closeLater(tile)
                     } else {
                         let saved = await store.keep(written, start: key, generation: sourceGeneration)
                         guard !Task.isCancelled, generation == me, saved else { return }
+                        Self.drafts[tile.id] = nil
+                        drafted.remove(tile.id)
                     }
                     notes[tile.id] = written
                 } else {
@@ -828,7 +865,7 @@ struct BacktapeLibrary: View {
 
     private func cell(_ tile: BacktapeTile, _ kind: BacktapeTileView.Kind) -> some View {
         BacktapeTileView(tile: tile, kind: kind, note: notes.notes[tile.id], waiting: notes.waiting(tile),
-                         pending: tile.end > Date(), open: expanded == tile.id)
+                         pending: notes.pending(tile), open: expanded == tile.id)
             .id(tile.id)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("backtape")) } action: { frames.frames[tile.id] = $0 }
             .onAppear { notes.appeared(tile) }

@@ -44,7 +44,7 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("details.senses")
                     NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
+                        SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                 }
@@ -181,9 +181,7 @@ struct PokiDetailsView: View {
                 case .agents:
                     AgentsAndRelayView(path: $path)
                 case .updates:
-                    Form { SigningSection() }
-                        .navigationTitle(AppLocalization.text("Signing & Updates"))
-                        .navigationBarTitleDisplayMode(.inline)
+                    SigningUpdatesPage()
                 case .approvals:
                     SecuritySettingsView()
                 case .appearance:
@@ -234,9 +232,13 @@ struct PokiDetailsView: View {
         return count == 0 ? nil : "\(count)"
     }
 
-    private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
-    /// The version is the page's last line, so the row only speaks up when an update waits.
-    private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
+    private var updateWaits: Bool { !isSample && (model.signer.sessionExpired || model.signer.updateNotReady || model.signer.next?.kind == "update") }
+    /// The version is the page's last line, so the row only speaks up when an update waits, or when
+    /// Apple's sign-in ran out and nothing renews until the owner signs in again.
+    private var updatesValue: String? {
+        if !isSample, model.signer.sessionExpired { return AppLocalization.text(LocalizedStringResource("Sign In Again")) }
+        return updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil
+    }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
@@ -491,7 +493,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 SettingsHeader("Memory")
             } footer: {
-                Text("The run log lists each routine run, where it stopped and how long it took, with no typed text. It helps the Poki maintainers make routines more reliable.")
+                Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
             }
 
             Section {
@@ -518,7 +520,7 @@ struct AdvancedSettingsView: View {
         .onAppear {
             // The run log is written to tmp for the share sheet, as Memory did it.
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("poki-agent-debug.json")
-            if (try? RoutineStore.shared.debugBundle().write(to: file, options: .atomic)) != nil { runLog = file }
+            if (try? ChatDebugLog.exportBundle().write(to: file, options: .atomic)) != nil { runLog = file }
         }
     }
 }

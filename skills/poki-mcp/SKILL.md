@@ -1,6 +1,6 @@
 ---
 name: poki-mcp
-description: How to send text and answer prompts with Poki MCP on a physical iPhone. Read before the first Poki call on a task that types into a field, meets a system prompt, or navigates with hardware buttons.
+description: Operate an iPhone and troubleshoot Poki errors with Poki MCP. Read before the first Poki call that types text, answers a prompt, or uses hardware buttons, and whenever Poki reports an error, stops responding, or needs a GitHub issue.
 license: AGPL-3.0-only
 ---
 
@@ -57,3 +57,11 @@ The verified hardware case is only iPhone17,1 in portrait orientation with a six
 Read the visible prompt and its reported kind. Use `handle_alert` with a button label or `action: "accept"` / `"dismiss"` to choose a visible button. For a purchase prompt, generic `action: "accept"` leaves the prompt open and returns its kind and available buttons. After the action, read the screen to confirm the dialog closed and the task reached its intended state.
 
 For login or verification, use the credentials available for the authorized task. Read a requested SMS verification code from Messages or notifications, enter it, and verify the resulting screen. Confirm a purchase only when the user's task explicitly requests that purchase. In that case, set `button` to the visible purchase button text. Otherwise dismiss the prompt or continue the task without purchasing.
+
+## When something goes wrong
+
+When Poki reports an error, stops responding, or needs a GitHub issue, read [references/troubleshooting.md](references/troubleshooting.md) (or `skills/poki-mcp/references/troubleshooting.md` in the Poki checkout if this skill was copied alone). That reference covers diagnostic tool calls, failure classification, exact error strings, secret redaction, and GitHub issue templates.
+
+- Run read-only diagnostic tools first to inspect versions, device state, and runner status before retrying actions or changing service state.
+- Never enter passcodes, passwords, or verification codes on the user's behalf during setup, signing, or troubleshooting.
+- Strip personal data and secrets from every GitHub issue or comment draft, show the full draft to the user, and submit only after the user confirms.

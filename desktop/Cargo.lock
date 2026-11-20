@@ -2457,9 +2457,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3023,7 +3025,9 @@ dependencies = [
  "hmac",
  "idevice-srp",
  "indexmap 2.14.2",
+ "jktcp",
  "libc",
+ "ns-keyed-archive",
  "plist",
  "plist-macro",
  "rand 0.10.3",
@@ -3272,6 +3276,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
 dependencies = [
  "jiff-tzdb",
+]
+
+[[package]]
+name = "jktcp"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f67259b6408391e66f7d7fd3dbef41ef3bc65e1d67f4c8d5512f2e59835f7844"
+dependencies = [
+ "futures",
+ "getrandom 0.3.4",
+ "rand 0.9.5",
+ "tokio",
+ "tracing",
+ "wasm-bindgen-futures",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -3776,6 +3795,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "ns-keyed-archive"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "815e8c8171d033165fdda6d95630d6f447592ad5e6fbade9db26663970c6fae6"
+dependencies = [
+ "nskeyedarchiver_converter",
+ "plist",
+]
+
+[[package]]
+name = "nskeyedarchiver_converter"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36c53158d1bf37bbbdd165f5220fda8bb5757c89eb700107992152c64c6cad7e"
+dependencies = [
+ "plist",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -4479,7 +4518,7 @@ dependencies = [
 
 [[package]]
 name = "poki-setup-app"
-version = "0.2.5"
+version = "0.2.8"
 dependencies = [
  "log",
  "poki-setup-core",
@@ -4500,7 +4539,7 @@ dependencies = [
 
 [[package]]
 name = "poki-setup-bridge"
-version = "0.2.5"
+version = "0.2.8"
 dependencies = [
  "base64 0.22.1",
  "poki-setup-core",
@@ -4514,7 +4553,7 @@ dependencies = [
 
 [[package]]
 name = "poki-setup-cli"
-version = "0.2.5"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -4531,7 +4570,7 @@ dependencies = [
 
 [[package]]
 name = "poki-setup-core"
-version = "0.2.5"
+version = "0.2.8"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -7341,6 +7380,19 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "wasmtimer"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c62b7f338e4397a45d054c15a2b36a93d57cccdda7be11a7d7b045d47b5e70ce"
+dependencies = [
+ "futures",
+ "js-sys",
+ "parking_lot",
+ "pin-project-lite",
+ "wasm-bindgen",
 ]
 
 [[package]]

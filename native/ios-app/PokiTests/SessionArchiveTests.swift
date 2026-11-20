@@ -141,6 +141,24 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(launch().session("chat")?.entries, saved.entries)
     }
 
+    /// Archiving and deleting say which conversation left the list, each time, so the screen showing it leaves it.
+    func testArchiveAndDeleteSayWhichConversationLeft() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        _ = try saveEarlier("one", lines: ["Open Maps", "Opened."])
+        _ = try saveEarlier("two", lines: ["Open Notes", "Opened."])
+        let store = launch()
+        XCTAssertNil(store.removed)
+        store.archive("one")
+        XCTAssertEqual(store.removed?.id, "one")
+        let first = store.removed
+        store.delete("two")
+        XCTAssertEqual(store.removed?.id, "two")
+        store.unarchive("one")
+        store.archive("one")
+        XCTAssertEqual(store.removed?.id, "one")
+        XCTAssertNotEqual(store.removed, first, "the same conversation leaving again is a new change")
+    }
+
     /// The limit is on the conversations list only: past it, the oldest listed conversation goes, and an
     /// archived one, older than all of them, stays with every line.
     func testTheLimitNeverTakesAnArchivedConversation() throws {

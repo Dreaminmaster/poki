@@ -13,7 +13,7 @@ import PokiCore
 /// carries the messages over; pi converts them between providers.
 @MainActor
 final class PiLoop {
-    enum Outcome: Equatable { case done, stopped, overTurns, stuck, failed(String) }
+    enum Outcome: Equatable { case done, stopped, authorizationDeclined, overTurns, stuck, failed(String) }
 
     /// This many steps in a row with the same call and the same screen end the task as stuck.
     nonisolated static let stallSteps = 6
@@ -23,11 +23,19 @@ final class PiLoop {
     let model: Model
     let inSplitView: Bool
     private let agent: Agent
+    private let allTools: [AgentTool]
     private let gate = StopGate()
+    /// A custom address's HTTP client, which repairs a doubled `data:` stream and keeps what the address
+    /// answered for the log.
+    private let endpoint: CustomEndpointClient?
     private let stall = StallWatch()
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
+    var hasCurrentCustomBackups: Bool {
+        guard let endpoint else { return true }
+        return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
+    }
 
     init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
@@ -35,7 +43,10 @@ final class PiLoop {
         self.model = model
         self.inSplitView = inSplitView
         let gate = self.gate
+        let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
+        self.endpoint = endpoint
         let stall = self.stall
+        let grants = HistoryDeliveryGrants()
         let agentTools = tools.map { spec in
             AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
                 if gate.stopped { return Self.result(PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true)) }
@@ -44,13 +55,19 @@ final class PiLoop {
                 let arguments = (try? encoder.encode(params)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                 // pi runs its loop in tasks of its own, so stop() reaches the call under way only through
                 // `signal`: cancelling the call stops a `do` before its next action.
+                let revision = spec.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
+                if spec.name == "screen_history" { grants.record(id, revision: revision) }
                 let call = Task { @MainActor in await perform(ToolCall(id: id, name: spec.name, arguments: arguments)) }
                 let forget = signal?.onCancel { call.cancel() }
                 defer { forget?() }
-                let answer = await call.value
+                let rawAnswer = await call.value
+                let answer = spec.name == "screen_history"
+                    ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: revision) : rawAnswer
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
-                if answer.waitingForOwner {
+                if answer.automationAuthorizationDeclined {
+                    gate.end(.authorizationDeclined)
+                } else if answer.waitingForOwner {
                     stall.reset()
                 } else if stall.record(call: "\(spec.name)\n\(arguments)", screen: answer.screen ?? answer.text) {
                     gate.end(.stuck)
@@ -58,11 +75,62 @@ final class PiLoop {
                 return Self.result(answer)
             }
         }
-        // agent/pi-session.mjs: low thinking, one tool call at a time.
+        allTools = agentTools
+        // agent/pi-session.mjs: low thinking, one tool call at a time. Pi copies the
+        // tool list at prompt start; prepareRequest updates its *live* context each turn.
         agent = Agent(AgentOptions(
-            initialState: AgentState(model: model, thinkingLevel: .low, tools: agentTools, messages: messages),
-            getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
-            toolExecution: .sequential
+            initialState: AgentState(model: model, thinkingLevel: .low,
+                                     tools: Self.availableTools(agentTools, allowed: HistoryCapture.agentQueryAllowed), messages: messages),
+            streamFn: { model, transcript, options in
+                // API credentials may have suspended after prepareRequest. Recheck at
+                // the last request boundary too; never add a tool the live context lacks.
+                let revision = HistoryCapture.agentQueryRevision
+                let allowed = revision != nil && getCurrentTools(transcript.messages).contains { $0.name == "screen_history" }
+                var messages = transcript.messages.map { message -> PiSwiftAI.Message in
+                    guard case .toolResult(let result) = message else { return message }
+                    return .toolResult(grants.validated(result, revision: revision))
+                }
+                if let index = messages.indices.first, case .system(var system) = messages[index],
+                   case .text(let text) = system.content {
+                    system.content = .text(Harness.historyInstructions(text, allowed: allowed))
+                    messages[index] = .system(system)
+                }
+                if !allowed, getCurrentTools(messages).contains(where: { $0.name == "screen_history" }) {
+                    messages.append(.system(SystemMessage(content: .text(""), toolsRemoved: [ToolReference(name: "screen_history")])))
+                }
+                var options = options
+                if let endpoint { options.httpClient = endpoint }
+                return try streamSimple(model: model, context: Context(messages: messages), options: options)
+            },
+            getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
+            toolExecution: .sequential,
+            prepareToolResultMessage: { result in
+                grants.validated(result, revision: HistoryCapture.agentQueryRevision)
+            },
+            prepareRequest: { request, _ in
+                let revision = HistoryCapture.agentQueryRevision
+                let tools = Self.availableTools(agentTools, allowed: revision != nil)
+                var context = request.context
+                context.tools = tools
+                context.messages = context.messages.map { message in
+                    guard case .toolResult(let result) = message else { return message }
+                    return .toolResult(grants.validated(result, revision: revision))
+                }
+                if let index = context.messages.indices.first, case .system(var system) = context.messages[index],
+                   case .text(let text) = system.content {
+                    system.content = .text(Harness.historyInstructions(text, allowed: revision != nil))
+                    context.messages[index] = .system(system)
+                }
+                let changes = getToolStateChanges(getCurrentTools(context.messages), tools.map(\.aiTool))
+                if !changes.toolsAdded.isEmpty || !changes.toolsRemoved.isEmpty {
+                    context.messages.append(.system(SystemMessage(
+                        content: .text(""),
+                        toolsAdded: changes.toolsAdded.isEmpty ? nil : changes.toolsAdded,
+                        toolsRemoved: changes.toolsRemoved.isEmpty ? nil : changes.toolsRemoved
+                    )))
+                }
+                return AgentRequestUpdate(context: context)
+            }
         ))
     }
 
@@ -73,6 +141,7 @@ final class PiLoop {
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
+        agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed)
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -102,12 +171,17 @@ final class PiLoop {
         }
         if gate.stopped {
             switch gate.ending {
+            case .authorizationDeclined: return .authorizationDeclined
             case .overTurns: return .overTurns
             case .stuck: return .stuck
             default: return .stopped
             }
         }
         if let message = failure.value {
+            if let seen = endpoint?.seen {
+                let key = provider == .custom ? CustomProviders.provider(piProvider: model.provider).flatMap { CustomProviders.key($0.id) } : ModelKeys.key(provider)
+                AppLog.shared.add("model", seen.summary(key: key) + ", failed: " + CustomEndpointClient.redacted(message, key: key))
+            }
             // The owner's message goes again with the next one, as with the direct clients.
             _ = agent.dropTrailingErroredAssistant()
             return .failed(Self.words(message, provider: provider))
@@ -134,6 +208,10 @@ final class PiLoop {
         agent.messages = messages
     }
 
+    nonisolated static func availableTools(_ tools: [AgentTool], allowed: Bool) -> [AgentTool] {
+        tools.filter { $0.name != "screen_history" || allowed }
+    }
+
     private nonisolated static func result(_ answer: PokiCore.ToolAnswer) -> AgentToolResult {
         var content: [ContentBlock] = [.text(TextContent(text: answer.text))]
         if let jpeg = answer.jpeg { content.append(.image(ImageContent(data: jpeg.base64EncodedString(), mimeType: "image/jpeg"))) }
@@ -158,9 +236,33 @@ final class PiLoop {
     }
 }
 
+/// Associates an actual history result with the grant under which it was requested.
+/// Missing grants (including results carried from another loop) are never trusted.
+final class HistoryDeliveryGrants: @unchecked Sendable {
+    private let lock = NSLock()
+    private var revisions: [String: UInt64] = [:]
+
+    func record(_ id: String, revision: UInt64?) {
+        lock.withLock { revisions[id] = revision }
+    }
+
+    func validated(_ result: ToolResultMessage, revision: UInt64?) -> ToolResultMessage {
+        guard result.toolName == "screen_history", !result.isError else { return result }
+        let granted = lock.withLock { revisions[result.toolCallId] }
+        guard let revision, granted == revision else {
+            var safe = result
+            safe.content = [.text(TextContent(text: PokiCore.screenHistoryRevokedMessage))]
+            safe.details = nil
+            safe.isError = true
+            return safe
+        }
+        return result
+    }
+}
+
 /// Set by stop(), the turn limit or the stall watch, read by the tools on pi's tasks.
 private final class StopGate: @unchecked Sendable {
-    enum Ending { case stopped, overTurns, stuck }
+    enum Ending { case stopped, authorizationDeclined, overTurns, stuck }
     private let lock = NSLock()
     private var first: Ending?
     func reset() { lock.withLock { first = nil } }

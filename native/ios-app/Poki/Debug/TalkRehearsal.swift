@@ -23,9 +23,9 @@ final class TalkRehearsal: VoiceConnection, @unchecked Sendable {
 
     /// The step on the phone: it waits as long as a short one takes and says it went well. Held for a
     /// screenshot, it does not come back.
-    static func step() async -> (String, Bool) {
+    static func step() async -> PhoneAnswer {
         try? await Task.sleep(for: .seconds(hold == .acting ? 3600 : 3.2))
-        return ("done", false)
+        return ("done", false, nil)
     }
 
     private let onEvent: @MainActor ([String: Any]) -> Void
@@ -37,7 +37,7 @@ final class TalkRehearsal: VoiceConnection, @unchecked Sendable {
         self.onClosed = onClosed
     }
 
-    func connect(secret: String, microphone: Bool, direct: Bool) async throws {
+    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {
         try await Task.sleep(for: .milliseconds(Self.hold == .connecting ? 3_600_000 : 900))
         let zh = AppLocalization.language.hasPrefix("zh")
         let asks = zh ? "打开设置，把屏幕调亮一点" : "Open Settings and turn the brightness up a little"

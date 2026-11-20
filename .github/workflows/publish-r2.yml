@@ -1,4 +1,4 @@
-name: Mirror approved Beta to R2
+name: Mirror approved release to R2
 
 on:
   workflow_call:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Published numbered Beta tag to mirror or retry
+        description: Published numbered Beta or desktop-vX.Y.Z prerelease tag to mirror or retry
         required: true
         type: string
 
@@ -37,7 +37,7 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$TAG" =~ ^(app-[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+|ios-beta-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+)$ ]]
+          [[ "$TAG" =~ ^(app-[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+|ios-beta-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+|desktop-v[0-9]+\.[0-9]+\.[0-9]+)$ ]]
           mkdir -p artifacts evidence
           gh api "repos/$GH_REPO/releases/tags/$TAG" > release.json
           gh release download "$TAG" --dir artifacts

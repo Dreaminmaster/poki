@@ -9,6 +9,7 @@ final class OpenAIClient: ModelClient {
     let key: String
     let model: String
     private var input: [[String: Any]] = []
+    private var historyGrants: [String: UInt64] = [:]
 
     static let endpoint = URL(string: "https://api.openai.com/v1/responses")!
 
@@ -19,6 +20,9 @@ final class OpenAIClient: ModelClient {
     func say(_ text: String) { input.append(["role": "user", "content": text]) }
 
     func answer(_ call: ToolCall, _ result: PokiCore.ToolAnswer) {
+        if call.name == "screen_history", !result.isError {
+            historyGrants[call.id] = HistoryCapture.agentQueryRevision
+        }
         var output: [[String: Any]] = [["type": "input_text", "text": result.text]]
         if let jpeg = result.jpeg {
             // One pixel per screen point: "high" keeps the picture at its size, so a point on it is a point to tap.
@@ -32,6 +36,15 @@ final class OpenAIClient: ModelClient {
     }
 
     func next(instructions: String, tools: [ToolSpec]) async throws -> ModelTurn {
+        let revision = HistoryCapture.agentQueryRevision
+        input = input.map { entry in
+            guard entry["type"] as? String == "function_call_output",
+                  let id = entry["call_id"] as? String,
+                  let original = historyGrants[id], original != revision else { return entry }
+            var safe = entry
+            safe["output"] = [["type": "input_text", "text": PokiCore.screenHistoryRevokedMessage]]
+            return safe
+        }
         let body: [String: Any] = [
             "model": model,
             "instructions": instructions,

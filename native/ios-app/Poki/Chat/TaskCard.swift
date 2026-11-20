@@ -12,12 +12,13 @@ enum TaskCardState: Equatable {
     case running, needsYou, yourTurn, done, failed, stopped
 
     /// From a plan's steps: `live` is the task under way; `waiting` and `handedOver` are what holds it.
-    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool) {
+    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false) {
         if live {
             if handedOver { self = .yourTurn }
             else if waiting || steps.contains(where: { $0.state == .waiting }) { self = .needsYou }
             else { self = .running }
-        } else if steps.contains(where: { $0.state == .failed }) { self = .failed }
+        } else if stopped { self = .stopped }
+        else if steps.contains(where: { $0.state == .failed }) { self = .failed }
         else if steps.allSatisfy({ $0.state == .done }) { self = .done }
         else { self = .stopped }
     }
@@ -216,7 +217,9 @@ struct TaskCard: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(steps) { step in
-                    TaskStepRow(text: step.text, state: step.state, tone: tone).transition(PlanMotion.stepTransition)
+                    TaskStepRow(text: step.text, state: step.state, tone: tone,
+                                stopped: state == .stopped)
+                        .transition(PlanMotion.stepTransition)
                 }
                 ForEach(Array(upcoming.enumerated()), id: \.offset) { _, text in
                     TaskStepRow(text: text, state: nil, tone: tone)
@@ -316,6 +319,7 @@ private struct TaskStepRow: View {
     var text: String
     var state: PlanStep.State?
     var tone: TaskTone
+    var stopped = false
     @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 18
 
     private var now: Bool { state == .current || state == .waiting }
@@ -352,10 +356,14 @@ private struct TaskStepRow: View {
             Circle().fill(Tint.redSoft)
                 .overlay { Image(systemName: "xmark").font(.system(size: side * 0.5, weight: .bold)).foregroundStyle(Tint.red) }
         case .current?, .waiting?:
-            let color = tone == .blue ? Color.white : tone == .amber ? Tint.amber : Color(.label)
-            Circle().strokeBorder(color, lineWidth: side / 9)
-                .overlay { Circle().fill(color).frame(width: side * 4 / 9, height: side * 4 / 9) }
-                .transition(PlanMotion.swapTransition)
+            if stopped {
+                Image(systemName: "stop.fill").font(.system(size: side * 0.5, weight: .bold)).foregroundStyle(.secondary)
+            } else {
+                let color = tone == .blue ? Color.white : tone == .amber ? Tint.amber : Color(.label)
+                Circle().strokeBorder(color, lineWidth: side / 9)
+                    .overlay { Circle().fill(color).frame(width: side * 4 / 9, height: side * 4 / 9) }
+                    .transition(PlanMotion.swapTransition)
+            }
         case nil:
             Circle().strokeBorder(tone == .blue ? Color.white.opacity(0.4) : Color(.systemGray4), lineWidth: side / 9)
         }
@@ -366,7 +374,7 @@ private struct TaskStepRow: View {
         switch state {
         case .done?: Text("Done")
         case .failed?: Text("Failed")
-        case .current?, .waiting?: Text("In progress")
+        case .current?, .waiting?: Text(stopped ? "Stopped" : "In progress")
         case nil: Text("Upcoming")
         }
     }
