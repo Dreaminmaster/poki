@@ -33,6 +33,10 @@ final class PiLoop {
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
+    var hasCurrentCustomBackups: Bool {
+        guard let endpoint else { return true }
+        return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
+    }
 
     /// Keep custom provider requests identified as Poki without imitating another client.
     static func clientIdentity(version: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) -> ClientIdentity {
@@ -51,7 +55,7 @@ final class PiLoop {
         self.sessionID = sessionID
         self.inSplitView = inSplitView
         let gate = self.gate
-        let endpoint = provider == .custom ? CustomEndpointClient() : nil
+        let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
         self.endpoint = endpoint
         let stall = self.stall
         let grants = HistoryDeliveryGrants()
@@ -112,7 +116,7 @@ final class PiLoop {
             },
             sessionId: sessionID,
             identity: provider == .custom ? Self.clientIdentity() : nil,
-            getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
+            getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
             toolExecution: .sequential,
             prepareToolResultMessage: { result in
                 grants.validated(result, revision: HistoryCapture.agentQueryRevision)
@@ -189,7 +193,7 @@ final class PiLoop {
         }
         if let message = failure.value {
             if let seen = endpoint?.seen {
-                let key = ModelKeys.key(provider)
+                let key = provider == .custom ? CustomProviders.provider(piProvider: model.provider).flatMap { CustomProviders.key($0.id) } : ModelKeys.key(provider)
                 AppLog.shared.add("model", seen.summary(key: key) + ", failed: " + CustomEndpointClient.redacted(message, key: key))
             }
             // The owner's message goes again with the next one, as with the direct clients.

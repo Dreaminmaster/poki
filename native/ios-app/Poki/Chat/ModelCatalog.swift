@@ -25,8 +25,9 @@ enum ModelCatalog {
     }
 
     static func available(_ provider: ModelProvider) -> [ChatModelChoice] {
+        let choices = all(provider)
         let on = enabled(provider)
-        return all(provider).filter { on.contains($0.id) }
+        return choices.filter { on.contains($0.id) }
     }
 
     static func enabled(_ provider: ModelProvider) -> Set<String> {
@@ -34,7 +35,7 @@ enum ModelCatalog {
         return defaults(provider)
     }
 
-    static func set(_ id: String, on: Bool, for provider: ModelProvider) {
+    static func set(_ id: String, on: Bool, for provider: ModelProvider, notify: Bool = true) {
         var ids = enabled(provider)
         if on { ids.insert(id) } else { ids.remove(id) }
         UserDefaults.standard.set(Array(ids), forKey: "models.enabled.\(provider.rawValue)")
@@ -42,11 +43,27 @@ enum ModelCatalog {
         if ModelKeys.selectedProvider == provider, !ids.contains(ModelKeys.selectedModel), let first = available(provider).first {
             ModelKeys.selectedModel = first.id
         }
-        ModelKeys.saved += 1
+        if notify { ModelKeys.saved += 1 }
     }
 
     static func listed(_ provider: ModelProvider) -> [ChatModelChoice] {
-        (UserDefaults.standard.stringArray(forKey: "models.listed.\(provider.rawValue)") ?? []).map { ChatModelChoice(id: $0, name: $0) }
+        if provider == .custom {
+            let providers = CustomProviders.all
+            return providers.flatMap { custom in listedCustom(custom.id).map {
+                ChatModelChoice(id: CustomProviders.choiceID(custom.id, $0), name: CustomProviders.choiceName(custom, $0, among: providers.count))
+            } }
+        }
+        return (UserDefaults.standard.stringArray(forKey: "models.listed.\(provider.rawValue)") ?? []).map { ChatModelChoice(id: $0, name: $0) }
+    }
+
+    /// The model ids one custom provider's list returned.
+    static func listedCustom(_ id: UUID) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "models.listed.custom.\(id.uuidString)") ?? []
+    }
+
+    /// One custom provider's models: its own model and its list's, as the chat names them.
+    static func all(custom id: UUID) -> [ChatModelChoice] {
+        all(.custom).filter { CustomProviders.parse($0.id)?.provider == id }
     }
 
     static func supportsReasoning(_ id: String, for provider: ModelProvider) -> Bool {
@@ -63,18 +80,16 @@ enum ModelCatalog {
     @MainActor
     static func refresh(_ provider: ModelProvider) async throws -> Int {
         if provider == .custom {
-            let address = ModelKeys.customURL
-            let key = ModelKeys.key(.custom)
-            let revision = UserDefaults.standard.string(forKey: "models.revision.custom")
-            let ids = try await fetchCustom(address: address, key: key)
-            try Task.checkCancellation()
-            guard address == ModelKeys.customURL, key == ModelKeys.key(.custom),
-                  revision == UserDefaults.standard.string(forKey: "models.revision.custom") else {
-                throw CancellationError()
+            // Every custom provider; the first failure is passed on once the others are read.
+            var count = 0
+            var failure: Error?
+            for custom in CustomProviders.all {
+                do { count += try await refresh(custom: custom.id) }
+                catch is CancellationError { throw CancellationError() }
+                catch { failure = failure ?? error }
             }
-            UserDefaults.standard.set(ids, forKey: "models.listed.custom")
-            ModelKeys.saved += 1
-            return ids.count
+            if let failure, count == 0 { throw failure }
+            return count
         }
         guard let request = request(provider) else { return 0 }
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -102,6 +117,41 @@ enum ModelCatalog {
         UserDefaults.standard.set(ids, forKey: "models.listed.\(provider.rawValue)")
         ModelKeys.saved += 1
         return ids.count
+    }
+
+    /// Reads one custom provider's model list, from its first address that answers, with its key
+    /// (sent only to that service). Its Realtime models go to its live voice list.
+    @MainActor
+    static func refresh(custom id: UUID) async throws -> Int {
+        guard let provider = CustomProviders.provider(id) else { return 0 }
+        let key = CustomProviders.key(id)
+        let revision = UserDefaults.standard.string(forKey: "models.revision.custom.\(id.uuidString)")
+        let addresses = provider.endpoints.map(\.normalized).filter { !$0.isEmpty }
+        var raw: [String]?
+        var failure: Error = DiscoveryError.invalidAddress
+        for address in addresses {
+            do { raw = try await fetchCustomIDs(address: address, key: key); break }
+            catch is CancellationError { throw CancellationError() }
+            catch let error as DiscoveryError where error == .network || error == .server { failure = error }
+            catch { failure = error; break }
+        }
+        guard let raw else { throw failure }
+        try Task.checkCancellation()
+        guard let now = CustomProviders.provider(id), now.endpoints.map(\.normalized).filter({ !$0.isEmpty }) == addresses,
+              key == CustomProviders.key(id),
+              revision == UserDefaults.standard.string(forKey: "models.revision.custom.\(id.uuidString)") else {
+            throw CancellationError()
+        }
+        let ids = chatIDs(raw)
+        UserDefaults.standard.set(ids, forKey: "models.listed.custom.\(id.uuidString)")
+        UserDefaults.standard.set(voiceIDs(raw), forKey: "models.listed.voice.custom.\(id.uuidString)")
+        ModelKeys.saved += 1
+        return ids.count
+    }
+
+    /// The Realtime models in a list: live voice can use them.
+    static func voiceIDs(_ ids: [String]) -> [String] {
+        Array(Set(ids.filter { $0.contains("realtime") && !$0.contains("transcribe") })).sorted()
     }
 
     /// Chat models only: no embeddings, speech, images or moderation.
@@ -191,6 +241,16 @@ enum ModelCatalog {
 
     /// Uses draft credentials without changing the account or its cached models.
     static func fetchCustom(address: String, key: String?, session: URLSession = .shared) async throws -> [String] {
+        chatIDs(try await fetchCustomIDs(address: address, key: key, session: session))
+    }
+
+    /// The chat models of a list, fast ones first.
+    private static func chatIDs(_ ids: [String]) -> [String] {
+        Array(Set(ids.filter { usable($0, .custom) })).sorted { fast($0) == fast($1) ? $0 < $1 : fast($0) }
+    }
+
+    /// Every model id a custom address lists, chat or not.
+    static func fetchCustomIDs(address: String, key: String?, session: URLSession = .shared) async throws -> [String] {
         let request = try customRequest(address: address, key: key)
         let data: Data
         let response: URLResponse
@@ -211,49 +271,85 @@ enum ModelCatalog {
               let items = (json["data"] ?? json["models"]) as? [[String: Any]] else {
             throw DiscoveryError.malformed
         }
-        let ids = items.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }
+        return items.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }
             .map { $0.hasPrefix("models/") ? String($0.dropFirst(7)) : $0 }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && usable($0, .custom) }
-        return Array(Set(ids)).sorted { fast($0) == fast($1) ? $0 < $1 : fast($0) }
+            .filter { !$0.isEmpty }
     }
 
-    /// Also invalidates in-flight refreshes, including an address changed away and back again.
+    /// Forgets one custom provider's model list. Also invalidates in-flight refreshes, including an
+    /// address changed away and back again.
+    static func invalidateCustom(_ id: UUID) {
+        UserDefaults.standard.removeObject(forKey: "models.listed.custom.\(id.uuidString)")
+        UserDefaults.standard.set(UUID().uuidString, forKey: "models.revision.custom.\(id.uuidString)")
+    }
+
+    /// Every custom provider's.
     static func invalidateCustom() {
-        UserDefaults.standard.removeObject(forKey: "models.listed.custom")
-        UserDefaults.standard.set(UUID().uuidString, forKey: "models.revision.custom")
+        for provider in CustomProviders.all { invalidateCustom(provider.id) }
     }
 
     // MARK: Voice
 
-    /// Live voice models (OpenAI Realtime): the built-in one and any the key's list adds, off at first.
+    /// Live voice models (Realtime): for OpenAI the built-in one and any the key's list adds, off at
+    /// first; for a custom provider the Realtime models its list names (the built-in one's name until it
+    /// has been read).
     static let voiceDefault = "gpt-realtime-2.1"
 
-    static var voiceAll: [ChatModelChoice] {
-        let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault }
-        return [ChatModelChoice(id: voiceDefault, name: "GPT Realtime 2.1")] + listed.map { ChatModelChoice(id: $0, name: $0) }
+    static func voiceChoices(for account: VoiceAccount) -> [ChatModelChoice] {
+        switch account {
+        case .openai:
+            let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault }
+            return [ChatModelChoice(id: voiceDefault, name: "GPT Realtime 2.1")] + listed.map { ChatModelChoice(id: $0, name: $0) }
+        case .custom(let id):
+            let listed = UserDefaults.standard.stringArray(forKey: "models.listed.voice.custom.\(id.uuidString)") ?? []
+            return (listed.isEmpty ? [voiceDefault] : listed).map { ChatModelChoice(id: $0, name: $0) }
+        }
     }
 
-    static var voiceEnabled: Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: "models.enabled.voice") ?? [voiceDefault])
+    static func voiceOn(for account: VoiceAccount) -> Set<String> {
+        if let saved = UserDefaults.standard.stringArray(forKey: "models.enabled.voice" + account.storeSuffix) { return Set(saved) }
+        switch account {
+        case .openai: return [voiceDefault]
+        case .custom: return Set(voiceChoices(for: account).prefix(1).map(\.id))
+        }
     }
 
-    static func setVoice(_ id: String, on: Bool) {
-        var ids = voiceEnabled
+    static func setVoice(_ id: String, on: Bool, for account: VoiceAccount = VoiceDirect.settingsAccount) {
+        var ids = voiceOn(for: account)
         if on { ids.insert(id) } else { ids.remove(id) }
-        UserDefaults.standard.set(Array(ids), forKey: "models.enabled.voice")
-        if !ids.contains(voiceModel) { voiceModel = voiceAll.first { ids.contains($0.id) }?.id ?? voiceDefault }
+        UserDefaults.standard.set(Array(ids), forKey: "models.enabled.voice" + account.storeSuffix)
+        if !ids.contains(voiceModelID(for: account)) {
+            setVoiceModelID(voiceChoices(for: account).first { ids.contains($0.id) }?.id ?? voiceDefault, for: account)
+        }
         ModelKeys.saved += 1
     }
 
-    static var voiceAvailable: [ChatModelChoice] { voiceAll.filter { voiceEnabled.contains($0.id) } }
+    static func voiceOffered(for account: VoiceAccount) -> [ChatModelChoice] {
+        let on = voiceOn(for: account)
+        return voiceChoices(for: account).filter { on.contains($0.id) }
+    }
 
-    /// The live voice model.
+    /// An account's live voice model.
+    static func voiceModelID(for account: VoiceAccount) -> String {
+        let fallback = voiceOffered(for: account).first?.id ?? voiceChoices(for: account).first?.id ?? voiceDefault
+        let saved = UserDefaults.standard.string(forKey: "voice.model" + account.storeSuffix) ?? fallback
+        return voiceOn(for: account).contains(saved) ? saved : fallback
+    }
+
+    static func setVoiceModelID(_ id: String, for account: VoiceAccount) {
+        UserDefaults.standard.set(id, forKey: "voice.model" + account.storeSuffix)
+        ModelKeys.saved += 1
+    }
+
+    // The account live voice runs on (OpenAI until a custom provider has live voice on).
+    static var voiceAll: [ChatModelChoice] { voiceChoices(for: VoiceDirect.settingsAccount) }
+    static var voiceEnabled: Set<String> { voiceOn(for: VoiceDirect.settingsAccount) }
+    static var voiceAvailable: [ChatModelChoice] { voiceOffered(for: VoiceDirect.settingsAccount) }
+
+    /// The live voice model of the account live voice runs on.
     static var voiceModel: String {
-        get {
-            let saved = UserDefaults.standard.string(forKey: "voice.model") ?? voiceDefault
-            return voiceEnabled.contains(saved) ? saved : voiceAvailable.first?.id ?? voiceDefault
-        }
-        set { UserDefaults.standard.set(newValue, forKey: "voice.model"); ModelKeys.saved += 1 }
+        get { voiceModelID(for: VoiceDirect.settingsAccount) }
+        set { setVoiceModelID(newValue, for: VoiceDirect.settingsAccount) }
     }
 }

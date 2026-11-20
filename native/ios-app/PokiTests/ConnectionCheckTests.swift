@@ -133,6 +133,44 @@ final class ConnectionCheckTests: XCTestCase {
         return await ConnectionCheck.run(.custom, key: key, customURL: "https://model-server.test/v1", modelID: "house-model")
     }
 
+    /// Automatic tries the Responses API first; an address without it (404 at /responses) is tested
+    /// again in chat completions, and the check says which one answered.
+    func testAutomaticFallsBackToChatCompletionsWhereThereIsNoResponsesAPI() async {
+        let chunk = #"{"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"house-model","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#
+        ModelServerStub.responder = { request, _ in
+            if request.url?.path == "/v1/responses" { return (404, "application/json", #"{"error":{"message":"Not Found"}}"#) }
+            return (200, "text/event-stream", "data: \(chunk)\n\ndata: [DONE]\n\n")
+        }
+        let run = await ConnectionCheck.runCustom(url: "https://model-server.test/v1", key: key, modelID: "house-model", api: .automatic, reasoning: nil)
+        XCTAssertTrue(run.result.passed)
+        XCTAssertEqual(run.api, .chatCompletions)
+        XCTAssertEqual(ModelServerStub.requests.map { $0.url?.path }, ["/v1/responses", "/v1/chat/completions"])
+    }
+
+    /// The Responses API is spoken where it is chosen, with the model's reasoning when the owner turns
+    /// thinking on, as the official OpenAI account sends it.
+    func testResponsesIsSentToTheResponsesPathWithReasoning() async throws {
+        ModelServerStub.answer = (404, #"{"error":{"message":"Not Found"}}"#)
+        let run = await ConnectionCheck.runCustom(url: "https://model-server.test/v1", key: key, modelID: "house-model", api: .responses, reasoning: true)
+        XCTAssertFalse(run.result.passed)
+        XCTAssertEqual(run.api, .responses)
+        let sent = try XCTUnwrap(ModelServerStub.requests.first)
+        XCTAssertEqual(sent.url?.path, "/v1/responses")
+        XCTAssertEqual(sent.json["model"] as? String, "house-model")
+        XCTAssertEqual(sent.json["store"] as? Bool, false)
+        XCTAssertEqual((sent.json["reasoning"] as? [String: Any])?["effort"] as? String, "low")
+        XCTAssertEqual(ModelServerStub.requests.count, 1)
+    }
+
+    func testOnlyAMissingResponsesAPIFallsBack() {
+        XCTAssertTrue(ConnectionCheck.lacksResponses(.noEndpoint))
+        XCTAssertTrue(ConnectionCheck.lacksResponses(.failed(status: 405, reason: nil)))
+        XCTAssertFalse(ConnectionCheck.lacksResponses(.badKey(reason: nil)))
+        XCTAssertFalse(ConnectionCheck.lacksResponses(.unreachable(reason: nil)))
+        XCTAssertFalse(ConnectionCheck.lacksResponses(.timedOut))
+        XCTAssertFalse(ConnectionCheck.lacksResponses(.works(model: "m")))
+    }
+
     func testOpenCodeConnectionCheckSendsAnIsolatedSessionHeader() async {
         ModelServerStub.responder = { request, _ in
             let session = request.value(forHTTPHeaderField: "x-opencode-session")
@@ -273,7 +311,7 @@ final class ConnectionCheckTests: XCTestCase {
         XCTAssertNil(checkSent.json["thinking"])
 
         let reasoningModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-terra"))
-        let reasoningLoop = PiLoop(provider: .openrouter, model: reasoningModel, tools: []) { _ in
+        let reasoningLoop = PiLoop(provider: .openrouter, model: reasoningModel, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let reasoningOutcome = await reasoningLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -323,7 +361,7 @@ final class ConnectionCheckTests: XCTestCase {
 
         ModelServerStub.recordedReset()
         let solModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-sol"))
-        let solLoop = PiLoop(provider: .openrouter, model: solModel, tools: []) { _ in
+        let solLoop = PiLoop(provider: .openrouter, model: solModel, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let solOutcome = await solLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -366,7 +404,7 @@ final class ConnectionCheckTests: XCTestCase {
         func chatRequest(_ modelID: String) async throws -> ModelServerStub.Sent {
             ModelServerStub.recordedReset()
             let model = try XCTUnwrap(ModelProvider.anthropic.piModel(modelID))
-            let loop = PiLoop(provider: .anthropic, model: model, tools: []) { _ in
+            let loop = PiLoop(provider: .anthropic, model: model, sessionID: UUID().uuidString, tools: []) { _ in
                 .init(text: "", jpeg: nil, isError: false)
             }
             let outcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }

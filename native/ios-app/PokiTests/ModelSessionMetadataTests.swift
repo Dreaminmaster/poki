@@ -138,7 +138,8 @@ final class ModelSessionMetadataTests: XCTestCase {
     }
 
     private func withRoutingFixture(_ body: (AppModel, SessionStore) async throws -> Void) async throws {
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiChat"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiChat",
+                    CustomProviders.storeKey, CustomProviders.selectedKey, "chat.model.custom", "chat.models.custom"]
         let original = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "ModelSessionMetadataTests-" + UUID().uuidString
@@ -150,9 +151,10 @@ final class ModelSessionMetadataTests: XCTestCase {
             defaults.removePersistentDomain(forName: suite)
         }
         UserDefaults.standard.removeObject(forKey: "pokiChat")
+        // Never edit the owner's configured provider or reuse its secret/backups.
+        let provider = CustomProviders.upsert(CustomProvider(endpoints: [CustomEndpoint(url: "http://127.0.0.1:1/v1")], model: "routing-fixture"))
         ModelKeys.selectedProvider = .custom
-        ModelKeys.customURL = "http://127.0.0.1:1/v1"
-        ModelKeys.customModel = "routing-fixture"
+        ModelKeys.selectedModel = CustomProviders.choiceID(provider.id, provider.model)
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         app.inProcessReadyForProbe()
         try await body(app, SessionStore(folder: folder, defaults: defaults))

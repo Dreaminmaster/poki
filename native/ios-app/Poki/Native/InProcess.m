@@ -586,12 +586,20 @@ static BOOL PKSameDisplay(PKDisplayGeometry a, PKDisplayGeometry b) {
 @property (nonatomic) BOOL paneLocal;
 @property (nonatomic) uint64_t generation;
 @property (nonatomic, copy) NSString *identity;
+@property (nonatomic, copy, nullable) NSString *targetBundle;
 /// The labels from the resolved trees, used to revalidate with a fresh image alone when still visible.
 @property (nonatomic, copy) NSSet<NSString *> *leftLabels, *rightLabels;
 /// Downsampled grayscale of the unobscured part of each pane. Kept in memory for this selection.
 @property (nonatomic, copy) NSArray<NSData *> *appearance;
 @end
 @implementation PKWorkspace
+@end
+
+@interface PKDuoCompanionTask : NSObject
+@property (nonatomic, copy, nullable) NSString *initialPokiPane;
+@property (atomic, strong, nullable) PKWorkspace *target;
+@end
+@implementation PKDuoCompanionTask
 @end
 
 static int PKPIDAt(id ax, CGRect pane, PKDisplayGeometry display) {
@@ -999,6 +1007,7 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
     NSNumber *_capturedDisplay;
     uint64_t _duoCaptureRequest;
     PKWorkspace *_workspace;
+    PKDuoCompanionTask *_duoCompanionTask;
     /// Bundle ids by pid, asked of testmanagerd once per process (a round trip each, on every read before).
     NSMutableDictionary<NSNumber *, NSString *> *_bundleByPID;
     uint64_t _bundleGeneration;
@@ -1066,6 +1075,37 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
 }
 
 - (BOOL)hasSelectedPane { return self.selectedWorkspace != nil; }
+
+- (PKDuoCompanionTask *)duoCompanionTask {
+    @synchronized (self) { return _duoCompanionTask; }
+}
+
+- (BOOL)hasDuoCompanionTask { return self.duoCompanionTask != nil; }
+
+- (BOOL)beginDuoCompanionTask {
+    NSString *placement = self.duoPlacement;
+    if (!placement || [placement isEqualToString:@"fullscreen"] || self.hasSelectedPane) return NO;
+    @synchronized (self) {
+        _duoCompanionTask = [PKDuoCompanionTask new];
+        _duoCompanionTask.initialPokiPane = [placement isEqualToString:@"split-unknown"] ? nil : placement;
+        _capturedDisplay = nil;
+        _lastFront = nil;
+        _viewport = CGRectNull;
+        _inputs++;
+    }
+    return YES;
+}
+
+- (void)endDuoCompanionTask {
+    @synchronized (self) {
+        if (!_duoCompanionTask) return;
+        _duoCompanionTask = nil;
+        _capturedDisplay = nil;
+        _lastFront = nil;
+        _viewport = CGRectNull;
+        _inputs++;
+    }
+}
 
 - (CGRect)otherWorkspacePane {
     PKWorkspace *workspace = self.selectedWorkspace;
@@ -1174,7 +1214,8 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
 
 /// The observed layout, with AX identity and physical positions independent of keyboard focus.
 - (PKWorkspace *)workspaceOn:(PKDisplayGeometry)display ax:(id)ax session:(id)session
-                   generation:(uint64_t)generation known:(PKWorkspace *)known elements:(NSArray **)elements {
+                   generation:(uint64_t)generation known:(PKWorkspace *)known
+                    pointHits:(BOOL)pointHits elements:(NSArray **)elements {
     if (!PKIsDuo() || !display.routesDisplay || CGRectGetWidth(display.bounds) <= CGRectGetHeight(display.bounds)) return nil;
     if (!CGRectIsNull(display.peer)) {
         if (![self isPokiSceneVisible]) return nil;
@@ -1188,7 +1229,8 @@ static NSInteger PKWorkspaceAppearanceOrder(NSArray<NSData *> *current, NSArray<
     if (active.count < 2) return nil;
     CGRect leftProbe, rightProbe;
     CGRectDivide(display.bounds, &leftProbe, &rightProbe, CGRectGetWidth(display.bounds) / 2, CGRectMinXEdge);
-    int leftHit = PKPIDAt(ax, leftProbe, display), rightHit = PKPIDAt(ax, rightProbe, display);
+    int leftHit = pointHits ? PKPIDAt(ax, leftProbe, display) : 0;
+    int rightHit = pointHits ? PKPIDAt(ax, rightProbe, display) : 0;
     if (leftHit == getpid() || rightHit == getpid()) return nil;
     NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
     NSMutableSet<NSNumber *> *seen = [NSMutableSet new];
@@ -1284,7 +1326,59 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
         CGRectEqualToRect(a.left, b.left) && CGRectEqualToRect(a.right, b.right);
 }
 
+- (id)hiddenCompanion:(PKWorkspace *)target display:(PKDisplayGeometry)display ax:(id)ax
+              session:(id)session generation:(uint64_t)generation viewport:(CGRect *)viewport {
+    if (!PKSameDisplay(target.display, display) || self.screenLocked) return nil;
+    int pid = target.selectRight ? target.rightPID : target.leftPID;
+    CGRect pane = target.selectRight ? target.right : target.left;
+    CGRect left, right;
+    CGRectDivide(display.bounds, &left, &right, CGRectGetWidth(display.bounds) / 2, CGRectMinXEdge);
+    int hit = PKPIDAt(ax, pane, display);
+    int otherHit = PKPIDAt(ax, target.selectRight ? left : right, display);
+    if (hit > 0 && hit != pid && otherHit == pid) return nil;
+    for (id app in PKActiveApplications(ax)) {
+        if (PKAXPid(app) != pid) continue;
+        NSString *otherBundle = otherHit > 0 && otherHit != pid ? [self bundleForPID:otherHit session:session] : nil;
+        BOOL otherApp = otherBundle.length && ![otherBundle isEqualToString:@"com.apple.springboard"] &&
+                        ![otherBundle isEqualToString:@"com.apple.SleepLockScreen"];
+        if (hit == pid && otherApp) {
+            *viewport = pane;
+            return app;
+        }
+        id root = PKRequestSnapshotWithin(0.6, ax, app, 2, 24, NULL);
+        if (!otherApp && CGRectEqualToRect(PKDuoFullWindow(root), display.bounds)) {
+            *viewport = display.bounds;
+            return app;
+        }
+        if (hit == pid && otherHit != pid) {
+            *viewport = pane;
+            return app;
+        }
+        break;
+    }
+
+    // Point tests can follow keyboard focus. Resolve an ambiguous pair from its
+    // window frames or independently match the visible screen to its AX labels.
+    display.peer = CGRectNull;
+    NSArray *elements = nil;
+    PKWorkspace *observed = [self workspaceOn:display ax:ax session:session generation:generation known:nil pointHits:NO elements:&elements];
+    if (!observed || pid != (target.selectRight ? observed.rightPID : observed.leftPID)) {
+        NSLog(@"PokiInProcess: companion pane unconfirmed (point pair %@/%@, window pair %@)",
+              hit == pid ? @"target" : hit > 0 ? @"other" : @"none",
+              otherHit == pid ? @"target" : otherHit > 0 ? @"other" : @"none",
+              observed ? @"elsewhere" : @"unavailable");
+        return nil;
+    }
+    CGRect observedPane = target.selectRight ? observed.right : observed.left;
+    *viewport = CGRectIntersection(pane, observedPane);
+    return CGRectIsEmpty(*viewport) ? nil : elements[target.selectRight ? 1 : 0];
+}
+
 - (NSDictionary<NSString *, id> *)selectPane:(NSString *)side code:(NSString **)code {
+    if (self.hasDuoCompanionTask) {
+        if (code) *code = @"the task is already using its companion pane";
+        return nil;
+    }
     if ([side isEqualToString:@"auto"]) {
         if (self.selectedWorkspace) [self setWorkspace:nil];
         return @{};
@@ -1293,7 +1387,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     uint64_t generation = 0;
     id session = [self current:&generation outcome:&refused];
     PKDisplayGeometry display = self.displayGeometry;
-    PKWorkspace *workspace = session ? [self workspaceOn:display ax:[self accessibilityFor:generation] session:session generation:generation known:self.selectedWorkspace elements:NULL] : nil;
+    PKWorkspace *workspace = session ? [self workspaceOn:display ax:[self accessibilityFor:generation] session:session generation:generation known:self.selectedWorkspace pointHits:YES elements:NULL] : nil;
     if (!workspace || !PKSameDisplay(display, self.displayGeometry)) {
         if (code) *code = @"the visible apps could not be confirmed; open the target app in Split View";
         return nil;
@@ -1324,7 +1418,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     uint64_t generation = 0;
     id session = [self current:&generation outcome:&refused];
     PKDisplayGeometry display = self.displayGeometry;
-    PKWorkspace *current = session ? [self workspaceOn:display ax:[self accessibilityFor:generation] session:session generation:generation known:selected elements:NULL] : nil;
+    PKWorkspace *current = session ? [self workspaceOn:display ax:[self accessibilityFor:generation] session:session generation:generation known:selected pointHits:YES elements:NULL] : nil;
     if (selected != self.selectedWorkspace || !PKSameWorkspace(selected, current) || !PKSameDisplay(display, self.displayGeometry))
         return @"the Split View apps or layout changed; look at the target pane again";
     return nil;
@@ -1508,6 +1602,20 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     NSString *workspaceFailure = [self validateSelectedPane];
     if (workspaceFailure) return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:workspaceFailure];
     PKWorkspace *workspace = self.selectedWorkspace;
+    PKDuoCompanionTask *companionTask = self.duoCompanionTask;
+    if (companionTask) {
+        if (!geometry.routesDisplay || !PKSameDisplay(geometry, self.displayGeometry))
+            return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"look at the target pane before tapping"];
+        NSDictionary *target = nil;
+        [self front:&target ax:NULL code:NULL timeout:1.75];
+        NSValue *frame = target[@"pane"];
+        if (!frame || !CGRectEqualToRect(frame.CGRectValue, self.viewport))
+            return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"look at the target pane before tapping"];
+        for (NSArray<PKTouchPoint *> *finger in fingers)
+            for (PKTouchPoint *point in finger)
+                if (!CGRectContainsPoint(frame.CGRectValue, point.point))
+                    return [PKOutcome delivery:PKDeliveryNotSent code:@"outside_target_pane" detail:nil];
+    }
     [self forgetFront];
     PKOutcome *refused;
     uint64_t generation = 0;
@@ -1571,7 +1679,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                 return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the captured display changed before dispatch"];
         }
     }
-    if (geometry.routesDisplay && !PKSameDisplay(geometry, self.displayGeometry))
+    if (companionTask != self.duoCompanionTask || (geometry.routesDisplay && !PKSameDisplay(geometry, self.displayGeometry)))
         return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the display changed before dispatch"];
     SRActionContext *context = [self contextFor:session generation:generation];
     NSError *error;
@@ -1584,7 +1692,8 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     }];
     [context markDispatched];
     PKOutcome *outcome = [self await:context timeout:timeout started:started generation:generation];
-    if (workspace && (workspace != self.selectedWorkspace || !PKSameDisplay(geometry, self.displayGeometry)))
+    if ((workspace || companionTask) &&
+        (workspace != self.selectedWorkspace || companionTask != self.duoCompanionTask || !PKSameDisplay(geometry, self.displayGeometry)))
         return [PKOutcome delivery:PKDeliveryUnknown code:@"split_view_changed_after_dispatch" detail:@"verify where the gesture landed"];
     return outcome;
 }
@@ -1595,8 +1704,11 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
 
 - (PKOutcome *)type:(NSString *)text typingSpeed:(NSUInteger)speed timeout:(double)timeout {
     PKWorkspace *workspace = self.selectedWorkspace;
-    if (workspace) {
-        if (!PKSameDisplay(workspace.display, self.displayGeometry))
+    PKDuoCompanionTask *companionTask = self.duoCompanionTask;
+    PKDisplayGeometry display = {0};
+    if (workspace || companionTask) {
+        display = self.displayGeometry;
+        if (workspace && !PKSameDisplay(workspace.display, display))
             return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the display changed before typing"];
         if (![self selectedPaneHasKeyboardFocus]) {
             return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_focus_unconfirmed"
@@ -1611,29 +1723,32 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     SRActionContext *context = [self contextFor:session generation:generation];
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
     NSError *error;
-    if (workspace && !PKSameDisplay(workspace.display, self.displayGeometry))
+    if (companionTask != self.duoCompanionTask || ((workspace || companionTask) && !PKSameDisplay(display, self.displayGeometry)))
         return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the display changed before typing"];
     if (!SRInsertTextAtSpeed(session, text, speed, context, &error)) {
         return [PKOutcome delivery:PKDeliveryNotSent code:error.localizedDescription ?: @"text_not_sent" detail:nil];
     }
     PKOutcome *outcome = [self await:context timeout:timeout started:started generation:generation];
-    if (workspace && !PKSameDisplay(workspace.display, self.displayGeometry))
+    if ((workspace || companionTask) &&
+        (companionTask != self.duoCompanionTask || !PKSameDisplay(display, self.displayGeometry)))
         return [PKOutcome delivery:PKDeliveryUnknown code:@"split_view_changed_after_dispatch" detail:@"verify the field before trying again"];
     return outcome;
 }
 
 - (BOOL)selectedPaneHasKeyboardFocus {
     PKWorkspace *workspace = self.selectedWorkspace;
-    if (!workspace) return NO;
+    PKDuoCompanionTask *companionTask = self.duoCompanionTask;
+    if (!workspace && !companionTask) return NO;
     NSDictionary *info = nil;
     id ax = nil;
-    id element = [self sharedFront:&info ax:&ax code:NULL];
-    if (!element || workspace != self.selectedWorkspace) return NO;
+    id element = companionTask ? [self front:&info ax:&ax] : [self sharedFront:&info ax:&ax code:NULL];
+    NSValue *observed = info[@"pane"];
+    if (!element || !observed || workspace != self.selectedWorkspace) return NO;
     id root = PKRequestSnapshotWithin(1.4, ax, element, 24, 600, NULL);
     if (!root) return NO;
-    CGRect pane = workspace.selectRight ? workspace.right : workspace.left;
-    if (workspace.paneLocal) pane.origin = CGPointZero;
-    CGFloat offset = PKCompanionTreeOffset(root, workspace.display, pane);
+    CGRect pane = observed.CGRectValue;
+    if ([info[@"paneLocal"] boolValue]) pane.origin = CGPointZero;
+    CGFloat offset = PKCompanionTreeOffset(root, self.displayGeometry, pane);
     NSMutableArray *nodes = [NSMutableArray arrayWithObject:root];
     while (nodes.count) {
         id node = nodes.lastObject;
@@ -1641,8 +1756,9 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
         NSString *type = PKTypeName([node elementType]);
         if ([type hasSuffix:@"Field"] || [type isEqualToString:@"TextView"]) {
             BOOL focused = [node respondsToSelector:@selector(hasKeyboardFocus)] ? [node hasKeyboardFocus] :
-                [node respondsToSelector:@selector(hasFocus)] && [node hasFocus];
-            if (focused && CGRectIntersectsRect(CGRectOffset([node frame], offset, 0), pane)) return workspace == self.selectedWorkspace;
+                !companionTask && [node respondsToSelector:@selector(hasFocus)] && [node hasFocus];
+            if (focused && CGRectIntersectsRect(CGRectOffset([node frame], offset, 0), pane))
+                return workspace == self.selectedWorkspace && companionTask == self.duoCompanionTask;
         }
         NSArray *children = [node children];
         if (children.count) [nodes addObjectsFromArray:children];
@@ -1681,8 +1797,13 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     @try {
         NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
         PKWorkspace *selected = self.selectedWorkspace;
+        PKDuoCompanionTask *companionTask = self.duoCompanionTask;
         PKDisplayGeometry geometry = self.displayGeometry;
         BOOL companion = selected && (selected.leftPID == getpid() || selected.rightPID == getpid());
+        if (companionTask && (CGRectIsNull(geometry.peer) || (!refreshViewport && !self.isPokiSceneVisible))) {
+            if (code) *code = @"target_pane_unconfirmed";
+            return nil;
+        }
         if (PKIsDuo() && PKDuoLocalPaneScale(geometry) && [self isPokiSceneVisible]) {
             if (code) *code = @"target_display_unavailable";
             return nil;
@@ -1709,7 +1830,16 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
         if (selected && refreshViewport && ![self sharedFront:&workspaceFront ax:NULL code:code]) return nil;
         NSValue *heldPane = nil;
         if (!refreshViewport && !CGRectIsNull(geometry.peer)) {
-            if (companion) {
+            if (companionTask) {
+                workspaceFront = [self heldCompanionInfo:geometry];
+                PKWorkspace *target = companionTask.target;
+                NSString *pokiPane = target.selectRight ? @"left" : @"right";
+                int targetPID = target.selectRight ? target.rightPID : target.leftPID;
+                if (target && [workspaceFront[@"pokiPane"] isEqualToString:pokiPane] &&
+                    [workspaceFront[@"pid"] intValue] == targetPID &&
+                    [workspaceFront[@"bundleId"] isEqualToString:target.targetBundle])
+                    heldPane = workspaceFront[@"pane"];
+            } else if (companion) {
                 workspaceFront = [self heldCompanionInfo:geometry];
                 if ([workspaceFront[@"identity"] isEqualToString:selected.identity]) heldPane = workspaceFront[@"pane"];
             } else if (selected && selected.generation == self.generation && PKSameDisplay(selected.display, geometry)) {
@@ -1718,7 +1848,10 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                 heldPane = [self heldCompanionInfo:geometry][@"pane"];
             }
         }
-        if (selected && !refreshViewport && !heldPane) { if (code) *code = @"target_pane_unconfirmed"; return nil; }
+        if ((selected || companionTask) && !refreshViewport && !heldPane) {
+            if (code) *code = @"target_pane_unconfirmed";
+            return nil;
+        }
         id screen = request ? PKUniqueAutomationScreen(geometry) : PKAutomationScreen(geometry);
         if (!screen) { if (code) *code = @"target_display_unavailable"; return nil; }
         // A JPEG from testmanagerd (what WebDriverAgent uses): a fraction of the PNG's bytes to
@@ -1746,8 +1879,10 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
             // Read the crop before exposing any pixels to PokiCore. Share the target lookup with
             // the tree read; during a held request use only a previously confirmed split crop.
             PKDisplayGeometry current = self.displayGeometry;
-            if ((request || selected || !CGRectIsNull(geometry.peer) || !CGRectIsNull(current.peer)) &&
-                (selected != self.selectedWorkspace || !PKSameDisplay(geometry, current))) {
+            if (companionTask != self.duoCompanionTask ||
+                (companionTask && !refreshViewport && !self.isPokiSceneVisible) ||
+                ((request || selected || !CGRectIsNull(geometry.peer) || !CGRectIsNull(current.peer)) &&
+                 (selected != self.selectedWorkspace || !PKSameDisplay(geometry, current)))) {
                 if (code) *code = @"display_changed_during_screenshot";
                 return nil;
             }
@@ -1797,6 +1932,8 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                 }
                 @synchronized (self) {
                     if ((request && request != _duoCaptureRequest) ||
+                        (companionTask && (companionTask != _duoCompanionTask || inputs != _inputs ||
+                         (!refreshViewport && [workspaceFront[@"companionGeneration"] unsignedLongLongValue] != _sessions.generation))) ||
                         (companion && (selected != _workspace || inputs != _inputs || selected.generation != _sessions.generation))) {
                         if (code) *code = @"display_changed_during_screenshot";
                         return nil;
@@ -1996,6 +2133,43 @@ static const NSTimeInterval PKWorkspaceFrontSeconds = 4.0;
 static const NSTimeInterval PKFrontSeconds = 2.0;
 static const int PKFrontKey = -1;
 
+- (BOOL)pinDuoCompanion:(PKWorkspace *)observed task:(PKDuoCompanionTask *)task session:(id)session {
+    if (!observed.targetBundle.length || !self.isPokiSceneVisible ||
+        !PKSameDisplay(observed.display, self.displayGeometry) ||
+        ![_sessions isCurrent:session generation:observed.generation]) return NO;
+    NSString *pokiPane = observed.selectRight ? @"left" : @"right";
+    if (task.initialPokiPane && ![task.initialPokiPane isEqualToString:pokiPane]) return NO;
+    @synchronized (self) {
+        if (task != _duoCompanionTask) return NO;
+        if (!task.target) task.target = observed;
+        PKWorkspace *target = task.target;
+        return target.selectRight == observed.selectRight &&
+            (target.selectRight ? target.rightPID == observed.rightPID : target.leftPID == observed.leftPID) &&
+            [target.targetBundle isEqualToString:observed.targetBundle];
+    }
+}
+
+- (BOOL)bindDuoCompanionTarget {
+    PKDuoCompanionTask *task = self.duoCompanionTask;
+    if (!task || !self.isPokiSceneVisible) return NO;
+    if (task.target) return YES;
+    PKDisplayGeometry display = self.displayGeometry;
+    if (CGRectIsNull(display.peer)) return NO;
+    PKOutcome *refused;
+    uint64_t generation = 0;
+    id session = [self current:&generation outcome:&refused];
+    if (!session) return NO;
+    id ax = [self accessibilityFor:generation];
+    PKWorkspace *target = PKBounded(PKFrontKey, PKFrontSeconds, NULL, ^id {
+        id element = nil;
+        PKWorkspace *workspace = [self companionOn:display ax:ax session:session generation:generation known:nil element:&element];
+        if (!workspace) return nil;
+        workspace.targetBundle = [self bundleForPID:PKAXPid(element) session:session];
+        return workspace.targetBundle.length ? workspace : nil;
+    });
+    return [self pinDuoCompanion:target task:task session:session];
+}
+
 /// The front app's AX element, with its bundle id and pid in `info`.
 - (id)front:(NSDictionary **)info ax:(id *)client {
     return [self front:info ax:client code:NULL];
@@ -2003,6 +2177,10 @@ static const int PKFrontKey = -1;
 
 /// The same, with why there is none in `code`.
 - (id)front:(NSDictionary **)info ax:(id *)client code:(NSString **)code {
+    return [self front:info ax:client code:code timeout:0];
+}
+
+- (id)front:(NSDictionary **)info ax:(id *)client code:(NSString **)code timeout:(NSTimeInterval)timeout {
     PKOutcome *refused;
     uint64_t generation = 0;
     id session = [self current:&generation outcome:&refused];
@@ -2017,16 +2195,28 @@ static const int PKFrontKey = -1;
         return nil;
     }
     PKWorkspace *selected = self.selectedWorkspace;
+    PKDuoCompanionTask *companionTask = self.duoCompanionTask;
+    BOOL pokiVisible = companionTask && self.isPokiSceneVisible;
     // Pane-local accessibility needs the workspace's physical placement as well as the app.
     // On rotation recovery, hit tests, two snapshots and visual matching can exceed 2 s.
-    NSDictionary *found = PKBounded(PKFrontKey, selected ? PKWorkspaceFrontSeconds : PKFrontSeconds, &given, ^id {
+    if (timeout == 0) timeout = selected || (companionTask && !pokiVisible) ? PKWorkspaceFrontSeconds : PKFrontSeconds;
+    NSDictionary *found = PKBounded(PKFrontKey, timeout, &given, ^id {
+        PKInProcess *owner = weakSelf;
+        if (!owner) return @{};
         CGRect pane = CGRectNull;
         id chosen = nil;
         BOOL paneLocal = NO;
         NSString *ownPane = nil;
-        if (selected) {
+        PKWorkspace *unboundCompanion = nil;
+        if (companionTask && !pokiVisible) {
+            PKWorkspace *target = companionTask.target;
+            if (!target) return @{};
+            chosen = [owner hiddenCompanion:target display:geometry ax:ax session:session generation:generation viewport:&pane];
+            if (!chosen) return @{};
+            ownPane = target.selectRight ? @"left" : @"right";
+        } else if (selected) {
             NSArray *elements = nil;
-            PKWorkspace *current = [weakSelf workspaceOn:geometry ax:ax session:session generation:generation known:selected elements:&elements];
+            PKWorkspace *current = [weakSelf workspaceOn:geometry ax:ax session:session generation:generation known:selected pointHits:YES elements:&elements];
             if (selected != weakSelf.selectedWorkspace || !PKSameWorkspace(selected, current)) return @{};
             pane = selected.selectRight ? current.right : current.left;
             chosen = elements[selected.selectRight ? 1 : 0];
@@ -2036,10 +2226,20 @@ static const int PKFrontKey = -1;
         } else if (PKIsDuo() && !CGRectIsNull(geometry.peer)) {
             PKWorkspace *companion = [weakSelf companionOn:geometry ax:ax session:session generation:generation known:nil element:&chosen];
             if (!companion) return @{};
+            if (companionTask) {
+                PKWorkspace *target = companionTask.target;
+                if (target) {
+                    int targetPID = target.selectRight ? target.rightPID : target.leftPID;
+                    if (target.selectRight != companion.selectRight || targetPID != PKAXPid(chosen)) return @{};
+                } else {
+                    unboundCompanion = companion;
+                }
+            }
             pane = companion.selectRight ? companion.right : companion.left;
             paneLocal = companion.paneLocal;
             ownPane = companion.selectRight ? @"left" : @"right";
         } else {
+            if (companionTask) return @{};
             chosen = PKForegroundElement(ax, geometry, &pane, ^NSString *(int pid) { return [weakSelf bundleForPID:pid session:session]; });
         }
         int pid = PKAXPid(chosen);
@@ -2057,19 +2257,31 @@ static const int PKFrontKey = -1;
         }
         if (paneLocal) answer[@"paneLocal"] = @YES;
         if (chosen && pid > 0) {
+            NSString *bundle = [owner bundleForPID:pid session:session] ?: @"";
+            if (companionTask && (companionTask != owner.duoCompanionTask ||
+                (!unboundCompanion && ![bundle isEqualToString:companionTask.target.targetBundle]))) return @{};
+            if (unboundCompanion) {
+                unboundCompanion.targetBundle = bundle;
+                answer[@"unboundCompanion"] = unboundCompanion;
+            }
             answer[@"element"] = chosen;
-            answer[@"bundleId"] = [weakSelf bundleForPID:pid session:session] ?: @"";
+            answer[@"bundleId"] = bundle;
             answer[@"pid"] = @(pid);
         }
         return answer;
     });
     if (![found isKindOfClass:NSDictionary.class]) { if (code) *code = given ?: @"no_front_app"; return nil; }
+    PKWorkspace *unboundCompanion = found[@"unboundCompanion"];
+    if (unboundCompanion && ![self pinDuoCompanion:unboundCompanion task:companionTask session:session]) {
+        if (code) *code = @"split_view_changed";
+        return nil;
+    }
     if (info) {
         NSMutableDictionary *copy = [found mutableCopy];
-        [copy removeObjectForKey:@"element"];
+        [copy removeObjectsForKeys:@[@"element", @"unboundCompanion"]];
         *info = copy;
     }
-    if (!found[@"element"] && code) *code = selected ? @"split_view_changed" : @"no_front_app";
+    if (!found[@"element"] && code) *code = selected || companionTask ? @"split_view_changed" : @"no_front_app";
     return found[@"element"];
 }
 
@@ -2168,6 +2380,12 @@ static const int PKFrontKey = -1;
     PKDisplayGeometry scene = self.sceneDisplayGeometry;
     if (!PKIsDuo() || !CGRectIsNull(scene.peer)) return scene;
     if ([self isPokiSceneVisible]) return PKDuoPanelForScene(scene);
+    PKWorkspace *target = self.duoCompanionTask.target;
+    if (target) {
+        PKDisplayGeometry panel = target.display;
+        panel.orientationRevision = scene.orientationRevision;
+        return panel;
+    }
     uint64_t generation = self.generation;
     @synchronized (self) {
         if (_workspace || !_duoPanelGeneration || _duoPanelGeneration != generation) return scene;
@@ -2187,6 +2405,7 @@ static const int PKFrontKey = -1;
 
 - (BOOL)hasDuoCompanion {
     if (!PKIsDuo()) return NO;
+    if (self.hasDuoCompanionTask) return YES;
     PKDisplayGeometry display = self.displayGeometry;
     return !CGRectIsNull(display.peer) || ([self isPokiSceneVisible] && PKDuoLocalPaneScale(display) != 0);
 }
@@ -2316,7 +2535,7 @@ static const int PKFrontKey = -1;
 - (PKDisplayGeometry)readDisplayGeometry {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270100
     if (PKIsDuo()) {
-        if (self.hasSelectedPane || self.isPokiSceneVisible) return self.displayGeometry;
+        if (self.hasSelectedPane || self.hasDuoCompanionTask || self.isPokiSceneVisible) return self.displayGeometry;
         PKOutcome *refused;
         uint64_t generation = 0;
         id session = [self current:&generation outcome:&refused];
@@ -2333,7 +2552,7 @@ static const int PKFrontKey = -1;
 - (CGRect)noteViewport:(CGRect)frame confirmedPane:(NSValue *)confirmed geometry:(PKDisplayGeometry)geometry {
     CGRect screen = geometry.bounds;
     CGRect next = CGRectNull;
-    if (self.selectedWorkspace && confirmed) {
+    if ((self.selectedWorkspace || self.hasDuoCompanionTask) && confirmed) {
         next = confirmed.CGRectValue;
     } else if (!CGRectIsNull(geometry.peer)) {
         if (geometry.panePlacementKnown) next = geometry.peer;
@@ -2561,6 +2780,7 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
 }
 
 - (nullable NSString *)press:(NSString *)name {
+    if (self.hasDuoCompanionTask) return @"not sent: a hardware button would leave the task's pane";
     [self forgetFront];
     @try {
         PKOutcome *refused;
@@ -2608,6 +2828,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
         NSString *ownSide = front[@"pokiPane"] ?: self.duoPlacement;
         if ([action isEqualToString:@"activate"] && [front[@"pokiPane"] length] && [front[@"bundleId"] isEqualToString:bundle]) return nil;
         NSString *targetSide = [ownSide isEqualToString:@"left"] ? @"right" : [ownSide isEqualToString:@"right"] ? @"left" : @"opposite";
+        if (self.hasDuoCompanionTask)
+            return [NSString stringWithFormat:@"not sent: %@ was not confirmed in the task's %@ pane.", bundle, targetSide];
         return [NSString stringWithFormat:@"not sent: keep Poki in Split View. Ask the owner to open %@ in the %@ pane, then look again.", bundle, targetSide];
     }
     [self forgetFront];

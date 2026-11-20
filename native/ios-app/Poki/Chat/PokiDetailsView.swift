@@ -91,10 +91,6 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
-                    NavigationLink(value: DetailsRoute.screenHistory) {
-                        SettingsRow(title: "Screen History", symbol: "rectangle.stack", value: screenHistoryValue)
-                    }
-                    .accessibilityIdentifier("details.screenHistory")
                     NavigationLink(value: DetailsRoute.conversations) {
                         SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
                     }
@@ -131,6 +127,11 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("details.health")
+                    NavigationLink(value: DetailsRoute.screenHistory) {
+                        SettingsRow(title: "Screen History", caption: "Experimental Feature",
+                                    symbol: "rectangle.stack", value: screenHistoryValue)
+                    }
+                    .accessibilityIdentifier("details.screenHistory")
                     .id(Self.lastRow)
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
