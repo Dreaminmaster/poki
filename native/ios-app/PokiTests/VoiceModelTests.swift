@@ -315,6 +315,41 @@ final class VoiceModelTests: XCTestCase {
         h.voice.stop()
     }
 
+    func testLiveDeduplicatesWithoutItemIDByOverlapOrThreeSecondsWithoutNewAudio() async {
+        let scenarios: [(name: String, start: Int, end: Int, sinceTranscript: Double, newAudio: Bool, expected: [String])] = [
+            ("overlap after three seconds", 350, 550, 4, false, ["first"]),
+            ("disjoint at three seconds", 600, 900, 3, false, ["first"]),
+            ("disjoint after three seconds", 600, 900, 3.1, false, ["first", "second"]),
+            ("disjoint with new audio", 600, 900, 1, true, ["first", "second"]),
+        ]
+        for scenario in scenarios {
+            var operations: [String] = []
+            let h = Harness(phoneTool: { _, arguments in
+                operations.append(arguments)
+                return ("verified result", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.input_transcript.delta", "delta": "向下滚动", "start_ms": 200, "end_ms": 400])
+            await h.time.advance(0.5)
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "first"]])
+            h.link.call("first", "do", arguments: "first", delegation: "first")
+            await h.time.settle()
+            XCTAssertEqual(operations, ["first"])
+
+            await h.time.advance(scenario.sinceTranscript - 0.5)
+            if scenario.newAudio {
+                h.link.play(["type": "input_audio_buffer.committed"])
+            }
+            h.link.play(["type": "session.input_transcript.delta", "delta": " 向下滚动！ ",
+                         "start_ms": scenario.start, "end_ms": scenario.end],
+                        ["type": "session.delegation.created", "delegation": ["id": "second"]])
+            h.link.call("second", "do", arguments: "second", delegation: "second")
+            await h.time.settle()
+            XCTAssertEqual(operations, scenario.expected, scenario.name)
+            h.voice.stop()
+        }
+    }
+
     func testLiveEndWaitsForServerConfirmationOrReleasesAfterTimeout() async {
         let confirmed = Harness()
         await confirmed.liveTalk()
