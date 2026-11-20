@@ -1815,20 +1815,27 @@ final class Computer: @unchecked Sendable {
     /// key's tap lands on the keyboard's own return key (Go, Search, Send: `returnKeyLabels`), judged
     /// with the key.
     func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool, backTarget: BackTarget? = nil) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+        let spec = action[kind.rawValue]
+        let localDrag = kind == .drag && spec?["to_pane"] == nil
+        // Photos can put the text of a receipt in the Image's label. A gesture over that image
+        // moves content, even when the label contains a payment or deletion word.
+        func isPhotoContent(_ element: Element?) -> Bool {
+            scan.front?.bundleID == "com.apple.mobileslideshow" && element?.type == "Image"
+        }
         // On a screen read after the numbers were given, a number is judged by what lies where it is touched.
         func under(_ p: (x: Double, y: Double)?) -> Element? { p.flatMap { element(at: $0, in: scan.elements) } }
         func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, judged: Press)? {
             guard let spec else { return nil }
             let atPoint = spec.array != nil || spec["x"] != nil
             let e = unread ? nil : scan.elements == nil || atPoint ? target(spec, in: scan.elements) : under(try? point(spec))
-            return (e, atPoint, .tap)
+            return (localDrag && isPhotoContent(e) ? nil : e, atPoint, .tap)
         }
         func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
             guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
-                  let down = element(at: (path.0, path.1), in: scan.elements), down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
+                  let down = element(at: (path.0, path.1), in: scan.elements), !isPhotoContent(down),
+                  down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
             return [(down, false, .stroke)]
         }
-        let spec = action[kind.rawValue]
         switch kind {
         case .tap, .longPress, .pinch: return [at(spec)].compactMap { $0 }
         // The field is tapped before the text goes.
