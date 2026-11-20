@@ -1,4 +1,4 @@
-name: Timed Screen History agent grant verification
+name: Validate three synchronized Poki contributions
 
 on:
   push:
@@ -9,11 +9,27 @@ permissions:
   contents: read
 
 jobs:
-  screen-history:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 533
+            ref: 9635701231b2c531761f65af1b4c396a14f49428
+            tests: 'ScreenHistoryTests:25 HistoryLockTests:16 ChatHarnessTests:36'
+          - pr: 322
+            ref: 878d4c38e2ec099f144cdcb02e08aa24db661a79
+            tests: 'ModelSessionMetadataTests:10 ConnectionCheckTests:6 ChatHarnessTests:38'
+          - pr: 249
+            ref: 7a2cc92b0c2a418d54ce8a80ab6ad29124f50f9a
+            tests: 'ConversationSearchTests:17 ChatScrollTests:6'
+    name: PR ${{ matrix.pr }}
     runs-on: xcode-27
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
       - name: Select newest released Xcode
         shell: bash
         run: |
@@ -79,7 +95,7 @@ jobs:
           CHOICE="$(python3 /tmp/poki-history-select.py "$SDK" < out/simctl-inventory.json)"
           read -r TYPE RUNTIME <<< "$CHOICE"
           printf 'SDK %s\nDevice type %s\nRuntime %s\n' "$SDK" "$TYPE" "$RUNTIME" | tee out/simulator-selection.log
-          UDID="$(xcrun simctl create "Poki timed history grant" "$TYPE" "$RUNTIME")"
+          UDID="$(xcrun simctl create "Poki history-consent-533" "$TYPE" "$RUNTIME")"
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b 2>&1 | tee out/simulator-boot.log
@@ -87,7 +103,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          native/launcher/fetch-idevice.sh
+          for attempt in 1 2 3; do
+            if native/launcher/fetch-idevice.sh; then break; fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 10
+          done
           rustup target add aarch64-apple-ios-sim
           cargo build --release --locked --target aarch64-apple-ios-sim --manifest-path native/launcher/Cargo.toml
           native/ios-app/scripts/make-assets.sh
@@ -101,8 +121,10 @@ jobs:
             -resultBundlePath out/history-build.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             2>&1 | tee out/build.log
-      - name: Run targeted production ScreenHistoryTests
+      - name: Run required XCTest suites on exact revision
         shell: bash
+        env:
+          TEST_SUITES: ${{ matrix.tests }}
         run: |
           set -euo pipefail
           APP="build/history-review/Build/Products/Debug-iphonesimulator/Poki.app"
@@ -110,58 +132,29 @@ jobs:
           xcrun simctl install "$UDID" "$APP"
           xcrun simctl privacy "$UDID" grant location-always "$BUNDLE"
           TIMEOUT=$(command -v timeout || command -v gtimeout)
-          "$TIMEOUT" 900 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
-            -destination "id=$UDID" -derivedDataPath build/history-review \
-            -only-testing:PokiTests/ScreenHistoryTests -parallel-testing-enabled NO \
-            -resultBundlePath out/history-tests.xcresult \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-            2>&1 | tee out/tests.log
-          xcrun xcresulttool get test-results summary --path out/history-tests.xcresult | tee out/summary.json
-          python3 - <<'PY'
-          import json
-          d = json.load(open("out/summary.json"))
-          assert d["totalTestCount"] >= 22, d
+          for spec in $TEST_SUITES; do
+            suite="${spec%%:*}"
+            minimum="${spec##*:}"
+            "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
+              -destination "id=$UDID" -derivedDataPath build/history-review \
+              -only-testing:PokiTests/$suite -parallel-testing-enabled NO \
+              -resultBundlePath out/$suite.xcresult \
+              CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+              2>&1 | tee "out/$suite.log"
+            xcrun xcresulttool get test-results summary --path "out/$suite.xcresult" | tee "out/$suite.json"
+            python3 - "$suite" "$minimum" <<'PY'
+          import json, sys
+          suite, minimum = sys.argv[1:]
+          d = json.load(open(f"out/{suite}.json"))
+          assert d["totalTestCount"] >= int(minimum), d
           assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
           PY
-      - name: Run broader ChatHarnessTests on the same build
-        shell: bash
-        run: |
-          set -euo pipefail
-          TIMEOUT=$(command -v timeout || command -v gtimeout)
-          "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
-            -destination "id=$UDID" -derivedDataPath build/history-review \
-            -only-testing:PokiTests/ChatHarnessTests -parallel-testing-enabled NO \
-            -resultBundlePath out/chat-tests.xcresult \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-            2>&1 | tee out/chat-tests.log
-          xcrun xcresulttool get test-results summary --path out/chat-tests.xcresult | tee out/chat-summary.json
-          python3 - <<'PY'
-          import json
-          d = json.load(open("out/chat-summary.json"))
-          assert d["totalTestCount"] > 0 and d["failedTests"] == 0 and d["skippedTests"] == 0, d
-          PY
-      - name: Run HistoryLockTests including all upstream cases
-        shell: bash
-        run: |
-          set -euo pipefail
-          TIMEOUT=$(command -v timeout || command -v gtimeout)
-          "$TIMEOUT" 1200 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
-            -destination "id=$UDID" -derivedDataPath build/history-review \
-            -only-testing:PokiTests/HistoryLockTests -parallel-testing-enabled NO \
-            -resultBundlePath out/lock-tests.xcresult \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-            2>&1 | tee out/lock-tests.log
-          xcrun xcresulttool get test-results summary --path out/lock-tests.xcresult | tee out/lock-summary.json
-          python3 - <<'PY'
-          import json
-          d = json.load(open("out/lock-summary.json"))
-          assert d["totalTestCount"] >= 13 and d["failedTests"] == 0 and d["skippedTests"] == 0, d
-          PY
+          done
       - name: Preserve build and test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: history-timed-agent-grant-results
+          name: poki-pr-${{ matrix.pr }}-results
           path: out/
           if-no-files-found: warn
       - name: Delete only the temporary simulator
