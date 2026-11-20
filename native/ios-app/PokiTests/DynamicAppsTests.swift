@@ -67,6 +67,16 @@ final class DynamicAppsTests: XCTestCase {
         XCTAssertNil(KnownApps.launchID("Nonesuch"))
     }
 
+    func testAnExplicitBundleIDKeepsTheRequestedEdition() {
+        let mainland = "tv.danmaku.bilianime"
+        let international = "com.bilibili.inter"
+        DynamicApps.set([.init(id: international, name: "Bilibili", user: true)])
+        XCTAssertEqual(KnownApps.launchID(mainland), mainland)
+
+        DynamicApps.set([.init(id: mainland, name: "哔哩哔哩", user: true)])
+        XCTAssertEqual(KnownApps.launchID(international), international)
+    }
+
     func testANameWithDotsIsAnAppBeforeItIsAnID() {
         XCTAssertNil(AppIconStore.bundleID("A.B.C"), "initials with dots are not a bundle id")
         XCTAssertNil(AppIconStore.bundleID("U.S.A"))
