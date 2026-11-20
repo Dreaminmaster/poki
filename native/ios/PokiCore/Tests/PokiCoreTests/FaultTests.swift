@@ -1571,7 +1571,7 @@ final class GymTests: XCTestCase {
         _ = await core.call("look", [:])
         let dump = "Error Domain=FBSOpenApplicationServiceErrorDomain Code=1 \"The request to open \"com.apple.mobilenotes\" failed.\" UserInfo={BSErrorCodeDescription=RequestDenied, NSUnderlyingError=0x600000c8 {Error Domain=FBSOpenApplicationErrorDomain Code=4 \"Application \"com.apple.mobilenotes\" is unknown to FrontBoard.\" UserInfo={BSErrorCodeDescription=InvalidRequest}}, NSLocalizedFailureReason=Application \"com.apple.mobilenotes\" is unknown to FrontBoard., NSLocalizedDescription=The request to open \"com.apple.mobilenotes\" failed.}"
         wda.set("POST /wda/apps/activate") { _ in (500, ["value": ["error": "unknown error", "message": .string(dump)]]) }
-        let result = await core.call("do", ["actions": [["launch": "com.apple.mobilenotes"]]])
+        let result = await core.call("do", ["actions": [["launch": ["bundle": "com.apple.mobilenotes"]]]])
         XCTAssertTrue(result.text.contains("launch com.apple.mobilenotes: no app with that bundle id is installed on this device"), result.text)
         XCTAssertFalse(result.text.contains("FBSOpen"), result.text)
         XCTAssertTrue(result.text.contains("not sent") || result.text.contains("not_sent"), result.text)
@@ -1594,6 +1594,24 @@ final class GymTests: XCTestCase {
         let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]]])
         XCTAssertTrue(result.text.hasPrefix("app: Photos"), result.text)
         XCTAssertTrue(result.text.contains("the screen was read again (2): com.apple.mobileslideshow was not in front yet"), result.text)
+        XCTAssertFalse(result.isError)
+    }
+
+    /// The same with the quick read on: Photos comes to the front only after the launch's whole pause,
+    /// so the reads made while the screen settles still see Safari, and the read after the pause is
+    /// made again until Photos is in front.
+    func testWithTheQuickReadOnTheReadIsStillMadeAgainUntilTheLaunchedAppIsInFront() async {
+        let (core, wda, _) = makeCore { $0.quickRead = { true } }
+        _ = await core.call("look", [:])
+        let launchedAt = LockedBox<Date?>(nil)
+        wda.set("POST /wda/apps/activate") { _ in launchedAt.value = Date(); return (200, ["value": .null]) }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            guard let at = launchedAt.value, Date().timeIntervalSince(at) > 1.4 else { return (200, ["value": ["bundleId": "com.apple.mobilesafari", "name": "Safari"]]) }
+            return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+        }
+        let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]]])
+        XCTAssertTrue(result.text.hasPrefix("app: Photos"), result.text)
+        XCTAssertTrue(result.text.contains("com.apple.mobileslideshow was not in front yet"), result.text)
         XCTAssertFalse(result.isError)
     }
 

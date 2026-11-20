@@ -173,6 +173,54 @@ final class PathTests: XCTestCase {
         XCTAssertEqual(app.page.value, 1)
     }
 
+    func testAPathReadsAsItsGoalOrItsSteps() {
+        let (core, _, _) = makeCore()
+        XCTAssertEqual(core.computer.label(["path": ["goal": "check the version", "steps": [["tap": "General"]]]]), "Run “check the version”")
+        XCTAssertEqual(core.computer.label(["path": ["steps": [["tap": "General"], ["tap": ["label": "About", "type": "Cell"]], ["swipe": "up"]]]]),
+                       "Tap “General”, then tap “About”, then swipe up")
+        XCTAssertEqual(core.computer.label(["path": [["long_press": "Photo"], ["tap": [200, 122]]]]), "Press and hold “Photo”, then tap at 200, 122")
+    }
+
+    func testAPathWithoutAGoalKeepsTypedTextOutOfActivityAndBusyReply() async {
+        let (core, wda, _) = makeCore {
+            $0.busyWait = 0
+            $0.actionCap = 1.2
+        }
+        let busyReply = LockedBox<String?>(nil)
+        wda.set("POST /wda/tap") { [weak core] _ in
+            busyReply.value = await core?.call("look", [:]).text
+            return (200, ["value": .null])
+        }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["path": ["steps": [
+            ["tap": "General"], ["type": "private search phrase", "into": "Search"],
+        ]]]]])
+
+        XCTAssertTrue(result.text.contains("stopped at step 2"), result.text)
+        XCTAssertTrue(wda.bodies("POST /wda/keys").isEmpty)
+        let started = await core.events.first { event in
+            if case .toolStarted(let activity) = event { return activity.name == "do" }
+            return false
+        }
+        guard case .toolStarted(let activity)? = started else { return XCTFail("No path activity") }
+        XCTAssertEqual(activity.summary, "Tap “General”, then type text")
+        XCTAssertEqual(busyReply.value?.split(separator: "\n").first.map(String.init),
+                       "busy: another call is still running (do: Tap “General”, then type text); nothing was sent. Call again in a moment.")
+    }
+
+    func testASwipeInAPathTakesNoListNumber() async {
+        for step: JSON in [["swipe": ["direction": "up", "in": 3]], ["swipe": "up", "in": 3]] {
+            let wda = FakeWDA()
+            wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
+            let (core, _, _) = makeCore(wda)
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["path": ["steps": [["tap": "General"], step]]]]])
+            XCTAssertTrue(result.text.contains("not in: a number from an earlier read"), "\(step): \(result.text)")
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "\(step): nothing was sent")
+        }
+    }
+
     func testADismissNamingAPaymentControlDoesNotPressIt() async {
         let wda = FakeWDA()
         wda.tree([Node("Button", "Pay", [16, 100, 358, 44])], app: "Shop")
@@ -204,7 +252,7 @@ final class PathTests: XCTestCase {
             ([["launch": "nz.zheha.poki"], ["tap": [200, 122]]], [], false, false),
             ([["launch": "nz.zheha.poki"], ["tap": "Continue"]], ["Never Ask"], true, false),
             // A launch that did not open its app leaves Poki in front.
-            ([["launch": "com.example.gone"], ["tap": [200, 122]]], [], false, true),
+            ([["launch": ["bundle": "com.example.gone"]], ["tap": [200, 122]]], [], false, true),
         ]
         for c in cases {
             let wda = FakeWDA()

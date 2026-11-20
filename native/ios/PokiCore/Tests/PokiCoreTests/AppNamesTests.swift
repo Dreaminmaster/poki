@@ -4,13 +4,17 @@ import XCTest
 
 /// Apps by name, the session's app, and the read that comes as soon as the screen has settled.
 final class AppNamesTests: XCTestCase {
-    static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer"]
+    static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer",
+                        "com.example.alias": "com.example.other"]
+    static let installedApps = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer",
+                                "com.apple.mobiletimer": "com.apple.mobiletimer", "com.example.shop": "com.example.shop"]
 
     func core(names: Bool = true, quick: Bool = true) -> (PokiCore, FakeWDA) {
         let wda = FakeWDA()
         wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
         let (core, _, _) = makeCore(wda) {
             $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
             $0.appNames = { names }
             $0.quickRead = { quick }
         }
@@ -109,6 +113,74 @@ final class AppNamesTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, taps)
     }
 
+    func testAnUnknownNameLaterInTheBatchSendsNothingBeforeIt() async {
+        for actions: [JSON] in [
+            [["tap": 1], ["launch": "Nonesuch"]],
+            [["tap": 1], ["path": ["steps": [["tap": "General"], ["launch": ["name": "Nonesuch"]]]]]],
+        ] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("no app named \"Nonesuch\" is known") && result.text.contains("nothing was sent"), result.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "\(actions): the tap before the unknown name was not sent")
+            XCTAssertEqual(launched(wda), [])
+        }
+    }
+
+    func testExplicitLaunchFieldsKeepTheirMeaningInBatchesAndPaths() async {
+        for inPath in [false, true] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let unknown: JSON = ["launch": ["name": "tutti.ch"]]
+            let actions: [JSON] = inPath
+                ? [["path": ["steps": [["tap": "General"], unknown]]]]
+                : [["tap": 1], unknown]
+            let refused = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(refused.isError, refused.text)
+            XCTAssertTrue(refused.text.contains("no app named \"tutti.ch\" is known") && refused.text.contains("nothing was sent"), refused.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, refused.text)
+            XCTAssertEqual(launched(wda), [], refused.text)
+
+            for bundle in ["vendor.app", "com.example.alias"] {
+                let (core, wda) = self.core()
+                _ = await core.call("look", [:])
+                let launch: JSON = ["launch": ["bundle": .string(bundle)]]
+                let actions: [JSON] = inPath ? [["path": ["steps": [launch]]]] : [launch]
+                let opened = await core.call("do", ["actions": .array(actions)])
+                XCTAssertFalse(opened.isError, opened.text)
+                XCTAssertEqual(launched(wda), [bundle], opened.text)
+            }
+        }
+    }
+
+    func testAnUnknownDottedLaunchShorthandSendsNothing() async {
+        for actions: [JSON] in [
+            [["tap": 1], ["launch": "tutti.ch"]],
+            [["path": ["steps": [["tap": "General"], ["launch": "tutti.ch"]]]]],
+        ] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("tutti.ch") && result.text.contains("nothing was sent"), result.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, result.text)
+            XCTAssertEqual(launched(wda), [], result.text)
+        }
+    }
+
+    func testWithNamesOffTheSessionsAppIsRefusedNotIgnored() async {
+        let (core, wda) = core(names: false)
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["tap": 1]], "app": "Clock"])
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("Apps by Name"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "the tap would have gone to Settings")
+        // Letting go of an app is still taken.
+        let letGo = await core.call("do", ["actions": [["wait": 10]], "app": false])
+        XCTAssertFalse(letGo.isError, letGo.text)
+    }
+
     func testAScreenThatChangedAndHoldsStillIsReadBeforeThePauseIsOver() async {
         let (core, wda) = core()
         _ = await core.call("look", [:])
@@ -157,7 +229,7 @@ final class AppNamesTests: XCTestCase {
         let wda = FakeWDA()
         wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
         let (core, _, _) = makeCore(wda) {
-            $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
             $0.toolDeadline = 25
             $0.readTimeout = 4
         }

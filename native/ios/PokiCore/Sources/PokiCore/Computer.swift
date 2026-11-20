@@ -970,15 +970,20 @@ final class Computer: @unchecked Sendable {
         var actions = actions
         var bound: String?
         if config.appNames() {
-            actions = actions.map(withAppNames)
+            do {
+                actions = try actions.map(resolvingLaunchNames)
+            } catch {
+                return ToolResult(text: "\(error)", jpeg: nil, isError: true)
+            }
             // The session's app: named once, kept until it is let go, a task ends or a new one begins.
             if beginsTask() { sessionApp = nil }
             if let app {
                 if app == .bool(false) || app == .null {
                     sessionApp = nil
-                } else if let given = app.string?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
-                    guard let bundle = config.resolveApp(given) ?? (given.contains(".") && !given.contains(" ") ? given : nil) else {
-                        return ToolResult(text: "do: no app named \"\(given)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
+                } else if let text = app.string,
+                          case let given = text.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
+                    guard let bundle = config.resolveInstalledApp(text) else {
+                        return ToolResult(text: unknownApp(given).message, jpeg: nil, isError: true)
                     }
                     sessionApp = (bundle, given, session)
                     if actions.first?["launch"] == nil, actions.count < 20, await !isInFront(bundle) { actions.insert(["launch": .string(bundle)], at: 0) }
@@ -987,6 +992,10 @@ final class Computer: @unchecked Sendable {
                 }
             }
             if let kept = sessionApp, kept.session == session { bound = kept.bundle }
+        } else if let app, app != .bool(false), app != .null {
+            // Apps by Name is off (the app's Testing Options): the actions would go to whatever app is
+            // in front, so none is sent.
+            return ToolResult(text: "do: app is turned off on this phone (Apps by Name, in Poki's Testing Options); nothing was sent. Send the actions without app, starting with {launch: \"bundle id\"} when the app is not in front", jpeg: nil, isError: true)
         }
         var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask))
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
@@ -1010,26 +1019,46 @@ final class Computer: @unchecked Sendable {
         return front == bundle
     }
 
-    /// A launch by name as a launch by bundle id, also inside a path's steps. A name the host does not
-    /// know is left as it is, and the launch says so.
-    func withAppNames(_ action: JSON) -> JSON {
-        guard case .object(var o) = action else { return action }
-        if let spec = o["launch"] {
-            if let given = spec.string { if let bundle = config.resolveApp(given) { o["launch"] = .string(bundle) } }
-            else if case .object(var inner) = spec, let given = inner["bundle"]?.string ?? inner["name"]?.string ?? inner["app"]?.string {
-                inner["bundle"] = .string(config.resolveApp(given) ?? given)
-                inner["name"] = nil
-                inner["app"] = nil
-                o["launch"] = .object(inner)
+    private func unknownApp(_ name: String) -> ActionFailure {
+        ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+    }
+
+    private func installedLaunchBundle(_ given: String) throws -> String {
+        guard let bundle = config.resolveInstalledApp(given) else {
+            throw unknownApp(given.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return bundle
+    }
+
+    private func resolvingLaunchNames(_ action: JSON) throws -> JSON {
+        guard case .object(var fields) = action else { return action }
+        if let spec = fields["launch"] {
+            if let given = spec.string {
+                fields["launch"] = .string(try installedLaunchBundle(given))
+            } else if case .object(var launch) = spec, launch["bundle"]?.string == nil {
+                if let name = launch["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    guard let bundle = config.resolveApp(name) else { throw unknownApp(name) }
+                    launch["bundle"] = .string(bundle)
+                } else if let given = launch["app"]?.string {
+                    launch["bundle"] = .string(try installedLaunchBundle(given))
+                } else {
+                    return action
+                }
+                launch["name"] = nil
+                launch["app"] = nil
+                fields["launch"] = .object(launch)
             }
-            return .object(o)
+            return .object(fields)
         }
-        if case .object(var path)? = o["path"], let steps = path["steps"]?.array {
-            path["steps"] = .array(steps.map(withAppNames))
-            o["path"] = .object(path)
-            return .object(o)
+        if case .object(var path)? = fields["path"], let steps = path["steps"]?.array {
+            path["steps"] = .array(try steps.map(resolvingLaunchNames))
+            fields["path"] = .object(path)
+            return .object(fields)
         }
-        if let steps = o["path"]?.array { o["path"] = .array(steps.map(withAppNames)); return .object(o) }
+        if let steps = fields["path"]?.array {
+            fields["path"] = .array(try steps.map(resolvingLaunchNames))
+            return .object(fields)
+        }
         return action
     }
 
