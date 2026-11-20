@@ -412,7 +412,7 @@ private extension HistoryLock.Biometrics {
 }
 
 /// Deterministically models elapsed continuous time without sleeping or changing the system clock.
-private final class GrantTestClock: @unchecked Sendable {
+final class GrantTestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var instant = ContinuousClock().now
     var now: ContinuousClock.Instant { lock.withLock { instant } }
