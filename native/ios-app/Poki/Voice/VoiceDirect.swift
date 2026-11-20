@@ -90,7 +90,7 @@ enum VoiceDirect {
             "type": "realtime", "model": model, "instructions": instructions, "output_modalities": ["audio"],
             "audio": [
                 "input": ["turn_detection": ["type": "server_vad", "silence_duration_ms": 450, "prefix_padding_ms": 300, "threshold": 0.5, "create_response": true, "interrupt_response": true],
-                          "noise_reduction": ["type": "near_field"], "transcription": ["model": "gpt-4o-mini-transcribe"]],
+                          "noise_reduction": ["type": "near_field"], "transcription": ["model": "gpt-4o-mini-transcribe", "language": "zh"]],
                 "output": ["voice": "marin"],
             ],
             "tools": tools, "tool_choice": "auto", "parallel_tool_calls": false, "reasoning": ["effort": "low"],
