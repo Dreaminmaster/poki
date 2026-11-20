@@ -555,7 +555,9 @@ final class ChatHarnessTests: XCTestCase {
                 FakeCompletions.text("Settings is ready."),
             ]
         }
-        let chat = chat(on: try FakeCompletions(replies: replies), transport: transport, automation: automation)
+        let server = try FakeCompletions(replies: replies)
+        defer { withExtendedLifetime(server) {} }
+        let chat = chat(on: server, transport: transport, automation: automation)
         let app = try XCTUnwrap(app)
         let imported = await app.runTool("skills", arguments: Self.json([
             "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
@@ -575,7 +577,7 @@ final class ChatHarnessTests: XCTestCase {
         for optional in [false, true] {
             let request = optional ? "Check Settings." : "Check Settings and save the procedure over \(name)."
             let result = await chat.runDelegated(request)
-            let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+            let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } }, result.text)
             guard case .plan(let steps) = card.kind else { return XCTFail("The task card disappeared") }
             let state = TaskCardState(steps: steps, live: false, waiting: false, handedOver: false, saveFailed: card.saveFailed == true)
 
@@ -603,7 +605,10 @@ final class ChatHarnessTests: XCTestCase {
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Find the device name"], "currentStep": 1]),
             FakeCompletions.tool("skills", ["action": "list"]),
-            FakeCompletions.tool("finish_task", ["success": true, "summary": text, "used_memory_ids": [old.id, old.id, "unseen-id"]]),
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": text, "details": [["label": "Device name", "value": text]],
+                "answer": ["kind": "field"], "used_memory_ids": [old.id, old.id, "unseen-id"],
+            ]),
             FakeCompletions.text(text),
         ])
         let chat = chat(on: server)
@@ -621,6 +626,7 @@ final class ChatHarnessTests: XCTestCase {
 
         let first = try XCTUnwrap(server.requests.first)
         XCTAssertFalse(FakeCompletions.system(first).contains(text))
+        XCTAssertEqual(result.success, true, result.text)
         XCTAssertTrue(result.text.contains(text))
         let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
         XCTAssertEqual(card.memoryUse?.notes, [.init(id: old.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))])
