@@ -72,6 +72,12 @@ void poki_history_cancel(void);
 void poki_history_pause(bool on);
 /* Makes the history run try its tunnel five times a second for the coming seconds, while it has none. */
 void poki_history_hurry(uint32_t seconds);
+/* Asks the history run to look at its tunnel now. The run answers with one progress line that
+   carries the number returned here as "check" and "event": "alive", "dead" or "none". With
+   replace, a tunnel that does not answer is given up and a new one tried at once. A run also
+   sends {"event": "open", "ms", "tries", "after_ms"} when its tunnel opens and
+   {"event": "lost", "error"} when it gives one up. */
+uint64_t poki_history_check(bool replace);
 
 #ifdef __cplusplus
 }

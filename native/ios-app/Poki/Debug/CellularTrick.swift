@@ -46,7 +46,8 @@ final class CellularTrick {
             do {
                 let answer = try await HistoryBridge.call(request) { [weak self] data in
                     Task { @MainActor [weak self] in
-                        guard let self, self.run == me, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+                        // A line about the tunnel (opened, lost, a check answered) is not a read.
+                        guard let self, self.run == me, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], line["event"] == nil else { return }
                         self.lastRead = (line["ok"] as? Bool == true, Date(), line["error"] as? String ?? "")
                     }
                 }

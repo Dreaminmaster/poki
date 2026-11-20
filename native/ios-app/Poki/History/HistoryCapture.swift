@@ -66,6 +66,81 @@ final class HistoryCapture: ObservableObject {
     private(set) var lastTunnelAt: Date?
     /// The launcher's last reason for a tunnel or a read that failed.
     private(set) var lastFailure: String?
+    /// When the launcher last opened a tunnel, as its own line says: a new tunnel, not a held one.
+    private(set) var lastOpenedAt: Date?
+
+    /// What the launcher says of its tunnel when asked.
+    enum Tunnel: Equatable {
+        /// A new stream inside it was taken by the iPhone.
+        case alive(ms: Int)
+        /// It did not answer. `givenUp`: the launcher dropped it and tries a new one.
+        case dead(String, givenUp: Bool)
+        /// The run has no tunnel.
+        case missing
+    }
+
+    /// The launcher's answers to checks of the tunnel, by the number each carries.
+    private var answers: [UInt64: Tunnel] = [:]
+
+    /// Asks the run to look at its tunnel now; `answer(to:)` has what it said once it did. nil when
+    /// no run is going. With `replace` a tunnel that does not answer is given up and a new one
+    /// tried at once.
+    func askTunnel(replace: Bool) -> UInt64? {
+        guard isRunning else { return nil }
+        if answers.count > 16 { answers = [:] }
+        return HistoryBridge.check(replace: replace)
+    }
+
+    /// What the run said to this check, or to a later one: both say how the tunnel is now.
+    func answer(to check: UInt64) -> Tunnel? {
+        answers.filter { $0.key >= check }.min { $0.key < $1.key }?.value
+    }
+
+    /// Asks the run whether its tunnel still answers, and waits for what it says. nil when no run
+    /// is going or it did not say in time (a read under way is finished first).
+    func tunnel(replace: Bool, within seconds: TimeInterval) async -> Tunnel? {
+        guard let check = askTunnel(replace: replace) else { return nil }
+        let asked = Date()
+        while Date().timeIntervalSince(asked) < seconds {
+            if let said = answer(to: check) { return said }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return answer(to: check)
+    }
+
+    // MARK: The log
+
+    /// The line said last, and how often the same came again: a try that fails five times a second
+    /// is one line and a count, not a page of lines (the owner, 2026-11-20).
+    private var said: (text: String, more: Int, since: Date)?
+    /// A line that goes on repeating is counted out this often.
+    private static let sayAgainAfter: TimeInterval = 300
+
+    private func say(_ text: String) {
+        if let last = said, last.text == text, Date().timeIntervalSince(last.since) < Self.sayAgainAfter {
+            said = (last.text, last.more + 1, last.since)
+            return
+        }
+        sayCount()
+        said = (text, 0, Date())
+        AppLog.shared.add("history", text)
+    }
+
+    /// Ends a run of the same line with its count. Called before a line of another kind.
+    private func sayCount() {
+        guard let last = said else { return }
+        said = nil
+        guard last.more > 0 else { return }
+        AppLog.shared.add("history", "the same \(last.more) more times in \(Int(Date().timeIntervalSince(last.since).rounded())) s")
+    }
+
+    /// A launcher failure as a short line: what it means, without the fix the pages already show.
+    nonisolated static func brief(_ error: String) -> String {
+        if error.contains("os error 51") || error.contains("Network is unreachable") { return "no route to 10.7.0.1 (the proxy's VPN is down)" }
+        if error.contains("os error 61") || error.contains("Connection refused") { return "iOS refused the connection at 10.7.0.1" }
+        if error.contains("did not answer within") { return String(error.prefix(70)) }
+        return String(error.replacingOccurrences(of: "no tree at hit test: no point of the screen answered the hit test ", with: "no app at the points read ").prefix(140))
+    }
 
     var isRunning: Bool { status == .waiting || status == .reading }
 
@@ -410,6 +485,7 @@ final class HistoryCapture: ObservableObject {
         ends = nil
         held = nil
         failingSince = nil
+        sayCount()
         if background != .invalid {
             UIApplication.shared.endBackgroundTask(background)
             background = .invalid
@@ -451,9 +527,42 @@ final class HistoryCapture: ObservableObject {
         notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &screenToken, DispatchQueue.main, changed)
     }
 
+    /// A line of the launcher's about its tunnel, not about a read: opened, lost, or the answer to
+    /// a check.
+    private func tunnelSaid(_ event: String, _ line: [String: Any]) {
+        let number = { (key: String) in (line[key] as? NSNumber)?.intValue ?? 0 }
+        var answer: Tunnel?
+        switch event {
+        case "open":
+            lastOpenedAt = Date()
+            lastTunnelAt = lastOpenedAt
+            sayCount()
+            let tries = number("tries")
+            AppLog.shared.add("history", tries > 1
+                ? "tunnel open in \(number("ms")) ms, at try \(tries), \(String(format: "%.1f", Double(number("after_ms")) / 1000)) s after the first"
+                : "tunnel open in \(number("ms")) ms")
+        case "lost":
+            say("tunnel lost: \(Self.brief(line["error"] as? String ?? ""))")
+        case "alive":
+            lastTunnelAt = Date()
+            answer = .alive(ms: number("ms"))
+        case "dead":
+            answer = .dead(Self.brief(line["error"] as? String ?? ""), givenUp: line["given_up"] as? Bool == true)
+        case "none":
+            answer = .missing
+        default:
+            return
+        }
+        if let answer, let check = (line["check"] as? NSNumber)?.uint64Value { answers[check] = answer }
+    }
+
     /// One read from the launcher. Only a screen whose text changed carries text.
     private func took(_ data: Data, run me: Int, model: AppModel) {
         guard me == run, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        if let event = line["event"] as? String {
+            tunnelSaid(event, line)
+            return
+        }
         // The tunnel is open: a read came through, or a held run says so.
         if line["ok"] as? Bool == true || line["tunnel"] as? Bool == true { lastTunnelAt = Date() }
         if let error = line["error"] as? String { lastFailure = error }
@@ -479,17 +588,21 @@ final class HistoryCapture: ObservableObject {
         }
         if line["paused"] as? Bool == true { return }
         // A read the launcher could not make: its tunnel is down and it is opening another.
+        let error = line["error"] as? String ?? ""
         if line["ok"] as? Bool == true {
             lastReadAt = Date()
+            sayCount()
             working()
-        } else if (line["error"] as? String ?? "").contains("no point of the screen") {
+        } else if error.contains("no point of the screen") {
             // The connection answered and found no app at the points read (a system screen over
             // the app, the Home Screen mid-swipe), or the hit tests got no answer. Neither is a
             // lost connection, and the launcher reopens what it must by itself: no notice for it.
-            AppLog.shared.add("history", "read skipped: \((line["error"] as? String ?? "").suffix(140))")
-        } else if !model.loopback.cellularRefused {
-            AppLog.shared.add("history", "read failed: \((line["error"] as? String ?? "").prefix(200))")
-            failing()
+            say("read skipped: \(Self.brief(error))")
+        } else {
+            // The same reason is said once and counted, whatever the network: a try with no
+            // tunnel comes five times a second around a change of network.
+            say((line["tunnel"] as? Bool == false ? "no tunnel: " : "read failed: ") + Self.brief(error))
+            if !model.loopback.cellularRefused { failing() }
         }
         if keep(line), once { end(me, .finished) }
     }

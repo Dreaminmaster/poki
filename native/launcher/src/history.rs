@@ -79,6 +79,110 @@ fn hurrying() -> bool {
     now_ms() < HURRY_UNTIL.load(Ordering::SeqCst)
 }
 
+/// The checks of the tunnel the app asked for: a count, doubled, plus one when a tunnel that
+/// does not answer is to be given up at once. The run answers every new value with one line.
+static CHECK: AtomicU64 = AtomicU64::new(0);
+
+/// Asks the run to look at its tunnel now and say whether it still answers. With `replace` a
+/// tunnel that does not answer is given up and a new one tried at once (the owner's reconnect);
+/// without it the finding is only reported, because on cellular a tunnel given up by mistake
+/// cannot be opened again. Returns the number the run's answer carries.
+pub fn check(replace: bool) -> u64 {
+    let mut next = 0;
+    let _ = CHECK.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
+        next = (((old >> 1) + 1) << 1) | u64::from(replace);
+        Some(next)
+    });
+    next
+}
+
+/// How long the phone has to take a new stream inside the tunnel before the tunnel counts as gone.
+const ALIVE_WITHIN: Duration = Duration::from_millis(1500);
+
+/// Lockdown as the tunnel lists it. It takes any number of streams, so one more disturbs nothing.
+const LOCKDOWN: &str = "com.apple.mobile.lockdown.remote.trusted";
+
+/// Whether the tunnel still carries traffic: a new stream to lockdown (or, where the tunnel lists
+/// none, to the accessibility service) is opened and dropped, and nothing is sent on it. Answers
+/// with the milliseconds it took. A try that gets no answer is made again when `patient`, so a
+/// busy moment is not taken for a lost tunnel; the owner's reconnect has no seconds to spend on it.
+async fn alive(device: &mut Device, patient: bool) -> Result<u64, String> {
+    let services = &device.rsd.services;
+    let port = services.get(LOCKDOWN).or_else(|| services.get(ax::SERVICE)).map(|service| service.port).ok_or("the tunnel lists no service to ask")?;
+    let asked = Instant::now();
+    for attempt in 0..2 {
+        match tokio::time::timeout(ALIVE_WITHIN, device.adapter.connect(port)).await {
+            Ok(Ok(stream)) => {
+                drop(stream);
+                return Ok(milliseconds(asked.elapsed()));
+            }
+            Ok(Err(error)) => return Err(error.to_string()),
+            Err(_) if attempt == 0 && patient => {}
+            Err(_) => break,
+        }
+    }
+    Err(format!("no answer in {} ms", milliseconds(asked.elapsed())))
+}
+
+/// The tries made since the run last had a tunnel.
+#[derive(Default)]
+struct Hunt {
+    failed: u32,
+    since: Option<Instant>,
+}
+
+/// Opens the run's tunnel, and says so in a line of its own: how long this try took, how many
+/// tries it took and since when.
+async fn open_tunnel(target: &Target, hunt: &mut Hunt, emit: &impl Fn(Value)) -> Result<Device, Failure> {
+    let asked = Instant::now();
+    let since = *hunt.since.get_or_insert(asked);
+    match target.open().await {
+        Ok(device) => {
+            emit(json!({"event": "open", "ms": milliseconds(asked.elapsed()), "tries": hunt.failed + 1, "after_ms": milliseconds(since.elapsed())}));
+            *hunt = Hunt::default();
+            Ok(device)
+        }
+        Err(failure) => {
+            hunt.failed += 1;
+            Err(failure)
+        }
+    }
+}
+
+/// Answers a check the app asked for, if one waits. Returns whether the tunnel was given up.
+async fn answer_check(checked: &mut u64, device: &mut Option<Device>, direct: &mut Option<ax::direct::Direct>, emit: &impl Fn(Value)) -> bool {
+    let asked = CHECK.load(Ordering::SeqCst);
+    if asked == *checked {
+        return false;
+    }
+    *checked = asked;
+    let mut line = json!({"check": asked});
+    let mut given_up = false;
+    match device.as_mut() {
+        None => line["event"] = "none".into(),
+        // Without `replace` the finding is only reported, and worth a second try.
+        Some(open) => match alive(open, asked & 1 == 0).await {
+            Ok(ms) => {
+                line["event"] = "alive".into();
+                line["ms"] = ms.into();
+            }
+            Err(error) => {
+                line["event"] = "dead".into();
+                line["error"] = error.into();
+                if asked & 1 == 1 {
+                    // Nothing is said to the phone on the way out: there is no way to it.
+                    direct.take();
+                    *device = None;
+                    given_up = true;
+                }
+                line["given_up"] = given_up.into();
+            }
+        },
+    }
+    emit(line);
+    given_up
+}
+
 /// The longest wait between reads of a screen that shows nothing new (the same text, or no app),
 /// and after reads that failed. Each such round doubles the wait from the run's interval. A deep
 /// snapshot makes the app in front walk its whole accessibility tree, so reading an unchanged
@@ -91,16 +195,25 @@ fn paced(interval: Duration, slow: u32, max: Duration) -> Duration {
     interval.saturating_mul(1u32 << slow.min(5)).min(max.max(interval))
 }
 
-/// How long a round waits before the next: short while there is no tunnel and one may come.
-fn wait_for(no_tunnel: bool, eager: bool, interval: Duration) -> Duration {
-    if no_tunnel && hurrying() {
+/// How long a round waits before the next. With no tunnel it is short while one may come (the
+/// app hurries, or the run is young), and otherwise grows with every try that failed: on cellular
+/// iOS refuses every try until the network changes, and a change brings a hurry of its own.
+fn wait_for(no_tunnel: bool, eager: bool, interval: Duration, slow: u32) -> Duration {
+    if !no_tunnel {
+        interval
+    } else if hurrying() {
         HURRY_EVERY
-    } else if no_tunnel && eager {
+    } else if eager {
         EAGER_EVERY
     } else {
-        interval
+        paced(interval, slow, FAILING_MAX)
     }
 }
+
+/// The least time from the start of one round to the start of the next, whatever the waits above
+/// say. A try with no route fails within a millisecond, so a round that did not wait would spin
+/// (build 61 did, during every hurry: thousands of tries and log lines a second).
+const ROUND_MIN: Duration = Duration::from_millis(150);
 
 /// The run reads nothing while this is set, and keeps its tunnel: on cellular a tunnel that was
 /// closed cannot be opened again, so a wait (an agent's task) must not cost it.
@@ -168,10 +281,27 @@ impl Target {
         rx.await.map_err(|_| Failure::new("the disk image mount ended without an answer"))?
     }
 
+    /// One try at the tunnel. It has 20 s, and only 4 s once the app hurries: a try that began
+    /// before the network changed and hangs must not use up the moment a new one could work in.
+    async fn open_once(&self, pairing: &mut Pairing) -> Result<Device, Failure> {
+        let started = Instant::now();
+        let open = Device::open(self.address, pairing, OPEN_WITHIN);
+        tokio::pin!(open);
+        loop {
+            tokio::select! {
+                result = &mut open => return result,
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    if hurrying() && started.elapsed() >= HURRY_OPEN_WITHIN {
+                        return Err(Failure::new(format!("the phone's developer services did not answer within {} s", HURRY_OPEN_WITHIN.as_secs())).fix(crate::device::LOOPBACK_FIX).code("loopback"));
+                    }
+                }
+            }
+        }
+    }
+
     async fn open(&self) -> Result<Device, Failure> {
         let mut pairing = Pairing::read(&self.pairing_file, self.host_name.as_deref())?;
-        let within = if hurrying() { HURRY_OPEN_WITHIN } else { OPEN_WITHIN };
-        let mut device = Device::open(self.address, &mut pairing, within).await?;
+        let mut device = self.open_once(&mut pairing).await?;
         if !crate::ddi::mounted(&device) {
             if let Some(dir) = self.ddi_dir.as_deref().filter(|d| crate::ddi::files_present(d)) {
                 // A failure here may only mean the supervisor mounted it meanwhile: the new tunnel tells.
@@ -323,7 +453,18 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut slow_max: Duration;
     // What the first point showed at the last read: while it shows the same, a long wait goes on.
     let mut first_hit: Option<Option<u64>> = None;
+    // The tries since the run last had a tunnel, and the last check of the app's that was answered.
+    // A check asked as the run was started is answered by its first round (it has no tunnel yet).
+    let mut hunt = Hunt::default();
+    let mut checked = 0;
+    let mut round: Option<Instant> = None;
     loop {
+        // No round starts sooner than ROUND_MIN after the one before, whatever ended its wait.
+        if let Some(last) = round {
+            while last.elapsed() < ROUND_MIN && RUN.load(Ordering::SeqCst) == me {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
         if RUN.load(Ordering::SeqCst) != me {
             ended = "stopped";
             break;
@@ -333,25 +474,34 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             break;
         }
         let asked = Instant::now();
+        round = Some(asked);
+        answer_check(&mut checked, &mut device, &mut direct, &emit).await;
         if PAUSED.load(Ordering::SeqCst) {
             // A held run still opens its tunnel: the moment it can be opened may not come again
             // (on cellular iOS refuses a new one), and the reads to come need it open.
             let mut line = json!({"paused": true, "at_s": at.as_secs()});
             if device.is_none() {
-                match target.open().await {
+                match open_tunnel(&target, &mut hunt, &emit).await {
                     Ok(open) => {
                         device = Some(open);
                         stats.connections += 1;
+                        slow = 0;
                     }
-                    Err(failure) => line["error"] = failure.detail.into(),
+                    Err(failure) => {
+                        line["error"] = failure.detail.into();
+                        slow += 1;
+                    }
                 }
             }
             line["tunnel"] = device.is_some().into();
             // One line each round, so the caller can tell a held run from a silent one.
             emit(line);
-            let none = device.is_none();
             // Asked again each piece, so a hurry that begins during a long wait cuts it short.
-            while asked.elapsed() < wait_for(none, since_start() < EAGER, interval) && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
+            while asked.elapsed() < wait_for(device.is_none(), since_start() < EAGER, interval, slow) && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
+                // A check is answered where the run waits; a tunnel given up is tried again now.
+                if answer_check(&mut checked, &mut device, &mut direct, &emit).await {
+                    break;
+                }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             continue;
@@ -361,7 +511,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         let mut trace = ax::direct::Trace::default();
         let result = async {
             if device.is_none() {
-                device = Some(target.open().await?);
+                device = Some(open_tunnel(&target, &mut hunt, &emit).await?);
                 stats.connections += 1;
             }
             let open = device.as_mut().unwrap();
@@ -439,8 +589,8 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                     // the tunnel may still be alive, and on cellular a new one cannot be opened
                     // while an open one keeps working. When the next subscribe fails on it too,
                     // the tunnel goes.
-                    if !subscribed || points.is_none() {
-                        device = None;
+                    if (!subscribed || points.is_none()) && device.take().is_some() {
+                        emit(json!({"event": "lost", "error": failure.detail}));
                     }
                 }
                 // No app on the screen (locked, dark) is an idle screen; any other failure backs off
@@ -458,17 +608,25 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                 line["ms"] = took.into();
                 line["error"] = failure.detail.into();
                 line["code"] = json!(failure.code);
+                // Whether the run has a tunnel after this failure: without one it was the tunnel
+                // that could not be opened, not the screen that could not be read.
+                line["tunnel"] = device.is_some().into();
             }
         }
         emit(line);
-        let none = device.is_none();
-        let wait = if none { wait_for(true, since_start() < EAGER, interval) } else { paced(interval, slow, slow_max) };
+        let with_tunnel = paced(interval, slow, slow_max);
         let mut probed = Instant::now();
-        // Waits in short pieces, so Stop is answered at once and a hurry cuts a long wait short.
+        // Waits in short pieces, so Stop is answered at once. The wait is asked again each piece:
+        // with no tunnel it turns short the moment a hurry begins, and stays 200 ms during one.
         // A long wait looks at the first point once an interval (one hit test, no snapshot), and
         // ends when another app, or an app where there was none, shows there.
-        while asked.elapsed() < wait && RUN.load(Ordering::SeqCst) == me {
-            if device.is_none() && hurrying() {
+        while RUN.load(Ordering::SeqCst) == me {
+            let wait = if device.is_none() { wait_for(true, since_start() < EAGER, interval, slow) } else { with_tunnel };
+            if asked.elapsed() >= wait {
+                break;
+            }
+            // A check is answered where the run waits; a tunnel given up is tried again now.
+            if answer_check(&mut checked, &mut device, &mut direct, &emit).await {
                 break;
             }
             if let (Some(seen), Some(open), Some(&(x, y))) = (first_hit, direct.as_mut(), points.as_ref().and_then(|p| p.first())) {
@@ -883,16 +1041,68 @@ mod tests {
         assert_eq!(unknown.code, Some("config"));
     }
 
+    /// The run in progress, the hurry and the checks are the process's own: the tests that start a
+    /// run take turns.
+    static ONE_RUN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn a_run_with_no_tunnel_tries_a_few_times_a_second_in_a_hurry_and_never_spins() {
+        let _turn = ONE_RUN.lock().await;
+        hurry(3);
+        let lines = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let seen = lines.clone();
+        // A pairing file that is not there fails each try at once, like a try with no route.
+        let run = tokio::spawn(handle(json!({"op": "run", "pairing_file": "/nonexistent/pairing.plist"}), move |line| seen.lock().unwrap().push(line)));
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        cancel();
+        tokio::time::timeout(Duration::from_secs(2), run).await.expect("the run ends when stopped").unwrap().unwrap();
+        let lines = lines.lock().unwrap();
+        // The lines about reads; a check another test asked for is answered in a line of its own.
+        let tries: Vec<&Value> = lines.iter().filter(|line| line["event"].is_null()).collect();
+        assert!((3..=8).contains(&tries.len()), "{} tries in 1.1 s", tries.len());
+        // Each one failed, the run had no tunnel after any of them, and says so.
+        assert!(tries.iter().all(|line| line["ok"] == false && line["tunnel"] == false));
+    }
+
+    #[tokio::test]
+    async fn a_run_answers_a_check_where_it_waits() {
+        let _turn = ONE_RUN.lock().await;
+        let lines = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let seen = lines.clone();
+        let run = tokio::spawn(handle(json!({"op": "run", "pairing_file": "/nonexistent/pairing.plist"}), move |line| seen.lock().unwrap().push(line)));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let earlier = check(false);
+        let asked = check(true);
+        assert!(asked > earlier && earlier & 1 == 0 && asked & 1 == 1);
+        let answered = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if lines.lock().unwrap().iter().any(|line| line["check"] == asked && line["event"] == "none") {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        cancel();
+        tokio::time::timeout(Duration::from_secs(2), run).await.expect("the run ends when stopped").unwrap().unwrap();
+        assert!(answered.is_ok(), "the check got no answer: {:?}", lines.lock().unwrap());
+    }
+
     #[tokio::test]
     async fn a_run_reports_failed_reads_and_ends_when_stopped() {
+        let _turn = ONE_RUN.lock().await;
         let lines = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let seen = lines.clone();
         let (first, reported) = tokio::sync::oneshot::channel();
         let first = std::sync::Mutex::new(Some(first));
         let run = tokio::spawn(handle(json!({"op": "run", "pairing_file": "/nonexistent/pairing.plist"}), move |line| {
+            // A line about the tunnel (the answer to a check another test asked for) is not a read.
+            let read = line["event"].is_null();
             seen.lock().unwrap().push(line);
-            if let Some(first) = first.lock().unwrap().take() {
-                let _ = first.send(());
+            if read {
+                if let Some(first) = first.lock().unwrap().take() {
+                    let _ = first.send(());
+                }
             }
         }));
         // Stopped once the run has reported its first read, not after a guessed wait.
@@ -903,7 +1113,8 @@ mod tests {
         assert_eq!(answer["reads"], 0);
         assert_eq!(answer["failures"], 1);
         let lines = lines.lock().unwrap();
-        assert_eq!(lines[0]["ok"], false);
-        assert_eq!(lines[0]["code"], "pairing");
+        let first = lines.iter().find(|line| line["event"].is_null()).expect("a line about a read");
+        assert_eq!(first["ok"], false);
+        assert_eq!(first["code"], "pairing");
     }
 }

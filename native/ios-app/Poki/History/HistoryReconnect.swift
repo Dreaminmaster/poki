@@ -10,6 +10,11 @@ import SwiftUI
 /// shortcut asks `http://127.0.0.1:47684/reconnect`, which answers `true` as soon as the tunnel opens
 /// (at most a few seconds) and keeps trying in the background as the network changes. The address is the
 /// iPhone's own, which iOS never refuses, on Wi-Fi or cellular.
+///
+/// `http://127.0.0.1:47684/ready` is the question to ask before Cellular Data goes off. It answers
+/// `true` when there is nothing to do (the tunnel still answers, or Wi-Fi is there), and otherwise
+/// `false` once the proxy's VPN has been steady for a few seconds: turned off any sooner after
+/// Wi-Fi dropped, cellular took the VPN down with it and no connection could be made at all.
 @MainActor
 final class HistoryReconnect: ObservableObject {
     static let shared = HistoryReconnect()
@@ -50,12 +55,12 @@ final class HistoryReconnect: ObservableObject {
     private var listener: NWListener?
     private nonisolated let queue = DispatchQueue(label: "nz.zheha.poki.history.reconnect")
 
-    func note(worked: Bool, by source: String) {
+    /// A shortcut asked and got its answer. The collector's own line says what happened.
+    func note(worked: Bool) {
         lastAt = Date()
         lastWorked = worked
         UserDefaults.standard.set(lastAt, forKey: "history.reconnect.at")
         UserDefaults.standard.set(worked, forKey: "history.reconnect.ok")
-        AppLog.shared.add("loopback", "reconnect asked by \(source): \(worked ? "connected" : "not connected")")
     }
 
     /// Listens while Poki runs, and only on this iPhone's own address.
@@ -78,11 +83,20 @@ final class HistoryReconnect: ObservableObject {
             connection.start(queue: queue)
             connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, _ in
                 let first = data.flatMap { String(data: $0, encoding: .utf8) }?.split(separator: "\r\n").first ?? ""
-                let asks = first.hasPrefix("GET /reconnect") || first.hasPrefix("POST /reconnect")
+                let reconnects = first.hasPrefix("GET /reconnect") || first.hasPrefix("POST /reconnect")
+                let readies = first.hasPrefix("GET /ready") || first.hasPrefix("POST /ready")
+                let asks = reconnects || readies
                 Task { @MainActor in
                     var body = "not found"
                     if asks, let model {
-                        body = await HistoryCollector.shared.reconnectSoon(model, by: "a shortcut") ? "true" : "false"
+                        let collector = HistoryCollector.shared
+                        let yes: Bool
+                        if readies {
+                            yes = await collector.ready(model, by: "a shortcut")
+                        } else {
+                            yes = await collector.reconnectSoon(model, by: "a shortcut")
+                        }
+                        body = yes ? "true" : "false"
                     }
                     let answer = "HTTP/1.1 \(asks ? "200 OK" : "404 Not Found")\r\nContent-Type: text/plain\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
                     connection.send(content: Data(answer.utf8), completion: .contentProcessed { _ in connection.cancel() })

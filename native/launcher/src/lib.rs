@@ -301,6 +301,14 @@ pub extern "C" fn poki_history_hurry(seconds: u32) {
     history::hurry(seconds);
 }
 
+/// Asks the history run to look at its tunnel now. The run answers with one progress line that
+/// carries the number returned here and "event": "alive", "dead" or "none". With `replace` a
+/// tunnel that does not answer is given up and a new one tried at once.
+#[unsafe(no_mangle)]
+pub extern "C" fn poki_history_check(replace: bool) -> u64 {
+    history::check(replace)
+}
+
 /// Ends the history run in progress, if any; it then answers with what it measured so far.
 #[unsafe(no_mangle)]
 pub extern "C" fn poki_history_cancel() {

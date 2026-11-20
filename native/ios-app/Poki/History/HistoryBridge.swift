@@ -61,4 +61,9 @@ enum HistoryBridge {
     /// A run with no tunnel tries five times a second for the coming seconds: the moment around a
     /// change of network is the one in which a new tunnel can be opened.
     static func hurry(_ seconds: UInt32) { poki_history_hurry(seconds) }
+
+    /// Asks the run to look at its tunnel now. Its answer is a line of the run's that carries the
+    /// number returned here as "check", with "event" alive, dead or none. With `replace` a tunnel
+    /// that does not answer is given up and a new one tried at once.
+    static func check(replace: Bool) -> UInt64 { poki_history_check(replace) }
 }
