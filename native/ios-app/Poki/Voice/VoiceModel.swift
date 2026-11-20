@@ -311,7 +311,7 @@ final class VoiceModel {
     private var link: VoiceConnection?
     private var usesLive = false
     private var liveSpeechStopped = false
-    private enum LiveDelegationState { case active, cancelled }
+    private enum LiveDelegationState { case active, cancelled, acknowledgment }
     private var liveDelegations: [String: LiveDelegationState] = [:]
     private var liveHasCancellation = false
     private var liveCallerSpeech = ""
@@ -896,16 +896,11 @@ final class VoiceModel {
     func stopTalking() {
         if let dictation { dictation.stopSpeaking(); if phase == .speaking { phase = .listening }; return }
         guard let link else { return }
-        if phase == .speaking { markInterrupted() }
         if usesLive {
-            liveSpeechStopped = true
-            liveAwaitingPlayback = false
-            link.setRemoteVolume(0)
-            phase = calls.contains { $0.state == .running } ? .thinking : .listening
-            if ready { link.send(note(Self.stoppedNote)) }
-            endIfDone()
+            stopLivePlayback(on: link, note: Self.stoppedNote)
             return
         }
+        if phase == .speaking { markInterrupted() }
         if activeResponse != nil { link.send(["type": "response.cancel"]) }
         link.send(["type": "output_audio_buffer.clear"])
         // Without this the next answer (say, when a running step finishes) picks the cut-off reply back up.
@@ -913,6 +908,17 @@ final class VoiceModel {
     }
 
     private static let stoppedNote = "The user pressed Stop talking. Drop the reply you were giving; do not continue or repeat it. When a running step finishes, report only its result, in one sentence."
+
+    private func stopLivePlayback(on link: VoiceConnection, note message: String) {
+        guard !liveSpeechStopped else { return }
+        if phase == .speaking { markInterrupted() }
+        liveSpeechStopped = true
+        liveAwaitingPlayback = false
+        link.setRemoteVolume(0)
+        phase = calls.contains { $0.state == .running } ? .thinking : .listening
+        if ready { link.send(note(message)) }
+        endIfDone()
+    }
 
     #if DEBUG
     /// Recorded speech instead of the microphone, for test runs: 24 kHz mono PCM16, sent as one user turn.
@@ -965,16 +971,16 @@ final class VoiceModel {
             keepOpen()
             appendLiveCaption(text, role: role, start: start, end: end)
             if role == .you {
-                resumeLiveAudio(link)
                 if end == 0 || end > liveSpeechThroughDelegation {
                     liveCallerSpeech += text
-                    let parts = Self.liveSpeechParts(liveCallerSpeech)
-                    if !parts.isEmpty, parts.allSatisfy(Self.liveStopPhrases.contains) { cancelLiveTask() }
-                }
-                let words = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
-                if !words.isEmpty, !Self.liveBackchannels.contains(words) {
-                    if !answerDue, phase != .thinking { clock = TurnClock(said: time.now()) }
-                    else if clock.call == nil { clock.said = time.now() }
+                    let utterance = Self.liveSpeechParts(liveCallerSpeech).filter { !Self.liveBackchannels.contains($0) }
+                    if Self.liveStopsPlayback(utterance) {
+                        stopLivePlayback(on: link, note: "The user interrupted the spoken reply. Drop that reply. When a running step finishes, report only its verified result.")
+                    } else if Self.liveSpeechParts(text).contains(where: { !Self.liveBackchannels.contains($0) }) {
+                        resumeLiveAudio(link)
+                        if !answerDue, phase != .thinking { clock = TurnClock(said: time.now()) }
+                        else if clock.call == nil { clock.said = time.now() }
+                    }
                 }
             } else if clock.delivered != nil {
                 clock.reply += text
@@ -982,12 +988,15 @@ final class VoiceModel {
             endIfDone()
         case "session.delegation.created":
             if let id = (event["delegation"] as? [String: Any])?["id"] as? String, liveDelegations[id] == nil {
-                let newRequest = Self.liveSpeechParts(liveCallerSpeech).contains { part in
-                    !Self.liveStopPhrases.contains(where: { $0.hasPrefix(part) })
-                }
-                liveDelegations[id] = liveHasCancellation && !newRequest ? .cancelled : .active
+                let parts = Self.liveSpeechParts(liveCallerSpeech)
                 liveCallerSpeech = ""
                 liveSpeechThroughDelegation = max(liveCaptions[.you]?.end ?? 0, event["offset_ms"] as? Int ?? 0)
+                if !parts.isEmpty, parts.allSatisfy(Self.liveBackchannels.contains) {
+                    liveDelegations[id] = .acknowledgment
+                    return
+                }
+                let newRequest = parts.contains { !Self.liveBackchannels.contains($0) && !Self.liveStopPhrases.contains($0) }
+                liveDelegations[id] = liveHasCancellation && !newRequest ? .cancelled : .active
             }
             link.send(["type": "session.thinking.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": ""])
         case "session.commentary.appended":
@@ -998,6 +1007,8 @@ final class VoiceModel {
             endIfDone()
         case "response.event":
             guard var backend = event["event"] as? [String: Any], let kind = backend["type"] as? String else { return }
+            if (event["delegation_id"] as? String).flatMap({ liveDelegations[$0] }) == .acknowledgment,
+               kind != "response.output_item.done" { return }
             switch kind {
             case "response.completed", "response.failed", "response.incomplete":
                 backend["type"] = "response.done"
@@ -1108,13 +1119,18 @@ final class VoiceModel {
     }
 
     private static let liveStopPhrases: Set<String> = ["停", "停止", "停一下", "别动", "别做了", "stop", "cancel"]
-    private static let liveBackchannels: Set<String> = ["嗯", "哦", "uh-huh", "mm-hmm"]
+    private static let liveBackchannels: Set<String> = ["嗯", "哦", "好的", "好", "uh-huh", "mm-hmm"]
 
     /// Match whole clauses of the caller's speech since delegation, independent of subtitle grouping.
     private static func liveSpeechParts(_ text: String) -> [String] {
         text.lowercased().split { ",，。.!！?？;；".contains($0) }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !liveBackchannels.contains($0) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func liveStopsPlayback(_ parts: [String]) -> Bool {
+        guard let first = parts.first, liveStopPhrases.contains(first) else { return false }
+        return parts.dropFirst().allSatisfy { part in liveStopPhrases.contains { $0.hasPrefix(part) } }
     }
 
     private func cancelLiveTask() {
@@ -1153,6 +1169,10 @@ final class VoiceModel {
     /// Runs a call once. The same call_id again (a repeated event) is ignored.
     private func run(_ call: VoiceCall) {
         guard !calls.contains(where: { $0.id == call.id }) else { return }
+        if usesLive, call.delegation.flatMap({ liveDelegations[$0] }) == .acknowledgment {
+            completeLiveControl(call, state: .failed, output: "The user was acknowledging the conversation. Wait for a request before starting work.")
+            return
+        }
         if usesLive, call.name == VoiceDirect.cancelCurrentTask {
             if call.delegation.flatMap({ liveDelegations[$0] }) != .cancelled { cancelLiveTask() }
             completeLiveControl(call, state: .done, output: "Cancelled further steps. A phone action already running may finish.")

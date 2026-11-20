@@ -74,7 +74,8 @@ enum VoiceDirect {
     private static let empty: [String: Any] = ["type": "object", "properties": [String: Any](), "additionalProperties": false]
     static let cancelCurrentTask = "cancel_current_task"
     private static let cancellationRule = """
-        When the user's whole request means stop or cancel the current phone task (for example “停”, “停止”, “别做了”, or “stop”), handle it immediately with \(cancelCurrentTask) as the only tool call. A request to stop takes priority over an earlier task, even while its tool is running. For “在备忘录输入停” or “把停字发过去”, the word is content to enter or send. Use the normal phone tools for that request.
+        Use the whole request and context to distinguish stopping your voice from cancelling phone work. Call \(cancelCurrentTask) immediately as the only tool when the user wants the phone task cancelled, for example “先别发了”. A request to quiet the voice only pauses playback. For “在备忘录输入停” or “把停字发过去”, the word is content to enter or send. Use the normal phone tools for that request.
+        Brief acknowledgments such as “嗯” and “好的” leave the current reply and task intact. Report success only after a tool confirms the requested result. Describe pending, uncertain and failed results as they are.
         """
     private static let tools: [[String: Any]] = [
         ["type": "function", "name": "get_ios_version", "description": "Read the iPhone model and its iOS version. Changes nothing on the phone." + silent, "parameters": empty],
@@ -117,7 +118,7 @@ enum VoiceDirect {
 
                 Act first, then talk. Delegate phone requests immediately and silently. Say nothing before or between tool calls. Stay silent while the backend works. Do not acknowledge, announce, or narrate any step. Give the verified result in one short sentence. Use two sentences only when the user asked for several facts.
 
-                A brief "嗯" is an acknowledgment from the user. Continue the current reply. When the user asks you to stop speaking, stop speaking. A phone action already running may finish.
+                Keep speaking through brief acknowledgments such as “嗯” and “好的”. When the user asks you to stop speaking, stop speaking. A phone action already running may finish.
                 """,
             "audio": ["output": ["voice": "marin"]],
             "delegation": ["type": "responses", "acknowledgement_delay_ms": 800, "responses": [
