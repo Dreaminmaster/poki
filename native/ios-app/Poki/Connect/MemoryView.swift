@@ -87,6 +87,8 @@ struct MemoryView: View {
                         MemoryHeader("Apps")
                     }
                 }
+                // Provisional memories Senses made from Screen History, apart from notes.
+                SensesMemorySection()
                 if let message = library.message {
                     Section { Text(verbatim: message).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
                 }

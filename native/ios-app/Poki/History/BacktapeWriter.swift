@@ -74,6 +74,15 @@ enum BacktapeWriter {
         return BacktapeNote(title: String(title.prefix(90)), body: lines.dropFirst().joined(separator: " "))
     }
 
+    /// One answer from the model on this iPhone, for Senses' other uses (SensesMemories,
+    /// SensesSuggestions, SensesContext). Nil without Apple Intelligence: nothing is downloaded and
+    /// nothing is sent anywhere.
+    @MainActor
+    static func ask(_ text: String, instructions: String) async -> String? {
+        guard available else { return nil }
+        return await answer(to: text, instructions: instructions)
+    }
+
     @MainActor
     private static func answer(to text: String, instructions: String) async -> String? {
         #if canImport(FoundationModels)

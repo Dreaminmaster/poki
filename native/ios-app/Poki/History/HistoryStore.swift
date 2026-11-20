@@ -305,6 +305,16 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// When each read since `start` was kept and which app it was, nothing else: what Senses counts
+    /// habits from (SensesMemories). No screen text or title is read.
+    func sightings(since start: Date) async -> [SensesSighting] {
+        await fetch {
+            self.rows("SELECT at, app FROM entries WHERE at >= ? ORDER BY at", [.real(start.timeIntervalSince1970)]) {
+                SensesSighting(at: Date(timeIntervalSince1970: sqlite3_column_double($0, 0)), app: Self.string($0, 1))
+            }
+        }
+    }
+
     /// Apps with kept reads, the most read first.
     func apps() async -> [String] {
         await fetch {

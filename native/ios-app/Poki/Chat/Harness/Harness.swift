@@ -19,7 +19,10 @@ enum Harness {
     }()
 
     static var instructions: String {
-        [system, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
+        // Screen History reaches Poki's chat through personal_context only (SensesContext): a model on
+        // this iPhone answers and checks the answer first. The raw screen_history query, which hands
+        // screen text straight to the model, stays for outside agents only.
+        [PokiCore.toolInstructions(includeScreenHistory: false), system, WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
@@ -41,7 +44,7 @@ enum Harness {
     @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
         if inSplitView {
             var parts = [splitViewInstructions]
-            if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
+            if SensesContext.offered { parts.append(SensesContext.brief) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return (parts.joined(separator: "\n\n"), [])
         }
@@ -70,6 +73,9 @@ enum Harness {
         }
         parts.append(recipients)
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
+        if SensesContext.offered { parts.append(SensesContext.brief) }
+        // The usual app for what this asks, learned from Screen History, when the owner named none.
+        if let usual = SensesMemories.shared.usualAppLine(for: task) { parts.append(usual) }
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
         return (parts.joined(separator: "\n\n"), brief.notes)
@@ -95,9 +101,11 @@ enum Harness {
         return "Use these iPhone bundle ids for apps named in this request:\n" + lines.joined(separator: "\n")
     }
 
-    /// Poki's sandbox browser tools sit beside the phone tools.
+    /// Poki's sandbox browser tools sit beside the phone tools. personal_context is always listed (a
+    /// loop keeps its tools for its whole life) and answers that it is off until the owner turns it on.
+    /// Screen History reaches Poki's chat only through personal_context (SensesContext).
     static var tools: [ToolSpec] {
-        toolSpecs(inSplitView: false, includeScreenHistory: HistoryCapture.agentQueryAllowed)
+        toolSpecs(inSplitView: false, includeScreenHistory: false)
     }
 
     /// Bundle ids from the phone's own app list, with the App Store's search as the backup (InstalledApps).
@@ -107,30 +115,29 @@ enum Harness {
         schema: ["type": "object", "properties": ["name": string, "purpose": string], "additionalProperties": false])
 
     static var splitViewTools: [ToolSpec] {
-        toolSpecs(inSplitView: true, includeScreenHistory: HistoryCapture.agentQueryAllowed)
+        toolSpecs(inSplitView: true, includeScreenHistory: false)
     }
 
     /// A Pi loop holds executable implementations, even for tools currently withheld.
     /// The current permission determines which ones are declared for each request.
     static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
         if !inSplitView {
-            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs + [reportPlan, finishTask]
+            return catalogTools(includeScreenHistory: false) + [findApp] + WebTools.specs + [SensesContext.spec, reportPlan, finishTask]
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: includeScreenHistory).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+        ] + catalogTools(includeScreenHistory: false).filter { $0.name == "status" } + [SensesContext.spec, reportPlan, finishTask]
     }
 
     /// Keep the cached task prompt consistent with the current tool catalog.
     nonisolated static func historyInstructions(_ text: String, allowed: Bool) -> String {
-        let instruction = PokiCore.screenHistoryInstructions
-        if allowed {
-            return text.contains(instruction) ? text : text + "\n\n" + instruction
-        }
-        return text.replacingOccurrences(of: instruction, with: "")
+        // Poki's own chat reads Screen History only through personal_context (SensesContext), whatever
+        // outside agents are allowed: the raw query's instructions are always taken out.
+        _ = allowed
+        return text.replacingOccurrences(of: PokiCore.screenHistoryInstructions, with: "")
     }
 
     /// PokiCore's catalog: look, do and status.

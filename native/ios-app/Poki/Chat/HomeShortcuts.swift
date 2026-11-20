@@ -94,8 +94,9 @@ enum ShortcutApp {
 }
 
 /// The home page's quick actions, worked out on this iPhone from what the owner did before. Nothing
-/// is uploaded and no model is asked. In order: the routines Poki remembered (their description, or
-/// their name, and the app they were recorded in), then requests the owner made at least twice
+/// is uploaded. In order: the routines Poki remembered (their description, or their name, and the app
+/// they were recorded in), then Senses' pills (the owner's habits for this time of day and follow-ups,
+/// SensesSuggestions), then requests the owner made at least twice
 /// (similar wordings counted as one) that begin with an app, then the default examples. Each is an app
 /// and an action; a routine or request without both is left out.
 @MainActor
@@ -114,14 +115,16 @@ enum HomeShortcuts {
     /// `pinned` (`HomeIdea.star`) goes second, after the first of the others: the top row opens a
     /// little way along, with its first pill half off the screen. It adds to the number shown, so it
     /// pushes none of the owner's pills off, and Forget works on it as on any pill.
+    /// `suggested` are the owner's own habits and follow-ups from Senses (SensesSuggestions), already
+    /// checked there. They come after the routines the owner taught Poki and before repeated requests.
     static func rank(routines: [Remembered], requests: [Request], examples: [HomeShortcut], pinned: [HomeShortcut] = [],
-                     forgotten: Set<String>, edits: [Edit] = [], now: Date) -> [HomeShortcut] {
+                     suggested: [HomeShortcut] = [], forgotten: Set<String>, edits: [Edit] = [], now: Date) -> [HomeShortcut] {
         rank(rankedRoutines: rankRoutines(routines, now: now), groupedRequests: groups(requests, now: now),
-             examples: examples, pinned: pinned, forgotten: forgotten, edits: edits)
+             examples: examples, pinned: pinned, suggested: suggested, forgotten: forgotten, edits: edits)
     }
 
     static func rank(rankedRoutines: [RankedRoutine], groupedRequests: [RequestGroup], examples: [HomeShortcut],
-                     pinned: [HomeShortcut] = [], forgotten: Set<String>, edits: [Edit] = []) -> [HomeShortcut] {
+                     pinned: [HomeShortcut] = [], suggested: [HomeShortcut] = [], forgotten: Set<String>, edits: [Edit] = []) -> [HomeShortcut] {
         var out: [HomeShortcut] = []
         // A request the owner already has as an edit (once they send its sentence) is not a second pill.
         func taken(_ key: String) -> Bool {
@@ -136,6 +139,8 @@ enum HomeShortcuts {
             guard let pill = routinePill(r.key, r.routine) else { continue }
             out.append(pill)
         }
+
+        for pill in suggested where !taken(pill.key) && !HomeShortcuts.isPrivate(pill.prompt) { out.append(pill) }
 
         for group in groupedRequests where group.count >= 2 && !taken(group.key) {
             guard let pill = requestPill(group.key, group.latest) else { continue }
@@ -282,6 +287,8 @@ final class HomeShortcutStore {
     @ObservationIgnored private var inputs: Inputs?
     @ObservationIgnored private var refreshToken = 0
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    /// Pills from Senses (SensesSuggestions), already checked there.
+    @ObservationIgnored private var suggested: [HomeShortcut] = []
     @ObservationIgnored private let defaults = UserDefaults.standard
     private static let forgottenKey = "home.shortcuts.forgotten"
     private static let editedKey = "home.shortcuts.edited"
@@ -336,10 +343,18 @@ final class HomeShortcutStore {
                 groupedRequests: groupedRequests,
                 examples: HomeIdea.examples,
                 pinned: [HomeIdea.star],
+                suggested: self.suggested,
                 forgotten: self.forgotten,
                 edits: self.edits
             )
         }
+    }
+
+    /// Senses' pills for now, in place of the ones before.
+    func suggest(_ pills: [HomeShortcut]) {
+        guard pills != suggested else { return }
+        suggested = pills
+        rank(now: Date())
     }
 
     func waitUntilRefreshed() async {
@@ -367,6 +382,6 @@ final class HomeShortcutStore {
 
     private func rank(now: Date) {
         shortcuts = HomeShortcuts.rank(routines: inputs?.routines ?? [], requests: inputs?.requests ?? [], examples: HomeIdea.examples, pinned: [HomeIdea.star],
-                                       forgotten: forgotten, edits: edits, now: now)
+                                       suggested: suggested, forgotten: forgotten, edits: edits, now: now)
     }
 }

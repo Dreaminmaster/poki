@@ -1010,6 +1010,7 @@ final class ChatModel {
         task?.cancel()
         // A browser step waiting for a page or for the owner ends too.
         PokiBrowser.shared.taskStopped()
+        answerContext(nil)
         // A step waiting for an approval would hold the task until the approval ran out.
         if kind == .poki, ChatModel.delegatedBusy == nil { for approval in app.approvals { app.resolve(approval, approved: false) } }
         finishPlan(stopped: true)
@@ -1152,7 +1153,7 @@ final class ChatModel {
                 if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["path"] != nil || $0["button"] != nil }) {
                     return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run skills. Finish with finish_task.")
                 }
-            case "report_plan", "finish_task", "status", "screen_history": break
+            case "report_plan", "finish_task", "status", SensesContext.name: break
             default:
                 return splitViewRefusal("Use the two visible apps with look and do for this task.")
             }
@@ -1178,6 +1179,8 @@ final class ChatModel {
             let card = result.success && kind == .poki ? result.card : nil
             if let card { showCard(card) }
             return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
+        case SensesContext.name:
+            return await personalContext(args)
         case let name where WebTools.names.contains(name):
             if let refusal = selectRoute(.web) { return refusal }
             showBrowser(opening: name == "web_open")
@@ -1218,6 +1221,11 @@ final class ChatModel {
             }
             return response
         default:
+            // A routine made while the usual app came from a habit learned from Screen History would
+            // keep the guess after the owner forgot it. A note is the owner's own words and is saved.
+            if call.name == "routines", args["action"] as? String == "save", SensesMemories.shared.usualAppLine(for: taskRequest) != nil {
+                return PokiCore.ToolAnswer(text: "Not saved: this task's app came from a habit learned from Screen History, which the owner can forget or turn off, so no routine is kept for it.", jpeg: nil, isError: false)
+            }
             return await app.runTool(call.name, arguments: call.arguments)
         }
     }
@@ -1591,6 +1599,65 @@ final class ChatModel {
     let isDemo = UserDefaults.standard.string(forKey: "pokiChat") == "demo"
     /// The step the demo waits on your answer for.
     private(set) var demoAsk: PendingApproval?
+
+    /// An answer from Screen History waits for the owner before it goes to the model (SensesContext).
+    struct ContextAsk: Equatable {
+        let id = UUID()
+        var expires: Date
+    }
+    private(set) var contextAsk: ContextAsk?
+    private var contextAnswer: CheckedContinuation<Bool?, Never>?
+
+    /// The owner's answer to the card, or nil when it ran out or the task stopped.
+    func answerContext(_ approved: Bool?) {
+        guard let waiting = contextAnswer else { return }
+        contextAnswer = nil
+        contextAsk = nil
+        waiting.resume(returning: approved)
+    }
+
+    /// Poki's model asked Screen History something. The model on this iPhone writes the answer and
+    /// judges it; the answer goes to Poki's model only when that judge or the owner said yes.
+    private func personalContext(_ args: [String: Any]) async -> PokiCore.ToolAnswer {
+        let question = args["question"] as? String ?? ""
+        let hours = (args["hours"] as? Int) ?? (args["hours"] as? Double).map { Int($0) } ?? 24
+        switch await SensesContext.draft(question: question, hours: hours, task: taskRequest) {
+        case .unavailable(let why):
+            return PokiCore.ToolAnswer(text: why, jpeg: nil, isError: true)
+        case .nothing:
+            return PokiCore.ToolAnswer(text: SensesContext.nothingFound, jpeg: nil, isError: false)
+        case .summary(let text, let share, let reason):
+            if stopAsked || !running { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
+            noteID = nil
+            var note = ApprovalNote(id: "context-\(UUID().uuidString)", summary: text, app: AppLocalization.text(LocalizedStringResource("Screen History")),
+                                    why: "", byModel: share, state: share ? .allowed : .asking, reason: reason)
+            var approved: Bool? = true
+            if share {
+                note.answered = Date()
+                setNote(.approval(note))
+            } else {
+                setNote(.approval(note))
+                let ask = ContextAsk(expires: Date().addingTimeInterval(120))
+                Haptics.received()
+                approved = await withCheckedContinuation { (waiting: CheckedContinuation<Bool?, Never>) in
+                    contextAnswer = waiting
+                    contextAsk = ask
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(120))
+                        if self?.contextAsk?.id == ask.id { self?.answerContext(nil) }
+                    }
+                }
+                note.state = approved == true ? .allowed : approved == false ? .refused : .expired
+                note.reason = ""
+                note.answered = Date()
+                setNote(.approval(note))
+            }
+            noteID = nil
+            SensesContext.record(shared: approved == true, question: question)
+            guard approved == true else { return PokiCore.ToolAnswer(text: SensesContext.notShared, jpeg: nil, isError: true) }
+            return PokiCore.ToolAnswer(text: text, jpeg: nil, isError: false)
+        }
+    }
     private var demoTask: Task<Void, Never>?
 
     private func playDemo(_ text: String) {

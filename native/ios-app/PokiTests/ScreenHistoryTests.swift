@@ -249,11 +249,15 @@ final class ScreenHistoryTests: XCTestCase {
         try unlockHistoryForFixture()
         HistoryCapture.shared.enabled = true
         let listedOn = try await mcpTools()
-        XCTAssertTrue(Harness.tools.map(\.name).contains("screen_history"))
-        XCTAssertTrue(Harness.splitViewTools.map(\.name).contains("screen_history"))
+        // Outside agents get the query; Poki's own chat asks through personal_context, which a model on
+        // this iPhone answers and checks before anything reaches the chat's model (SensesContext).
+        XCTAssertFalse(Harness.tools.map(\.name).contains("screen_history"))
+        XCTAssertFalse(Harness.splitViewTools.map(\.name).contains("screen_history"))
+        XCTAssertTrue(Harness.tools.map(\.name).contains(SensesContext.name))
         XCTAssertTrue(listedOn.contains("screen_history"))
-        XCTAssertTrue(Harness.taskInstructions(for: "我刚才在备忘录里写了什么").text.contains("screen_history"))
-        XCTAssertTrue(Harness.taskInstructions(for: "我刚才在备忘录里写了什么", inSplitView: true).text.contains("screen_history"))
+        XCTAssertFalse(Harness.taskInstructions(for: "我刚才在备忘录里写了什么").text.contains("screen_history"))
+        XCTAssertTrue(Harness.taskInstructions(for: "我刚才在备忘录里写了什么").text.contains(SensesContext.name))
+        XCTAssertTrue(Harness.taskInstructions(for: "我刚才在备忘录里写了什么", inSplitView: true).text.contains(SensesContext.name))
 
         HistoryCapture.shared.enabled = false
         let listedOffAgain = try await mcpTools()

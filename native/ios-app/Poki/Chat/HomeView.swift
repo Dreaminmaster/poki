@@ -509,6 +509,8 @@ struct HomePage<Footer: View>: View {
         .task(id: sessionStore.sessions.count) {
             shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
+        // The owner's habits and the recent tape, on this iPhone (at most every half hour).
+        .task { await SensesSuggestions.shared.refresh() }
         .onChange(of: AppLocalization.language, initial: true) { _, _ in
             shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
