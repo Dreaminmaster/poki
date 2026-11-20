@@ -56,6 +56,8 @@ extension Computer {
 
     /// A path's step: its target is the text it shows ({tap: "General"}), not a number of a read.
     func pathStepLabel(_ step: JSON) -> String? {
+        // A path can type into a later screen whose field has not been read yet.
+        if step["type"]?.text != nil { return "Type text" }
         for (key, verb) in [("tap", "Tap"), ("long_press", "Press and hold")] {
             if let spec = step[key], spec.array == nil, let name = (spec.string ?? spec["label"]?.string ?? spec["text"]?.string)?.trimmingCharacters(in: .whitespacesAndNewlines),
                !name.isEmpty, Double(name) == nil {

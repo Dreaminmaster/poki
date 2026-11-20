@@ -60,13 +60,15 @@ enum DynamicApps {
 }
 
 extension KnownApps {
-    /// The bundle id to launch for an app's name or id (PokiCore's `resolveApp`, from any thread): an
-    /// app Poki knows by the edition this iPhone has (Bilibili's international one, say), else its
-    /// main id; past those, an installed app by its Home Screen name. nil when neither knows it.
-    static func launchID(_ name: String) -> String? {
-        if let known = find(name) { return known.ids.first { DynamicApps.name(forID: $0) != nil } ?? known.id }
-        let given = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Keeps an explicit bundle ID. A known app name selects the installed edition or the main
+    /// edition if none is installed. Other names use the iPhone's Home Screen names.
+    static func launchID(_ nameOrID: String) -> String? {
+        let given = nameOrID.trimmingCharacters(in: .whitespacesAndNewlines)
         if DynamicApps.name(forID: given) != nil { return given }
+        if let known = find(given) {
+            if known.ids.contains(where: { $0.caseInsensitiveCompare(given) == .orderedSame }) { return given }
+            return known.ids.first { DynamicApps.name(forID: $0) != nil } ?? known.id
+        }
         return DynamicApps.id(forName: given)
     }
 }
