@@ -6,7 +6,7 @@ import SwiftUI
 
 /// The decision model: a small, fast model which a skill or a path asks how to go on where it would
 /// otherwise stop (a prompt in the way, a button renamed or moved). It is a model on this iPhone
-/// (Apple Intelligence or a downloaded model, under Settings › Models › Local Models) or a model of one of the
+/// (Apple Intelligence or a downloaded model, under Settings › Models › Local) or a model of one of the
 /// owner's model accounts (under the account, Decisions). There is no other switch: it is in use
 /// from the moment it is picked, and only one is in use at a time. An account's call goes from this
 /// iPhone straight to its provider, never through Poki's relay, and holds the task's goal and the

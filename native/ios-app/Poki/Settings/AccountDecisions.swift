@@ -23,7 +23,7 @@ enum AccountDecisions {
     }
 
     static func name(_ provider: ModelProvider, _ model: String) -> String {
-        models(provider).first { $0.id == model }?.name ?? model
+        models(provider).first { $0.id == model }?.name ?? CustomProviders.parse(model)?.model ?? model
     }
 
     /// The decider for an account's model. An account that is gone gives no answer when asked, which
@@ -42,7 +42,7 @@ enum AccountDecisions {
     /// answer, which is an error for the decider and never a guess. The key is never logged.
     @MainActor
     static func ask(_ provider: ModelProvider, model id: String, prompt: String, instructions: String) async -> String? {
-        guard let model = provider.piModel(id), let key = await ModelCredential.apiKey(for: provider) else { return nil }
+        guard let model = provider.piModel(id), let key = await ModelCredential.apiKey(for: provider, piProvider: model.provider) else { return nil }
         var options = SimpleStreamOptions()
         options.apiKey = key
         options.headers = openCodeSessionHeaders(model: model, sessionId: UUID().uuidString, headers: options.headers)
@@ -68,42 +68,5 @@ enum AccountDecisions {
             failed(error.localizedDescription)
             return nil
         }
-    }
-}
-
-/// Account › Decisions: which of the account's models is the decision model, or none of them.
-struct DecisionFeature: View {
-    var provider: ModelProvider
-    @State private var picked: String
-
-    init(provider: ModelProvider) {
-        self.provider = provider
-        _picked = State(initialValue: QuickFixes.accountModel(provider) ?? "")
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                Picker(selection: $picked) {
-                    Text("Off").tag("")
-                    ForEach(AccountDecisions.models(provider)) { choice in
-                        Text(verbatim: choice.name).tag(choice.id)
-                    }
-                } label: {
-                    Text("Decision Model")
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-                .accessibilityIdentifier("account.decisions.model")
-            } header: {
-                Text("Decision Model")
-            } footer: {
-                Text("A small, fast model works best. It helps a skill go on when a prompt is in the way or a button was renamed, acts only when the answer is clear and never taps anything that needs your approval. It gets the goal of the task and the names of the elements on screen, with no screenshot. Only one decision model is in use at a time.")
-            }
-        }
-        .settingsPage()
-        .navigationTitle(AppLocalization.text("Decisions"))
-        .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: picked) { _, new in QuickFixes.pickAccount(provider, model: new.isEmpty ? nil : new) }
     }
 }

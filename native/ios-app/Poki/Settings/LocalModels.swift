@@ -1,47 +1,87 @@
 import PokiCore
 import SwiftUI
+import UIKit
 
-/// Settings › Models › Local Models: the models on this iPhone, listed like the accounts above them.
-/// Each opens to what it is and what it is used for. Nothing a local model is asked leaves the phone.
-struct LocalModelsSection: View {
-    /// The page's count of changes: a new pick redraws the rows.
-    var version: Int
-
+/// Settings › Models › Local: the provider that is always there. It holds the models on this iPhone,
+/// Apple Intelligence where the iPhone has it and the models that can be downloaded, and what they
+/// are used for. Local models can only decide and write Senses' notes. Nothing they are asked leaves
+/// the phone.
+struct LocalProviderDetail: View {
+    @State private var version = ModelKeys.saved
     let model = BacktapeModel.shared
 
     var body: some View {
-        if OnDeviceDecisions.appleAvailable || BacktapeModel.offered {
+        Form {
             Section {
-                if OnDeviceDecisions.appleAvailable {
-                    NavigationLink { AppleIntelligenceDetail() } label: {
-                        LocalModelRow(symbol: "apple.intelligence", name: AppLocalization.text("Apple Intelligence"),
-                                      uses: QuickFixes.choice == .apple ? AppLocalization.text("Decisions") : AppLocalization.text("On This iPhone"))
-                    }
-                    .accessibilityIdentifier("models.local.apple")
+                LabeledContent("Type", value: ProviderRef.local.name)
+                LabeledContent("Connection", value: AppLocalization.text("On This iPhone"))
+            }
+
+            if LocalModels.recommends {
+                Section { LocalRecommendation() }
+            }
+
+            Section {
+                NavigationLink { AppleIntelligenceDetail() } label: {
+                    LocalModelRow(symbol: "apple.intelligence", name: LocalModel.apple.name, status: Self.appleStatus)
                 }
+                .accessibilityIdentifier("models.local.apple")
                 // The models that can be downloaded, whether or not the iPhone has Apple Intelligence.
                 // Listed on an iPhone that cannot run them too: its page says what they need.
                 if BacktapeModel.offered {
                     ForEach(BacktapeModel.choices) { choice in
                         NavigationLink { DownloadedModelDetail(choice: choice) } label: {
-                            LocalModelRow(symbol: "arrow.down.circle", name: choice.name, uses: uses(choice))
+                            LocalModelRow(symbol: "arrow.down.circle", name: choice.name, status: status(choice))
                         }
                         .accessibilityIdentifier("models.local.\(choice.id)")
                     }
                 }
             } header: {
-                Text("Local Models").textCase(nil)
+                Text("Models")
             } footer: {
-                Text("Models on this iPhone. What they are asked never leaves the phone.")
+                if !BacktapeModel.supported {
+                    Text("This iPhone does not have the memory to run a downloaded model.")
+                } else {
+                    Text("Only one downloaded model is kept. What a local model is asked never leaves the phone.")
+                }
             }
+
+            Section {
+                ForEach(ProviderRef.local.uses) { use in
+                    NavigationLink { ModelTickList(use: use, provider: .local) } label: {
+                        LabeledContent {
+                            Text(verbatim: ProviderUseValue.text(use, for: .local))
+                        } label: { SettingsLabel(use.title, systemImage: use.symbol) }
+                    }
+                    .accessibilityIdentifier("models.local.use.\(use.rawValue)")
+                }
+            } header: {
+                Text("Use This Provider For")
+            } footer: {
+                Text("Local models can be used for decisions and for Senses. Senses only runs on local models.")
+            }
+        }
+        .background { Color.clear.accessibilityHidden(true).id(version) }
+        .settingsPage()
+        .navigationTitle(Text(verbatim: ProviderRef.local.name))
+        .navigationBarTitleDisplayMode(.inline)
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
+    }
+
+    static var appleStatus: String {
+        switch AppleIntelligence.status {
+        case .available: AppLocalization.text("On This iPhone")
+        case .turnedOff: AppLocalization.text("Turned Off")
+        case .notReady: AppLocalization.text("Getting Ready")
+        case .unsupported: AppLocalization.text("Not on This iPhone")
         }
     }
 
-    /// Under a downloaded model's name: where its download stands, and Decisions when it decides.
-    private func uses(_ choice: BacktapeModel.Choice) -> String {
+    /// Under a downloaded model's name: where its download stands.
+    private func status(_ choice: BacktapeModel.Choice) -> String {
         guard model.choice == choice else { return AppLocalization.text("Not Downloaded") }
         switch model.state {
-        case .ready: return QuickFixes.choice == .downloaded ? AppLocalization.text("Decisions") : AppLocalization.text("Downloaded")
+        case .ready: return AppLocalization.text("Downloaded")
         case .downloading(let part): return "\(Int(part * 100)) %"
         case .failed: return AppLocalization.text("Download Stopped")
         case .missing: return AppLocalization.text(model.kept > 0 ? "Download Stopped" : "Not Downloaded")
@@ -49,8 +89,66 @@ struct LocalModelsSection: View {
     }
 }
 
-/// Local Models › a downloaded model: its download, and what it is used for. Only one downloaded
-/// model is kept, so downloading this one removes the one before.
+/// Local in the providers list: its tile, its name and what it is used for.
+struct LocalProviderRow: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsIcon(symbol: "iphone", neutral: true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: ProviderRef.local.name)
+                Text(verbatim: ProviderUseValue.summary(.local)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+            }
+        }
+    }
+}
+
+/// Where the iPhone has no Apple Intelligence: the recommendation to download a model for decisions,
+/// and the download as it goes.
+struct LocalRecommendation: View {
+    let model = BacktapeModel.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label {
+                Text(message).font(.subheadline)
+            } icon: {
+                Image(systemName: "apple.intelligence")
+            }
+            .labelStyle(SettingsLabelStyle())
+            if model.choice == LocalModels.recommended, case .downloading(let part) = model.state {
+                ProgressView(value: part) {
+                    Text(verbatim: "\(Int(part * 100)) %").font(.footnote).monospacedDigit()
+                }
+                Button("Cancel Download") { model.cancel() }
+            } else {
+                Button {
+                    LocalModels.downloadRecommended()
+                } label: {
+                    Text("Download \(LocalModels.recommended.name)")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("models.local.recommended")
+                Text(verbatim: ByteCountFormatter.string(fromByteCount: LocalModels.recommended.bytes, countStyle: .file))
+                    .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var message: LocalizedStringKey {
+        switch AppleIntelligence.status {
+        case .turnedOff:
+            "Apple Intelligence is turned off on this iPhone. Turn it on in Settings, or download a model to make decisions and write Senses’ notes on the phone."
+        case .notReady:
+            "Apple Intelligence is still getting ready on this iPhone. Until then, a downloaded model can make decisions and write Senses’ notes on the phone."
+        case .available, .unsupported:
+            "This iPhone has no Apple Intelligence. Download a model to make decisions and write Senses’ notes on the phone. It is used for decisions once it is downloaded."
+        }
+    }
+}
+
+/// Local › a downloaded model: its download. Only one downloaded model is kept, so downloading this
+/// one removes the one before.
 struct DownloadedModelDetail: View {
     var choice: BacktapeModel.Choice
     let model = BacktapeModel.shared
@@ -93,20 +191,12 @@ struct DownloadedModelDetail: View {
                 Text(footer)
             }
 
-            Section {
-                LocalDecisionToggle(choice: .downloaded, disabled: !ready)
-                    .accessibilityIdentifier("models.local.downloaded.decisions")
-            } header: {
-                Text("Use This Model For")
-            } footer: {
-                Text("As the decision model it helps a skill go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
-            }
-
             if ready {
                 Section {
                     Button("Remove Model", role: .destructive) {
                         if QuickFixes.choice == .downloaded { QuickFixes.choice = .none }
                         model.remove()
+                        ModelKeys.saved += 1
                     }
                     .accessibilityIdentifier("models.local.remove")
                 }
@@ -142,69 +232,75 @@ struct DownloadedModelDetail: View {
             }
         }
         if stoppedPart { return "The download was stopped before it finished. The files already downloaded are kept." }
-        if ready { return "This model is on this iPhone and runs here. Screen History uses it for its notes where the iPhone has no Apple Intelligence." }
+        if ready { return "This model is on this iPhone and runs here. Choose it under Decisions or Senses on the Models page." }
         return "Only one downloaded model is kept, and downloading this one removes the one before. Screen History uses it for its notes where the iPhone has no Apple Intelligence."
     }
 }
 
-/// A local model's row: its tile, its name and what it is used for, as an account's row.
+/// A local model's row: its tile, its name and where it stands.
 struct LocalModelRow: View {
     var symbol: String
     var name: String
-    var uses: String
+    var status: String
     var body: some View {
         HStack(spacing: 12) {
             SettingsIcon(symbol: symbol, neutral: true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: name)
-                Text(verbatim: uses).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: status).font(.footnote).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
 }
 
-/// The switch that makes a local model the decision model. Only one decision model is in use at a
-/// time, so turning this on takes over from whichever was.
-struct LocalDecisionToggle: View {
-    var choice: QuickFixes.Choice
-    var disabled = false
-    @State private var on: Bool
-
-    init(choice: QuickFixes.Choice, disabled: Bool = false) {
-        self.choice = choice
-        self.disabled = disabled
-        _on = State(initialValue: QuickFixes.choice == choice)
-    }
-
-    var body: some View {
-        Toggle(isOn: $on) { SettingsLabel("Decisions", systemImage: "bolt") }
-            .disabled(disabled)
-            .onChange(of: on) { _, new in
-                if new { QuickFixes.choice = choice } else if QuickFixes.choice == choice { QuickFixes.choice = .none }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in on = QuickFixes.choice == choice }
-    }
-}
-
-/// Local Models › Apple Intelligence: Apple's own model, where the iPhone has it.
+/// Local › Apple Intelligence: Apple's own model, and whether this iPhone has it.
 struct AppleIntelligenceDetail: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Type", value: AppLocalization.text("Apple Intelligence"))
+                LabeledContent("Type", value: LocalModel.apple.name)
                 LabeledContent("Connection", value: AppLocalization.text("On This iPhone"))
-            }
-            Section {
-                LocalDecisionToggle(choice: .apple)
-                    .accessibilityIdentifier("models.local.apple.decisions")
-            } header: {
-                Text("Use This Model For")
+                LabeledContent("Status", value: LocalProviderDetail.appleStatus)
             } footer: {
-                Text("As the decision model it helps a skill go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
+                switch AppleIntelligence.status {
+                case .available: Text("Choose it under Decisions or Senses on the Models page.")
+                case .turnedOff: Text("Turn on Apple Intelligence in the Settings app to use it here.")
+                case .notReady: Text("Apple Intelligence is downloading its model. It can be chosen once it is ready.")
+                case .unsupported: Text("This iPhone has no Apple Intelligence. A downloaded model can make decisions and write Senses’ notes instead.")
+                }
+            }
+            if AppleIntelligence.status == .turnedOff {
+                Section {
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }
             }
         }
         .settingsPage()
-        .navigationTitle(AppLocalization.text("Apple Intelligence"))
+        .navigationTitle(Text(verbatim: LocalModel.apple.name))
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// What a provider's rows say about a use: the model it runs on now when this provider has it, else
+/// how many models are ticked.
+enum ProviderUseValue {
+    @MainActor static func text(_ use: ModelUse, for provider: ProviderRef) -> String {
+        let pick = ModelPicks.current(use)
+        if let item = ModelPicks.groups(use).first(where: { $0.id == provider.id })?.items.first(where: { $0.pick == pick }) {
+            return item.name
+        }
+        let count = ModelPicks.groups(use).first { $0.id == provider.id }?.items.count ?? 0
+        return count == 0 ? AppLocalization.text("Off") : AppLocalization.text(LocalizedStringResource("\(count) Models"))
+    }
+
+    /// "Chat, Decisions", "Not in use": the uses a provider runs now.
+    @MainActor static func summary(_ provider: ProviderRef) -> String {
+        let uses = ModelUse.allCases.filter { use in
+            let pick = ModelPicks.current(use)
+            return ModelPicks.groups(use).first { $0.id == provider.id }?.items.contains { $0.pick == pick } ?? false
+        }
+        return uses.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : uses.map(\.name).joined(separator: ", ")
     }
 }

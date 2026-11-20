@@ -55,6 +55,9 @@ struct CustomProvider: Codable, Hashable, Identifiable, Sendable {
     var reasoning: Bool?
     /// Live voice through this service's Realtime API, at its first address.
     var liveVoice = false
+    /// Models added by hand beside `model`, for a service that lists none (nil in what was saved
+    /// before there could be more than one).
+    var added: [String]?
 
     /// The address used first.
     var primary: CustomEndpoint? { endpoints.first { !$0.normalized.isEmpty } }

@@ -23,9 +23,10 @@ enum BacktapeWriter {
         return false
     }
 
-    /// Apple's model first; the downloaded one where Apple's is missing.
+    /// The model picked under Settings › Models › Senses: Apple's first, the downloaded one where
+    /// Apple's is missing, unless the owner picked otherwise or turned it off.
     @MainActor
-    static var available: Bool { apple || BacktapeModel.shared.ready }
+    static var available: Bool { SensesModel.current != nil }
 
     @MainActor
     static func write(_ entries: [HistoryEntry], period: String = "10 minutes") async -> BacktapeNote? {
@@ -61,7 +62,7 @@ enum BacktapeWriter {
     @MainActor
     private static func answer(to text: String, instructions: String) async -> String? {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *), apple {
+        if #available(iOS 26.0, *), SensesModel.current == .apple {
             do {
                 let session = LanguageModelSession(instructions: instructions)
                 return try await session.respond(to: text).content
@@ -71,6 +72,7 @@ enum BacktapeWriter {
             }
         }
         #endif
+        guard case .downloaded = SensesModel.current else { return nil }
         return await BacktapeModel.shared.respond(to: text, instructions: instructions)
     }
 }

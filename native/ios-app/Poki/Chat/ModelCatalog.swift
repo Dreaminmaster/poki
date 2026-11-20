@@ -30,9 +30,20 @@ enum ModelCatalog {
         return choices.filter { on.contains($0.id) }
     }
 
+    /// Until the owner ticks models, the defaults and the recommended ones of the provider's list
+    /// (Terra, Haiku, Sonnet, Flash) are ticked.
     static func enabled(_ provider: ModelProvider) -> Set<String> {
         if let saved = UserDefaults.standard.stringArray(forKey: "models.enabled.\(provider.rawValue)") { return Set(saved) }
-        return defaults(provider)
+        return defaults(provider).union(listed(provider).map(\.id).filter(recommended))
+    }
+
+    /// The models ticked for a new provider: the fast ones and the everyday ones, without a dated
+    /// snapshot or a preview. A custom model id is read after its provider's prefix.
+    static func recommended(_ id: String) -> Bool {
+        let model = (CustomProviders.parse(id)?.model ?? id).lowercased()
+        let name = model.split(separator: "/").last.map(String.init) ?? model
+        guard !name.contains("preview"), !name.contains("exp"), name.range(of: #"\d{4}-?\d{2}-?\d{2}"#, options: .regularExpression) == nil else { return false }
+        return ["terra", "haiku", "sonnet", "flash"].contains { name.contains($0) }
     }
 
     static func set(_ id: String, on: Bool, for provider: ModelProvider, notify: Bool = true) {

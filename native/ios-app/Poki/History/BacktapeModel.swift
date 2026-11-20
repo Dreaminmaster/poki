@@ -175,6 +175,7 @@ final class BacktapeModel {
             self.kept = stop == nil ? picked.bytes : self.wholeBytes()
             if stop == nil {
                 self.state = .ready
+                LocalModels.downloadFinished()
             } else if cancelled {
                 // Stopped by the owner: not a failure, and the files so far wait for Resume Download.
                 self.state = .missing

@@ -8,36 +8,38 @@
 // into the keychain instead of a server's model list, and the agents on a computer below.
 import SwiftUI
 
-/// Accounts, as the Mail app lists mail accounts: every model account on this iPhone whatever its
-/// provider, each with what it is used for (the text chat, live voice) switched on or off inside it.
-/// What an account can power is worked out from its type: any wired provider can run the text chat;
-/// live voice needs a Realtime API, which an OpenAI API key or a custom provider's service can open.
-/// Each custom provider is an account of its own.
+/// Models: what each use runs on (Chat, Voice, Decisions, Senses), each picked from the models ticked
+/// under the providers, in sections by provider; and the providers, as the Mail app lists mail
+/// accounts. Local, the models on this iPhone, is always there. Each custom provider is one of its own.
 struct ModelSettingsView: View {
-    /// Opened from Talk with Poki without a key: the OpenAI key's form at once, or Live Voice when the
-    /// key is there but Live Voice is turned off.
+    /// Opened from Talk with Poki without a key: the OpenAI key's form at once, or its voice models
+    /// when the key is there but live voice is off.
     var opensVoiceKey = false
     @State private var adding = false
     @State private var version = ModelKeys.saved
     @State private var enteringVoiceKey = false
     @State private var showingLiveVoice = false
     @State private var openedForVoice = false
-    @State private var decision = QuickFixes.name
 
     var body: some View {
         List {
-            // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
             Section {
-                InUseCard(decision: decision ?? AppLocalization.text("Off"), add: { adding = true })
+                ForEach(ModelUse.allCases) { use in
+                    ModelUsePicker(use: use, version: version)
+                }
             } header: {
                 Text("In Use").textCase(nil)
             } footer: {
-                Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
+                Text("Each list offers the models ticked under the providers below. Senses only runs on local models. Dictation in the message field needs no model.")
             }
 
-            // With no account yet the card above has Add Account, and an empty group would only be a heading.
-            if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
+            if LocalModels.recommends {
+                Section { LocalRecommendation() }
+            }
+
             Section {
+                NavigationLink { LocalProviderDetail() } label: { LocalProviderRow() }
+                    .accessibilityIdentifier("models.provider.local")
                 ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
                     let usage = ModelAccounts.uses(provider)
                     NavigationLink { AccountDetail(provider: provider) } label: {
@@ -50,16 +52,13 @@ struct ModelSettingsView: View {
                         AccountRow(provider: .custom, name: custom.displayName, usage: usage)
                     }
                 }
-                Button("Add Account", systemImage: "plus") { adding = true }
+                Button("Add Provider", systemImage: "plus") { adding = true }
+                    .accessibilityIdentifier("models.provider.add")
             } header: {
-                Text("Accounts").textCase(nil)
+                Text("Providers").textCase(nil)
             } footer: {
                 Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
             }
-            }
-
-            // The models on this iPhone, listed like the accounts.
-            LocalModelsSection(version: version)
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
@@ -68,75 +67,15 @@ struct ModelSettingsView: View {
         .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Models"))
         .navigationBarTitleDisplayMode(.inline)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in
-            version = ModelKeys.saved
-            decision = QuickFixes.name
-        }
-        .onAppear { decision = QuickFixes.name }
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
         .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
-        .navigationDestination(isPresented: $showingLiveVoice) { LiveVoiceFeature(account: .openai) }
+        .navigationDestination(isPresented: $showingLiveVoice) { ModelTickList(use: .voice, provider: .account(.openai)) }
         .task {
             guard opensVoiceKey, !openedForVoice else { return }
             openedForVoice = true
             if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if VoiceDirect.account == nil { showingLiveVoice = true }
         }
-    }
-}
-
-/// What runs now: the chat's model and its account, what the text chat, live voice and dictation each
-/// use (main's In Use rows), and Add Account while there is none. The chat model is changed on Poki's
-/// card, its one place.
-private struct InUseCard: View {
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// The decision model's name, or Off.
-    var decision: String
-    var add: () -> Void
-
-    var body: some View {
-        let has = ModelKeys.hasUsableKey
-        let provider = ModelKeys.selectedProvider
-        VStack(alignment: .leading, spacing: 14) {
-            let heading = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
-            heading {
-                if has { ProviderTile(provider: provider, size: 44) } else { SettingsIcon(symbol: "sparkles", warns: true, size: 44) }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: has ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("No Account")))
-                        .font(.title3.weight(.semibold)).foregroundStyle(Color(.label))
-                    if has { Text(verbatim: ModelKeys.selectedAccountName).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
-                }
-            }
-            .accessibilityElement(children: .combine)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) { uses(has: has, provider: provider, singleLine: true) }
-                VStack(alignment: .leading, spacing: 6) { uses(has: has, provider: provider, singleLine: false) }
-            }
-            if !has {
-                SettingsPill(title: "Add Account", symbol: "plus", prominent: true, action: add)
-                    .accessibilityIdentifier("model.inUse.action")
-            }
-        }
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder private func uses(has: Bool, provider: ModelProvider, singleLine: Bool) -> some View {
-        chip("Text Chat", has ? ModelKeys.selectedAccountName : AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
-        chip("Live Voice", VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
-        chip("Decision", decision, singleLine: singleLine)
-    }
-
-    private func chip(_ title: LocalizedStringKey, _ value: String, singleLine: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.caption).foregroundStyle(Color(.secondaryLabel))
-            Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Color(.label))
-        }
-        .lineLimit(singleLine ? 1 : nil)
-        // Measure the row at its natural width. The stacked fallback can wrap long values.
-        .fixedSize(horizontal: singleLine, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Tint.blueSoft.opacity(0.6), in: .rect(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -162,24 +101,6 @@ enum ModelAccounts {
         default: AppLocalization.text(LocalizedStringResource("API key"))
         }
     }
-
-    /// "Text Chat, Live Voice", "Not in use".
-    static func uses(_ provider: ModelProvider) -> String {
-        var out: [String] = []
-        if ModelKeys.selectedProvider == provider, ModelKeys.hasUsableKey { out.append(AppLocalization.text(LocalizedStringResource("Text Chat"))) }
-        if provider == .openai, VoiceDirect.account == .openai { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
-        return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
-    }
-
-    /// The same for one custom provider.
-    static func uses(_ custom: CustomProvider) -> String {
-        var out: [String] = []
-        if ModelKeys.selectedProvider == .custom, ModelKeys.hasUsableKey, CustomProviders.parse(ModelKeys.selectedModel)?.provider == custom.id {
-            out.append(AppLocalization.text(LocalizedStringResource("Text Chat")))
-        }
-        if VoiceDirect.account == .custom(custom.id) { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
-        return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
-    }
 }
 
 private struct AccountRow: View {
@@ -190,8 +111,8 @@ private struct AccountRow: View {
         HStack(spacing: 12) {
             ProviderTile(provider: provider)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: name)
-                Text(verbatim: usage).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: provider.name)
+                Text(verbatim: ProviderUseValue.summary(.account(provider))).font(.footnote).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
@@ -222,8 +143,24 @@ struct ConnectionCheckFeedback: View {
     }
 }
 
-/// One account: its type and connection, what it is used for (switches; the ones it can't power are
-/// shown greyed with why), its model, and Delete.
+/// The rows of a provider's "Use This Provider For": one per use it can serve, each opening the tick
+/// list of the models that use's picker offers.
+struct ProviderUseRows: View {
+    var provider: ProviderRef
+
+    var body: some View {
+        ForEach(provider.uses) { use in
+            NavigationLink { ModelTickList(use: use, provider: provider) } label: {
+                LabeledContent {
+                    Text(verbatim: ProviderUseValue.text(use, for: provider))
+                } label: { SettingsLabel(use.title, systemImage: use.symbol) }
+            }
+            .accessibilityIdentifier("provider.use.\(use.rawValue)")
+        }
+    }
+}
+
+/// One hosted provider: its type and connection, what it is used for (the tick lists), and Delete.
 private struct AccountDetail: View {
     @Environment(\.dismiss) private var dismiss
     var provider: ModelProvider
@@ -236,45 +173,27 @@ private struct AccountDetail: View {
             Section {
                 LabeledContent("Type", value: provider.name)
                 LabeledContent("Connection", value: ModelAccounts.method(provider))
-                if provider == .custom { LabeledContent("Address", value: ModelKeys.customURL) }
-                Button(provider.signsIn ? "Sign In Again" : provider == .custom ? "Edit Address and Key" : "Replace Key") {
+                Button(provider.signsIn ? "Sign In Again" : "Replace Key") {
                     if provider.signsIn { signingIn = true } else { editing = true }
                 }
             }
 
             Section {
-                NavigationLink { TextChatFeature(provider: provider) } label: {
-                    LabeledContent {
-                        Text(ModelKeys.selectedProvider == provider ? ModelKeys.selectedModelName : ModelAccounts.canChat(provider) ? AppLocalization.text(LocalizedStringResource("Off")) : AppLocalization.text(LocalizedStringResource("Not Supported")))
-                    } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
-                }
-                .disabled(!ModelAccounts.canChat(provider))
-                NavigationLink { LiveVoiceFeature(account: .openai) } label: {
-                    LabeledContent {
-                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.isOn(.openai) ? ModelCatalog.voiceModelID(for: .openai) : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
-                    } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
-                }
-                .disabled(!ModelAccounts.canTalkLive(provider))
-                NavigationLink { DecisionFeature(provider: provider) } label: {
-                    LabeledContent {
-                        Text(verbatim: QuickFixes.accountModel(provider).map { AccountDecisions.name(provider, $0) } ?? AppLocalization.text(AccountDecisions.canDecide(provider) ? "Off" : "Not Supported"))
-                    } label: { SettingsLabel("Decisions", systemImage: "bolt") }
-                }
-                .disabled(!AccountDecisions.canDecide(provider))
-                .accessibilityIdentifier("account.decisions")
+                ProviderUseRows(provider: .account(provider))
             } header: {
-                Text("Use This Account For")
+                Text("Use This Provider For")
             } footer: {
                 if !ModelAccounts.canChat(provider) {
                     Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
-                } else if !ModelAccounts.canTalkLive(provider) {
-                    Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open. Dictation in the message field works with this account.")
+                } else if provider != .openai {
+                    Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open.")
                 }
             }
 
             Section {
-                Button(provider.signsIn ? "Sign Out" : "Delete Account", role: .destructive) {
-                    if provider == .custom, let current = CustomProviders.current { CustomProviders.remove(current.id) } else { ModelKeys.remove(provider) }
+                Button(provider.signsIn ? "Sign Out" : "Delete Provider", role: .destructive) {
+                    ModelKeys.remove(provider)
+                    if QuickFixes.accountModel(provider) != nil { QuickFixes.pickAccount(provider, model: nil) }
                     if ModelKeys.selectedProvider == provider, let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
                         ModelKeys.selectedProvider = other
                     }
@@ -294,107 +213,8 @@ private struct AccountDetail: View {
     }
 }
 
-/// Account › Text Chat: which of its models Poki's card offers. Which one answers is chosen on the card.
-struct TextChatFeature: View {
-    var provider: ModelProvider
-    /// One custom provider's models only.
-    var custom: UUID? = nil
-    @State private var version = ModelKeys.saved
-    @State private var loading = false
-    @State private var problem: String?
-
-    var body: some View {
-        Form {
-            Section {
-                ForEach(custom.map { ModelCatalog.all(custom: $0) } ?? ModelCatalog.all(provider)) { choice in
-                    Toggle(isOn: Binding(get: { ModelCatalog.enabled(provider).contains(choice.id) }, set: { ModelCatalog.set(choice.id, on: $0, for: provider) })) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(choice.name)
-                            if ModelCatalog.fast(choice.id) { Text("Fast").font(.caption).foregroundStyle(Color(.secondaryLabel)) }
-                        }
-                    }
-                }
-                if provider != .chatgpt {
-                    Button(loading ? "Reading the Model List…" : "Refresh Model List") { refresh() }.disabled(loading)
-                }
-            } header: {
-                Text("Models to Choose From")
-            } footer: {
-                Text(problem ?? AppLocalization.text(LocalizedStringResource("Fast models without long thinking answer quickest on the phone. Models from \(accountName)’s list start switched off.")))
-            }
-        }
-        // Reads the version so the page redraws with the new keys and models, without rebuilding it
-        // (a rebuild dropped taps and the sheets it was presenting).
-        .background { Color.clear.accessibilityHidden(true).id(version) }
-        .settingsPage()
-        .navigationTitle(AppLocalization.text("Text Chat"))
-        .navigationBarTitleDisplayMode(.inline)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .task {
-            let empty = custom.map { ModelCatalog.listedCustom($0).isEmpty } ?? ModelCatalog.listed(provider).isEmpty
-            if empty, provider != .chatgpt { refresh() }
-        }
-    }
-
-    private var accountName: String { custom.flatMap { CustomProviders.provider($0) }?.displayName ?? provider.name }
-
-    private func refresh() {
-        loading = true
-        problem = nil
-        Task {
-            do { if let custom { _ = try await ModelCatalog.refresh(custom: custom) } else { _ = try await ModelCatalog.refresh(provider) } }
-            catch is CancellationError { /* The account changed while loading. */ }
-            catch let error as ModelCatalog.DiscoveryError { problem = error.message }
-            catch { problem = AppLocalization.text(LocalizedStringResource("\(accountName) didn’t return its model list. The built-in models still work.")) }
-            loading = false
-        }
-    }
-}
-
-/// Account › Live Voice: on or off, the voice model, and which voice models to offer, for OpenAI or a
-/// custom provider. One account runs live voice at a time.
-struct LiveVoiceFeature: View {
-    var account: VoiceAccount
-    @State private var version = ModelKeys.saved
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Use for Live Voice", isOn: Binding(get: { VoiceDirect.isOn(account) }, set: { VoiceDirect.set(account, on: $0) }))
-                if VoiceDirect.isOn(account) {
-                    Picker("Voice Model", selection: Binding(get: { ModelCatalog.voiceModelID(for: account) }, set: { ModelCatalog.setVoiceModelID($0, for: account) })) {
-                        ForEach(ModelCatalog.voiceOffered(for: account)) { Text($0.name).tag($0.id) }
-                    }
-                }
-            } footer: {
-                if account == .openai {
-                    Text("Live voice is a spoken conversation with OpenAI’s Realtime model: it listens, taps and types, and answers out loud.")
-                } else {
-                    Text("Live voice is a spoken conversation with the Realtime API at this service’s first address. It listens, taps and types, and answers out loud. Turn it on only if the service offers the Realtime API.")
-                }
-            }
-            Section {
-                ForEach(ModelCatalog.voiceChoices(for: account)) { choice in
-                    Toggle(choice.name, isOn: Binding(get: { ModelCatalog.voiceOn(for: account).contains(choice.id) }, set: { ModelCatalog.setVoice(choice.id, on: $0, for: account) }))
-                }
-            } header: {
-                Text("Voice Models to Choose From")
-            } footer: {
-                Text("Refresh the model list under Text Chat to add the other Realtime models your key can use.")
-            }
-        }
-        // Reads the version so the page redraws with the new keys and models, without rebuilding it
-        // (a rebuild dropped taps and the sheets it was presenting).
-        .background { Color.clear.accessibilityHidden(true).id(version) }
-        .settingsPage()
-        .navigationTitle(AppLocalization.text("Live Voice"))
-        .navigationBarTitleDisplayMode(.inline)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-    }
-}
-
-/// Add Account: the account types, each with how it connects; choosing one opens its key, address or
-/// sign-in.
+/// Add Provider: the provider types, each with what it can be used for; choosing one opens its key,
+/// address or sign-in, the same pane for every one.
 struct AddAccount: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: ModelProvider?
@@ -423,11 +243,11 @@ struct AddAccount: View {
                         }
                     }
                 } footer: {
-                    Text("Text chat works with every account. Live voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like.")
+                    Text("Chat and decisions work with every provider. Voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like. Local is always there.")
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle(AppLocalization.text("Add Account"))
+            .navigationTitle(AppLocalization.text("Add Provider"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .sheet(item: $editing, onDismiss: { if editing == nil { dismiss() } }) { provider in KeyEntry(provider: provider) }
@@ -436,11 +256,12 @@ struct AddAccount: View {
         }
     }
 
+    /// What a provider can be used for: chat and decisions on every wired one, voice where it has a
+    /// Realtime API.
     private func capabilities(_ provider: ModelProvider) -> String {
-        let how = ModelAccounts.method(provider)
-        if ModelAccounts.canTalkLive(provider) { return AppLocalization.text(LocalizedStringResource("\(how) · Text chat and live voice")) }
-        if ModelAccounts.canChat(provider) { return AppLocalization.text(LocalizedStringResource("\(how) · Text chat")) }
-        return AppLocalization.text(LocalizedStringResource("\(how) · Coming in an update"))
+        if ModelAccounts.canTalkLive(provider) { return AppLocalization.text(LocalizedStringResource("Chat, voice and decisions")) }
+        if ModelAccounts.canChat(provider) { return AppLocalization.text(LocalizedStringResource("Chat and decisions")) }
+        return AppLocalization.text(LocalizedStringResource("Coming in an update"))
     }
 }
 
