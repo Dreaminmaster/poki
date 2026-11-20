@@ -52,9 +52,12 @@ struct CustomProviderDetail: View {
                 } header: {
                     Text("Addresses")
                 } footer: {
-                    Text(provider.endpoints.count > 1
-                         ? LocalizedStringKey("Poki uses the first address. When it can’t be reached, Poki tries the next ones that speak the same API, in order. Automatic reasoning is on for models Poki knows as reasoning models.")
-                         : LocalizedStringKey("Automatic reasoning is on for models Poki knows as reasoning models, such as GPT-6.1 Sol."))
+                    Group {
+                        Text(provider.endpoints.count > 1
+                             ? LocalizedStringKey("Poki uses the first address. When it can’t be reached, Poki tries the next ones that speak the same API, in order. Automatic reasoning is on for models Poki knows as reasoning models.")
+                             : LocalizedStringKey("Automatic reasoning is on for models Poki knows as reasoning models, such as GPT-6.1 Sol."))
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -62,7 +65,10 @@ struct CustomProviderDetail: View {
                 } header: {
                     Text("Use This Provider For")
                 } footer: {
-                    Text("Voice needs the Realtime API at the first address.")
+                    Group {
+                        Text("Voice needs the Realtime API at the first address.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -145,7 +151,10 @@ struct CustomProviderEditor: View {
                 } header: {
                     Text("Address")
                 } footer: {
-                    Text("Automatic tries the Responses API first and uses chat completions where the address has none.")
+                    Group {
+                        Text("Automatic tries the Responses API first and uses chat completions where the address has none.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -157,7 +166,10 @@ struct CustomProviderEditor: View {
                 } header: {
                     Text("Backup Addresses")
                 } footer: {
-                    Text("When the address can’t be reached, Poki tries these in order.")
+                    Group {
+                        Text("When the address can’t be reached, Poki tries these in order.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -165,13 +177,16 @@ struct CustomProviderEditor: View {
                 } header: {
                     Text("\(draft.displayName) key")
                 } footer: {
-                    if !keyHosts.isEmpty, key.isEmpty, !newHosts.isEmpty {
-                        Text("The saved key is only sent to the addresses it was saved for. Enter it again to use it with the new address.")
-                    } else if !keyHosts.isEmpty {
-                        Text("A key is saved. Enter a new one to replace it.")
-                    } else {
-                        Text(verbatim: ModelProvider.custom.keyHelp)
+                    Group {
+                        if !keyHosts.isEmpty, key.isEmpty, !newHosts.isEmpty {
+                            Text("The saved key is only sent to the addresses it was saved for. Enter it again to use it with the new address.")
+                        } else if !keyHosts.isEmpty {
+                            Text("A key is saved. Enter a new one to replace it.")
+                        } else {
+                            Text(verbatim: ModelProvider.custom.keyHelp)
+                        }
                     }
+                    .settingsFooter()
                 }
 
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
@@ -187,20 +202,23 @@ struct CustomProviderEditor: View {
                     .disabled(testing || !canSave)
                     .accessibilityIdentifier("customEditor.test")
                 } footer: {
-                    if !testing, let first = filled.first, let outcome = results[first.id] {
-                        VStack(alignment: .leading, spacing: 4) {
-                            resultView(outcome)
-                            ForEach(filled.dropFirst()) { backup in
-                                if let other = results[backup.id] {
-                                    Text(verbatim: backup.normalized).lineLimit(1).truncationMode(.middle)
-                                    resultView(other)
+                    Group {
+                        if !testing, let first = filled.first, let outcome = results[first.id] {
+                            VStack(alignment: .leading, spacing: 4) {
+                                resultView(outcome)
+                                ForEach(filled.dropFirst()) { backup in
+                                    if let other = results[backup.id] {
+                                        Text(verbatim: backup.normalized).lineLimit(1).truncationMode(.middle)
+                                        resultView(other)
+                                    }
                                 }
+                                if saved, !outcome.result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
                             }
-                            if saved, !outcome.result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("customEditor.result")
                         }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("customEditor.result")
                     }
+                    .settingsFooter()
                 }
 
                 if !keyHosts.isEmpty, CustomProviders.key(draft.id) != nil {

@@ -80,7 +80,10 @@ struct SettingsHome: View {
                 }
                 .padding(.vertical, 4)
             } footer: {
-                Text("The relay forwards requests to this iPhone while Poki is open or in the background. It stores nothing; when offline, clients receive an error.")
+                Group {
+                    Text("The relay forwards requests to this iPhone while Poki is open or in the background. It stores nothing; when offline, clients receive an error.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -102,7 +105,10 @@ struct SettingsHome: View {
             } header: {
                 Text("Agents")
             } footer: {
-                if model.relayAddress == nil { Text("Set your relay address first: each agent’s address is on your relay.") }
+                Group {
+                    if model.relayAddress == nil { Text("Set your relay address first: each agent’s address is on your relay.") }
+                }
+                .settingsFooter()
             }
 
             // The in-process path has no Poki Runner to start or stop (ESP-152).
@@ -120,7 +126,10 @@ struct SettingsHome: View {
                 } header: {
                     Text("Runner")
                 } footer: {
-                    Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                    Group {
+                        Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                    }
+                    .settingsFooter()
                 }
             }
 
@@ -142,9 +151,12 @@ struct SettingsHome: View {
             } header: {
                 Text("This iPhone")
             } footer: {
-                Text(model.automationPath == .inProcess
-                     ? "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents."
-                     : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
+                Group {
+                    Text(model.automationPath == .inProcess
+                         ? "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents."
+                         : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Agents and Relay"))
@@ -193,11 +205,14 @@ struct RelayView: View {
             } header: {
                 Text("Relay Address")
             } footer: {
-                if rejected {
-                    Text("That is not a relay address. Enter the address deploy.sh printed, such as https://poki-relay.you.workers.dev.").foregroundStyle(.red)
-                } else {
-                    Text("Poki has no default relay. Deploy your own to your Cloudflare account with deploy/cf-relay/deploy.sh from the Poki repository, then enter the address it prints. Screenshots and taps pass only through that relay.")
+                Group {
+                    if rejected {
+                        Text("That is not a relay address. Enter the address deploy.sh printed, such as https://poki-relay.you.workers.dev.").foregroundStyle(.red)
+                    } else {
+                        Text("Poki has no default relay. Deploy your own to your Cloudflare account with deploy/cf-relay/deploy.sh from the Poki repository, then enter the address it prints. Screenshots and taps pass only through that relay.")
+                    }
                 }
+                .settingsFooter()
             }
             Section("Status") { LabeledContent("Relay", value: statusText) }
         }
@@ -262,7 +277,10 @@ struct ConnectorDetail: View {
                     copied = true
                 }
             } footer: {
-                Text("Add this URL as a remote MCP server in your client. Anyone with this link can control this iPhone while Poki is running. Keep it private, and revoke it here if compromised.")
+                Group {
+                    Text("Add this URL as a remote MCP server in your client. Anyone with this link can control this iPhone while Poki is running. Keep it private, and revoke it here if compromised.")
+                }
+                .settingsFooter()
             }
             }
             Section {

@@ -286,13 +286,16 @@ struct MemoryEditor: View {
                         .focused($focused)
                         .accessibilityIdentifier("memory.editor")
                 } footer: {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        if over {
-                            Text("Up to \(limit) characters. Remove \(count - limit) to save.").foregroundStyle(Tint.red)
+                    Group {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            if over {
+                                Text("Up to \(limit) characters. Remove \(count - limit) to save.").foregroundStyle(Tint.red)
+                            }
+                            Spacer(minLength: 0)
+                            Text(verbatim: "\(count)/\(limit)").monospacedDigit().foregroundStyle(over ? Tint.red : Color(.secondaryLabel))
                         }
-                        Spacer(minLength: 0)
-                        Text(verbatim: "\(count)/\(limit)").monospacedDigit().foregroundStyle(over ? Tint.red : Color(.secondaryLabel))
                     }
+                    .settingsFooter()
                 }
                 Section {
                     if picksApp {
@@ -308,12 +311,15 @@ struct MemoryEditor: View {
                     Toggle("Locked", isOn: $page.draftLocked)
                         .accessibilityIdentifier("memory.editor.lock")
                 } footer: {
-                    // Two Texts, not one with a ternary: a ternary's words are a String and skip the catalog.
-                    if page.draftLocked {
-                        Text("Poki won’t change or forget it while it is locked.")
-                    } else {
-                        Text("Poki can update it when it learns something new.")
+                    Group {
+                        // Two Texts, not one with a ternary: a ternary's words are a String and skip the catalog.
+                        if page.draftLocked {
+                            Text("Poki won’t change or forget it while it is locked.")
+                        } else {
+                            Text("Poki can update it when it learns something new.")
+                        }
                     }
+                    .settingsFooter()
                 }
             }
             .navigationTitle(AppLocalization.text(title))
@@ -379,7 +385,10 @@ struct MemoryAppPicker: View {
                 Section {
                     row(nil)
                 } footer: {
-                    Text("Poki keeps it in mind in every app.")
+                    Group {
+                        Text("Poki keeps it in mind in every app.")
+                    }
+                    .settingsFooter()
                 }
                 if !known.isEmpty {
                     Section("With Memories") { ForEach(known, id: \.self) { row($0) } }
@@ -513,16 +522,22 @@ struct MemoryPageEditor: View {
                         .focused($focused)
                         .accessibilityIdentifier("memory.pageEditor")
                 } footer: {
-                    Text("Each line is one memory. Remove a line to forget it.")
+                    Group {
+                        Text("Each line is one memory. Remove a line to forget it.")
+                    }
+                    .settingsFooter()
                 }
                 Section {
                     Toggle("Locked", isOn: $locked)
                 } footer: {
-                    if locked {
-                        Text("Poki won’t change this page while it is locked.")
-                    } else {
-                        Text("Poki can rewrite this page as it learns, but never a line you locked.")
+                    Group {
+                        if locked {
+                            Text("Poki won’t change this page while it is locked.")
+                        } else {
+                            Text("Poki can rewrite this page as it learns, but never a line you locked.")
+                        }
                     }
+                    .settingsFooter()
                 }
             }
             .navigationTitle(app.map { Text(verbatim: MemoryFormat.appName($0)) } ?? Text("About You"))

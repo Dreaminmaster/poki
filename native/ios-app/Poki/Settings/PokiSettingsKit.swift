@@ -74,19 +74,22 @@ struct SettingsRow: View {
         HStack(spacing: min(18, iconSpacing)) {
             SettingsIcon(symbol: symbol)
                 .padding(.vertical, SettingsRowMetrics.iconLineInset)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.allo(.body)).foregroundStyle(Color(.label))
-                if let caption { Text(caption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
-                if let dataCaption {
-                    Text(verbatim: dataCaption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
+            // The title stays on one line (the owner, Nov 20 2026: a pill made "Signing & Updates" wrap).
+            // The value sits beside it when both fit, and goes under the title when they do not, as it
+            // does at the accessibility sizes. The caption wraps either way.
+            TitleValueLayout(inline: !typeSize.isAccessibilitySize) {
+                VStack(alignment: .leading, spacing: 2) {
+                    titleText
+                    if let caption { Text(caption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
+                    if let dataCaption {
+                        Text(verbatim: dataCaption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
+                    }
                 }
-                // At the accessibility sizes the value goes under the caption, as in Settings.
-                if typeSize.isAccessibilitySize, let value { valueView(value) }
+                if let value { valueView(value).lineLimit(1) } else { Color.clear.frame(width: 0, height: 0) }
+                // Measured, never drawn: the title's width on one line.
+                titleText.fixedSize().hidden().accessibilityHidden(true)
             }
-            Spacer(minLength: 8)
-            // The value keeps its width (a model's name, the way of asking); the caption wraps instead.
-            if !typeSize.isAccessibilitySize, let value { valueView(value).lineLimit(1).layoutPriority(1) }
             switch accessory {
             case .done:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Tint.green).accessibilityLabel(Text("Done"))
@@ -96,6 +99,10 @@ struct SettingsRow: View {
             case nil: EmptyView()
             }
         }
+    }
+
+    private var titleText: some View {
+        Text(title).font(.allo(.body)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
     }
 
     @ViewBuilder private func valueView(_ value: String) -> some View {
@@ -182,6 +189,14 @@ private struct SettingsPageStyle: ViewModifier {
 
 extension View {
     func settingsPage() -> some View { modifier(SettingsPageStyle()) }
+
+    /// A section footer as the system draws it: footnote, secondary. The app sets Allo body text at
+    /// its root (PokiApp), and an explicit environment font wins over List's own footer style, so
+    /// without this every footer showed at body size (the owner, Nov 20 2026: far too big). A font or
+    /// colour set inside a footer still wins over this one.
+    func settingsFooter() -> some View {
+        font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+    }
 }
 
 /// A section's heading as the settings pages write it: in the words' own case.
@@ -257,5 +272,43 @@ struct SettingsChoiceCard: View {
         }
         .buttonStyle(PressedDimStyle())
         .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+/// A row's words and its value: the words (subview 0) take the room the value (1) leaves; the value
+/// sits at the trailing edge when the title (2, measured on one line and never drawn) fits beside it,
+/// and under the words otherwise, so a pill or a value never makes a title wrap.
+struct TitleValueLayout: Layout {
+    var inline = true
+    var gap: CGFloat = 8
+
+    private func plan(_ width: CGFloat?, _ subviews: Subviews) -> (inline: Bool, value: CGSize, words: CGSize) {
+        let value = subviews[1].sizeThatFits(.unspecified)
+        let title = subviews[2].sizeThatFits(.unspecified)
+        let room = width ?? .infinity
+        let besides = inline && (value.width == 0 || title.width + gap + value.width <= room)
+        let wordsWidth = besides ? max(0, room - (value.width > 0 ? value.width + gap : 0)) : room
+        let words = subviews[0].sizeThatFits(ProposedViewSize(width: wordsWidth.isFinite ? wordsWidth : nil, height: nil))
+        return (besides, value, words)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let p = plan(proposal.width, subviews)
+        let height = p.inline ? max(p.words.height, p.value.height) : p.words.height + (p.value.height > 0 ? 2 + p.value.height : 0)
+        let width = proposal.width ?? (p.inline ? p.words.width + (p.value.width > 0 ? gap + p.value.width : 0) : max(p.words.width, p.value.width))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let p = plan(bounds.width, subviews)
+        subviews[2].place(at: bounds.origin, proposal: .zero)
+        if p.inline {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                              proposal: ProposedViewSize(width: p.words.width, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: .unspecified)
+        } else {
+            subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + p.words.height + 2), proposal: .unspecified)
+        }
     }
 }

@@ -37,7 +37,10 @@ struct SecuritySettingsView: View {
             } header: {
                 SettingsHeader("Records")
             } footer: {
-                Text("The Activity Log lists every step Poki took and every approval. The Observing Record lists when Screen History was reading, stopped or left an app out.")
+                Group {
+                    Text("The Activity Log lists every step Poki took and every approval. The Observing Record lists when Screen History was reading, stopped or left an app out.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Security"))

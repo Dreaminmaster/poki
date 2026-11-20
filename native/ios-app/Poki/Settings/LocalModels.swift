@@ -39,11 +39,14 @@ struct LocalProviderDetail: View {
             } header: {
                 Text("Models")
             } footer: {
-                if !BacktapeModel.supported {
-                    Text("This iPhone does not have the memory to run a downloaded model.")
-                } else {
-                    Text("Only one downloaded model is kept. What a local model is asked never leaves the phone.")
+                Group {
+                    if !BacktapeModel.supported {
+                        Text("This iPhone does not have the memory to run a downloaded model.")
+                    } else {
+                        Text("Only one downloaded model is kept. What a local model is asked never leaves the phone.")
+                    }
                 }
+                .settingsFooter()
             }
 
             Section {
@@ -58,7 +61,10 @@ struct LocalProviderDetail: View {
             } header: {
                 Text("Use This Provider For")
             } footer: {
-                Text("Local models can be used for decisions and for Senses. Senses only runs on local models.")
+                Group {
+                    Text("Local models can be used for decisions and for Senses. Senses only runs on local models.")
+                }
+                .settingsFooter()
             }
         }
         .background { Color.clear.accessibilityHidden(true).id(version) }
@@ -188,7 +194,10 @@ struct DownloadedModelDetail: View {
                     .accessibilityIdentifier("models.local.download")
                 }
             } footer: {
-                Text(footer)
+                Group {
+                    Text(footer)
+                }
+                .settingsFooter()
             }
 
             if ready {
@@ -262,12 +271,15 @@ struct AppleIntelligenceDetail: View {
                 LabeledContent("Connection", value: AppLocalization.text("On This iPhone"))
                 LabeledContent("Status", value: LocalProviderDetail.appleStatus)
             } footer: {
-                switch AppleIntelligence.status {
-                case .available: Text("Choose it under Decisions or Senses on the Models page.")
-                case .turnedOff: Text("Turn on Apple Intelligence in the Settings app to use it here.")
-                case .notReady: Text("Apple Intelligence is downloading its model. It can be chosen once it is ready.")
-                case .unsupported: Text("This iPhone has no Apple Intelligence. A downloaded model can make decisions and write Senses’ notes instead.")
+                Group {
+                    switch AppleIntelligence.status {
+                    case .available: Text("Choose it under Decisions or Senses on the Models page.")
+                    case .turnedOff: Text("Turn on Apple Intelligence in the Settings app to use it here.")
+                    case .notReady: Text("Apple Intelligence is downloading its model. It can be chosen once it is ready.")
+                    case .unsupported: Text("This iPhone has no Apple Intelligence. A downloaded model can make decisions and write Senses’ notes instead.")
+                    }
                 }
+                .settingsFooter()
             }
             if AppleIntelligence.status == .turnedOff {
                 Section {

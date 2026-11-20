@@ -215,7 +215,10 @@ struct ActionLogView: View {
             }
             if !log.entries.isEmpty {
                 Section {} footer: {
-                    Text("Poki keeps its latest \(ActionLog.keep) entries on this iPhone. Entries can’t be deleted by hand.")
+                    Group {
+                        Text("Poki keeps its latest \(ActionLog.keep) entries on this iPhone. Entries can’t be deleted by hand.")
+                    }
+                    .settingsFooter()
                 }
             }
         }

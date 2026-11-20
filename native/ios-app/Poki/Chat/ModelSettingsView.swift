@@ -30,7 +30,10 @@ struct ModelSettingsView: View {
             } header: {
                 Text("In Use").textCase(nil)
             } footer: {
-                Text("Each list offers the models ticked under the providers below. Senses only runs on local models. Dictation in the message field needs no model.")
+                Group {
+                    Text("Each list offers the models ticked under the providers below. Senses only runs on local models. Dictation in the message field needs no model.")
+                }
+                .settingsFooter()
             }
 
             if LocalModels.recommends {
@@ -57,7 +60,10 @@ struct ModelSettingsView: View {
             } header: {
                 Text("Providers").textCase(nil)
             } footer: {
-                Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
+                Group {
+                    Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
+                }
+                .settingsFooter()
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -183,11 +189,14 @@ private struct AccountDetail: View {
             } header: {
                 Text("Use This Provider For")
             } footer: {
-                if !ModelAccounts.canChat(provider) {
-                    Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
-                } else if provider != .openai {
-                    Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open.")
+                Group {
+                    if !ModelAccounts.canChat(provider) {
+                        Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
+                    } else if provider != .openai {
+                        Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open.")
+                    }
                 }
+                .settingsFooter()
             }
 
             Section {
@@ -243,7 +252,10 @@ struct AddAccount: View {
                         }
                     }
                 } footer: {
-                    Text("Chat and decisions work with every provider. Voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like. Local is always there.")
+                    Group {
+                        Text("Chat and decisions work with every provider. Voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like. Local is always there.")
+                    }
+                    .settingsFooter()
                 }
             }
             .listStyle(.insetGrouped)
@@ -295,17 +307,20 @@ struct KeyEntry: View {
                 } header: {
                     Text("\(provider.name) key")
                 } footer: {
-                    if !provider.wired {
-                        Text("Poki keeps the key now; chatting with \(provider.name) comes in an update. Until then, choose Anthropic or OpenAI.")
-                    } else if provider == .custom,
-                              ModelCatalog.normalizedAddress(url) != ModelCatalog.normalizedAddress(ModelKeys.customURL),
-                              ModelKeys.hasKey(provider) {
-                        Text("The saved key belongs to the previous address. Enter a key for this service if it needs one.")
-                    } else if ModelKeys.hasKey(provider) {
-                        Text("A key is saved. Enter a new one to replace it.")
-                    } else {
-                        Text(verbatim: provider.keyHelp)
+                    Group {
+                        if !provider.wired {
+                            Text("Poki keeps the key now; chatting with \(provider.name) comes in an update. Until then, choose Anthropic or OpenAI.")
+                        } else if provider == .custom,
+                                  ModelCatalog.normalizedAddress(url) != ModelCatalog.normalizedAddress(ModelKeys.customURL),
+                                  ModelKeys.hasKey(provider) {
+                            Text("The saved key belongs to the previous address. Enter a key for this service if it needs one.")
+                        } else if ModelKeys.hasKey(provider) {
+                            Text("A key is saved. Enter a new one to replace it.")
+                        } else {
+                            Text(verbatim: provider.keyHelp)
+                        }
                     }
+                    .settingsFooter()
                 }
                 if provider == .custom {
                     Section {
@@ -319,11 +334,14 @@ struct KeyEntry: View {
                         .disabled(discovery.loading || testing || !validCustomAddress)
                         .accessibilityIdentifier("keyEntry.fetchModels")
                     } footer: {
-                        if let problem = discovery.problem {
-                            Text(problem.message)
-                        } else {
-                            Text("Choose a model from the service, or enter its ID manually.")
+                        Group {
+                            if let problem = discovery.problem {
+                                Text(problem.message)
+                            } else {
+                                Text("Choose a model from the service, or enter its ID manually.")
+                            }
                         }
+                        .settingsFooter()
                     }
                 }
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
@@ -339,10 +357,13 @@ struct KeyEntry: View {
                         .disabled(testing || testKey == nil)
                         .accessibilityIdentifier("keyEntry.test")
                     } footer: {
-                        if let result, !testing {
-                            ConnectionCheckFeedback(result: result, saved: saved)
-                                .accessibilityIdentifier("keyEntry.result")
+                        Group {
+                            if let result, !testing {
+                                ConnectionCheckFeedback(result: result, saved: saved)
+                                    .accessibilityIdentifier("keyEntry.result")
+                            }
                         }
+                        .settingsFooter()
                     }
                 }
                 if ModelKeys.hasKey(provider) {

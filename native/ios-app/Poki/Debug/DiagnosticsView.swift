@@ -24,8 +24,11 @@ struct DiagnosticsView: View {
             } header: {
                 Text("Proxy Loopback Interface")
             } footer: {
-                Text(verbatim: "Network path: \(model.loopback.pathSummary). Wi-Fi \(model.loopback.wifiUp ? "up" : "down"), cellular \(model.loopback.cellularUp ? "up" : "down")\(model.loopback.cellularOnly ? " (cellular only)" : "")")
-                    .textSelection(.enabled)
+                Group {
+                    Text(verbatim: "Network path: \(model.loopback.pathSummary). Wi-Fi \(model.loopback.wifiUp ? "up" : "down"), cellular \(model.loopback.cellularUp ? "up" : "down")\(model.loopback.cellularOnly ? " (cellular only)" : "")")
+                        .textSelection(.enabled)
+                }
+                .settingsFooter()
             }
             .textSelection(.enabled)
             Section("Checks") {
@@ -73,7 +76,10 @@ struct DiagnosticsView: View {
         } header: {
             Text("Cellular Startup")
         } footer: {
-            Text(AppLocalization.text(detail))
+            Group {
+                Text(AppLocalization.text(detail))
+            }
+            .settingsFooter()
         }
     }
 
@@ -135,7 +141,10 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals.")
+                Group {
+                    Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals.")
+                }
+                .settingsFooter()
             }
             // Apps by name and the read that comes when the screen settles: on unless turned off here.
             SpeedTestingSection()
@@ -161,7 +170,10 @@ struct TestingOptionsView: View {
             } header: {
                 Text("Background Hold")
             } footer: {
-                Text("Tap Start, leave the app for a while, then return. The log records suspension gaps and connection closures.")
+                Group {
+                    Text("Tap Start, leave the app for a while, then return. The log records suspension gaps and connection closures.")
+                }
+                .settingsFooter()
             }
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }

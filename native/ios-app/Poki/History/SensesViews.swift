@@ -17,9 +17,12 @@ struct SensesUseSection: View {
         } header: {
             SettingsHeader("Use History")
         } footer: {
-            Text(LocalizedStringKey(use.insightModel == .onDevice
-                ? "Poki learns your usual apps and routines from which apps you use and when, suggests pills for the time of day, and answers Poki's questions about you. A model on this iPhone checks each answer, and asks you first when it is private. Your screen text never leaves this iPhone."
-                : "Poki learns your usual apps and routines from which apps you use and when. Interests and pill ideas are written by your chat model, which then reads your summaries and screen titles. A model on this iPhone still checks each answer for Poki's chat, and asks you first when it is private."))
+            Group {
+                Text(LocalizedStringKey(use.insightModel == .onDevice
+                    ? "Poki learns your usual apps and routines from which apps you use and when, suggests pills for the time of day, and answers Poki's questions about you. A model on this iPhone checks each answer, and asks you first when it is private. Your screen text never leaves this iPhone."
+                    : "Poki learns your usual apps and routines from which apps you use and when. Interests and pill ideas are written by your chat model, which then reads your summaries and screen titles. A model on this iPhone still checks each answer for Poki's chat, and asks you first when it is private."))
+            }
+            .settingsFooter()
         }
     }
 }
@@ -54,7 +57,10 @@ struct SensesMemorySection: View {
             } header: {
                 SettingsHeader("Learned from Screen History")
             } footer: {
-                Text("Inferred on this iPhone from your Screen History. They are not notes. They are not exported or backed up, and agents get them only through a check on this iPhone. Swipe to forget one or save it as a note.")
+                Group {
+                    Text("Inferred on this iPhone from your Screen History. They are not notes. They are not exported or backed up, and agents get them only through a check on this iPhone. Swipe to forget one or save it as a note.")
+                }
+                .settingsFooter()
             }
             .task { await memories.refresh(force: true) }
         }

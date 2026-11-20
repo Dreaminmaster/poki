@@ -20,7 +20,10 @@ struct SpeedTestingSection: View {
         } header: {
             Text("Speed")
         } footer: {
-            Text("On by default. Apps by Name lets an agent open an app by its name and keep it as the app it works in. Read When the Screen Settles reads the screen as soon as it has changed and holds still after an app opens, a swipe or a button, in place of a fixed pause. Changes count from the next step.")
+            Group {
+                Text("On by default. Apps by Name lets an agent open an app by its name and keep it as the app it works in. Read When the Screen Settles reads the screen as soon as it has changed and holds still after an app opens, a swipe or a button, in place of a fixed pause. Changes count from the next step.")
+            }
+            .settingsFooter()
         }
     }
 }

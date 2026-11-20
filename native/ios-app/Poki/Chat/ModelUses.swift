@@ -463,7 +463,10 @@ struct ModelTickList: View {
             } header: {
                 Text("Models to Choose From")
             } footer: {
-                Text(problem ?? footer)
+                Group {
+                    Text(problem ?? footer)
+                }
+                .settingsFooter()
             }
         }
         // Reads the version so the page redraws with the new ticks, without rebuilding it.

@@ -28,7 +28,10 @@ struct ConnectorsView: View {
             } header: {
                 SettingsHeader("Available")
             } footer: {
-                Text("Connectors let Poki use a service directly, without opening its app. Mention one with @ in a message.")
+                Group {
+                    Text("Connectors let Poki use a service directly, without opening its app. Mention one with @ in a message.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Connectors"))
@@ -115,8 +118,11 @@ struct ConnectorDetailView: View {
                         }
                     }
                 } footer: {
-                    if let problem { Text(problem).foregroundStyle(Tint.red) }
-                    else if accounts.isEmpty { Text(verbatim: connector.url) }
+                    Group {
+                        if let problem { Text(problem).foregroundStyle(Tint.red) }
+                        else if accounts.isEmpty { Text(verbatim: connector.url) }
+                    }
+                    .settingsFooter()
                 }
                 if connector.custom {
                     Section {
@@ -187,7 +193,10 @@ struct ConnectorAccountView: View {
                     }
                     .pickerStyle(.menu)
                 } footer: {
-                    account.automatic ? Text("Poki can use this account in any chat.") : Text("Poki uses this account only when a message mentions it with @.")
+                    Group {
+                        account.automatic ? Text("Poki can use this account in any chat.") : Text("Poki uses this account only when a message mentions it with @.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -292,7 +301,10 @@ struct CustomConnectorSheet: View {
                     TextField(AppLocalization.text("Address"), text: $address)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 } footer: {
-                    Text("The server's streamable HTTP address, often ending in /mcp.")
+                    Group {
+                        Text("The server's streamable HTTP address, often ending in /mcp.")
+                    }
+                    .settingsFooter()
                 }
                 Section {
                     Picker(selection: $sign) {

@@ -140,7 +140,10 @@ struct CellularTrickSection: View {
         } header: {
             Text("Cellular Connection Test")
         } footer: {
-            Text("1. Turn Wi-Fi off and tap Start. New connections should be refused. 2. Turn Airplane Mode on with Wi-Fi still off, or turn Cellular Data off, and wait until the held tunnel reads. 3. Turn it back. If the held tunnel keeps reading while new connections are refused, the trick works. The log is saved as cellular-trick.json and in the app log.")
+            Group {
+                Text("1. Turn Wi-Fi off and tap Start. New connections should be refused. 2. Turn Airplane Mode on with Wi-Fi still off, or turn Cellular Data off, and wait until the held tunnel reads. 3. Turn it back. If the held tunnel keeps reading while new connections are refused, the trick works. The log is saved as cellular-trick.json and in the app log.")
+            }
+            .settingsFooter()
         }
     }
 }

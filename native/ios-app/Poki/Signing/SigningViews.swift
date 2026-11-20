@@ -24,7 +24,10 @@ struct AccountPage: View {
                 Button("Verify") { Task { await signer.finishSignIn(code: code); code = "" } }
                     .disabled(code.count != 6 || signer.working != nil)
             } footer: {
-                Text("Apple sent a six-digit code to your trusted devices or phone number.")
+                Group {
+                    Text("Apple sent a six-digit code to your trusted devices or phone number.")
+                }
+                .settingsFooter()
             }
             VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
         } else if signer.signedIn, !signer.sessionExpired {
@@ -43,9 +46,12 @@ struct AccountPage: View {
                     LabeledContent("Team", value: team.is_free ? AppLocalization.text(LocalizedStringResource("\(team.name) (Free, 7-day signing)")) : team.name)
                 }
             } footer: {
-                Text(signer.status?.keeps_password == true
-                     ? "Poki keeps the password in this iPhone’s Keychain to sign itself again every week."
-                     : "Poki signs in again when its signing is due, and asks you for the password then.")
+                Group {
+                    Text(signer.status?.keeps_password == true
+                         ? "Poki keeps the password in this iPhone’s Keychain to sign itself again every week."
+                         : "Poki signs in again when its signing is due, and asks you for the password then.")
+                }
+                .settingsFooter()
             }
             .task { if signer.teams.isEmpty, signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
             Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
@@ -69,7 +75,10 @@ struct AccountPage: View {
                     .textContentType(.password)
                 Toggle("Keep Me Signed In", isOn: $keepPassword)
             } footer: {
-                Text("You can use a free Apple Account. Signing lasts 7 days, and Poki automatically prepares a renewal before it expires. Your Apple Account and password are sent only to Apple.")
+                Group {
+                    Text("You can use a free Apple Account. Signing lasts 7 days, and Poki automatically prepares a renewal before it expires. Your Apple Account and password are sent only to Apple.")
+                }
+                .settingsFooter()
             }
             Section {
                 Button("Sign In") { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } }
@@ -250,7 +259,10 @@ struct SigningSection: View {
                 SignerAction(signer: signer, title: "Prepare Renewal Now", systemImage: "arrow.clockwise") { await signer.prepare(kind: "refresh") }
             }
         } footer: {
-            Text(footer)
+            Group {
+                Text(footer)
+            }
+            .settingsFooter()
         }
 
         Section {
@@ -261,7 +273,10 @@ struct SigningSection: View {
                 SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
             }
         } footer: {
-            Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+            Group {
+                Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+            }
+            .settingsFooter()
         }
         SignerActivityRows(signer: signer)
     }
@@ -389,7 +404,10 @@ struct SigningOptionsPage: View {
                 } header: {
                     SettingsHeader("Release Channel")
                 } footer: {
-                    Text("Poki receives updates from the selected release channel.")
+                    Group {
+                        Text("Poki receives updates from the selected release channel.")
+                    }
+                    .settingsFooter()
                 }
             }
             Section {
@@ -418,7 +436,10 @@ struct SigningOptionsPage: View {
             } header: {
                 SettingsHeader("Sign-In Server")
             } footer: {
-                Text("Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail.")
+                Group {
+                    Text("Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail.")
+                }
+                .settingsFooter()
             }
             SignerActivityRows(signer: signer)
         }
@@ -491,7 +512,10 @@ struct VerificationCodeSheet: View {
                 } header: {
                     Text("Two-Factor Authentication")
                 } footer: {
-                    Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
+                    Group {
+                        Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
+                    }
+                    .settingsFooter()
                 }
                 VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
                 SignerActivityRows(signer: signer, offersSignIn: false)

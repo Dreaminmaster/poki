@@ -764,7 +764,10 @@ struct HistoryUnlockSections: View {
                 } header: {
                     Text("Make a PIN for Screen History")
                 } footer: {
-                    Text(LocalizedStringKey(wrong ? "The two PINs did not match. Try again." : "Screen History is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it."))
+                    Group {
+                        Text(LocalizedStringKey(wrong ? "The two PINs did not match. Try again." : "Screen History is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it."))
+                    }
+                    .settingsFooter()
                 }
             } else {
                 if lock.usesBiometrics {
@@ -792,11 +795,14 @@ struct HistoryUnlockSections: View {
                         }
                         .disabled(pin.isEmpty || waiting)
                     } footer: {
-                        if waiting, let until = lock.blockedUntil {
-                            Text(verbatim: String(format: AppLocalization.text("Too many wrong tries. Try again at %@."), until.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(AppLocalization.locale))))
-                        } else if wrong {
-                            Text("That PIN is not right.")
+                        Group {
+                            if waiting, let until = lock.blockedUntil {
+                                Text(verbatim: String(format: AppLocalization.text("Too many wrong tries. Try again at %@."), until.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(AppLocalization.locale))))
+                            } else if wrong {
+                                Text("That PIN is not right.")
+                            }
                         }
+                        .settingsFooter()
                     }
                 }
             }
@@ -828,7 +834,10 @@ struct HistoryLockSettings: View {
                     }
                     .disabled(lock.biometricsOn && !lock.hasPIN)
                 } footer: {
-                    Text("The iPhone's passcode never opens history. To turn this off, set a PIN first.")
+                    Group {
+                        Text("The iPhone's passcode never opens history. To turn this off, set a PIN first.")
+                    }
+                    .settingsFooter()
                 }
             }
             Section {
@@ -846,7 +855,10 @@ struct HistoryLockSettings: View {
             } header: {
                 Text("Poki PIN")
             } footer: {
-                Text(LocalizedStringKey(mismatch ? "The two PINs did not match. Try again." : "A PIN of 4 to 8 digits that belongs to Poki alone. One of the two ways in always stays on."))
+                Group {
+                    Text(LocalizedStringKey(mismatch ? "The two PINs did not match. Try again." : "A PIN of 4 to 8 digits that belongs to Poki alone. One of the two ways in always stays on."))
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Screen History Lock"))

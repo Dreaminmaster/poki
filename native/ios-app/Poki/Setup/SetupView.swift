@@ -318,9 +318,12 @@ private struct LoopbackPage: View {
         } header: {
             Text("Status")
         } footer: {
-            if model.servicesSilent, monitor.isWorking {
-                Text("10.7.0.1 takes the connection, but the phone's remote pairing service does not answer through it, so this page can show Working while Poki cannot connect. Reconnect your proxy app or LocalDevVPN, then pair again in Setup › Pairing.")
+            Group {
+                if model.servicesSilent, monitor.isWorking {
+                    Text("10.7.0.1 takes the connection, but the phone's remote pairing service does not answer through it, so this page can show Working while Poki cannot connect. Reconnect your proxy app or LocalDevVPN, then pair again in Setup › Pairing.")
+                }
             }
+            .settingsFooter()
         }
 
         // The loopback on cellular is set up with the loopback itself.
@@ -336,10 +339,13 @@ private struct LoopbackPage: View {
         } header: {
             Text("Use Your Proxy App")
         } footer: {
-            if let chosen = model.setup.proxyApp, !monitor.isWorking, !localReady, model.setup.loopback == .proxy {
-                let name = ProxyApps.all.first { $0.id == chosen }?.name ?? "LocalDevVPN"
-                Text("\(name) is chosen, but nothing answers at 10.7.0.1 right now. Open \(name), make sure it is connected with the loopback on, then come back; this page updates by itself.")
+            Group {
+                if let chosen = model.setup.proxyApp, !monitor.isWorking, !localReady, model.setup.loopback == .proxy {
+                    let name = ProxyApps.all.first { $0.id == chosen }?.name ?? "LocalDevVPN"
+                    Text("\(name) is chosen, but nothing answers at 10.7.0.1 right now. Open \(name), make sure it is connected with the loopback on, then come back; this page updates by itself.")
+                }
             }
+            .settingsFooter()
         }
         .disabled(externalLocked)
 
@@ -365,7 +371,10 @@ private struct LoopbackPage: View {
             } header: {
                 Text("Other Ways")
             } footer: {
-                if model.connectionInUse { Text("Stop Poki and finish pairing before changing the local connection.") }
+                Group {
+                    if model.connectionInUse { Text("Stop Poki and finish pairing before changing the local connection.") }
+                }
+                .settingsFooter()
             }
         }
     }
@@ -422,11 +431,14 @@ private struct ProxyAppPage: View {
             } header: {
                 Text("How To")
             } footer: {
-                if !app.documented {
-                    Text("As reported by users of \(app.name); not checked against its documentation. The status on the Loopback page tells whether it works.")
-                } else if !app.minimumVersion.isEmpty {
-                    Text("\(app.name) \(app.minimumVersion) or later.")
+                Group {
+                    if !app.documented {
+                        Text("As reported by users of \(app.name); not checked against its documentation. The status on the Loopback page tells whether it works.")
+                    } else if !app.minimumVersion.isEmpty {
+                        Text("\(app.name) \(app.minimumVersion) or later.")
+                    }
                 }
+                .settingsFooter()
             }
             Section {
                 switch app.install {
@@ -534,7 +546,10 @@ private struct PairingPage: View {
             } header: {
                 Text("Pairing Code")
             } footer: {
-                Text("Enter this code in Settings. It also appears on the Lock Screen.")
+                Group {
+                    Text("Enter this code in Settings. It also appears on the Lock Screen.")
+                }
+                .settingsFooter()
             }
             Section { Button("Cancel Pairing", role: .destructive) { model.cancelPairing() } }
         case .advertising?:
@@ -555,7 +570,10 @@ private struct PairingPage: View {
                 Section {
                     Label(AppLocalization.text(LocalizedStringResource("The phone no longer accepts this pairing: \(trouble)")), systemImage: "exclamationmark.triangle")
                 } footer: {
-                    Text(SetupStep.onDevicePairing ? "This happens after a restore, a reset of Location & Privacy, or when the phone forgot Poki. Pair again; the old key is replaced." : "This happens after a restore, a reset of Location & Privacy, or when the phone forgot Poki. Pair again from Poki Setup on your computer and send the new file here; the old key is replaced.")
+                    Group {
+                        Text(SetupStep.onDevicePairing ? "This happens after a restore, a reset of Location & Privacy, or when the phone forgot Poki. Pair again; the old key is replaced." : "This happens after a restore, a reset of Location & Privacy, or when the phone forgot Poki. Pair again from Poki Setup on your computer and send the new file here; the old key is replaced.")
+                    }
+                    .settingsFooter()
                 }
             } else if model.pairingPath != nil {
                 Section {
@@ -576,7 +594,10 @@ private struct PairingPage: View {
                 } header: {
                     Text("How To")
                 } footer: {
-                    Text("No Poki Setup yet? Any lockdown pairing file works: pymobiledevice3, jitterbugpair or StikPair make one.")
+                    Group {
+                        Text("No Poki Setup yet? Any lockdown pairing file works: pymobiledevice3, jitterbugpair or StikPair make one.")
+                    }
+                    .settingsFooter()
                 }
             }
         }
@@ -602,7 +623,10 @@ private struct PairingPage: View {
         } header: {
             Text("Other Ways")
         } footer: {
-            if let importError { Text(importError).foregroundStyle(.red) }
+            Group {
+                if let importError { Text(importError).foregroundStyle(.red) }
+            }
+            .settingsFooter()
         }
         .sheet(isPresented: $scanning) { PairingScannerSheet() }
         // Poki Setup on a computer may be writing the file into Poki right now.
@@ -659,10 +683,13 @@ private struct BackgroundPage: View {
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
             }
         } footer: {
-            Text(model.background.always ? "Poki stays active in the background without the location indicator, and never records your location."
-                 : model.background.allowed ? "Poki keeps itself running with silent audio. Always Allow makes that sturdier, and iOS shows no location indicator for it. Poki never records your location."
-                 : model.background.denied ? "Location Services is off for Poki. It keeps itself running with silent audio, which iOS may stop during calls or other audio."
-                 : "iOS needs a background mode to keep apps running. Poki uses lowest-accuracy location with Always Allow, which shows no location indicator, and never records your location.")
+            Group {
+                Text(model.background.always ? "Poki stays active in the background without the location indicator, and never records your location."
+                     : model.background.allowed ? "Poki keeps itself running with silent audio. Always Allow makes that sturdier, and iOS shows no location indicator for it. Poki never records your location."
+                     : model.background.denied ? "Location Services is off for Poki. It keeps itself running with silent audio, which iOS may stop during calls or other audio."
+                     : "iOS needs a background mode to keep apps running. Poki uses lowest-accuracy location with Always Allow, which shows no location indicator, and never records your location.")
+            }
+            .settingsFooter()
         }
         Section {
             LabeledContent {
@@ -675,10 +702,16 @@ private struct BackgroundPage: View {
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
             }
         } footer: {
-            Text(model.activitiesEnabled ? "Poki shows steps, pairing codes and approvals on the Lock Screen." : "Turn them on to see the agent’s steps and approve sensitive actions.")
+            Group {
+                Text(model.activitiesEnabled ? "Poki shows steps, pairing codes and approvals on the Lock Screen." : "Turn them on to see the agent’s steps and approve sensitive actions.")
+            }
+            .settingsFooter()
         }
         Section { EmptyView() } footer: {
-            Text(SetupStep.inProcess ? "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it." : "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it.")
+            Group {
+                Text(SetupStep.inProcess ? "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it." : "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it.")
+            }
+            .settingsFooter()
         }
     }
 }
@@ -699,13 +732,19 @@ struct SetupChecklist: View {
                     NavigationLink(value: step) { SetupStepRow(step: step) }
                 }
             } footer: {
-                Text(model.setupReadyForUse ? "Everything Poki needs is in place." : "Poki needs every item ticked before an agent or the chat can use this iPhone. Items tick themselves when the phone can check them.")
+                Group {
+                    Text(model.setupReadyForUse ? "Everything Poki needs is in place." : "Poki needs every item ticked before an agent or the chat can use this iPhone. Items tick themselves when the phone can check them.")
+                }
+                .settingsFooter()
             }
             SigningSection()
             Section {
                 Button { guiding = true } label: { Label("Setup Guide", systemImage: "list.number") }
             } footer: {
-                Text("Walks through every item in order. You can close it at any time and pick up from this list.")
+                Group {
+                    Text("Walks through every item in order. You can close it at any time and pick up from this list.")
+                }
+                .settingsFooter()
             }
         }
         .listStyle(.insetGrouped)
@@ -772,10 +811,15 @@ struct SetupStepPage: View {
                 LabeledContent {
                     Text(model.isDone(step) ? "Done" : "Needed").foregroundStyle(model.isDone(step) ? Color.green : Color.orange)
                 } label: {
-                    Label(step.pageTitle, systemImage: step.symbol)
+                    // "Status", not the step's name: the page's title already says it (the owner,
+                    // Nov 20 2026: say each thing once).
+                    Label("Status", systemImage: step.symbol)
                 }
             } footer: {
-                Text(step.pageSummary)
+                Group {
+                    Text(step.pageSummary)
+                }
+                .settingsFooter()
             }
             Section("How To") {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
@@ -786,7 +830,10 @@ struct SetupStepPage: View {
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: step) }
                 Toggle(confirmTitle, isOn: confirmBinding)
             } footer: {
-                Text("iOS doesn’t let Poki check this one, so turn the switch on once it’s done.")
+                Group {
+                    Text("iOS doesn’t let Poki check this one, so turn the switch on once it’s done.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(step.pageTitle)
@@ -840,10 +887,15 @@ struct SetupStepPage: View {
                         Text(model.stepReadyForUse(step) ? "Done" : "Needed").foregroundStyle(model.stepReadyForUse(step) ? Color.green : Color.orange)
                     }
                 } label: {
-                    Label(step.pageTitle, systemImage: step.symbol)
+                    // "Status", not the step's name: the page's title already says it (the owner,
+                    // Nov 20 2026: say each thing once).
+                    Label("Status", systemImage: step.symbol)
                 }
             } footer: {
-                Text(step.pageSummary)
+                Group {
+                    Text(step.pageSummary)
+                }
+                .settingsFooter()
             }
             content
         }
