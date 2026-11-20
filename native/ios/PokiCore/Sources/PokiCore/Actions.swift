@@ -210,20 +210,23 @@ extension Computer {
     /// The slow tail is real motion, so the lift finds a finger that all but stopped. Sent as W3C
     /// pointer actions, which both WebDriverAgent and the in-process path take; a runner without
     /// them gets the press-drag.
-    func scrollDrag(_ path: (Double, Double, Double, Double), seconds: Double, rest: Double, until: Double) async throws {
+    func scrollDrag(_ path: (Double, Double, Double, Double), seconds: Double, rest: Double, until: Double,
+                    allowFlickFallback: Bool = true) async throws {
         let distance = max(1, hypot(path.2 - path.0, path.3 - path.1))
         // The slow tail with shaped input too: the shaped resting drag moved the gym's list 392-640 pt
         // per swipe where the slow tail moved a steady 442-471 (run 42435103942), and scroll_to's
         // overshoot check fired on the spread. Shaped input varies the tail's points by a point or
         // two and its times by up to 10 %, so no two swipes are alike.
-        guard distance > 24 else { return try await gesture(path, seconds: seconds, rest: rest, until: until) }
+        if allowFlickFallback, distance <= 24 {
+            return try await gesture(path, seconds: seconds, rest: rest, until: until)
+        }
         var path = path, seconds = seconds, rest = rest
-        if humanize.enabled {
+        if humanize.enabled, allowFlickFallback {
             path = (path.0 + humanize.uniform(-2, 2), path.1 + humanize.uniform(-2, 2), path.2 + humanize.uniform(-2, 2), path.3 + humanize.uniform(-2, 2))
             seconds *= humanize.uniform(0.92, 1.08)
             rest *= humanize.uniform(0.92, 1.08)
         }
-        let tail = 12.0
+        let tail = min(12, distance / 2)
         let near = (x: path.2 - (path.2 - path.0) / distance * tail, y: path.3 - (path.3 - path.1) / distance * tail)
         let expected = seconds + rest
         let timeout = max(expected + 1.5, min(expected + 5, until - now() - 0.2))
@@ -237,7 +240,7 @@ extension Computer {
         do {
             _ = try await runner.call("POST", "/actions", ["actions": [finger]], timeout: timeout, countsAsMiss: false)
             swipeUnread = true
-        } catch let e as RunnerError where e.code == "unknown command" || e.code == "unknown method" {
+        } catch let e as RunnerError where allowFlickFallback && (e.code == "unknown command" || e.code == "unknown method") {
             try await gesture(path, seconds: seconds, rest: rest, until: until)
         } catch let e as RunnerError where e.delivery == .unknown {
             swipeUnread = true
@@ -395,7 +398,12 @@ extension Computer {
             }
             let ms = min(3000, max(100, spec["ms"]?.double ?? 400))
             let hold = min(3000, max(0, spec["hold_ms"]?.double ?? 0))
-            try await gesture((from.x, from.y, to.x, to.y), seconds: ms / 1000, hold: hold / 1000, rest: 0.15, until: until)
+            let path = (from.x, from.y, to.x, to.y)
+            if spec["_counted_scroll"]?.bool == true {
+                try await scrollDrag(path, seconds: ms / 1000, rest: 0.4, until: until, allowFlickFallback: false)
+            } else {
+                try await gesture(path, seconds: ms / 1000, hold: hold / 1000, rest: 0.15, until: until)
+            }
             return ("drag", "drag from [\(Int(from.x)), \(Int(from.y))] to [\(Int(to.x)), \(Int(to.y))] in \(Int(ms)) ms\(hold > 0 ? " after holding \(Int(hold)) ms" : "")")
         case .pinch:
             let p = try point(spec)

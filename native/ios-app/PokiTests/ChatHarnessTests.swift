@@ -132,7 +132,7 @@ final class ChatHarnessTests: XCTestCase {
         let completed = expectation(description: "Poki ends the continued scroll task")
         var result: TaskResult?
         ChatModel.afterTask = { result = $0.result; completed.fulfill() }
-        chat.send("The current group.")
+        try await sendCountedScrollComposer("The current group.", replying: true, chat: chat)
         await fulfillment(of: [completed], timeout: 15)
 
         XCTAssertEqual(transport.topMessage, 3, "The continued task actually sent one scroll")
@@ -186,7 +186,7 @@ final class ChatHarnessTests: XCTestCase {
             let finished = expectation(description: followUp)
             var result: TaskResult?
             ChatModel.afterTask = { result = $0.result; finished.fulfill() }
-            chat.send(followUp)
+            try await sendCountedScrollComposer(followUp, replying: !shouldFinish, chat: chat)
             await fulfillment(of: [finished], timeout: 10)
 
             XCTAssertEqual(transport.topMessage, 3)

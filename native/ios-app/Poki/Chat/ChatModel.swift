@@ -358,14 +358,21 @@ final class ChatModel {
 
     func send(_ text: String, inSplitView: Bool = false) { send(text, again: false, inSplitView: inSplitView) }
 
+    var countedScrollQuestion: UUID? {
+        guard kind == .poki, let last = entries.last, case .poki = last.kind,
+              last.countedScrollRequestID != nil else { return nil }
+        return last.id
+    }
+
     /// A message with photos or PDFs from the plus menu: the model reads their pictures with the words.
     /// The words may be left out.
-    func send(_ text: String, attachments: [ChatAttachment]) {
+    func send(_ text: String, attachments: [ChatAttachment], replyingTo: UUID? = nil) {
         lastImages = attachments.flatMap(\.images)
         let documents = attachments.compactMap { attachment in
             attachment.textContent.map { ChatTextDocument(name: attachment.label, content: $0) }
         }
-        send(text, again: false, thumbnails: attachments.filter { !$0.thumbnail.isEmpty }.map(\.thumbnail), documents: documents, chooseWorkspace: true)
+        send(text, again: false, thumbnails: attachments.filter { !$0.thumbnail.isEmpty }.map(\.thumbnail),
+             documents: documents, chooseWorkspace: true, replyingTo: replyingTo)
     }
 
     /// The last message again, after a problem (the Retry button under it).
@@ -413,13 +420,15 @@ final class ChatModel {
         let provider: ModelProvider
         let model: String
         let continuation: String?
+        let countedScrollTarget: Int?
         let inSplitView: Bool
         let images: [Data]
         let namedApps: [String]
         let engine: Engine
     }
 
-    private func send(_ text: String, again: Bool, thumbnails: [Data] = [], documents: [ChatTextDocument] = [], inSplitView: Bool = false, chooseWorkspace: Bool = false) {
+    private func send(_ text: String, again: Bool, thumbnails: [Data] = [], documents: [ChatTextDocument] = [],
+                      inSplitView: Bool = false, chooseWorkspace: Bool = false, replyingTo: UUID? = nil) {
         if let message = app.signer.installMessage {
             add(.note(.problem(message)))
             return
@@ -436,7 +445,7 @@ final class ChatModel {
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("Poki is working on a task for \(busy). Try again when it’s done.")))))
             return
         }
-        let isContinuation = kind == .poki && thumbnails.isEmpty && lastImages.isEmpty
+        let isContinuation = replyingTo == nil && kind == .poki && thumbnails.isEmpty && lastImages.isEmpty
             && (ChatContinuation.isRequest(text) || entries.last?.continuationChoices != nil)
         if kind == .poki, !store.isInitialReady || (isContinuation && !store.isLoaded) {
             running = true
@@ -463,7 +472,8 @@ final class ChatModel {
                 }
                 self.lastImages = capturedImages
                 guard let prepared = self.prepareSend(text, again: again, thumbnails: thumbnails, documents: documents,
-                                                      inSplitView: inSplitView, chooseWorkspace: chooseWorkspace) else {
+                                                      inSplitView: inSplitView, chooseWorkspace: chooseWorkspace,
+                                                      replyingTo: replyingTo) else {
                     self.running = false
                     self.awaitingModel = false
                     return
@@ -473,7 +483,8 @@ final class ChatModel {
             return
         }
         guard let prepared = prepareSend(text, again: again, thumbnails: thumbnails, documents: documents,
-                                         inSplitView: inSplitView, chooseWorkspace: chooseWorkspace) else { return }
+                                         inSplitView: inSplitView, chooseWorkspace: chooseWorkspace,
+                                         replyingTo: replyingTo) else { return }
         running = true
         awaitingModel = !app.hasVisibleDuoCompanion
         stopAsked = false
@@ -489,9 +500,10 @@ final class ChatModel {
     }
 
     private func prepareSend(_ text: String, again: Bool, thumbnails: [Data], documents: [ChatTextDocument],
-                             inSplitView: Bool, chooseWorkspace: Bool) -> PreparedSend? {
+                             inSplitView: Bool, chooseWorkspace: Bool, replyingTo: UUID?) -> PreparedSend? {
+        let replyRequestID = replyingTo.flatMap { $0 == countedScrollQuestion ? entries.last?.countedScrollRequestID : nil }
         var resumedTask: String?
-        if kind == .poki, thumbnails.isEmpty, lastImages.isEmpty {
+        if replyRequestID == nil, kind == .poki, thumbnails.isEmpty, lastImages.isEmpty {
             switch ChatContinuation.resolve(text, current: sessionID, choices: entries.last?.continuationChoices,
                                             sessions: store.sessions) {
             case .newTask: break
@@ -517,21 +529,20 @@ final class ChatModel {
             }
         }
         let priorRequest = entries.last { if case .you = $0.kind { true } else { false } }
-        let answeredID = again ? priorRequest?.countedScrollRequestID : entries.last?.countedScrollRequestID
+        let answeredID = again ? priorRequest?.countedScrollRequestID : replyRequestID
         let answeredRequest = entries.first { $0.id == answeredID }
         let linkedTask: String?
         var countedScrollRequestID: UUID?
+        var countedScrollTarget = MessageScroll.requestedTarget(in: text)
         let continuation: String?
         if let resumedTask {
             linkedTask = resumedTask
             continuation = "The owner selected this saved task to resume: \(resumedTask). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory."
-        } else if kind == .poki, thumbnails.isEmpty, lastImages.isEmpty, documents.isEmpty,
-                  !MessageScroll.startsNewScrollRequest(text),
-                  let answeredRequest, case .you(let requestedText, _) = answeredRequest.kind {
-            let clarified = answeredRequest.continuedTask ?? requestedText
-            linkedTask = clarified
+        } else if let answeredRequest, case .you(let requestedText, _) = answeredRequest.kind {
+            linkedTask = requestedText
             countedScrollRequestID = answeredRequest.id
-            continuation = "The owner's latest message answers your question about this task: \(clarified). Verify the requested count before completing it."
+            countedScrollTarget = MessageScroll.requestedTarget(in: requestedText)
+            continuation = "The owner's latest message answers your question about this task: \(requestedText). Verify the requested count before completing it."
         } else {
             linkedTask = nil
             continuation = nil
@@ -588,7 +599,8 @@ final class ChatModel {
             }
             guard let client else { return nil }
             return PreparedSend(text: text, you: you, message: message, runSession: runSession, provider: provider, model: model,
-                                continuation: continuation, inSplitView: inSplitView, images: images, namedApps: namedApps,
+                                continuation: continuation, countedScrollTarget: countedScrollTarget,
+                                inSplitView: inSplitView, images: images, namedApps: namedApps,
                                 engine: .direct(client, instructions))
         }
         guard let piModel = provider.piModel(model) else {
@@ -596,7 +608,8 @@ final class ChatModel {
             return nil
         }
         return PreparedSend(text: text, you: you, message: message, runSession: runSession, provider: provider, model: model,
-                            continuation: continuation, inSplitView: inSplitView, images: images, namedApps: namedApps,
+                            continuation: continuation, countedScrollTarget: countedScrollTarget,
+                            inSplitView: inSplitView, images: images, namedApps: namedApps,
                             engine: .pi(piModel))
     }
 
@@ -611,7 +624,7 @@ final class ChatModel {
     private func executePreparedSend(_ prepared: PreparedSend, token: Int) async {
         switch prepared.engine {
         case .direct(let client, let instructions):
-            await began("direct", prepared.provider, prepared.model, task: prepared.text)
+            await began("direct", prepared.provider, prepared.model, task: prepared.text, countedScrollTarget: prepared.countedScrollTarget)
             guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
             awaitingModel = true
             client.say(prepared.message)
@@ -647,7 +660,8 @@ final class ChatModel {
                 }
             }
             let splitSession = splitViewSession
-            await began("pi", prepared.provider, prepared.model, task: prepared.text, splitViewSession: splitSession)
+            await began("pi", prepared.provider, prepared.model, task: prepared.text,
+                        countedScrollTarget: prepared.countedScrollTarget, splitViewSession: splitSession)
             guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
             awaitingModel = true
             if let splitSession, pair.count == 2 {
@@ -825,9 +839,10 @@ final class ChatModel {
     /// instead; that code goes once the phone acceptance with the owner's OpenAI key has passed on pi.
     private static var direct: Bool { UserDefaults.standard.string(forKey: "chatEngine") == "direct" }
 
-    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) async {
+    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String,
+                       countedScrollTarget: Int?, splitViewSession: String? = nil) async {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
-        messageScroll = MessageScroll.requestedTarget(in: taskRequest).map(MessageScroll.init(target:))
+        messageScroll = countedScrollTarget.map(MessageScroll.init(target:))
         messageScreen = nil
         messagePane = nil
         taskCalls.removeAll()
@@ -1177,23 +1192,38 @@ final class ChatModel {
             if let refusal = selectRoute(.app) { return refusal }
             let actions = args["actions"] as? [[String: Any]] ?? []
             let scrolls = actions.filter { $0["drag"] != nil || $0["swipe"] != nil || $0["scroll_to"] != nil }
+            var toolArguments = call.arguments
+            var countedDistance: Double?
             if call.name == "do", let messageScroll, messageScroll.started, !actions.isEmpty || args["finish"] as? Bool == true {
                 if messageScroll.reachedTarget || messageScroll.needsCount { return messageScroll.progress(error: true) }
-                let skipsReads = actions.contains { $0["scroll_to"] != nil || $0["run"] != nil || $0["path"] != nil }
+                let skipsReads = actions.contains { $0["run"] != nil || $0["path"] != nil }
                 if actions.count > 1 || skipsReads || args["finish"] as? Bool == true {
                     return PokiCore.ToolAnswer(text: "Send one scroll at a time and verify the next screen before continuing.", jpeg: nil, isError: true)
+                }
+                if let scroll = scrolls.first {
+                    guard let bounded = messageScroll.boundedDrag(scroll["drag"]) else {
+                        return messageScroll.progress(error: true)
+                    }
+                    var boundedArgs = args
+                    boundedArgs["actions"] = [bounded.action]
+                    boundedArgs["full"] = true
+                    boundedArgs.removeValue(forKey: "app")
+                    guard let data = try? JSONSerialization.data(withJSONObject: boundedArgs) else {
+                        return messageScroll.progress(error: true)
+                    }
+                    toolArguments = String(decoding: data, as: UTF8.self)
+                    countedDistance = bounded.distance
                 }
             }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             let taskToken = runToken
-            let response = await app.runTool(call.name, arguments: call.arguments, localSession: splitViewSession, expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)")
+            let response = await app.runTool(call.name, arguments: toolArguments, localSession: splitViewSession, expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)")
             guard taskToken == runToken else { return response }
             messageScreen = response.isError || response.waitingForOwner ? nil : response.numberedScreen
             messagePane = response.splitView?.side ?? lastSplitViewSide
             if call.name == "do", !scrolls.isEmpty || (messageScroll?.started == true && !actions.isEmpty) {
-                let distance = actions.count == 1 ? MessageScroll.distance(of: actions[0]["drag"]) : nil
-                messageScroll?.actionTookPlace(error: response.isError, distance: distance)
+                messageScroll?.actionTookPlace(error: response.isError, distance: countedDistance)
             }
             guard usesSplitView else { return response }
             let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&

@@ -53,6 +53,7 @@ struct ChatView: View {
     @State private var writing = false
     /// Plus's ways to add a photo or a file stand over the message field.
     @State private var adding = false
+    @State private var scrollReplyQuestion: UUID?
     @State private var standaloneDraft = ""
     private var draft: Binding<String> { sharedDraft ?? $standaloneDraft }
     /// Taps on New Conversation on the home page, for the message field (`ComposerInputView.restarts`).
@@ -174,8 +175,31 @@ struct ChatView: View {
                     Label(ActivityWords.local("Waiting for Split View"), systemImage: "rectangle.split.2x1")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                if !busy, let question = chat.countedScrollQuestion {
+                    if scrollReplyQuestion == question {
+                        HStack {
+                            Label("Replying to Poki", systemImage: "arrowshape.turn.up.left")
+                            Spacer()
+                            Button("New message") { scrollReplyQuestion = nil }
+                        }
+                        .font(.footnote)
+                    } else {
+                        Button {
+                            scrollReplyQuestion = question
+                            writing = true
+                        } label: {
+                            Label("Reply to Poki", systemImage: "arrowshape.turn.up.left")
+                                .font(.footnote)
+                        }
+                        .accessibilityIdentifier("chat.counted-scroll.reply")
+                    }
+                }
                 ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts,
-                                  send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
+                                  send: { text, attachments in
+                                      let reply = scrollReplyQuestion == chat.countedScrollQuestion ? scrollReplyQuestion : nil
+                                      scrollReplyQuestion = nil
+                                      chat.send(text, attachments: attachments, replyingTo: reply)
+                                  }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
             }
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
