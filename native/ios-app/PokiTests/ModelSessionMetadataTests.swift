@@ -13,15 +13,6 @@ final class ModelSessionMetadataTests: XCTestCase {
               contextWindow: 1_000, maxTokens: 100)
     }
 
-    func testPokiLoopCarriesThePersistedConversationID() {
-        let session = "saved-chat-123"
-        let loop = PiLoop(provider: .custom, model: syntheticModel(baseURL: "https://opencode.ai/v1"),
-                          sessionID: session, tools: []) { _ in
-            .init(text: "No tools", jpeg: nil, isError: true)
-        }
-        XCTAssertEqual(loop.sessionID, session)
-    }
-
     func testPinnedPiSwiftLimitsOpenCodeHeaderToMatchingEndpoint() {
         let session = "saved-chat-123"
         let target = syntheticModel(baseURL: "https://opencode.ai/v1")
@@ -198,6 +189,31 @@ final class ModelSessionMetadataTests: XCTestCase {
             XCTAssertFalse(headers.isEmpty)
             XCTAssertTrue(headers.allSatisfy { $0["x-opencode-session"] == originalID }, "\(headers)")
             XCTAssertTrue(chat.entries.contains { if case .poki("Reopened answer.") = $0.kind { return true }; return false })
+        }
+    }
+
+    func testTryAgainKeepsOriginalOutgoingChatIdentity() async throws {
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Rejected"), FakeCompletions.text("Recovered answer.")],
+                                         responseStatuses: [400, 200])
+        try await withRoutingFixture { app, store in
+            let model = self.fixtureModel(server)
+            let chat = ChatModel(app: app, store: store, resolveModel: { _, _ in model })
+            defer { chat.stop() }
+            chat.newConversation()
+            let id = chat.sessionID
+            chat.send("Synthetic retry request.")
+            try await self.waitForTask(chat)
+            XCTAssertTrue(chat.canRetry, "The failed send must expose the real Try Again action")
+            XCTAssertEqual(server.requests.count, 1)
+            // Same method wired to ChatTranscript's user-facing Try Again button.
+            chat.retry()
+            try await self.waitForTask(chat)
+            XCTAssertEqual(server.requests.count, 2)
+            XCTAssertFalse(chat.canRetry)
+            XCTAssertEqual(chat.sessionID, id)
+            XCTAssertTrue(chat.entries.contains { if case .poki("Recovered answer.") = $0.kind { return true }; return false })
+            XCTAssertGreaterThanOrEqual(server.requestHeaders.count, 2)
+            XCTAssertTrue(server.requestHeaders.allSatisfy { $0["x-opencode-session"] == id })
         }
     }
 

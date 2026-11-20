@@ -37,10 +37,16 @@ struct ChatView: View {
     @State private var homeBottom: CGFloat?
     /// How far Poki's picture rises from the home page into the top bar.
     @State private var flightRise: CGFloat = 0
+    @State private var wardrobeOpen = false
 
-    /// A tap on Poki, on the home page or in the chat: the bear says hi and Poki's card opens.
     private func tapPoki() {
+        writing = false
+        adding = false
         pokes += 1
+        wardrobeOpen = true
+    }
+
+    private func showPokiStatus() {
         openDetails(isGreeting ? homeBottom : nil)
     }
     /// The message field has the keyboard.
@@ -110,6 +116,14 @@ struct ChatView: View {
     }
 
     var body: some View {
+        ZStack {
+            chatContent.accessibilityHidden(wardrobeOpen)
+            BearWardrobeOverlay(isPresented: $wardrobeOpen)
+        }
+        .environment(\.bearOutfitPreview, wardrobeOpen)
+    }
+
+    @ViewBuilder private var chatContent: some View {
         let status = PokiStatus.current(model: model, chat: chat)
         let home = isGreeting
         ZStack {
@@ -145,7 +159,7 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: tapPoki)
+                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: showPokiStatus)
             }
         }
         .bottomBar(softEdge: true) {
@@ -167,7 +181,9 @@ struct ChatView: View {
             GeometryReader { proxy in
                 if !bare {
                     PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
-                               tap: tapPoki, landed: { homeBottom = $0 }, travel: { flightRise = $0 })
+                               tap: tapPoki, statusCard: showPokiStatus, landed: { homeBottom = $0 }, travel: { flightRise = $0 })
+                        .offset(y: home && wardrobeOpen ? -46 : 0)
+                        .animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.14), value: wardrobeOpen)
                 }
             }
         }
@@ -269,7 +285,7 @@ struct ChatView: View {
         for entry in chat.entries.reversed() {
             switch entry.kind {
             case .note(.problem): return false
-            case .plan(let steps): return !steps.contains { $0.state == .failed }
+            case .plan(let steps): return entry.stopped != true && !steps.contains { $0.state == .failed }
             case .you, .request: return false
             default: continue
             }
@@ -743,7 +759,8 @@ struct ChatTranscript<Footer: View>: View {
             let ask = asking(at: i)
             let current = live && isLastPlan(i)
             TaskCard(title: entry.title ?? ask.title, steps: steps,
-                     state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver),
+                     state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver,
+                                          stopped: entry.stopped == true),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
                      asker: ask.from, app: current ? app : entry.app, usedBrowser: ChatEntry.taskUsedBrowser(in: entries, at: i), started: entry.at, shot: current ? shot : nil,

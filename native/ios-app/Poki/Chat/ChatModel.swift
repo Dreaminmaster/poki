@@ -36,6 +36,7 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var app: String?
     var ended: Date?
     var total: Int?
+    var stopped: Bool?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
     var textDocuments: [ChatTextDocument]?
@@ -855,7 +856,8 @@ final class ChatModel {
     static var delegatedBusy: String?
 
     private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID) {
-        finishPlan()
+        let stopped = outcome == .stopped || outcome == .authorizationDeclined
+        finishPlan(stopped: stopped)
         // The turn is over: the phone goes back to the app the task began in (Poki's chat, where the
         // reply is), or stays where it is and the reply goes out as a notification that can be answered
         // there (Advanced › When a Task Ends).
@@ -875,7 +877,8 @@ final class ChatModel {
             reply = words
             add(.note(.problem(words)))
         }
-        if outcome == .stopped || outcome == .authorizationDeclined {
+        if stopped {
+            app.chatTaskStopped()
             if !usesSplitView { app.finishTask(switching: outcome != .authorizationDeclined) }
         } else {
             // A finished run on the Live Activity says what it came to: finish_task's summary when the
@@ -908,7 +911,8 @@ final class ChatModel {
         PokiBrowser.shared.taskStopped()
         // A step waiting for an approval would hold the task until the approval ran out.
         if kind == .poki, ChatModel.delegatedBusy == nil { for approval in app.approvals { app.resolve(approval, approved: false) } }
-        finishPlan()
+        finishPlan(stopped: true)
+        app.chatTaskStopped()
         runToken += 1
         running = false
         awaitingModel = false
@@ -1327,14 +1331,18 @@ final class ChatModel {
         entries[i].kind = .browser(BrowserVisit(host: browser.host, title: browser.title))
     }
 
-    /// The task ended: a step still marked current was the last one done.
-    private func finishPlan() {
+    private func finishPlan(stopped: Bool = false) {
         keepBrowserVisit()
-        updatePlan { steps in for i in steps.indices where steps[i].state == .current { steps[i].state = .done } }
+        if !stopped {
+            updatePlan { steps in
+                for i in steps.indices where steps[i].state == .current { steps[i].state = .done }
+            }
+        }
         guard let id = planID, let i = entries.firstIndex(where: { $0.id == id }), entries[i].ended == nil else { return }
         entries[i].ended = Date()
         entries[i].app = taskApp
         entries[i].total = modelPlan?.count
+        if stopped { entries[i].stopped = true }
     }
 
     /// The approval the chat is showing as asked, until its answer comes.
@@ -1523,7 +1531,7 @@ final class ChatModel {
         demoAsk = nil
         awaitingModel = false
         guard running else { return }
-        finishPlan()
+        finishPlan(stopped: true)
         running = false
         entries.append(ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))))
     }
