@@ -118,8 +118,8 @@ final class BacktapeModel {
     #endif
 
     private init() {
-        let kept = UserDefaults.standard.string(forKey: "history.summaryModel")
-        choice = Self.choices.first { $0.id == kept } ?? Self.choices[0]
+        let keptID = UserDefaults.standard.string(forKey: "history.summaryModel")
+        choice = Self.choices.first { $0.id == keptID } ?? Self.choices[0]
         if FileManager.default.fileExists(atPath: folder.appendingPathComponent(".complete").path) { state = .ready }
         // A download the app was closed in the middle of: its whole files are still there.
         kept = state == .ready ? choice.bytes : wholeBytes()

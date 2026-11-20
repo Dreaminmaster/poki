@@ -41,13 +41,13 @@ struct ModelSettingsView: View {
                 NavigationLink { LocalProviderDetail() } label: { LocalProviderRow() }
                     .accessibilityIdentifier("models.provider.local")
                 ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
-                    let usage = ModelAccounts.uses(provider)
+                    let usage = ProviderUseValue.summary(.account(provider))
                     NavigationLink { AccountDetail(provider: provider) } label: {
                         AccountRow(provider: provider, name: provider.name, usage: usage)
                     }
                 }
                 ForEach(CustomProviders.all) { custom in
-                    let usage = ModelAccounts.uses(custom)
+                    let usage = ProviderUseValue.summary(.custom(custom.id))
                     NavigationLink { CustomProviderDetail(id: custom.id) } label: {
                         AccountRow(provider: .custom, name: custom.displayName, usage: usage)
                     }

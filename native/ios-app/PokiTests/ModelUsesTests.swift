@@ -57,8 +57,8 @@ final class ModelUsesTests: XCTestCase {
         XCTAssertTrue(ModelPicks.groups(.senses).allSatisfy { $0.id == "local" })
         XCTAssertFalse(ProviderRef.account(.openai).uses.contains(.senses))
         XCTAssertEqual(ProviderRef.local.uses, [.decision, .senses])
-        SensesModel.set(nil)
-        XCTAssertNil(SensesModel.current)
+        SensesLocalModel.set(nil)
+        XCTAssertNil(SensesLocalModel.current)
         XCTAssertEqual(ModelPicks.current(.senses), .off)
     }
 

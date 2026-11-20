@@ -218,7 +218,7 @@ enum LocalModels {
 
 /// The local model that writes Senses' notes: the owner's pick, else Apple Intelligence, else the
 /// downloaded model. Nothing it is given leaves the phone.
-enum SensesModel {
+enum SensesLocalModel {
     private static let key = "senses.model"
 
     @MainActor static var current: LocalModel? {
@@ -352,7 +352,7 @@ enum ModelPicks {
             case .account: return QuickFixes.accountPick.map { .account($0.provider, $0.model) } ?? .off
             }
         case .senses:
-            return SensesModel.current.map(ModelPick.local) ?? .off
+            return SensesLocalModel.current.map(ModelPick.local) ?? .off
         }
     }
 
@@ -371,8 +371,8 @@ enum ModelPicks {
         case (.decision, .local(.downloaded)): QuickFixes.choice = .downloaded
         case (.decision, .account(let provider, let id)): QuickFixes.pickAccount(provider, model: id)
         case (.decision, .off): QuickFixes.choice = .none
-        case (.senses, .local(let model)): SensesModel.set(model)
-        case (.senses, .off): SensesModel.set(nil)
+        case (.senses, .local(let model)): SensesLocalModel.set(model)
+        case (.senses, .off): SensesLocalModel.set(nil)
         default: return
         }
         ModelKeys.saved += 1
