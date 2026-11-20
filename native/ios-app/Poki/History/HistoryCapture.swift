@@ -38,9 +38,9 @@ final class HistoryCapture: ObservableObject {
             if !enabled { stop() }
         }
     }
-    @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode") } }
-    @Published var excluded: [String] { didSet { save(excluded, "history.excluded") } }
-    @Published var included: [String] { didSet { save(included, "history.included") } }
+    @Published var listMode: ListMode { didSet { save(listMode.rawValue, "history.listMode"); tellLists() } }
+    @Published var excluded: [String] { didSet { save(excluded, "history.excluded"); tellLists() } }
+    @Published var included: [String] { didSet { save(included, "history.included"); tellLists() } }
     @Published var retentionDays: Int { didSet { save(retentionDays, "history.retentionDays"); prune() } }
     /// How long the hour, day and week summaries outlive the tape, in days. 0 is as long as the tape.
     @Published var summaryDays: Int { didSet { save(summaryDays, "history.summaryDays"); prune() } }
@@ -148,8 +148,11 @@ final class HistoryCapture: ObservableObject {
     static let runMinutes = [3, 5]
     /// The wait before a single read, time to leave Poki and put another app in front.
     static let waitSeconds = 10
-    /// Seconds between two reads of a run.
-    static let interval = 5
+    /// Seconds between two looks of a run at which app is in front. A look asks the phone which
+    /// app shows and reads its screen only when that app is kept and was not read a moment ago
+    /// (the launcher's history.rs has the pace). Every 5 seconds, with accessibility left on in
+    /// between, made the iPhone noticeably slow (the owner, 2026-11-20).
+    static let interval = 30
 
     /// The run in progress. Ending a run moves it on, so a late answer from an older one is ignored.
     private var run = 0
@@ -172,6 +175,23 @@ final class HistoryCapture: ObservableObject {
     private var notified = false
     /// The app last read that was an app, for a web page whose own process names none.
     private var host: String?
+    /// Apple's processes found in front that are no app (a widget's renderer, a view service).
+    /// The launcher is told, so each is read once and not again.
+    private var processes: Set<String> = []
+    /// What reading asked of the iPhone since `since`, for one line in the log every ten minutes:
+    /// what the owner reads when the phone feels slow. No app is named in it.
+    private var tally = Tally()
+
+    private struct Tally {
+        var since = Date()
+        var looks = 0
+        var reads = 0
+        var leftOut = 0
+        var askedMs = 0
+        var slowestMs = 0
+    }
+
+    private static let tallyEvery: TimeInterval = 600
     private var background: UIBackgroundTaskIdentifier = .invalid
     private var lockToken: Int32 = NOTIFY_TOKEN_INVALID
     private var screenToken: Int32 = NOTIFY_TOKEN_INVALID
@@ -239,6 +259,47 @@ final class HistoryCapture: ObservableObject {
         if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
     }
 
+    /// Tells the launcher which apps' screens are never kept, so it does not read them: Poki, the
+    /// Home Screen, the screens that sit over an app, what the owner left out, and Apple's
+    /// processes that are no app. A read is made on the front app's own main thread, and one
+    /// thrown away here cost the owner as much as one that is kept.
+    private func tellLists() {
+        guard !loading else { return }
+        var skip: [String] = [Bundle.main.bundleIdentifier ?? "nz.zheha.poki", "com.apple.springboard"]
+        skip.append(contentsOf: Self.overlays)
+        skip.append(contentsOf: processes)
+        if listMode == .exclude { skip.append(contentsOf: excluded) }
+        HistoryBridge.policy(skip: skip, only: listMode == .include ? included : nil)
+    }
+
+    private func learn(process app: String) {
+        guard processes.count < 200, processes.insert(app.lowercased()).inserted else { return }
+        tellLists()
+    }
+
+    /// Counts a look of the launcher's, and says the sum once every ten minutes.
+    private func count(_ line: [String: Any]) {
+        let number = { (key: String) in (line[key] as? NSNumber)?.intValue ?? 0 }
+        tally.looks += 1
+        if line["snapshot_ms"] != nil {
+            tally.reads += 1
+            tally.slowestMs = max(tally.slowestMs, number("snapshot_ms"))
+        }
+        if line["look"] as? String == "skipped" { tally.leftOut += 1 }
+        tally.askedMs += number("subscribe_ms") + number("cost_ms")
+        if Date().timeIntervalSince(tally.since) >= Self.tallyEvery { sayTally() }
+    }
+
+    private func sayTally() {
+        let was = tally
+        tally = Tally()
+        guard was.looks > 0 else { return }
+        let ran = max(1, Date().timeIntervalSince(was.since))
+        let seconds = String(format: "%.1f", Double(was.askedMs) / 1000)
+        let share = String(format: "%.2f", Double(was.askedMs) / 10 / ran)
+        AppLog.shared.add("history", "cost in \(Int((ran / 60).rounded())) min: \(was.looks) looks, \(was.reads) screens read (slowest \(was.slowestMs) ms), \(was.leftOut) left out; the iPhone was asked for \(seconds) s in all, \(share)% of the time")
+    }
+
     // MARK: The controls
 
     private func state(_ token: Int32) -> Bool {
@@ -284,7 +345,7 @@ final class HistoryCapture: ObservableObject {
 
     // MARK: Short runs
 
-    /// Reads once after `waitSeconds`, or every `interval` seconds for `minutes`, or with `always`
+    /// Reads once after `waitSeconds`, or looks every `interval` seconds for `minutes`, or with `always`
     /// until the iPhone locks or the owner stops it (the collector starts it again after a lock).
     func start(minutes: Int? = nil, always: Bool = false, model: AppModel) {
         guard !isRunning else { return }
@@ -305,6 +366,8 @@ final class HistoryCapture: ObservableObject {
         failingSince = nil
         notified = false
         host = nil
+        tally = Tally()
+        tellLists()
         Self.withdrawNotice()
         background = UIApplication.shared.beginBackgroundTask(withName: "poki-screen-history") { [weak self] in
             Task { @MainActor in
@@ -486,6 +549,7 @@ final class HistoryCapture: ObservableObject {
         held = nil
         failingSince = nil
         sayCount()
+        sayTally()
         if background != .invalid {
             UIApplication.shared.endBackgroundTask(background)
             background = .invalid
@@ -590,9 +654,12 @@ final class HistoryCapture: ObservableObject {
         // A read the launcher could not make: its tunnel is down and it is opening another.
         let error = line["error"] as? String ?? ""
         if line["ok"] as? Bool == true {
+            // A look that read no screen (the same app as a moment ago, or one that is left out)
+            // shows the connection open as well as a read does.
             lastReadAt = Date()
             sayCount()
             working()
+            count(line)
         } else if error.contains("no point of the screen") {
             // The connection answered and found no app at the points read (a system screen over
             // the app, the Home Screen mid-swipe), or the hit tests got no answer. Neither is a
@@ -622,6 +689,8 @@ final class HistoryCapture: ObservableObject {
         } else if !HistoryAppNames.isProcess(app) {
             host = app
         }
+        // No app of the owner's: the launcher leaves its screen unread from now on.
+        if !app.isEmpty, !home, HistoryAppNames.isProcess(app) { learn(process: app) }
         guard let read = line["text"] as? [String], !read.isEmpty else { return false }
         // The Home Screen is left out with its notification banners: a banner names the sending app
         // only by its display name, so the app lists could not leave it out. A left-out app leaves
@@ -705,7 +774,8 @@ final class HistoryCapture: ObservableObject {
                 }
             }
             guard self.run == me, self.status == .reading else { return }
-            try? await Task.sleep(for: .seconds(Self.interval))
+            // The simulator has no phone to spare: it reads at the old pace.
+            try? await Task.sleep(for: .seconds(5))
         }
     }
     #endif

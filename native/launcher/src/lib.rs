@@ -309,6 +309,17 @@ pub extern "C" fn poki_history_check(replace: bool) -> u64 {
     history::check(replace)
 }
 
+/// Says which apps' screens the history run reads: {"skip": [bundle ids never kept], "only": [the
+/// only bundle ids kept, or null for every app not skipped]}. A screen that would not be kept is
+/// not read at all. It holds for the run in progress and the runs to come. -1 when unreadable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn poki_history_policy(lists_json: *const c_char) -> i32 {
+    let Some(text) = (unsafe { read_str(lists_json) }) else { return -1 };
+    let Ok(lists) = serde_json::from_str::<Value>(&text) else { return -1 };
+    history::set_policy(&lists);
+    0
+}
+
 /// Ends the history run in progress, if any; it then answers with what it measured so far.
 #[unsafe(no_mangle)]
 pub extern "C" fn poki_history_cancel() {

@@ -150,7 +150,7 @@ async fn open_tunnel(target: &Target, hunt: &mut Hunt, emit: &impl Fn(Value)) ->
 }
 
 /// Answers a check the app asked for, if one waits. Returns whether the tunnel was given up.
-async fn answer_check(checked: &mut u64, device: &mut Option<Device>, direct: &mut Option<ax::direct::Direct>, emit: &impl Fn(Value)) -> bool {
+async fn answer_check(checked: &mut u64, device: &mut Option<Device>, emit: &impl Fn(Value)) -> bool {
     let asked = CHECK.load(Ordering::SeqCst);
     if asked == *checked {
         return false;
@@ -170,8 +170,6 @@ async fn answer_check(checked: &mut u64, device: &mut Option<Device>, direct: &m
                 line["event"] = "dead".into();
                 line["error"] = error.into();
                 if asked & 1 == 1 {
-                    // Nothing is said to the phone on the way out: there is no way to it.
-                    direct.take();
                     *device = None;
                     given_up = true;
                 }
@@ -183,11 +181,35 @@ async fn answer_check(checked: &mut u64, device: &mut Option<Device>, direct: &m
     given_up
 }
 
-/// The longest wait between reads of a screen that shows nothing new (the same text, or no app),
-/// and after reads that failed. Each such round doubles the wait from the run's interval. A deep
-/// snapshot makes the app in front walk its whole accessibility tree, so reading an unchanged
-/// screen every few seconds slowed the owner's iPhone down (2026-11-19).
-const IDLE_MAX: Duration = Duration::from_secs(60);
+/// What reading costs the phone, and how a run keeps it small (the owner, 2026-11-19 and again
+/// 2026-11-20: Screen History visibly slowed the iPhone down, which is not acceptable):
+/// - A round is a look: accessibility is asked for, one hit test says which app is in front, and
+///   accessibility is given back. Between rounds nothing is asked of the phone at all. Until
+///   2026-11-20 one subscription was kept for the whole run, which kept accessibility on in every
+///   app all day, and a hit test was made every five seconds.
+/// - The app's screen is read (a deep snapshot: the app walks its whole screen on its main
+///   thread) only when the app is another than at the last read, or was last read a while ago:
+///   twice the interval after a read that showed something new, doubling for each read that did
+///   not, up to `IDLE_MAX`.
+/// - A read may take the phone at most one part in `BUSY_SHARE` of the time: after a screen that
+///   took long to read, the next read of that app waits that many times as long.
+/// - An app whose screens are never kept (`Policy`) is not read at all.
+/// - After the iPhone is unlocked or an agent's task ends, the first round waits `SETTLE`.
+const IDLE_MAX: Duration = Duration::from_secs(240);
+const BUSY_SHARE: u32 = 100;
+const REREAD_MAX: Duration = Duration::from_secs(600);
+const SETTLE: Duration = Duration::from_secs(10);
+/// Rounds in a row that found the same app and read nothing, after which rounds come half as often.
+const STEADY_AFTER: u32 = 4;
+/// A subscription that is not answered in this time has failed.
+const SUBSCRIBE_WITHIN: Duration = Duration::from_secs(6);
+/// Subscriptions that failed in a row on a tunnel that still answers, after which the tunnel is
+/// given up all the same: its list of services is from when it opened.
+const SUBSCRIBE_TRIES: u32 = 3;
+
+/// The wait after a read or a try that failed: it doubles from here up to `FAILING_MAX`, so a
+/// connection that comes back is found again soon.
+const RETRY: Duration = Duration::from_secs(5);
 const FAILING_MAX: Duration = Duration::from_secs(30);
 
 /// The wait after `slow` rounds in a row that brought nothing new.
@@ -195,18 +217,89 @@ fn paced(interval: Duration, slow: u32, max: Duration) -> Duration {
     interval.saturating_mul(1u32 << slow.min(5)).min(max.max(interval))
 }
 
+/// How long an app is left alone after its screen was read. `unchanged`: the reads in a row that
+/// showed the same text. `cost`: the time the phone spent on the read.
+fn reread_after(interval: Duration, new_app: bool, unchanged: u32, cost: Duration) -> Duration {
+    let wait = if new_app { interval } else { paced(interval.saturating_mul(2), unchanged, IDLE_MAX) };
+    wait.max(cost.saturating_mul(BUSY_SHARE)).min(REREAD_MAX.max(interval))
+}
+
+/// The wait between two rounds that found an app. `steady`: the rounds in a row that found the
+/// same app as the round before and read nothing.
+fn round_wait(interval: Duration, steady: u32) -> Duration {
+    if steady >= STEADY_AFTER { interval.saturating_mul(2) } else { interval }
+}
+
+/// The apps whose screens are kept, as the app last said. A screen that would be thrown away is
+/// not read: an app the owner left out is never made to walk its screen, and what it shows never
+/// leaves it.
+#[derive(Default, Clone, PartialEq, Debug)]
+pub struct Policy {
+    /// Bundle ids never kept, in lower case.
+    skip: std::collections::HashSet<String>,
+    /// When set, the only bundle ids kept.
+    only: Option<std::collections::HashSet<String>>,
+}
+
+impl Policy {
+    /// From `{"skip": [...], "only": [...]}`; a missing or null `only` means every app not skipped.
+    pub fn from(lists: &Value) -> Self {
+        let set = |list: &Value| list.as_array().map(|ids| ids.iter().filter_map(Value::as_str).map(|id| id.trim().to_ascii_lowercase()).filter(|id| !id.is_empty()).collect());
+        Self { skip: set(&lists["skip"]).unwrap_or_default(), only: set(&lists["only"]) }
+    }
+
+    pub fn skips(&self, app: &str) -> bool {
+        let app = app.trim().to_ascii_lowercase();
+        self.skip.contains(&app) || self.only.as_ref().is_some_and(|only| !only.contains(&app))
+    }
+}
+
+static POLICY: std::sync::Mutex<Option<Policy>> = std::sync::Mutex::new(None);
+
+/// Sets which apps' screens the run reads, now and for the runs to come.
+pub fn set_policy(lists: &Value) {
+    *POLICY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Policy::from(lists));
+}
+
+fn policy() -> Policy {
+    POLICY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone().unwrap_or_default()
+}
+
+/// What a round does with the app it found.
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Look {
+    /// Its screen is read.
+    Read,
+    /// The same app as at the last read, read not long ago: left alone.
+    Same,
+    /// Its screens are never kept: not read.
+    Skipped,
+}
+
+/// `app`: the bundle id the owner would name, when the phone told. `last`: the process read
+/// last and how long ago. `reread`: how long that process is left alone.
+fn decide(app: Option<&str>, pid: u64, policy: &Policy, last: Option<(u64, Duration)>, reread: Duration) -> Look {
+    if app.is_some_and(|app| policy.skips(app)) {
+        Look::Skipped
+    } else if last.is_some_and(|(read, ago)| read == pid && ago < reread) {
+        Look::Same
+    } else {
+        Look::Read
+    }
+}
+
 /// How long a round waits before the next. With no tunnel it is short while one may come (the
 /// app hurries, or the run is young), and otherwise grows with every try that failed: on cellular
 /// iOS refuses every try until the network changes, and a change brings a hurry of its own.
-fn wait_for(no_tunnel: bool, eager: bool, interval: Duration, slow: u32) -> Duration {
+fn wait_for(no_tunnel: bool, eager: bool, with_tunnel: Duration, failed: u32) -> Duration {
     if !no_tunnel {
-        interval
+        with_tunnel
     } else if hurrying() {
         HURRY_EVERY
     } else if eager {
         EAGER_EVERY
     } else {
-        paced(interval, slow, FAILING_MAX)
+        paced(RETRY, failed, FAILING_MAX)
     }
 }
 
@@ -422,9 +515,17 @@ async fn watch(request: &Value) -> Result<Value, Failure> {
     Ok(answer)
 }
 
+/// What one round of a run did.
+enum Round {
+    /// Nothing was asked of the phone: the run was held or stopped while the round waited.
+    Held,
+    /// The app in front was found. `seen` is missing for a read of the service's own dump.
+    Looked { seen: Option<ax::direct::Seen>, look: Look, tree: Option<Value> },
+}
+
 async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let target = Target::from(request)?;
-    let interval = Duration::from_millis(request["interval_ms"].as_u64().unwrap_or(5000).clamp(1000, 600_000));
+    let interval = Duration::from_millis(request["interval_ms"].as_u64().unwrap_or(30_000).clamp(1000, 600_000));
     let duration = Duration::from_secs(request["duration_s"].as_u64().unwrap_or(1800).clamp(10, 86_400));
     let windows = match request["windows_ms"].as_array() {
         Some(_) => windows(request),
@@ -442,17 +543,26 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut last_good: Option<Duration> = None;
     let mut last_text: Option<u64> = None;
     let points: Option<Vec<(f64, f64)>> = request["direct_points"].as_array().map(|points| points.iter().filter_map(|point| Some((point[0].as_f64()?, point[1].as_f64()?))).collect());
-    let mut direct: Option<ax::direct::Direct> = None;
     let include_text = request["include_text"].as_bool().unwrap_or(false);
     let include_tree = request["include_tree"].as_bool().unwrap_or(false);
     let mut ended = "finished";
-    // Reads in a row whose hit tests failed outright.
-    let mut unanswered = 0u32;
-    // Rounds in a row that brought nothing new, and the cap their wait grows to.
-    let mut slow = 0u32;
-    let mut slow_max: Duration;
-    // What the first point showed at the last read: while it shows the same, a long wait goes on.
-    let mut first_hit: Option<Option<u64>> = None;
+    // What the run knows of the processes it met. It outlives the subscriptions, one per round.
+    let mut known = ax::direct::Known::default();
+    // The process whose screen was read last and the round that read it, how long that process
+    // is left alone, and the reads in a row that showed the same text.
+    let mut last_read: Option<(u64, Instant)> = None;
+    let mut reread = Duration::ZERO;
+    let mut unchanged = 0u32;
+    // The process the round before found, and the rounds in a row that found it again and read nothing.
+    let mut last_pid: Option<u64> = None;
+    let mut steady = 0u32;
+    // Rounds in a row that failed or had no tunnel, rounds in a row that found no app on the
+    // screen, and subscriptions in a row that failed.
+    let mut failing = 0u32;
+    let mut idle = 0u32;
+    let mut unsubscribed = 0u32;
+    // Until when the first look after a hold waits.
+    let mut settle: Option<Instant> = None;
     // The tries since the run last had a tunnel, and the last check of the app's that was answered.
     // A check asked as the run was started is answered by its first round (it has no tunnel yet).
     let mut hunt = Hunt::default();
@@ -475,21 +585,22 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         }
         let asked = Instant::now();
         round = Some(asked);
-        answer_check(&mut checked, &mut device, &mut direct, &emit).await;
+        answer_check(&mut checked, &mut device, &emit).await;
         if PAUSED.load(Ordering::SeqCst) {
             // A held run still opens its tunnel: the moment it can be opened may not come again
-            // (on cellular iOS refuses a new one), and the reads to come need it open.
+            // (on cellular iOS refuses a new one), and the reads to come need it open. Nothing
+            // else is asked of the phone: no subscription is kept through a hold.
             let mut line = json!({"paused": true, "at_s": at.as_secs()});
             if device.is_none() {
                 match open_tunnel(&target, &mut hunt, &emit).await {
                     Ok(open) => {
                         device = Some(open);
                         stats.connections += 1;
-                        slow = 0;
+                        failing = 0;
                     }
                     Err(failure) => {
                         line["error"] = failure.detail.into();
-                        slow += 1;
+                        failing += 1;
                     }
                 }
             }
@@ -497,111 +608,189 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             // One line each round, so the caller can tell a held run from a silent one.
             emit(line);
             // Asked again each piece, so a hurry that begins during a long wait cuts it short.
-            while asked.elapsed() < wait_for(device.is_none(), since_start() < EAGER, interval, slow) && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
+            while asked.elapsed() < wait_for(device.is_none(), since_start() < EAGER, interval, failing) && RUN.load(Ordering::SeqCst) == me && PAUSED.load(Ordering::SeqCst) {
                 // A check is answered where the run waits; a tunnel given up is tried again now.
-                if answer_check(&mut checked, &mut device, &mut direct, &emit).await {
+                if answer_check(&mut checked, &mut device, &emit).await {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
+            // Let go: the screen has just come back (the owner unlocked the iPhone, or an agent's
+            // task ended). The first look waits, so it does not land in what the owner is doing.
+            if !PAUSED.load(Ordering::SeqCst) {
+                settle = Some(Instant::now() + SETTLE);
+            }
             continue;
         }
-        let mut line = json!({"n": stats.reads + stats.failures + 1, "at_s": at.as_secs()});
-        let subscribed = direct.is_some();
+        let mut line = json!({"n": stats.reads + stats.looks + stats.failures + 1, "at_s": at.as_secs()});
         let mut trace = ax::direct::Trace::default();
         let result = async {
             if device.is_none() {
                 device = Some(open_tunnel(&target, &mut hunt, &emit).await?);
                 stats.connections += 1;
             }
-            let open = device.as_mut().unwrap();
-            // With points to hit test, the app is found the way the screen shows it and read whole;
-            // the service's own dump can name the wrong app.
-            if let Some(points) = &points {
-                // One subscription serves every read of the run; a read that fails ends it.
-                if direct.is_none() {
-                    trace.stage = "subscribe";
-                    direct = Some(ax::direct::Direct::connect(&mut open.adapter, &open.rsd).await.map_err(|error| Failure::new(format!("no tree at subscribe: {error}")).code("read"))?);
+            // The tunnel is opened first, whatever else waits: the moment for it may be short.
+            if let Some(until) = settle.take() {
+                while Instant::now() < until && RUN.load(Ordering::SeqCst) == me && !PAUSED.load(Ordering::SeqCst) {
+                    answer_check(&mut checked, &mut device, &emit).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                return direct.as_mut().unwrap().front(points, &mut trace).await.map_err(|error| Failure::new(format!("no tree at {}: {error}", trace.stage)).code("read"));
+                if RUN.load(Ordering::SeqCst) != me || PAUSED.load(Ordering::SeqCst) || device.is_none() {
+                    return Ok(Round::Held);
+                }
             }
-            let (tree, attempts) = ax::read_tree_traced(&mut open.adapter, &open.rsd, false, &windows).await;
-            tree.ok_or_else(|| no_tree(&attempts))
+            let open = device.as_mut().unwrap();
+            let Some(points) = &points else {
+                let (tree, attempts) = ax::read_tree_traced(&mut open.adapter, &open.rsd, false, &windows).await;
+                return tree.map(|tree| Round::Looked { seen: None, look: Look::Read, tree: Some(tree) }).ok_or_else(|| no_tree(&attempts));
+            };
+            // With points to hit test, the app is found the way the screen shows it; the service's
+            // own dump can name the wrong app. Accessibility is asked for now and given back
+            // below, whatever the round brings: while a client needs it, it is on in every app.
+            trace.stage = "subscribe";
+            let subscribing = Instant::now();
+            let mut direct = match tokio::time::timeout(SUBSCRIBE_WITHIN, ax::direct::Direct::connect(&mut open.adapter, &open.rsd)).await {
+                Ok(Ok(direct)) => direct,
+                Ok(Err(error)) => return Err(Failure::new(format!("no tree at subscribe: {error}")).code("read")),
+                Err(_) => return Err(Failure::new(format!("no tree at subscribe: no answer in {} s", SUBSCRIBE_WITHIN.as_secs())).code("read")),
+            };
+            trace.subscribe_ms = milliseconds(subscribing.elapsed());
+            let looked = async {
+                let seen = direct.see(points, &mut trace, &mut known).await?;
+                let look = decide(seen.app(), seen.pid, &policy(), last_read.map(|(pid, read)| (pid, asked.saturating_duration_since(read))), reread);
+                let tree = match look {
+                    Look::Read => Some(direct.read(&seen, points, &mut trace, &mut known).await?),
+                    Look::Same | Look::Skipped => None,
+                };
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Round::Looked { seen: Some(seen), look, tree })
+            }
+            .await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), direct.close()).await;
+            looked.map_err(|error| Failure::new(format!("no tree at {}: {error}", trace.stage)).code("read"))
         }
         .await;
         let took = milliseconds(asked.elapsed());
-        let pid_before = first_hit.flatten();
-        first_hit = trace.hits.first().map(|hit| hit["pid"].as_u64());
+        // The wait until the next round, while the run has a tunnel.
+        let with_tunnel;
         match result {
-            Ok(tree) => {
-                unanswered = 0;
-                let summary = summarize(&tree, true);
-                let text = hash_of(&summary["text"]);
-                let changed = last_text != Some(text);
-                last_text = Some(text);
+            Ok(Round::Held) => continue,
+            Ok(Round::Looked { seen, mut look, tree }) => {
+                failing = 0;
+                idle = 0;
+                unsubscribed = 0;
+                let pid = seen.as_ref().map(|seen| seen.pid);
                 let now = since_start();
-                stats.good(took, now.saturating_sub(last_good.unwrap_or(now)), changed);
+                let gap = now.saturating_sub(last_good.unwrap_or(now));
                 last_good = Some(now);
                 line["ok"] = true.into();
                 line["ms"] = took.into();
-                line["elements"] = summary["elements"].clone();
-                line["app"] = front_name(&summary);
-                // The app that shows a web page, when the page's own process was the one read.
-                let host = bundle_name(&tree["host"]["bundle_id"]);
+                // What the round asked of the phone, for the app's tally of what reading costs.
+                line["subscribe_ms"] = trace.subscribe_ms.into();
+                line["cost_ms"] = trace.asked_ms.into();
+                let mut app = seen.as_ref().and_then(|seen| seen.bundle.clone()).map(Value::from).map(|id| bundle_name(&id)).unwrap_or(Value::Null);
+                let mut host = seen.as_ref().and_then(|seen| seen.host.clone()).map(Value::from).map(|id| bundle_name(&id)).unwrap_or(Value::Null);
+                let mut kept = None;
+                if let Some(tree) = tree {
+                    let summary = summarize(&tree, true);
+                    app = front_name(&summary);
+                    // The app that shows a web page, when the page's own process was the one read.
+                    if !bundle_name(&tree["host"]["bundle_id"]).is_null() {
+                        host = bundle_name(&tree["host"]["bundle_id"]);
+                    }
+                    // An app the phone named only with its screen: one that is left out is
+                    // dropped here, and its text goes no further.
+                    let named = match (app.as_str(), host.as_str()) {
+                        (_, Some(host)) => Some(host),
+                        (Some(app), None) if !ax::direct::is_web(app) => Some(app),
+                        _ => None,
+                    };
+                    if named.is_some_and(|named| policy().skips(named)) {
+                        look = Look::Skipped;
+                    } else {
+                        kept = Some((tree, summary));
+                    }
+                    line["snapshot_ms"] = json!(trace.snapshot_ms);
+                    line["bytes"] = json!(trace.snapshot_bytes);
+                    // Read once, whatever becomes of it: the process is left alone for a while.
+                    let cost = if points.is_some() { Duration::from_millis(trace.asked_ms) } else { Duration::from_millis(took) };
+                    let new_app = pid.is_none() || last_read.map(|(read, _)| read) != pid;
+                    if let Some((_, summary)) = &kept {
+                        let text = hash_of(&summary["text"]);
+                        let changed = last_text != Some(text);
+                        last_text = Some(text);
+                        unchanged = if changed { 0 } else { unchanged + 1 };
+                        line["changed"] = changed.into();
+                    }
+                    reread = reread_after(interval, new_app && kept.is_some(), unchanged, cost);
+                    last_read = pid.map(|pid| (pid, asked));
+                }
+                if !app.is_null() {
+                    line["app"] = app;
+                }
                 if !host.is_null() {
                     line["host"] = host;
                 }
-                line["changed"] = changed.into();
-                // A new app is read again soon (it is still drawing), a new screen in the same app
-                // a little later, and a screen that stays the same less and less often.
-                slow_max = IDLE_MAX;
-                slow = if !changed { slow + 1 } else if trace.pid != pid_before { 0 } else { 1 };
-                // The capture loop asks for the text itself, and gets it only for a screen that changed.
-                if include_text && changed {
-                    line["text"] = summary["text"].clone();
-                    line["title"] = title_of(&tree);
-                }
-                // The tree itself, compact, when the capture keeps trees: only for a changed screen.
-                if include_tree && changed {
-                    line["tree"] = compact(&tree);
-                }
-            }
-            Err(failure) => {
-                // A screen that shows no app (locked or off) is an answer, and the connection stays.
-                // Any other failure ends the tunnel; the next read opens a new one.
-                if failure.detail.contains(ax::direct::HITS_FAILED) {
-                    // Hit tests that failed (no answer, or a broken socket) may be a dead
-                    // subscription or a dead tunnel, and both would otherwise be kept for good.
-                    // After three in a row the subscription goes; the tunnel stays, and goes only
-                    // when the new subscribe fails on it (on cellular it could not be opened again).
-                    unanswered += 1;
-                    if unanswered >= 3 {
-                        unanswered = 0;
-                        if let Some(mut old) = direct.take() {
-                            let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
+                match kept {
+                    Some((tree, summary)) => {
+                        let changed = line["changed"] == true;
+                        stats.good(took, gap, changed);
+                        steady = 0;
+                        line["elements"] = summary["elements"].clone();
+                        // The capture loop asks for the text itself, and gets it only for a screen that changed.
+                        if include_text && changed {
+                            line["text"] = summary["text"].clone();
+                            line["title"] = title_of(&tree);
+                        }
+                        // The tree itself, compact, when the capture keeps trees: only for a changed screen.
+                        if include_tree && changed {
+                            line["tree"] = compact(&tree);
                         }
                     }
-                } else if !failure.detail.contains("no point of the screen") {
-                    if let Some(mut old) = direct.take() {
-                        let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
-                    }
-                    // A read that failed on a subscription already open ends only the subscription:
-                    // the tunnel may still be alive, and on cellular a new one cannot be opened
-                    // while an open one keeps working. When the next subscribe fails on it too,
-                    // the tunnel goes.
-                    if (!subscribed || points.is_none()) && device.take().is_some() {
-                        emit(json!({"event": "lost", "error": failure.detail}));
+                    None => {
+                        // A look that read no screen: the app is the one read not long ago, or
+                        // one whose screens are never kept.
+                        stats.looked(gap);
+                        steady = if pid.is_some() && pid == last_pid { steady + 1 } else { 0 };
+                        line["look"] = if look == Look::Skipped { "skipped" } else { "same" }.into();
+                        line["changed"] = false.into();
                     }
                 }
-                // No app on the screen (locked, dark) is an idle screen; any other failure backs off
-                // to a shorter cap, so a connection that comes back is found again soon.
-                if failure.detail.contains("no point of the screen") && !failure.detail.contains(ax::direct::HITS_FAILED) {
-                    slow_max = IDLE_MAX;
+                last_pid = pid;
+                with_tunnel = round_wait(interval, steady);
+            }
+            Err(failure) => {
+                // A screen that shows no app (locked or off) is an answer, and the tunnel stays.
+                let no_app = failure.detail.contains("no point of the screen") && !failure.detail.contains(ax::direct::HITS_FAILED);
+                steady = 0;
+                last_pid = None;
+                if no_app {
+                    idle += 1;
+                    unsubscribed = 0;
+                    with_tunnel = paced(interval, idle, IDLE_MAX);
                 } else {
-                    slow_max = FAILING_MAX;
-                    first_hit = None;
+                    failing += 1;
+                    with_tunnel = paced(RETRY, failing, FAILING_MAX);
+                    if device.is_some() && points.is_none() {
+                        // The service's own dump did not come: the next read opens a new tunnel.
+                        device = None;
+                        emit(json!({"event": "lost", "error": failure.detail}));
+                    } else if device.is_some() && trace.stage == "subscribe" {
+                        // A subscription that fails may be a tunnel that is gone. The tunnel is
+                        // asked itself: on cellular one given up by mistake cannot be opened
+                        // again. One that answers stays, until the service has failed on it
+                        // several times over (its list of services is from when it opened).
+                        unsubscribed += 1;
+                        let gone = alive(device.as_mut().unwrap(), true).await.is_err();
+                        if gone || unsubscribed >= SUBSCRIBE_TRIES {
+                            unsubscribed = 0;
+                            device = None;
+                            emit(json!({"event": "lost", "error": failure.detail}));
+                        }
+                    } else {
+                        // The subscription answered, so the tunnel is alive: it stays.
+                        unsubscribed = 0;
+                    }
                 }
-                slow += 1;
                 stats.failures += 1;
                 stats.last_error = Some(failure.detail.clone());
                 line["ok"] = false.into();
@@ -614,40 +803,19 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             }
         }
         emit(line);
-        let with_tunnel = paced(interval, slow, slow_max);
-        let mut probed = Instant::now();
         // Waits in short pieces, so Stop is answered at once. The wait is asked again each piece:
         // with no tunnel it turns short the moment a hurry begins, and stays 200 ms during one.
-        // A long wait looks at the first point once an interval (one hit test, no snapshot), and
-        // ends when another app, or an app where there was none, shows there.
-        while RUN.load(Ordering::SeqCst) == me {
-            let wait = if device.is_none() { wait_for(true, since_start() < EAGER, interval, slow) } else { with_tunnel };
-            if asked.elapsed() >= wait {
+        // Nothing is asked of the phone while the run waits.
+        while RUN.load(Ordering::SeqCst) == me && !PAUSED.load(Ordering::SeqCst) {
+            if asked.elapsed() >= wait_for(device.is_none(), since_start() < EAGER, with_tunnel, failing) {
                 break;
             }
             // A check is answered where the run waits; a tunnel given up is tried again now.
-            if answer_check(&mut checked, &mut device, &mut direct, &emit).await {
+            if answer_check(&mut checked, &mut device, &emit).await {
                 break;
-            }
-            if let (Some(seen), Some(open), Some(&(x, y))) = (first_hit, direct.as_mut(), points.as_ref().and_then(|p| p.first())) {
-                if probed.elapsed() >= interval && asked.elapsed() + interval < wait {
-                    probed = Instant::now();
-                    match tokio::time::timeout(Duration::from_secs(4), open.hit(x, y)).await {
-                        Ok(Ok(now)) if now != seen && now.is_some() => {
-                            slow = 0;
-                            break;
-                        }
-                        Ok(Ok(_)) => {}
-                        // A probe that fails says nothing; the next read will tell.
-                        _ => break,
-                    }
-                }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-    }
-    if let Some(mut open) = direct.take() {
-        let _ = tokio::time::timeout(Duration::from_secs(1), open.close()).await;
     }
     let mut answer = stats.json();
     answer["ended"] = ended.into();
@@ -666,6 +834,8 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
 #[derive(Default)]
 pub(crate) struct RunStats {
     pub reads: u64,
+    /// Rounds that found the app in front and read no screen.
+    pub looks: u64,
     pub failures: u64,
     pub changed: u64,
     pub connections: u64,
@@ -686,9 +856,15 @@ impl RunStats {
         }
     }
 
+    pub(crate) fn looked(&mut self, gap: Duration) {
+        self.looks += 1;
+        self.longest_gap_ms = self.longest_gap_ms.max(milliseconds(gap));
+    }
+
     pub(crate) fn json(&self) -> Value {
         json!({
             "reads": self.reads,
+            "looks": self.looks,
             "failures": self.failures,
             "changed": self.changed,
             "connections": self.connections,
@@ -1008,13 +1184,71 @@ mod tests {
     }
 
     #[test]
-    fn a_screen_that_shows_nothing_new_is_read_less_and_less_often() {
-        let five = Duration::from_secs(5);
-        let waits: Vec<u64> = (0..8).map(|slow| paced(five, slow, IDLE_MAX).as_secs()).collect();
-        assert_eq!(waits, [5, 10, 20, 40, 60, 60, 60, 60]);
-        assert_eq!(paced(five, 9, FAILING_MAX).as_secs(), 30);
-        // A run asked to read more slowly than the cap keeps its own interval.
-        assert_eq!(paced(Duration::from_secs(90), 3, IDLE_MAX).as_secs(), 90);
+    fn a_screen_is_left_alone_longer_the_less_it_changes() {
+        let (half, quick) = (Duration::from_secs(30), Duration::from_millis(200));
+        // A new app is read again a round later (it was still drawing); the same app after two
+        // rounds when its screen changed, and twice as long after each read that showed the same.
+        assert_eq!(reread_after(half, true, 0, quick).as_secs(), 30);
+        let waits: Vec<u64> = (0..5).map(|unchanged| reread_after(half, false, unchanged, quick).as_secs()).collect();
+        assert_eq!(waits, [60, 120, 240, 240, 240]);
+        // A screen that took the phone long to read is left alone a hundred times as long.
+        assert_eq!(reread_after(half, true, 0, Duration::from_millis(1500)).as_secs(), 150);
+        assert_eq!(reread_after(half, false, 0, Duration::from_millis(900)).as_secs(), 90);
+        assert_eq!(reread_after(half, false, 0, Duration::from_secs(30)), REREAD_MAX);
+        // A run asked to read more slowly than the caps keeps its own interval.
+        assert_eq!(reread_after(Duration::from_secs(900), true, 0, quick).as_secs(), 900);
+    }
+
+    #[test]
+    fn rounds_come_half_as_often_once_the_same_app_stays_in_front() {
+        let half = Duration::from_secs(30);
+        let waits: Vec<u64> = (0..6).map(|steady| round_wait(half, steady).as_secs()).collect();
+        assert_eq!(waits, [30, 30, 30, 30, 60, 60]);
+    }
+
+    #[tokio::test]
+    async fn a_run_with_no_tunnel_backs_off_from_five_seconds_whatever_its_interval() {
+        // The hurry is the process's own, and a test that starts a run may be in one.
+        let _turn = ONE_RUN.lock().await;
+        // Not in a hurry and not young: the tries double from five seconds up to thirty.
+        HURRY_UNTIL.store(0, Ordering::SeqCst);
+        let waits: Vec<u64> = (1..6).map(|failed| wait_for(true, false, Duration::from_secs(240), failed).as_secs()).collect();
+        assert_eq!(waits, [10, 20, 30, 30, 30]);
+        assert_eq!(wait_for(true, true, Duration::from_secs(240), 9), EAGER_EVERY);
+        assert_eq!(wait_for(false, true, Duration::from_secs(240), 9).as_secs(), 240);
+        assert_eq!(paced(Duration::from_secs(30), 9, IDLE_MAX), IDLE_MAX);
+    }
+
+    #[test]
+    fn the_app_lists_decide_which_screens_are_read() {
+        let leaves_out = Policy::from(&json!({"skip": ["com.tencent.xin", " COM.Apple.SpringBoard "]}));
+        assert!(leaves_out.skips("com.tencent.xin") && leaves_out.skips("com.apple.springboard") && leaves_out.skips("Com.Tencent.Xin"));
+        assert!(!leaves_out.skips("com.apple.mobilesafari"));
+        // With a list of the only apps kept, every other app is left out, and so is one on both lists.
+        let only = Policy::from(&json!({"skip": ["com.apple.mobilenotes"], "only": ["com.apple.mobilesafari", "com.apple.mobilenotes"]}));
+        assert!(only.skips("com.apple.Maps") && only.skips("com.apple.mobilenotes") && !only.skips("com.apple.mobileSafari"));
+        // Nothing said: every app is read, as before.
+        assert_eq!(Policy::from(&json!({})), Policy::default());
+        assert!(!Policy::default().skips("com.tencent.xin"));
+        assert!(!Policy::from(&json!({"only": null})).skips("com.apple.Maps"));
+    }
+
+    #[test]
+    fn a_round_reads_a_screen_only_when_it_is_kept_and_not_read_a_moment_ago() {
+        let policy = Policy::from(&json!({"skip": ["com.tencent.xin"]}));
+        let minute = Duration::from_secs(60);
+        // An app that is left out is never read, however long ago anything was.
+        assert_eq!(decide(Some("com.tencent.xin"), 7, &policy, None, minute), Look::Skipped);
+        assert_eq!(decide(Some("com.tencent.xin"), 7, &policy, Some((7, minute * 9)), minute), Look::Skipped);
+        // The first sight of an app, and another app than the one read last: read at once.
+        assert_eq!(decide(Some("com.apple.mobilesafari"), 7, &policy, None, minute), Look::Read);
+        assert_eq!(decide(Some("com.apple.mobilesafari"), 7, &policy, Some((8, Duration::from_secs(1))), minute), Look::Read);
+        // The same app: left alone until its time is up.
+        assert_eq!(decide(Some("com.apple.mobilesafari"), 7, &policy, Some((7, Duration::from_secs(59))), minute), Look::Same);
+        assert_eq!(decide(Some("com.apple.mobilesafari"), 7, &policy, Some((7, minute)), minute), Look::Read);
+        // An app the phone did not name is read: its screen names it, and the lists are asked then.
+        assert_eq!(decide(None, 7, &policy, None, minute), Look::Read);
+        assert_eq!(decide(None, 7, &policy, Some((7, Duration::from_secs(5))), minute), Look::Same);
     }
 
     #[test]
@@ -1024,7 +1258,9 @@ mod tests {
         stats.good(600, Duration::from_secs(5), false);
         stats.good(500, Duration::from_secs(42), true);
         stats.failures = 1;
+        stats.looked(Duration::from_secs(30));
         let json = stats.json();
+        assert_eq!(json["looks"], 1);
         assert_eq!(json["reads"], 3);
         assert_eq!(json["changed"], 2);
         assert_eq!(json["longest_gap_ms"], 42_000);

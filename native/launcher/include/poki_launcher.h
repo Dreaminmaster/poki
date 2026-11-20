@@ -59,15 +59,20 @@ int32_t poki_signer_call(const char *request_json, poki_event_cb cb, void *conte
 // iPhone History tests (native/launcher/src/history.rs): the screen read as text through the
 // accessibility audit service, on a tunnel of its own and with no XCTest session.
 // request_json: {"op": "read_once", "device_address": "10.7.0.1", "pairing_file": "...",
-//   "host_name": "Poki", "include_text": false} or {"op": "run", ..., "interval_ms": 5000,
+//   "host_name": "Poki", "include_text": false} or {"op": "run", ..., "interval_ms": 30000,
 //   "duration_s": 1800}.
 // Events: {"event": "progress", "progress": {"n", "at_s", "ok", "ms", "elements", "app", "changed"}}
-// for every read of a run, then one {"event": "result", "ok": true, "value": {...}} or
+// for every round of a run (with "look": "same" or "skipped" when the round found the app in
+// front and read no screen, and "cost_ms": what the round asked of the phone), then one {"event": "result", "ok": true, "value": {...}} or
 // {"event": "result", "ok": false, "error": "...", "fix": "...", "code": "..."}.
 // Returns -1 when the request is unreadable (no events follow), else 0.
 int32_t poki_history_call(const char *request_json, poki_event_cb cb, void *context);
 // Ends the run in progress; it answers with what it measured so far.
 void poki_history_cancel(void);
+/* Says which apps' screens the history run reads: {"skip": [bundle ids never kept], "only": [the
+   only bundle ids kept, or null for every app not skipped]}. A screen that would not be kept is
+   not read at all. Holds for the run in progress and the runs to come. -1 when unreadable. */
+int32_t poki_history_policy(const char *lists_json);
 /// Holds (true) or lets go (false) the reads of the history run in progress; its tunnel stays open.
 void poki_history_pause(bool on);
 /* Makes the history run try its tunnel five times a second for the coming seconds, while it has none. */

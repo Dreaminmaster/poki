@@ -66,4 +66,14 @@ enum HistoryBridge {
     /// number returned here as "check", with "event" alive, dead or none. With `replace` a tunnel
     /// that does not answer is given up and a new one tried at once.
     static func check(replace: Bool) -> UInt64 { poki_history_check(replace) }
+
+    /// Tells the launcher which apps' screens it leaves unread: those in `skip` always, and with
+    /// `only` every app that is not in it. It holds for the run in progress and the runs to come.
+    /// A screen is read on the app's own main thread, so one that would be thrown away here is
+    /// better not read at all.
+    static func policy(skip: [String], only: [String]?) {
+        let lists: [String: Any] = ["skip": skip, "only": only.map { $0 as Any } ?? NSNull()]
+        guard let json = try? JSONSerialization.data(withJSONObject: lists) else { return }
+        _ = String(decoding: json, as: UTF8.self).withCString { poki_history_policy($0) }
+    }
 }

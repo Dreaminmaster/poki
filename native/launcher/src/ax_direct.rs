@@ -4,7 +4,16 @@
 //! then that process's application element, then one deep snapshot of it.
 //! Wire schema: https://github.com/ipbtools/ipb/blob/main/docs/protocol.md
 //! A hit test sends no touch, and nothing here is an accessibility action.
+//!
+//! What a read costs the phone (the owner, 2026-11-20: Screen History slowed the iPhone down):
+//! - While a client says it needs accessibility, accessibility is on in every app, and the phone
+//!   keeps a copy of the front app's tree for the client. So a subscription lasts one read.
+//! - The deep snapshot is the one XCTest takes: the app walks its whole screen on its main thread.
+//!   So an app is named first, from a snapshot of its application element alone, and a screen that
+//!   will not be kept is not read at all.
 use super::*;
+use std::collections::HashMap;
+use std::time::Instant;
 
 /// In the error of a front read whose hit tests failed, as opposed to answered with no process.
 pub const HITS_FAILED: &str = "hit tests failed";
@@ -17,19 +26,89 @@ pub struct Trace {
     /// One per point tried: the point, the process hit (None when nothing answered there), the time.
     pub hits: Vec<Json>,
     pub pid: Option<u64>,
+    /// Naming the process, when it was not known: its application element and nothing below.
+    pub name_ms: Option<u64>,
     pub application_ms: Option<u64>,
     pub snapshot_ms: Option<u64>,
     pub snapshot_bytes: Option<u64>,
     pub orientation: Option<u64>,
+    /// The time the phone spent on this read's requests, all told.
+    pub asked_ms: u64,
     pub error: Option<String>,
+}
+
+/// What a run learned about the processes it met: the bundle id of each, and the app that shows
+/// each web page's process. Kept across the run's subscriptions, each for a while only: a process
+/// number is given out again in time.
+#[derive(Default)]
+pub struct Known {
+    bundles: HashMap<u64, (String, Instant)>,
+    hosts: HashMap<u64, (String, Instant)>,
+}
+
+const KNOWN_FOR: Duration = Duration::from_secs(600);
+
+impl Known {
+    fn fresh(map: &HashMap<u64, (String, Instant)>, pid: u64) -> Option<String> {
+        map.get(&pid).filter(|(_, at)| at.elapsed() < KNOWN_FOR).map(|(name, _)| name.clone())
+    }
+
+    fn keep(map: &mut HashMap<u64, (String, Instant)>, pid: u64, name: &str) {
+        if map.len() >= 256 {
+            map.retain(|_, (_, at)| at.elapsed() < KNOWN_FOR);
+            if map.len() >= 256 {
+                map.clear();
+            }
+        }
+        map.insert(pid, (name.to_owned(), Instant::now()));
+    }
+
+    /// The bundle id of a process, when it was learned not long ago.
+    pub fn bundle(&self, pid: u64) -> Option<String> {
+        Self::fresh(&self.bundles, pid)
+    }
+
+    pub fn learn(&mut self, pid: u64, bundle: &str) {
+        Self::keep(&mut self.bundles, pid, bundle);
+    }
+
+    /// The app that shows the web page a process draws, when it was learned not long ago.
+    pub fn host(&self, web: u64) -> Option<String> {
+        Self::fresh(&self.hosts, web)
+    }
+
+    pub fn learn_host(&mut self, web: u64, host: &str) {
+        Self::keep(&mut self.hosts, web, host);
+    }
+}
+
+/// The app at the screen's first point that shows one, before its screen is read.
+pub struct Seen {
+    pub pid: u64,
+    /// Its bundle id, when the phone gave one.
+    pub bundle: Option<String>,
+    /// For a web page's own process: the app that shows the page.
+    pub host: Option<String>,
+}
+
+impl Seen {
+    /// The app the owner would name: the one that shows the page for a web page's process, the
+    /// process's own otherwise. None when it could not be told (the read then decides).
+    pub fn app(&self) -> Option<&str> {
+        match (self.bundle.as_deref(), self.host.as_deref()) {
+            (Some(bundle), _) if !is_web(bundle) => Some(bundle),
+            (Some(_), Some(host)) => Some(host),
+            _ => None,
+        }
+    }
 }
 
 pub struct Direct {
     socket: Box<dyn ReadWrite>,
     orientation: Option<u64>,
     next_id: u32,
-    /// The bundle id of each process asked so far, so the app behind a web page is asked once.
-    bundles: std::collections::HashMap<u64, String>,
+    /// The time spent waiting for the phone's answers on this subscription.
+    asked: Duration,
 }
 
 const STEP: Duration = Duration::from_secs(4);
@@ -103,7 +182,7 @@ impl Direct {
         )
         .await?;
         call(&mut socket, 2, "clientNeedsAccessibility:", true.into(), true).await?;
-        let mut direct = Self { socket, orientation: None, next_id: 10, bundles: Default::default() };
+        let mut direct = Self { socket, orientation: None, next_id: 10, asked: Duration::ZERO };
         let _ = tokio::time::timeout(Duration::from_millis(1500), async {
             while direct.orientation.is_none() {
                 let message = Message::from_reader(&mut direct.socket).await?;
@@ -146,7 +225,8 @@ impl Direct {
         let id = self.next_id;
         self.next_id += 1;
         call(&mut self.socket, id, "processDataFromHost:", Value::Data(bytes), true).await?;
-        tokio::time::timeout(STEP, async {
+        let asked = Instant::now();
+        let answer = tokio::time::timeout(STEP, async {
             loop {
                 let message = Message::from_reader(&mut self.socket).await?;
                 acknowledge(&mut self.socket, &message).await?;
@@ -161,8 +241,9 @@ impl Direct {
                 }
             }
         })
-        .await
-        .map_err(|_| format!("no answer to request type {kind} in {} s", STEP.as_secs()))?
+        .await;
+        self.asked += asked.elapsed();
+        answer.map_err(|_| format!("no answer to request type {kind} in {} s", STEP.as_secs()))?
     }
 
     /// The process that owns what is shown at a point of the screen (in points). No touch is sent.
@@ -216,10 +297,9 @@ impl Direct {
         Ok(update.field(update.root(), "resultData").and_then(|v| update.field(v, "pid")).and_then(|v| update.integer(v)).filter(|pid| *pid > 0))
     }
 
-    /// The application element of a process and its deep snapshot, flattened like a tree dump.
-    pub async fn tree_of(&mut self, pid: u64, trace: &mut Trace) -> Result<Json> {
-        trace.stage = "application";
-        let asked = std::time::Instant::now();
+    /// The application element of a process: the request's objects with the element among them
+    /// (it goes back whole, with every object it refers to), the element, and its identity.
+    async fn application(&mut self, pid: u64) -> Result<(Vec<Value>, Value, u64)> {
         let mut objects = vec![Value::from("$null")];
         let parameters = encode(&mut objects, dictionary([("pid", pid.into())]));
         let cls = class(&mut objects, "AXPTranslatorRequest");
@@ -236,20 +316,21 @@ impl Direct {
             ]),
         );
         let (update, _) = self.ask(1, objects, request).await?;
-        trace.application_ms = Some(asked.elapsed().as_millis() as u64);
         let token = update.field(update.root(), "resultData").ok_or("the process has no application element")?;
         let object_id = update.field(token, "objectID").and_then(|v| update.integer(v)).ok_or("the application element has no identity")?;
+        let objects = update.value.as_dictionary().unwrap()["$objects"].as_array().unwrap().clone();
+        Ok((objects, token.clone(), object_id))
+    }
 
-        trace.stage = "snapshot";
-        let asked = std::time::Instant::now();
-        // The token goes back whole, with every object it refers to.
-        let mut objects = update.value.as_dictionary().unwrap()["$objects"].as_array().unwrap().clone();
-        let token = add(&mut objects, token.clone());
+    /// A snapshot from an application element down: these attributes of each element, to this
+    /// depth, with at most this many children of each. The app makes it on its main thread.
+    async fn snapshot(&mut self, mut objects: Vec<Value>, token: Value, attributes: &[u64], depth: u64, children: u64) -> Result<(Archive, usize)> {
+        let token = add(&mut objects, token);
         let options = dictionary([
-            ("attributes", Value::Array([2001, 2003, 2004, 5019, 2006, 3002, 3003].into_iter().map(Value::from).collect())),
-            ("maxDepth", 48.into()),
-            ("maxChildren", 512.into()),
-            ("maxArrayCount", 512.into()),
+            ("attributes", Value::Array(attributes.iter().copied().map(Value::from).collect())),
+            ("maxDepth", depth.into()),
+            ("maxChildren", children.into()),
+            ("maxArrayCount", children.into()),
             ("traverseFromParentsToChildren", true.into()),
             ("snapshotKeyHonorModalViews", false.into()),
         ]);
@@ -267,19 +348,52 @@ impl Direct {
                 ("$class", cls),
             ]),
         );
-        let (update, size) = self.ask(2, objects, request).await?;
+        self.ask(2, objects, request).await
+    }
+
+    /// The application element of a process and its deep snapshot, flattened like a tree dump.
+    pub async fn tree_of(&mut self, pid: u64, trace: &mut Trace) -> Result<Json> {
+        trace.stage = "application";
+        let asked = Instant::now();
+        let (objects, token, object_id) = self.application(pid).await?;
+        trace.application_ms = Some(asked.elapsed().as_millis() as u64);
+
+        trace.stage = "snapshot";
+        let asked = Instant::now();
+        let (update, size) = self.snapshot(objects, token, &[2001, 2003, 2004, 5019, 2006, 3002, 3003], 48, 512).await?;
         trace.snapshot_ms = Some(asked.elapsed().as_millis() as u64);
         trace.snapshot_bytes = Some(size as u64);
         let result = update.field(update.root(), "resultData").ok_or("the snapshot has no result")?;
         flatten(&update, result, pid, object_id, self.orientation.unwrap_or(1))
     }
 
-    /// The tree of the app shown at the first of `points` that hits a process, on this connection.
-    pub async fn front(&mut self, points: &[(f64, f64)], trace: &mut Trace) -> Result<Json> {
+    /// The bundle id of a process, from a snapshot of its application element and nothing below
+    /// it (one attribute, one level, one child): naming an app must not make it walk its screen.
+    /// None when the phone gives no such snapshot; the deep one then names the app, as before.
+    async fn name_of(&mut self, pid: u64) -> Option<String> {
+        let (objects, token, _) = self.application(pid).await.ok()?;
+        let (update, _) = self.snapshot(objects, token, &[3003], 1, 1).await.ok()?;
+        let result = update.field(update.root(), "resultData")?;
+        let attrs = update.field(result, "UIAccessibilitySnapshotKeyAttributes")?;
+        attribute(&update, attrs, 3003).and_then(|v| update.string(v)).map(|name| name.trim().to_owned()).filter(|name| !name.is_empty())
+    }
+
+    /// The bundle id of a process: what the run already knows, else asked from the phone.
+    async fn bundle(&mut self, pid: u64, known: &mut Known) -> Option<String> {
+        if let Some(bundle) = known.bundle(pid) {
+            return Some(bundle);
+        }
+        let bundle = self.name_of(pid).await?;
+        known.learn(pid, &bundle);
+        Some(bundle)
+    }
+
+    /// The process shown at the first of `points` that hits one. No screen is read.
+    async fn locate(&mut self, points: &[(f64, f64)], trace: &mut Trace) -> Result<u64> {
         trace.stage = "hit test";
         trace.orientation = self.orientation;
         for (x, y) in points {
-            let asked = std::time::Instant::now();
+            let asked = Instant::now();
             let hit = self.hit(*x, *y).await;
             let ms = asked.elapsed().as_millis() as u64;
             match hit {
@@ -287,42 +401,81 @@ impl Direct {
                     trace.hits.push(json!({"x": x, "y": y, "pid": pid, "ms": ms}));
                     if let Some(pid) = pid {
                         trace.pid = Some(pid);
-                        break;
+                        return Ok(pid);
                     }
                 }
-                Err(error) => trace.hits.push(json!({"x": x, "y": y, "error": error.to_string(), "ms": ms})),
+                Err(error) => {
+                    // No answer, or a broken socket: the other points would wait as long for
+                    // nothing, with accessibility on all the while.
+                    trace.hits.push(json!({"x": x, "y": y, "error": error.to_string(), "ms": ms}));
+                    break;
+                }
             }
         }
-        let pid = match trace.pid {
-            Some(pid) => pid,
-            None => {
-                // A hit that failed is not a hit that found nothing: a dead connection must not
-                // read as a locked screen. The first failure travels with the error.
-                let failed: Vec<&str> = trace.hits.iter().filter_map(|hit| hit["error"].as_str()).collect();
-                return Err(match failed.first() {
-                    Some(first) => format!("no point of the screen answered the hit test ({HITS_FAILED}: {} of {}, first: {first})", failed.len(), trace.hits.len()).into(),
-                    None => "no point of the screen answered the hit test (every point answered with no process)".into(),
-                });
-            }
-        };
-        let mut tree = self.tree_of(pid, trace).await?;
-        let bundle = bundle_of(&tree);
-        if let Some(bundle) = &bundle {
-            self.bundles.insert(pid, bundle.clone());
+        // A hit that failed is not a hit that found nothing: a dead connection must not
+        // read as a locked screen. The first failure travels with the error.
+        let failed: Vec<&str> = trace.hits.iter().filter_map(|hit| hit["error"].as_str()).collect();
+        Err(match failed.first() {
+            Some(first) => format!("no point of the screen answered the hit test ({HITS_FAILED}: {} of {}, first: {first})", failed.len(), trace.hits.len()).into(),
+            None => "no point of the screen answered the hit test (every point answered with no process)".into(),
+        })
+    }
+
+    /// The app shown at the first of `points` that hits a process, named but not read: the caller
+    /// decides whether its screen is worth a deep snapshot.
+    pub async fn see(&mut self, points: &[(f64, f64)], trace: &mut Trace, known: &mut Known) -> Result<Seen> {
+        let pid = self.locate(points, trace).await?;
+        trace.stage = "name";
+        let asked = Instant::now();
+        let fresh = known.bundle(pid).is_none();
+        let bundle = self.bundle(pid, known).await;
+        if fresh {
+            trace.name_ms = Some(asked.elapsed().as_millis() as u64);
         }
         // A web page is drawn by a process of its own (com.apple.WebKit.WebContent), one per tab,
         // with no app's name. The app that shows it owns the bars at the screen's edges.
-        if bundle.as_deref().is_none_or(is_web) {
-            if let Some(host) = self.host_of(points, pid).await {
-                tree["host"] = json!({"bundle_id": host});
-            }
+        let host = match &bundle {
+            Some(bundle) if is_web(bundle) => self.host_of(points, pid, known).await,
+            _ => None,
+        };
+        trace.asked_ms = self.asked.as_millis() as u64;
+        Ok(Seen { pid, bundle, host })
+    }
+
+    /// The screen of the app `see` found, read whole.
+    pub async fn read(&mut self, seen: &Seen, points: &[(f64, f64)], trace: &mut Trace, known: &mut Known) -> Result<Json> {
+        let tree = self.tree_of(seen.pid, trace).await;
+        trace.asked_ms = self.asked.as_millis() as u64;
+        let mut tree = tree?;
+        let bundle = bundle_of(&tree);
+        if let Some(bundle) = &bundle {
+            known.learn(seen.pid, bundle);
         }
+        let host = match &seen.host {
+            Some(host) => Some(host.clone()),
+            // Not named before the read (the phone gave no short snapshot): the tree names it now.
+            None if seen.bundle.is_none() && bundle.as_deref().is_none_or(is_web) => self.host_of(points, seen.pid, known).await,
+            None => None,
+        };
+        if let Some(host) = host {
+            tree["host"] = json!({"bundle_id": host});
+        }
+        trace.asked_ms = self.asked.as_millis() as u64;
         Ok(tree)
+    }
+
+    /// The tree of the app shown at the first of `points` that hits a process, on this connection.
+    pub async fn front(&mut self, points: &[(f64, f64)], trace: &mut Trace, known: &mut Known) -> Result<Json> {
+        let seen = self.see(points, trace, known).await?;
+        self.read(&seen, points, trace, known).await
     }
 
     /// The app whose bars frame the web page that process `web` draws: the first process hit near
     /// the bottom or the top edge that is an app, not a web process and not the Home Screen.
-    async fn host_of(&mut self, points: &[(f64, f64)], web: u64) -> Option<String> {
+    async fn host_of(&mut self, points: &[(f64, f64)], web: u64, known: &mut Known) -> Option<String> {
+        if let Some(host) = known.host(web) {
+            return Some(host);
+        }
         let (x, middle) = *points.first()?;
         let height = middle * 2.0;
         for share in [0.955, 0.9, 0.075, 0.12] {
@@ -330,21 +483,25 @@ impl Direct {
             if pid == web {
                 continue;
             }
-            let bundle = match self.bundles.get(&pid) {
-                Some(known) => known.clone(),
+            let bundle = match self.bundle(pid, known).await {
+                Some(known) => known,
                 None => {
+                    // No short snapshot from this phone: the deep one names the process, once.
                     let found = self.tree_of(pid, &mut Trace::default()).await.ok().and_then(|tree| bundle_of(&tree)).unwrap_or_default();
-                    self.bundles.insert(pid, found.clone());
+                    known.learn(pid, &found);
                     found
                 }
             };
             if !bundle.is_empty() && !is_web(&bundle) && !bundle.eq_ignore_ascii_case("com.apple.springboard") {
+                known.learn_host(web, &bundle);
                 return Some(bundle);
             }
         }
         None
     }
 
+    /// Says this client no longer needs accessibility and ends the connection, so accessibility
+    /// goes off in the phone's apps again.
     pub async fn close(&mut self) {
         let id = self.next_id;
         let _ = call(&mut self.socket, id, "clientNeedsAccessibility:", false.into(), true).await;
@@ -375,7 +532,7 @@ pub async fn read_front(adapter: &mut AdapterHandle, rsd: &RsdHandshake, points:
     };
     trace.subscribe_ms = asked.elapsed().as_millis() as u64;
     trace.orientation = direct.orientation;
-    let outcome = direct.front(points, &mut trace).await;
+    let outcome = direct.front(points, &mut trace, &mut Known::default()).await;
     direct.close().await;
     match outcome {
         Ok(tree) => {
@@ -556,6 +713,38 @@ mod tests {
             assert_eq!(field["focused"], responder);
         }
     }
+    #[test]
+    fn a_run_remembers_which_app_a_process_is() {
+        let mut known = Known::default();
+        assert_eq!(known.bundle(412), None);
+        known.learn(412, "com.apple.mobilenotes");
+        known.learn_host(900, "com.apple.mobilesafari");
+        assert_eq!(known.bundle(412).as_deref(), Some("com.apple.mobilenotes"));
+        assert_eq!(known.host(900).as_deref(), Some("com.apple.mobilesafari"));
+        assert_eq!(known.host(412), None);
+        // A process number is given out again in time: what was learned long ago is asked again.
+        if let Some(long_ago) = Instant::now().checked_sub(KNOWN_FOR + Duration::from_secs(1)) {
+            known.bundles.insert(412, ("com.apple.mobilenotes".into(), long_ago));
+            assert_eq!(known.bundle(412), None);
+        }
+        // The list does not grow without end.
+        for pid in 0..600 {
+            known.learn(pid, "com.example.app");
+        }
+        assert!(known.bundles.len() <= 256);
+        assert_eq!(known.bundle(599).as_deref(), Some("com.example.app"));
+    }
+
+    #[test]
+    fn the_app_the_owner_would_name_is_the_one_that_shows_a_web_page() {
+        let seen = |bundle: Option<&str>, host: Option<&str>| Seen { pid: 1, bundle: bundle.map(String::from), host: host.map(String::from) };
+        assert_eq!(seen(Some("com.apple.mobilenotes"), None).app(), Some("com.apple.mobilenotes"));
+        assert_eq!(seen(Some("com.apple.WebKit.WebContent"), Some("com.tencent.xin")).app(), Some("com.tencent.xin"));
+        // A web page whose app could not be told, and a process the phone did not name: the read decides.
+        assert_eq!(seen(Some("com.apple.WebKit.WebContent"), None).app(), None);
+        assert_eq!(seen(None, None).app(), None);
+    }
+
     #[test]
     fn direct_snapshot_takes_its_own_root_and_reads_cut_lists() {
         let (archive, mut root) = fixture(true);
