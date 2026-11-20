@@ -601,20 +601,19 @@ final class ChatHarnessTests: XCTestCase {
     func testFailedTaskCardsKeepTheMemoryAndSkillTheyUsed() async throws {
         let note = "The recovery checklist is named \(UUID().uuidString)"
         let name = "Read the recovery label \(UUID().uuidString)"
-        notes.append(note)
-        let memory = try XCTUnwrap(SkillStore.shared.remember(note, by: "Poki"))
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember(note, by: "Poki"))
         let skill = Skill(name: name, description: "", app: nil, steps: [SkillStep(action: ["wait": 0])],
-                          params: [:], expect: [], read: ["Settings"], runs: 0, ok: 0, failuresInARow: 0,
+                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
                           lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
-        XCTAssertTrue(SkillStore.shared.save(skill))
-        defer { SkillStore.shared.forget(name) }
+        XCTAssertTrue(fixture.save(skill))
         let automation = FakeAutomation()
         _ = automation.prepare()
         let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
         let readsAndFails = [
             FakeCompletions.tool("skills", ["action": "list"]),
             FakeCompletions.tool("finish_task", [
-                "success": false, "summary": "The saved checklist could not be opened.",
+                "success": false, "summary": "The saved checklist could not be opened.", "details": [], "answer": ["kind": "field"],
                 "used_memory_ids": [memory.id],
             ]),
             FakeCompletions.text("I could not open the saved checklist."),
@@ -625,6 +624,15 @@ final class ChatHarnessTests: XCTestCase {
         ] + readsAndFails)
         defer { withExtendedLifetime(server) {} }
         let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer { library.forget(item.id); library.forget(memory.id) }
 
         for expectsReplay in [false, true] {
             let result = await chat.runDelegated(expectsReplay ? "Read the recovery label and open the checklist." : "Open the recovery checklist.")
@@ -634,7 +642,8 @@ final class ChatHarnessTests: XCTestCase {
             XCTAssertEqual(card?.memoryUse?.notes.map(\.id), [memory.id])
             XCTAssertEqual(card?.memoryUse?.skills, expectsReplay ? [name] : [])
             if expectsReplay {
-                XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.answer.contains("run \"\(name)\"") && $0.ok })
+                XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.answer.contains("run \"\(name)\":") && $0.ok },
+                              chat.savedCalls.map(\.answer).joined(separator: "\n"))
             }
         }
     }
@@ -644,14 +653,12 @@ final class ChatHarnessTests: XCTestCase {
         let newSkill = "New recovery workflow \(UUID().uuidString)"
         let note = "New recovery preference \(UUID().uuidString)"
         let optionalNote = "Automatic recovery preference \(UUID().uuidString)"
-        notes += [note, optionalNote]
         let fixture = SkillStore(url: nil)
         let original = Skill(name: name, description: "Owner's workflow", app: "com.apple.Preferences",
                              steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
                              params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
                              lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date())
         XCTAssertTrue(fixture.save(original))
-        defer { SkillStore.shared.forget(newSkill) }
         let automation = FakeAutomation()
         _ = automation.prepare()
         let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
@@ -661,7 +668,7 @@ final class ChatHarnessTests: XCTestCase {
             FakeCompletions.tool("skills", ["action": "save", "name": newSkill]),
             FakeCompletions.tool("skills", ["action": "save", "name": name]),
             FakeCompletions.tool("skills", ["action": "remember", "text": optionalNote, "optional": true]),
-            FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready."]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready.", "details": [], "answer": ["kind": "action"]]),
             FakeCompletions.text("Settings is ready."),
         ])
         defer { withExtendedLifetime(server) {} }
@@ -675,7 +682,12 @@ final class ChatHarnessTests: XCTestCase {
         library.reload()
         let item = try XCTUnwrap(library.items.first { $0.text == name })
         library.setLocked(item.id, true)
-        defer { library.setLocked(item.id, false); library.forget(item.id) }
+        let rejected = Set([note, newSkill, optionalNote])
+        defer {
+            library.setLocked(item.id, false)
+            library.forget(item.id)
+            for saved in library.items where rejected.contains(saved.text) { library.forget(saved.id) }
+        }
         let list = #"{"action":"list"}"#
         let before = await app.runTool("skills", arguments: list)
         XCTAssertTrue(before.text.split(separator: "\n").contains { $0.contains(name) && $0.hasSuffix("(locked)") })
@@ -689,7 +701,6 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(after.text.contains(note))
         XCTAssertFalse(after.text.contains(newSkill))
         XCTAssertFalse(after.text.contains(optionalNote))
-        let rejected = Set([note, newSkill, optionalNote])
         XCTAssertTrue(library.changes.allSatisfy { !rejected.contains($0.item.text) })
     }
 
