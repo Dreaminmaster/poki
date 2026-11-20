@@ -54,6 +54,16 @@ case "$mode" in
     ;;
 esac
 
+if ! xcode_version=$(xcodebuild -version 2>/dev/null) ||
+   [[ ! ${xcode_version%%$'\n'*} =~ ^Xcode[[:space:]]+([1-9][0-9]*)(\.[0-9]+)*$ ]] ||
+   (( BASH_REMATCH[1] < 26 )) ||
+   ! sdk_version=$(xcodebuild -version -sdk "$sdk" SDKVersion 2>/dev/null) ||
+   [[ ! $sdk_version =~ ^([1-9][0-9]*)(\.[0-9]+)*$ ]] ||
+   (( BASH_REMATCH[1] < 26 )); then
+  echo "Select full Xcode 26 or later with the iOS 26 SDK or later installed, then retry." >&2
+  exit 1
+fi
+
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 umask 077
