@@ -65,6 +65,18 @@ final class ItemPictureTests: XCTestCase {
         XCTAssertNil(ItemPictureFit.frame(for: visible, images: [tile], screen: screen))
     }
 
+    func testWithoutAnImageElementABoxTouchingTheScreenEdgeIsLeftOut() {
+        let edgeBoxes = [
+            Rect(x: 345, y: 350, width: 57, height: 80),
+            Rect(x: 0, y: 350, width: 57, height: 80),
+            Rect(x: 24, y: 0, width: 80, height: 57),
+            Rect(x: 24, y: 817, width: 80, height: 57),
+        ]
+        for box in edgeBoxes {
+            XCTAssertNil(ItemPictureFit.frame(for: box, images: [], screen: screen), "\(box)")
+        }
+    }
+
     func testWithoutAnImageElementABoxIsUsedWhenItIsAWholePicture() {
         let box = Rect(x: 12, y: 218, width: 90, height: 91)
         XCTAssertEqual(ItemPictureFit.frame(for: box, images: [], screen: screen), box)

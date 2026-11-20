@@ -76,7 +76,8 @@ enum ItemPictureFit {
             (image, max(overlap(image, box), overlap(image.intersection(bounds), box)))
         }.filter { $0.1 >= 0.6 }.max { $0.1 < $1.1 }?.0
         if let match { return isInside(match) ? match : nil }
-        guard isInside(box) else { return nil }
+        // With no matching element, a box at the edge may only cover the visible part of the image.
+        guard box.x > 0, box.y > 0, box.maxX < bounds.maxX, box.maxY < bounds.maxY else { return nil }
         let ratio = box.width / box.height
         return ratio >= 0.6 && ratio <= 1.7 ? box : nil
     }
