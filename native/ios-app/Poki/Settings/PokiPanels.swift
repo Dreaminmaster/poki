@@ -1,90 +1,11 @@
 import SwiftUI
 
-// Senses and Memory on Settings (the owner, Nov 20 2026): two taller cards side by side under Poki's
-// row, each opening its panel over Settings, with a search and ask bar at the panel's foot. The cards
-// are plain system cards with a soft wash of their colour, the name large, one quiet line of what is
-// in them, the last update and one symbol: the reference's idea of two "places" for what Poki takes
-// in and what it keeps, without its gradients, grain, capitals or monospaced type.
+// The ask bar on the Senses and Memory pages. It came with f1a436ae's Senses and Memory cards, which
+// opened those pages as panels over Settings; the cards are gone (the owner, Nov 20 2026: Senses and
+// Memory showed twice in Settings), and the bar stays at the foot of each page. Typing searches
+// Memory; sending hands the words to Poki.
 
-/// One of the two cards.
-struct PokiSpaceCard: View {
-    var title: LocalizedStringKey
-    var detail: Text
-    var date: Date?
-    var symbol: String
-    var tint: Color
-    @ScaledMetric(relativeTo: .body) private var height: CGFloat = 148
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.alloRounded(.title2, .bold)).foregroundStyle(Color(.label)).lineLimit(1).minimumScaleFactor(0.8)
-            detail.font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
-            Spacer(minLength: 16)
-            HStack(alignment: .lastTextBaseline) {
-                if let date {
-                    Text(date, format: .dateTime.month(.abbreviated).day().locale(AppLocalization.locale))
-                        .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
-                }
-                Spacer(minLength: 8)
-                Image(systemName: symbol).font(.alloRounded(.title2, .semibold)).foregroundStyle(tint)
-                    .accessibilityHidden(true)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: min(height, 220), alignment: .topLeading)
-        .background {
-            shape.fill(Color(.secondarySystemGroupedBackground))
-            shape.fill(LinearGradient(colors: [tint.opacity(0.16), tint.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing))
-        }
-        .contentShape(shape)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
-/// A card's panel: its page in its own navigation, over Settings, with the ask bar at its foot.
-struct PokiPanel: View {
-    enum Kind: String, Identifiable {
-        case senses, memory
-        var id: String { rawValue }
-    }
-
-    var kind: Kind
-    /// Opens a conversation (a memory's Source), closing Settings.
-    var openSession: (String) -> Void = { _ in }
-    @State private var path = NavigationPath()
-    @State private var asking = ""
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            Group {
-                switch kind {
-                case .memory:
-                    MemoryView(back: { dismiss() }, query: $asking)
-                case .senses:
-                    ScreenHistorySettingsView()
-                        .safeAreaInset(edge: .bottom) { PokiAskBar(text: $asking, scope: .senses) }
-                }
-            }
-            .settingsPage()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", systemImage: "xmark") { dismiss() }
-                        .accessibilityIdentifier("panel.close")
-                }
-            }
-            .navigationDestination(for: SettingsRoute.self) { route in
-                SettingsDestination(route: route, push: { path.append($0) }, pop: { if !path.isEmpty { path.removeLast() } })
-                    .settingsPage()
-            }
-        }
-        .presentationDragIndicator(.visible)
-    }
-}
-
-/// Where a question or a change typed in a panel goes.
+/// Where a question or a change typed in the ask bar goes.
 enum MemoryAsk {
     enum Scope { case memory, senses }
 
@@ -102,7 +23,7 @@ enum MemoryAsk {
     }
 }
 
-/// The bar at a panel's foot: typing searches the page (Memory), sending asks Poki.
+/// The bar at the foot of Senses and Memory: typing searches the page (Memory), sending asks Poki.
 struct PokiAskBar: View {
     @Binding var text: String
     var scope: MemoryAsk.Scope

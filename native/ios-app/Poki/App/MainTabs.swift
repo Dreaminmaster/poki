@@ -43,16 +43,19 @@ struct ApprovalsSections: View {
                 }
                 .accessibilityIdentifier("approvals.mode")
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                    switch model.approvalMode {
-                    case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
-                    case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                    case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                Group {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
+                        switch model.approvalMode {
+                        case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
+                        case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
+                        case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                        }
+                        Text("Payments, deletions and actions in Wallet always need your confirmation.")
+                        Text("Changes apply right away, starting from Poki’s next step.")
                     }
-                    Text("Payments, deletions and actions in Wallet always need your confirmation.")
-                    Text("Changes apply right away, starting from Poki’s next step.")
                 }
+                .settingsFooter()
             }
             if model.approvalMode != .off {
                 Section {
@@ -75,12 +78,15 @@ struct ApprovalsSections: View {
                     }
                     .padding(.vertical, 4)
                 } footer: {
-                    switch model.classifierLevel {
-                    case .permissive: Text("Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
-                    case .balanced: Text("Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
-                    case .strict: Text("Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
-                    case .everything: Text("Ask All. Nothing is approved automatically. Each request needs your answer.")
+                    Group {
+                        switch model.classifierLevel {
+                        case .permissive: Text("Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
+                        case .balanced: Text("Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
+                        case .strict: Text("Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
+                        case .everything: Text("Ask All. Nothing is approved automatically. Each request needs your answer.")
+                        }
                     }
+                    .settingsFooter()
                 }
             }
         }
@@ -118,12 +124,15 @@ struct AgentsView: View {
                     NavigationLink(value: SettingsRoute.memory) {
                         LabeledContent {
                             Text("\(RoutineStore.shared.usableSkills.count) skills")
-                        } label: { Label("Memory Library", systemImage: "brain") }
+                        } label: { Label("Memory", systemImage: "brain") }
                     }
                 } header: {
                     Text("Poki Agent")
                 } footer: {
-                    Text("The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents.")
+                    Group {
+                        Text("The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -160,9 +169,12 @@ struct AgentsView: View {
                 } header: {
                     Text("External Agents")
                 } footer: {
-                    Text(model.relayAddress == nil
-                         ? "Set your relay first. Each agent gets its own MCP address on it."
-                         : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                    Group {
+                        Text(model.relayAddress == nil
+                             ? "Set your relay first. Each agent gets its own MCP address on it."
+                             : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -192,7 +204,10 @@ struct AgentsView: View {
                 } header: {
                     Text("MCP Relay")
                 } footer: {
-                    Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
+                    Group {
+                        Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -206,7 +221,10 @@ struct AgentsView: View {
                 } header: {
                     Text("Safety")
                 } footer: {
-                    Text("When Poki asks you before a sensitive step, and the record of every action any agent ran on this iPhone.")
+                    Group {
+                        Text("When Poki asks you before a sensitive step, and the record of every action any agent ran on this iPhone.")
+                    }
+                    .settingsFooter()
                 }
             }
             .listStyle(.insetGrouped)
@@ -278,7 +296,10 @@ struct AdvancedView: View {
             } header: {
                 Text("Debugging")
             } footer: {
-                Text("Diagnostics has connection checks and this iPhone’s addresses. Testing Options has switches being tried.")
+                Group {
+                    Text("Diagnostics has connection checks and this iPhone’s addresses. Testing Options has switches being tried.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Advanced"))

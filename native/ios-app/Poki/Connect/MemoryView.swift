@@ -36,8 +36,9 @@ struct MemoryDestination: View {
 /// Memory's first page.
 struct MemoryView: View {
     var back: () -> Void
-    /// The panel's ask bar, when the page opens as Settings' Memory panel: the bar's words search the
-    /// page, and sending them asks Poki. Without it the page has the system's search field.
+    /// The ask bar's words, when a caller holds them; otherwise the page keeps its own. The bar at the
+    /// page's foot searches the page as it is typed in, and sending asks Poki. It is the page's only
+    /// search (it replaced the system's search field, so there are not two).
     var asked: Binding<String>? = nil
     private let library = MemoryLibrary.shared
     @State private var page = MemoryPageState()
@@ -94,9 +95,8 @@ struct MemoryView: View {
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Memory Library"))
+        .navigationTitle(AppLocalization.text("Memory"))
         .navigationBarTitleDisplayMode(.inline)
-        .modifier(MemorySearch(query: $typed, shown: asked == nil && apps.count > 8))
         .headerlessTop(library.items.isEmpty)
         .toolbar {
             // Recent Updates is an icon (the owner, Nov 20 2026): words pushed the title off the centre,
@@ -119,7 +119,7 @@ struct MemoryView: View {
         }
         .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
-        .safeAreaInset(edge: .bottom) { if let asked { PokiAskBar(text: asked, scope: .memory) } }
+        .safeAreaInset(edge: .bottom) { PokiAskBar(text: asked ?? $typed, scope: .memory) }
         .environment(library)
         .onAppear { library.reload(); exportURL = library.exportFile() }
         .onChange(of: library.items) { exportURL = library.exportFile() }
@@ -452,24 +452,6 @@ extension View {
             }
             .tint(Tint.blue)
         }
-    }
-}
-
-/// The search field, only past 8 apps (the design's rule): with fewer, the system's drawer would show
-/// it whenever the page comes back into view.
-private struct MemorySearch: ViewModifier {
-    @Binding var query: String
-    var shown: Bool
-
-    func body(content: Content) -> some View {
-        Group {
-            if shown {
-                content.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
-            } else {
-                content
-            }
-        }
-        .onChange(of: shown) { _, now in if !now { query = "" } }
     }
 }
 

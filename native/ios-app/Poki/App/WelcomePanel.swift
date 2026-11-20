@@ -38,7 +38,10 @@ struct WelcomePanel: View {
             } header: {
                 SettingsHeader("This iPhone")
             } footer: {
-                Text("Each one is turned on once. They tick themselves as you go.")
+                Group {
+                    Text("Each one is turned on once. They tick themselves as you go.")
+                }
+                .settingsFooter()
             }
 
             WelcomeCellularSection()
@@ -54,7 +57,10 @@ struct WelcomePanel: View {
             } header: {
                 SettingsHeader("Models")
             } footer: {
-                Text("Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.")
+                Group {
+                    Text("Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -82,7 +88,10 @@ struct WelcomePanel: View {
             } header: {
                 SettingsHeader("Features")
             } footer: {
-                Text("All optional. Each can be changed later in Settings.")
+                Group {
+                    Text("All optional. Each can be changed later in Settings.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -202,7 +211,7 @@ extension View {
                 Group {
                     switch route {
                     case .model, .voiceKey: ModelSettingsView()
-                    case .screenHistory: ScreenHistorySettingsView()
+                    case .screenHistory: ScreenHistorySettingsView(asks: false)
                     case .agents: AgentsAndRelayView(path: path)
                     default: EmptyView()
                     }

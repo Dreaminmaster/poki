@@ -21,8 +21,6 @@ struct PokiDetailsView: View {
     @Binding var path: NavigationPath
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
-    /// The Senses or Memory panel, open over Settings.
-    @State private var panel: PokiPanel.Kind?
 
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiDetailsSample") }
     private static let lastRow = "details.lastRow"
@@ -39,14 +37,15 @@ struct PokiDetailsView: View {
                     PokiNameRow(mood: status.mood, status: PokiStatusCopy.word(status))
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("details.status")
-                    // Senses: what Poki and agents did, and with Screen History on what the owner did
-                    // (the owner, 2026-11-16: the Activity Log is part of it). Memory right under it.
-                    NavigationLink { HistoryPage().settingsPage() } label: {
-                        SettingsRow(title: "Senses", symbol: "clock.arrow.circlepath")
+                    // Senses and Memory, one plain row each (the owner, Nov 20 2026: each showed twice
+                    // while f1a436ae's cards sat under these rows). Senses holds every sense, its
+                    // history and its ask bar; Memory holds the library and its ask bar.
+                    NavigationLink(value: DetailsRoute.screenHistory) {
+                        SettingsRow(title: "Senses", symbol: "clock.arrow.circlepath", value: screenHistoryValue)
                     }
                     .accessibilityIdentifier("details.senses")
                     NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.usableSkills.count)")
+                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.usableSkills.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                 }
@@ -61,27 +60,6 @@ struct PokiDetailsView: View {
                         }
                         .accessibilityIdentifier("details.issues")
                     }
-                }
-
-                // Senses and Memory: what Poki takes in and what it keeps, two cards that open as panels
-                // over Settings (the owner, Nov 20 2026).
-                Section {
-                    HStack(spacing: 12) {
-                        Button { panel = .senses } label: {
-                            PokiSpaceCard(title: "Senses", detail: Text(verbatim: screenHistoryValue), date: nil,
-                                          symbol: "eye", tint: Color(.systemPurple))
-                        }
-                        .buttonStyle(PressedDimStyle())
-                        .accessibilityIdentifier("details.senses")
-                        Button { panel = .memory } label: {
-                            PokiSpaceCard(title: "Memory", detail: Text(memoryDetail), date: isSample ? nil : MemoryLibrary.shared.changes.first?.at,
-                                          symbol: "bookmark", tint: Tint.blue)
-                        }
-                        .buttonStyle(PressedDimStyle())
-                        .accessibilityIdentifier("moreSettings.memory")
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
                 }
 
                 // What Poki works with.
@@ -164,10 +142,13 @@ struct PokiDetailsView: View {
                 } header: {
                     SettingsHeader("This App")
                 } footer: {
-                    Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
-                        .monospacedDigit()
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 12)
+                    Group {
+                        Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 12)
+                    }
+                    .settingsFooter()
                 }
             }
             .settingsPage()
@@ -229,11 +210,6 @@ struct PokiDetailsView: View {
                     .settingsPage()
             }
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
-            .sheet(item: $panel) { panel in
-                PokiPanel(kind: panel, openSession: { id in self.panel = nil; dismiss(); openSession(id) })
-                    .environment(model)
-                    .environment(chat)
-            }
             .sheet(isPresented: Bindable(model.signer).needsCodeSheet) { VerificationCodeSheet() }
         }
     }
@@ -270,12 +246,6 @@ struct PokiDetailsView: View {
     private var archivedValue: String? {
         let count = SessionStore.shared.archivedSessions.count
         return count == 0 ? nil : "\(count)"
-    }
-
-    /// "About You and 6 apps".
-    private var memoryDetail: LocalizedStringKey {
-        let apps = isSample ? 6 : MemoryLibrary.shared.apps.count
-        return apps == 0 ? "About You" : "About You and \(apps) apps"
     }
 
     private var screenHistoryValue: String {
@@ -441,27 +411,30 @@ struct ConnectionView: View {
                     Button("Cancel", role: .cancel) { model.cancelPasscodeHeadsUp() }
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
-                    if model.passcodeConfirmationPending {
-                        Text(AppModel.passcodeConfirmationMessage)
-                    } else {
-                        Text(model.sessionStarting ? "Poki is turning on."
-                             : on ? "Poki can tap, type, and scroll on this iPhone."
-                             : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
-                             : "Poki is off. Agents can’t reach this iPhone.")
-                    }
-                    // Why turning on failed, under the switch that was turned on (not only on Poki's
-                    // page). Poki's own sentences are localized; PokiCore's stay as they came.
-                    if let failure = model.developerToolsFailure {
-                        Text(failure).foregroundStyle(.red)
-                    } else if !on, !model.sessionStarting, let problem = model.problem {
-                        Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
-                            .foregroundStyle(.red)
-                    } else if !on, !model.sessionStarting, case .downloaded = model.diskImage.state {
-                        Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
+                Group {
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
+                        if model.passcodeConfirmationPending {
+                            Text(AppModel.passcodeConfirmationMessage)
+                        } else {
+                            Text(model.sessionStarting ? "Poki is turning on."
+                                 : on ? "Poki can tap, type, and scroll on this iPhone."
+                                 : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
+                                 : "Poki is off. Agents can’t reach this iPhone.")
+                        }
+                        // Why turning on failed, under the switch that was turned on (not only on Poki's
+                        // page). Poki's own sentences are localized; PokiCore's stay as they came.
+                        if let failure = model.developerToolsFailure {
+                            Text(failure).foregroundStyle(.red)
+                        } else if !on, !model.sessionStarting, let problem = model.problem {
+                            Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
+                                .foregroundStyle(.red)
+                        } else if !on, !model.sessionStarting, case .downloaded = model.diskImage.state {
+                            Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
+                        }
                     }
                 }
+                .settingsFooter()
             }
 
             Section {
@@ -472,9 +445,12 @@ struct ConnectionView: View {
             } header: {
                 SettingsHeader("Live Activity")
             } footer: {
-                Text(model.showsReadyActivity
-                     ? "Poki shows Ready on the Lock Screen and in the Dynamic Island while it waits for a task."
-                     : "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications.")
+                Group {
+                    Text(model.showsReadyActivity
+                         ? "Poki shows Ready on the Lock Screen and in the Dynamic Island while it waits for a task."
+                         : "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -493,7 +469,10 @@ struct ConnectionView: View {
             } header: {
                 SettingsHeader("This iPhone")
             } footer: {
-                Text("Poki uses Apple’s developer tools on this iPhone. Keep all of these on.")
+                Group {
+                    Text("Poki uses Apple’s developer tools on this iPhone. Keep all of these on.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Connection"))
@@ -544,7 +523,10 @@ struct AdvancedSettingsView: View {
                 } header: {
                     SettingsHeader("Connection")
                 } footer: {
-                    Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                    Group {
+                        Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                    }
+                    .settingsFooter()
                 }
             }
 
@@ -564,7 +546,10 @@ struct AdvancedSettingsView: View {
             } header: {
                 SettingsHeader("Memory")
             } footer: {
-                Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
+                Group {
+                    Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -712,7 +697,10 @@ struct AppearanceView: View {
                     .accessibilityIdentifier("appearance.\(option == .automatic ? "automatic" : option.rawValue)")
                 }
             } footer: {
-                Text("Automatic follows the iPhone’s appearance setting.")
+                Group {
+                    Text("Automatic follows the iPhone’s appearance setting.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Appearance"))
@@ -784,29 +772,32 @@ struct SecurityApprovalSections: View {
                 }
                 .accessibilityIdentifier("approvals.mode.picker")
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    switch model.approvalMode {
-                    case .reply: Text("Poki asks in the chat and proceeds after you reply.")
-                    case .confirm: Text("Tap Allow or Don’t Allow in the Live Activity, a notification, or Poki.")
-                    case .off: Text("Optional steps run automatically without asking.")
-                    }
-                    if more {
+                Group {
+                    VStack(alignment: .leading, spacing: 6) {
                         switch model.approvalMode {
-                        case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
-                        case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                        case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                        case .reply: Text("Poki asks in the chat and proceeds after you reply.")
+                        case .confirm: Text("Tap Allow or Don’t Allow in the Live Activity, a notification, or Poki.")
+                        case .off: Text("Optional steps run automatically without asking.")
                         }
-                        Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                        Text("Changes apply right away, starting from Poki’s next step.")
-                    } else {
-                        Button("Learn More") { withAnimation(.snappy) { more = true } }
-                            .font(.allo(.footnote, .semibold))
-                            .foregroundStyle(Tint.blueText)
-                            .buttonStyle(.borderless)
-                            .padding(.top, 2)
-                            .accessibilityIdentifier("approvals.learnMore")
+                        if more {
+                            switch model.approvalMode {
+                            case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
+                            case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
+                            case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                            }
+                            Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
+                            Text("Changes apply right away, starting from Poki’s next step.")
+                        } else {
+                            Button("Learn More") { withAnimation(.snappy) { more = true } }
+                                .font(.allo(.footnote, .semibold))
+                                .foregroundStyle(Tint.blueText)
+                                .buttonStyle(.borderless)
+                                .padding(.top, 2)
+                                .accessibilityIdentifier("approvals.learnMore")
+                        }
                     }
                 }
+                .settingsFooter()
             }
             .accessibilityIdentifier("approvals.mode")
 
@@ -816,12 +807,15 @@ struct SecurityApprovalSections: View {
                 } header: {
                     Text("Sensitivity").textCase(nil)
                 } footer: {
-                    switch model.classifierLevel {
-                    case .permissive: Text("Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
-                    case .balanced: Text("Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
-                    case .strict: Text("Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
-                    case .everything: Text("Ask All. Nothing is approved automatically. Each request needs your answer.")
+                    Group {
+                        switch model.classifierLevel {
+                        case .permissive: Text("Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
+                        case .balanced: Text("Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
+                        case .strict: Text("Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
+                        case .everything: Text("Ask All. Nothing is approved automatically. Each request needs your answer.")
+                        }
                     }
+                    .settingsFooter()
                 }
             }
         }
@@ -932,7 +926,10 @@ struct AgentsAndRelayView: View {
             } header: {
                 SettingsHeader("MCP Relay")
             } footer: {
-                Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
+                Group {
+                    Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -964,9 +961,12 @@ struct AgentsAndRelayView: View {
             } header: {
                 SettingsHeader("Agents")
             } footer: {
-                Text(model.relayAddress == nil
-                     ? "Set your relay first. Each agent gets its own MCP address on it."
-                     : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                Group {
+                    Text(model.relayAddress == nil
+                         ? "Set your relay first. Each agent gets its own MCP address on it."
+                         : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Agents"))
