@@ -753,6 +753,90 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(card.memoryUse?.skills, [name])
     }
 
+    func testTaskCardKeepsLiveSkillAttributionAcrossTaskEndings() async throws {
+        enum Ending: String, CaseIterable { case completed, declined, stopped, failed }
+        let defaults = UserDefaults.standard
+        let mode = defaults.object(forKey: ApprovalClassifier.modeKey)
+        defaults.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        defer { defaults.set(mode, forKey: ApprovalClassifier.modeKey) }
+        let name = "Open Settings to read the version"
+        let bundle = "com.apple.Preferences"
+        let fixture = SkillStore(url: nil)
+        XCTAssertTrue(fixture.save(Skill(name: name, description: "", app: bundle,
+                                         steps: [SkillStep(action: ["launch": .string(bundle)])],
+                                         params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                                         lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())))
+        let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
+        let library = MemoryLibrary.shared
+        let store = SessionStore.shared
+
+        func lastTaskCard(in entries: [ChatEntry]) -> ChatEntry? {
+            entries.last { if case .plan = $0.kind { true } else { false } }
+        }
+
+        for ending in Ending.allCases {
+            var actions: [[String: Any]] = [["run": name]]
+            let needsApproval = ending == .declined || ending == .stopped
+            if needsApproval { actions.append(["tap": 1]) }
+            if ending == .failed { actions.append(["wait": -1]) }
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Finish the check"], "currentStep": 2]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("do", ["actions": actions]),
+                FakeCompletions.tool("finish_task", [
+                    "success": ending == .completed, "summary": "Settings check ended.",
+                    "details": [], "answer": ["kind": "action"],
+                ]),
+                FakeCompletions.text("The Settings check ended."),
+            ])
+            let automation = FakeAutomation()
+            _ = automation.prepare()
+            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Delete" }),
+                            automation: automation)
+            let session = chat.sessionID
+            let app = try XCTUnwrap(app)
+            let imported = await app.runTool("skills", arguments: Self.json(["action": "import", "data": backup]))
+            XCTAssertFalse(imported.isError, imported.text)
+            library.reload()
+            let item = try XCTUnwrap(library.items.first { $0.text == name })
+            defer {
+                library.forget(item.id)
+                store.delete(session)
+            }
+            var approvalRequested = false
+            app.addShellObserver { [weak app, weak chat] event in
+                guard case .approvalRequested(let approval) = event else { return }
+                approvalRequested = true
+                if ending == .stopped {
+                    let savedCard = lastTaskCard(in: store.session(session)?.entries ?? [])
+                    XCTAssertNotNil(savedCard)
+                    XCTAssertNil(savedCard?.ended, "Approval is still pending")
+                    XCTAssertEqual(savedCard?.memoryUse?.skills, [name], "The saved card while awaiting approval")
+                    chat?.stop()
+                } else {
+                    app?.resolve(approval, approved: false)
+                }
+            }
+
+            _ = await chat.runDelegated("Check Settings and ask before the follow-up action.")
+            XCTAssertEqual(approvalRequested, needsApproval, ending.rawValue)
+
+            let card = try XCTUnwrap(lastTaskCard(in: chat.entries))
+            guard case .plan(let steps) = card.kind else { return XCTFail("Missing \(ending) task card") }
+            let state = TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
+                                      stopped: card.stopped == true, saveFailed: card.saveFailed == true || card.failed == true)
+            XCTAssertEqual(state, ending == .completed ? .done : ending == .stopped ? .stopped : .failed, ending.rawValue)
+            XCTAssertEqual(card.memoryUse?.skills, [name], "\(ending) task card")
+            XCTAssertNotNil(card.ended, ending.rawValue)
+            if ending != .stopped {
+                let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(3).first))
+                XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
+                if ending == .declined { XCTAssertTrue(answer.contains("the owner declined on the phone"), answer) }
+                if ending == .failed { XCTAssertTrue(answer.contains("wait takes nonnegative milliseconds"), answer) }
+            }
+        }
+    }
+
     func testRejectedRequiredSaveLeavesTheTaskMemoryBatchUnchanged() async throws {
         let name = "Required locked workflow \(UUID().uuidString)"
         let newSkill = "New recovery workflow \(UUID().uuidString)"
