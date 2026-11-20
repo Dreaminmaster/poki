@@ -410,7 +410,7 @@ final class ChatModel {
         let runSession: String
         let provider: ModelProvider
         let model: String
-        let resumedTask: String?
+        let continuation: String?
         let inSplitView: Bool
         let images: [Data]
         let namedApps: [String]
@@ -514,6 +514,22 @@ final class ChatModel {
                 return nil
             }
         }
+        let priorRequest = entries.last { if case .you = $0.kind { true } else { false } }
+        let linkedTask: String?
+        let continuation: String?
+        if let resumedTask {
+            linkedTask = resumedTask
+            continuation = "The owner selected this saved task to resume: \(resumedTask). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory."
+        } else if kind == .poki, thumbnails.isEmpty, lastImages.isEmpty, documents.isEmpty,
+                  MessageScroll.requestedTarget(in: text) == nil,
+                  let clarified = again ? priorRequest?.continuedTask : countedScrollAwaitingAnswer(after: priorRequest),
+                  MessageScroll.requestedTarget(in: clarified) != nil {
+            linkedTask = clarified
+            continuation = "The owner's latest message answers your question about this task: \(clarified). Verify the requested count before completing it."
+        } else {
+            linkedTask = nil
+            continuation = nil
+        }
         // A pause of half an hour or more gets its own time line, as in Messages.
         if !again, let lastAt = entries.last?.at, Date().timeIntervalSince(lastAt) > 1800 { entries.append(ChatEntry(.time(Date()))) }
         let you: ChatEntry
@@ -521,7 +537,7 @@ final class ChatModel {
             you = last
         } else {
             var entry = ChatEntry(kind == .handoff ? .request(text, from: requester ?? "") : .you(text, delivered: false))
-            entry.continuedTask = resumedTask
+            entry.continuedTask = linkedTask
             if !thumbnails.isEmpty { entry.attachments = thumbnails } else { lastImages = [] }
             if !documents.isEmpty { entry.textDocuments = documents }
             you = entry
@@ -553,20 +569,19 @@ final class ChatModel {
         }
         planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         taskApp = nil
-        taskApps = TaskApps(); taskRequest = resumedTask ?? text; toolRoute = nil
-        let continuation = resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
+        taskApps = TaskApps(); taskRequest = linkedTask ?? text; toolRoute = nil
         let images = lastImages
         let namedApps = chooseWorkspace && kind == .poki && app.canPlanSplitView
             ? AppIconStore.bundleIDs(namedIn: text) : []
         if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
-            let instructions = [Harness.instructions(for: resumedTask ?? text), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
+            let instructions = [Harness.instructions(for: taskRequest), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
                 client = provider == .openai ? OpenAIClient(key: key, model: model) : AnthropicClient(key: key, model: model)
             }
             guard let client else { return nil }
             return PreparedSend(text: text, you: you, message: message, runSession: runSession, provider: provider, model: model,
-                                resumedTask: resumedTask, inSplitView: inSplitView, images: images, namedApps: namedApps,
+                                continuation: continuation, inSplitView: inSplitView, images: images, namedApps: namedApps,
                                 engine: .direct(client, instructions))
         }
         guard let piModel = provider.piModel(model) else {
@@ -574,8 +589,15 @@ final class ChatModel {
             return nil
         }
         return PreparedSend(text: text, you: you, message: message, runSession: runSession, provider: provider, model: model,
-                            resumedTask: resumedTask, inSplitView: inSplitView, images: images, namedApps: namedApps,
+                            continuation: continuation, inSplitView: inSplitView, images: images, namedApps: namedApps,
                             engine: .pi(piModel))
+    }
+
+    private func countedScrollAwaitingAnswer(after request: ChatEntry?) -> String? {
+        guard case .poki(let reply)? = entries.last?.kind,
+              let end = reply.trimmingCharacters(in: .whitespacesAndNewlines).last, end == "?" || end == "？",
+              let request, case .you(let text, _) = request.kind else { return nil }
+        return request.continuedTask ?? text
     }
 
     private func executePreparedSend(_ prepared: PreparedSend, token: Int) async {
@@ -644,8 +666,8 @@ final class ChatModel {
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
             let loop = modelLoop(provider: prepared.provider, model: piModel, inSplitView: splitSession != nil)
-            let continuation = prepared.resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
-            let instructions = [Harness.instructions(for: prepared.resumedTask ?? prepared.message, inSplitView: splitSession != nil), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
+            let instructions = [Harness.instructions(for: prepared.continuation == nil ? prepared.message : taskRequest, inSplitView: splitSession != nil),
+                                restoredContext, prepared.continuation].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message, images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(prepared.you.id)

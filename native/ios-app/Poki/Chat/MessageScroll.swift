@@ -82,14 +82,7 @@ struct MessageScroll {
             needsCount = false
             return progress()
         }
-        // An older page ends with the first rows of the previous page. Require the matching
-        // rows to have moved down, so listing more refs from the same screen cannot add to the count.
-        let overlaps = (1...min(previous.rows.count, rows.count)).filter { length in
-            zip(previous.rows.prefix(length), rows.suffix(length)).allSatisfy { old, new in
-                old.key == new.key && new.frame.centre.y > old.frame.centre.y
-            }
-        }
-        guard overlaps.count == 1, let overlap = overlaps.first else { return rejected(.unmatched) }
+        guard let overlap = Self.overlap(between: previous.rows, and: rows) else { return rejected(.unmatched) }
         let newRows = rows.count - overlap
         let added = min(newRows, target - confirmed)
         confirmed += added
@@ -98,6 +91,25 @@ struct MessageScroll {
         needsCount = false
         problem = nil
         return progress()
+    }
+
+    private static func overlap(between previous: [Element], and current: [Element]) -> Int? {
+        let maximum = min(previous.count, current.count)
+        guard maximum >= 2 else { return nil }
+        // A repeated label can join two disjoint pages. Require a sequence with context
+        // whose rows all moved down together, and reject competing alignments.
+        let positionTolerance = 2.0
+        let candidates = (2...maximum).filter { length in
+            let olderPageTail = current.suffix(length)
+            let shift = current[current.count - length].frame.centre.y - previous[0].frame.centre.y
+            guard shift > positionTolerance, Set(olderPageTail.map(\.key)).count > 1 else { return false }
+            return zip(previous.prefix(length), olderPageTail).allSatisfy { old, new in
+                old.key == new.key &&
+                    abs(new.frame.centre.x - old.frame.centre.x) <= positionTolerance &&
+                    abs(new.frame.centre.y - old.frame.centre.y - shift) <= positionTolerance
+            }
+        }
+        return candidates.count == 1 ? candidates[0] : nil
     }
 
     private mutating func rejected(_ problem: Problem) -> PokiCore.ToolAnswer {
