@@ -190,9 +190,15 @@ final class AppModel {
         startSession(reconnectLocal: passcodeHeadsUpReconnect)
     }
     func cancelPasscodeHeadsUp() {
+        let wasHoldingAnOpen = passcodeHeldOpen != nil
         passcodeConfirmationPending = false
         passcodeHeadsUp = false
         passcodeHeldOpen = nil
+        if wasHoldingAnOpen {
+            InProcessWDA.gate.withLock { $0.declined = true }
+            inProcessSession = .failed(code: "passcode_declined", detail: "the owner cancelled automation authorization")
+            host.update(runner: coreState(of: runner))
+        }
     }
     /// The in-process open waiting for Continue on the passcode note: its reason.
     private var passcodeHeldOpen: String?
@@ -521,6 +527,7 @@ final class AppModel {
     /// Counts closes, so an open that began before one is not taken as the state after it.
     private var inProcessEpoch = 0
     private var inProcessWarmToken = 0
+    private var automationRevision: UInt64 = 0
     /// Standing by kept the session with Automation Mode off: the
     /// next open resumes it instead of making a new one, and a resume that fails is closed and opened again.
     private var sessionKept = false
@@ -633,6 +640,7 @@ final class AppModel {
             passcodeHeldOpen = why
             passcodeConfirmationPending = true
             passcodeHeadsUp = true
+            host.update(runner: coreState(of: runner))
             log.add("runner", "first automation since this iPhone restarted: requested notice that iOS will ask for the passcode")
             return
         }
@@ -649,8 +657,8 @@ final class AppModel {
         let resuming = sessionKept
         if inProcessSession != .open, inProcessSession != .opening, inProcessSession != .waitingForPasscode {
             inProcessSession = .opening
-            host.update(runner: coreState(of: runner))
         }
+        host.update(runner: coreState(of: runner))
         DispatchQueue.global(qos: .userInitiated).async { [automation] in
             var result = InProcessWDA.openThroughGate { automation.prepare() }
             var resumeFailure: String?
@@ -698,6 +706,7 @@ final class AppModel {
                 self.log.add("runner", ok ? "in-process session ready for \(why) (generation \(result["generation"] ?? 0), \((result["reused"] as? Bool) == true ? "already open" : "opened"), \(seconds) s\(warm))"
                                           : "in-process session not ready for \(why): \(result["code"] ?? "unknown") after \(seconds) s")
                 if ok {
+                    self.automationRevision += 1
                     self.log.add("session-timing", String(format: "session_ready uptime=%.6f", ProcessInfo.processInfo.systemUptime))
                     self.automationStarted()
                     // An open session proves both, also when the launcher only found the image mounted.
@@ -1233,6 +1242,8 @@ final class AppModel {
     }
 
     func stopSession() {
+        let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode
+        cancelPasscodeHeadsUp()
         sessionStartTask?.cancel()
         pendingPrepareForTask = false
         preparingCellularImage = false
@@ -1259,6 +1270,7 @@ final class AppModel {
         background.stop()
         activity.end()
         sessionOn = false
+        if awaitingAuthorization { host.update(runner: .failed("Poki was turned off", fix: nil)) }
         chatTaskActive = false
         stepUnderWay = nil
         runner = .idle
@@ -1350,10 +1362,15 @@ final class AppModel {
             return
         }
         if automationPath == .inProcess {
+            let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode
+            if awaitingAuthorization { cancelPasscodeHeadsUp() }
             Task { [core] in _ = await core.finishTask(switching: false) }
             // The owner's own Stop ends the session; standing by on its own keeps it where the policy says so.
             closeInProcess("standing by", keepingSession: !byOwner && idleSessionPolicy == .pauseAutomation)
             standBy(reason: reason)
+            if awaitingAuthorization {
+                host.update(runner: .failed("Poki was stopped while waiting for automation authorization", fix: nil))
+            }
             return
         }
         log.add("runner", "stopping: \(reason)")
@@ -1646,7 +1663,14 @@ final class AppModel {
     /// is the same thing: waiting for the tunnel, said with the time it went and what to do.
     func coreState(of status: RunnerStatus) -> RunnerState {
         // In-process, a running launcher only mounted the disk image; tools wait for the session.
-        if automationPath == .inProcess, status.state == "running", inProcessSession != .open {
+        if automationPath == .inProcess, status.isRunning {
+            if inProcessSession == .open { return .automationReady(revision: automationRevision) }
+            if passcodeConfirmationPending {
+                return .awaitingAutomationAuthorization(AppLocalization.text(Self.passcodeConfirmationMessage))
+            }
+            if inProcessWarming, inProcessSession == .opening {
+                return .openingAutomationSession("opening the in-process session")
+            }
             return inProcessSession.agentState
         }
         if status.code == "passcode" {
@@ -1895,7 +1919,7 @@ final class AppModel {
     /// A tool call from the chat's model loop. Poki turns on first when it is off (the runner then starts
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
-    func finishTask(then: (@MainActor () -> Void)? = nil) {
+    func finishTask(switching: Bool = true, then: (@MainActor () -> Void)? = nil) {
         chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
@@ -1903,25 +1927,28 @@ final class AppModel {
         // The phone goes back to where the task began first: that still needs the session.
         endingTasks += 1
         Task { [weak self, core, log] in
-            if let line = await core.finishTask() { log.add("runner", line) }
+            if let line = await core.finishTask(switching: switching) { log.add("runner", line) }
             self?.endingTasks -= 1
             self?.closeAfterTask("the task ended")
             then?()
         }
     }
 
-    func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, cancelled: () -> Bool = { false }) async {
-        _ = await core.settle(timeout: 30)
-        if let line = await core.finishTask(switching: pairConfirmed, localSession: localSession) { log.add("runner", line) }
-        // The Split View task is over: as at the end of any task, the automation session closes.
+    func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, authorizationDeclined: Bool = false, cancelled: () -> Bool = { false }) async {
+        if authorizationDeclined {
+            await core.discardWorkspace(session: localSession)
+        } else {
+            _ = await core.settle(timeout: 30)
+            if let line = await core.finishTask(switching: pairConfirmed, localSession: localSession) { log.add("runner", line) }
+        }
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
-        closeAfterTask("the Split View task ended")
+        if !authorizationDeclined { closeAfterTask("the Split View task ended") }
         guard activitySplitViewSession == localSession else { return }
         activitySplitViewSession = nil
         lastAgentActivity = Date()
         activity.setChatOwnsCompletion(false)
-        if cancelled() { activity.endStoppedRun() }
+        if authorizationDeclined || cancelled() { activity.endStoppedRun() }
     }
 
     func reserveSplitViewWorkspace(session: String) async -> Bool {
@@ -2039,14 +2066,14 @@ final class AppModel {
     }
 
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
-    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> PokiCore.ToolAnswer {
+    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
         if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps) }
         if !sessionOn {
             if !sessionStarting { startSession() }
             if let task = sessionStartTask { await task.value }
         }
-        if passcodeConfirmationPending {
+        if passcodeConfirmationPending, automationPath != .inProcess || !sessionOn {
             return PokiCore.ToolAnswer(text: "not_sent: \(AppLocalization.text(Self.passcodeConfirmationMessage)) Nothing was sent.", jpeg: nil, isError: true)
         }
         guard sessionOn else {
@@ -2054,7 +2081,7 @@ final class AppModel {
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)
         }
         lastAgentActivity = Date(); lastStepAt = Date()
-        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps)
+        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask)
     }
 
     /// After Stop: waits until the phone has finished the action a stopped call had already sent.

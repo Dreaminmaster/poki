@@ -96,7 +96,8 @@ struct RootView: View {
     /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
     @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
-    @State private var searchJump: ConversationSearchJump?
+    @State private var searchNavigation = ConversationSearchNavigation()
+    private var searchJump: ConversationSearchJump? { searchNavigation.pending }
     /// The first run is up, over everything (`FirstRunGuide`).
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
@@ -112,15 +113,14 @@ struct RootView: View {
 
     private func show(_ route: HomeRoute) {
         // Ordinary navigation must not replay a previously selected search result.
-        searchJump = nil
+        searchNavigation = ConversationSearchNavigation()
         if threadsOpen { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = false } }
         wide = route
         home = route == .chat ? NavigationPath() : NavigationPath([route])
     }
 
     private func consumeSearchJump(_ requestID: UUID) {
-        guard searchJump?.requestID == requestID else { return }
-        searchJump = nil
+        searchNavigation.consume(requestID)
     }
 
     private func openDetails(_ items: [any Hashable] = []) {
@@ -169,6 +169,7 @@ struct RootView: View {
             openSetupStep: { fix(.step($0), split: split) },
             openModel: { fix(.model, split: split) },
             searchJump: searchJump?.sessionID == chat.sessionID ? searchJump : nil,
+            revealedSearchEntryID: searchNavigation.revealedEntry(in: chat.sessionID),
             onSearchJumpApplied: consumeSearchJump,
             openVoiceKey: { openDetails([DetailsRoute.voiceKey]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
@@ -261,11 +262,7 @@ struct RootView: View {
                 next.append(DetailsRoute.connection)
                 detailsPath = next
             },
-            openSession: { id, entryID in
-                // Keep the active composer mounted behind Settings during a live task.
-                if !(id != chat.sessionID && (chat.running || showsSidebar)) { detailsOpen = false }
-                openRun(id, entryID: entryID)
-            },
+            openSession: { id, entryID in openRun(id, entryID: entryID) },
             searchJump: searchJump,
             onSearchJumpApplied: consumeSearchJump,
             path: $detailsPath
@@ -388,8 +385,7 @@ struct RootView: View {
         } else if url.host() == "session" {
             // poki://session/<id>: a memory's Source, back to the conversation it was heard in. A conversation
             // that is no longer kept leaves the page where it is.
-            if let id = url.pathComponents.dropFirst().first, SessionStore.shared.session(id) != nil {
-                detailsOpen = false
+            if let id = url.pathComponents.dropFirst().first, sessionStore.session(id) != nil {
                 openRun(id)
             }
         } else if url.host() == "voice" {
@@ -447,19 +443,30 @@ struct RootView: View {
     private func openRun(_ id: String, entryID: UUID? = nil) {
         // Replacing the right-hand ChatView on iPad would destroy its unsent draft
         // and attachments. Open history within Settings while a live task is running.
-        if id != chat.sessionID && (chat.running || showsSidebar) {
-            searchJump = entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }
+        // Both search and Memory source links use this route. A preview must be on a
+        // presented stack; never close Settings before pushing a destination into it.
+        guard let session = sessionStore.session(id) else { return }
+        if Self.usesSessionPreview(id: id, activeID: chat.sessionID, running: chat.running, wide: showsSidebar) {
+            if !detailsOpen { detailsPath = NavigationPath() }
+            detailsOpen = true
+            searchNavigation.open(entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }, preview: true)
+            // A preview is separate from the active chat; don't perturb its transcript selection.
             detailsPath.append(DetailsRoute.sessionPreview(id))
             return
         }
-        if let session = SessionStore.shared.session(id), session.kind == .poki {
+        detailsOpen = false
+        if session.kind == .poki {
             if session.id != chat.sessionID { chat.restore(session) }
             show(.chat)
         } else {
             show(.session(id))
         }
         // show() clears the old request; install a new one after routing.
-        searchJump = entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }
+        searchNavigation.open(entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }, preview: false)
+    }
+
+    static func usesSessionPreview(id: String, activeID: String, running: Bool, wide: Bool) -> Bool {
+        id != activeID && (running || wide)
     }
 
     /// Opens an initial screen from the app's local screenshot/test launch flags.
@@ -558,5 +565,25 @@ private struct AutomationNotices: ViewModifier {
         } message: {
             Text(AppModel.passcodeHeadsUpMessage)
         }
+    }
+}
+
+/// A one-shot scroll and a retained, session-scoped reveal serve different purposes.
+/// Opening a read-only preview does not disturb the current chat's retained selection.
+struct ConversationSearchNavigation {
+    private(set) var pending: ConversationSearchJump?
+    private var selected: ConversationSearchJump?
+
+    mutating func open(_ jump: ConversationSearchJump?, preview: Bool) {
+        pending = jump
+        if !preview { selected = jump }
+    }
+
+    mutating func consume(_ requestID: UUID) {
+        if pending?.requestID == requestID { pending = nil }
+    }
+
+    func revealedEntry(in sessionID: String) -> UUID? {
+        selected?.sessionID == sessionID ? selected?.entryID : nil
     }
 }

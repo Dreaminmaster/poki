@@ -18,6 +18,40 @@ final class ConversationSearchTests: XCTestCase {
         return ConversationSearchIndex.resolve(matched, in: sessions)
     }
 
+    func testMemorySourceRouteKeepsOtherConversationInPresentedPreview() {
+        XCTAssertTrue(RootView.usesSessionPreview(id: "saved", activeID: "current", running: false, wide: true))
+        XCTAssertTrue(RootView.usesSessionPreview(id: "saved", activeID: "current", running: true, wide: false))
+        XCTAssertFalse(RootView.usesSessionPreview(id: "saved", activeID: "current", running: false, wide: false))
+        XCTAssertFalse(RootView.usesSessionPreview(id: "current", activeID: "current", running: true, wide: true))
+    }
+
+    func testGreetingRemainsInTranscriptAfterScrollRequestIsConsumed() {
+        let greeting = ChatEntry(.poki("Welcome to Poki"))
+        let user = ChatEntry(.you("First request", delivered: true))
+        let entries = [greeting, user]
+        let hit = find(in: [sample(entries: entries)], query: "Welcome").first
+        XCTAssertEqual(hit?.entryID, greeting.id)
+        let jump = ConversationSearchJump(sessionID: "first", entryID: greeting.id)
+        var navigation = ConversationSearchNavigation()
+        navigation.open(jump, preview: false)
+        XCTAssertEqual(navigation.pending, jump)
+        navigation.consume(UUID())
+        XCTAssertEqual(navigation.pending, jump, "Ignore completion of an older scroll")
+        navigation.consume(jump.requestID)
+        XCTAssertNil(navigation.pending)
+        let selected = navigation.revealedEntry(in: "first")
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: selected).map(\.id), entries.map(\.id))
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: selected).first?.id, greeting.id)
+        XCTAssertNil(navigation.revealedEntry(in: "different"))
+        let preview = ConversationSearchJump(sessionID: "saved", entryID: user.id)
+        navigation.open(preview, preview: true)
+        navigation.consume(preview.requestID)
+        XCTAssertEqual(navigation.revealedEntry(in: "first"), greeting.id)
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: nil).map(\.id), [user.id])
+        XCTAssertEqual(ChatView.transcriptEntries([greeting], revealed: selected).map(\.id), [greeting.id])
+        XCTAssertTrue(ChatView.transcriptEntries([user], revealed: greeting.id).contains(user))
+    }
+
     func testFindsOlderMessageEvenWhenLastLineDoesNotMatch() {
         let old = ChatEntry(.you("明天下午去海港拍照", delivered: true))
         let newest = ChatEntry(.poki("Understood."))

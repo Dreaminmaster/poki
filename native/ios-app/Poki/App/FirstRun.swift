@@ -17,7 +17,7 @@ enum EarlierVersion {
 
 /// The first run: Poki says hello, then goes through what it needs (this iPhone, a model, the microphone),
 /// each of which can wait, and says what to try. Someone who used an earlier version never sees it on
-/// updating; it can be gone through again from Settings › Automation › Setup.
+/// updating; it can be gone through again from Settings › Connection.
 enum FirstRun {
     /// Absent until the first launch of a version with the first run decides it, once.
     static let key = "pokiFirstRun"
@@ -107,7 +107,7 @@ struct FirstRunGuide: View {
         case .ready:
             return ready
                 ? AppLocalization.text(LocalizedStringResource("Try “Order my usual coffee”. Type it, or say it."))
-                : AppLocalization.text(LocalizedStringResource("Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Automation › Setup."))
+                : AppLocalization.text(LocalizedStringResource("Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Connection."))
         }
     }
 

@@ -27,6 +27,7 @@ struct ChatView: View {
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
     var searchJump: ConversationSearchJump? = nil
+    var revealedSearchEntryID: UUID? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
     /// Opens where the OpenAI key for Talk with Poki goes: the key's form, or Live Voice when it is off.
     var openVoiceKey: () -> Void = {}
@@ -69,7 +70,7 @@ struct ChatView: View {
 
     /// No message of yours yet: the page is the bear and what you could ask, not a transcript.
     private var isGreeting: Bool {
-        if let searchJump, chat.entries.contains(where: { $0.id == searchJump.entryID }) { return false }
+        if Self.containsSearchEntry(chat.entries, id: searchJump?.entryID ?? revealedSearchEntryID) { return false }
         guard !chat.running, !voice.isOn, voice.lines.isEmpty else { return false }
         return !chat.entries.contains(where: Self.isContent)
     }
@@ -84,11 +85,18 @@ struct ChatView: View {
 
     /// The conversation without the greeting's lines, which the home page said itself.
     private var shown: [ChatEntry] {
-        if let searchJump, chat.entries.contains(where: { $0.id == searchJump.entryID }) {
-            return chat.entries
-        }
-        guard let first = chat.entries.firstIndex(where: Self.isContent) else { return [] }
-        return chat.entries.enumerated().compactMap { i, entry in
+        Self.transcriptEntries(chat.entries, revealed: searchJump?.entryID ?? revealedSearchEntryID)
+    }
+
+    private static func containsSearchEntry(_ entries: [ChatEntry], id: UUID?) -> Bool {
+        guard let id else { return false }
+        return entries.contains { $0.id == id }
+    }
+
+    static func transcriptEntries(_ entries: [ChatEntry], revealed: UUID?) -> [ChatEntry] {
+        if containsSearchEntry(entries, id: revealed) { return entries }
+        guard let first = entries.firstIndex(where: Self.isContent) else { return [] }
+        return entries.enumerated().compactMap { i, entry in
             if i < first, case .poki = entry.kind { return nil }
             return entry
         }

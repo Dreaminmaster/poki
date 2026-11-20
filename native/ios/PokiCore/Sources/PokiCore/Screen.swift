@@ -65,6 +65,7 @@ public struct Element: Equatable, Sendable {
 public struct Foreground: Equatable, Sendable {
     public var bundleID: String?
     public var name: String?
+    var pokiPane: String? = nil
     public var describe: String {
         if bundleID == "com.apple.springboard" { return "Home screen (SpringBoard: the home screen, the App Switcher, a banner or a system alert)" }
         if let name, !name.isEmpty { return name }
@@ -74,13 +75,30 @@ public struct Foreground: Equatable, Sendable {
 
 public struct ScreenSize: Equatable, Sendable { public var width, height: Double }
 
+struct ScreenshotCompanion: Sendable {
+    let identity: String
+    let bundleID: String
+    let pokiPane: String
+}
+
+private struct ScreenCapture: Sendable {
+    let data: Data
+    let companion: ScreenshotCompanion?
+}
+
 /// One read of the screen. Either part may be missing; `notes` says why.
 public struct Reading: Sendable {
     public var elements: [Element] = []
     public var foreground: Foreground?
     public var png: Data?
+    var screenshotCompanion: ScreenshotCompanion?
     public var notes: [String] = []
     public var ms = 0
+
+    fileprivate mutating func use(_ capture: ScreenCapture) {
+        png = capture.data
+        screenshotCompanion = capture.companion
+    }
 }
 
 /// WDA's JSON source as a flat list of the elements worth listing: not the application root, with a
@@ -193,30 +211,42 @@ extension Runner {
         let appValue = await app
         let bundleID = appValue?["bundleId"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         let appName = appValue?["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        let pokiPane = appValue?["pokiPane"]?.string
         let sourceValue: JSON
         do { sourceValue = try await source } catch var error as RunnerError {
             // An app whose tree cannot be read is still the app in front (on the phone, WeChat's in-process
             // read: "Error getting main window kAXError"); without it the app read before stays in front.
-            if bundleID != nil || appName != nil { error.foreground = Foreground(bundleID: bundleID, name: appName) }
+            if bundleID != nil || appName != nil { error.foreground = Foreground(bundleID: bundleID, name: appName, pokiPane: pokiPane) }
             throw error
         }
         if xml {
             guard let text = sourceValue.string, let parsed = flattenXML(Data(text.utf8)) else {
                 throw RunnerError(message: "the runner's XML tree could not be read", delivery: .notSent)
             }
-            return (parsed.elements, Foreground(bundleID: bundleID, name: appName ?? parsed.root.label ?? parsed.root.name))
+            return (parsed.elements, Foreground(bundleID: bundleID, name: appName ?? parsed.root.label ?? parsed.root.name, pokiPane: pokiPane))
         }
         let root = (try? sourceValue.string.map(JSON.parse)) ?? sourceValue
         let name = appName ?? root["label"]?.text ?? root["name"]?.text
-        return (flatten(root), Foreground(bundleID: bundleID, name: name))
+        return (flatten(root), Foreground(bundleID: bundleID, name: name, pokiPane: pokiPane))
     }
 
     func screenshot(timeout: Double) async throws -> Data {
+        try await captureScreen(timeout: timeout).data
+    }
+
+    private func captureScreen(timeout: Double) async throws -> ScreenCapture {
         let value = try await raw("GET", "/screenshot", timeout: timeout)
-        guard let base64 = value.string, let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
+        guard let base64 = value.string ?? value["image"]?.string,
+              let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
             throw RunnerError(message: "the runner sent no screenshot", delivery: .notSent)
         }
-        return data
+        if value.string != nil { return ScreenCapture(data: data, companion: nil) }
+        guard let companion = value["companion"], let identity = companion["identity"]?.string, !identity.isEmpty,
+              let bundle = companion["bundleId"]?.string, !bundle.isEmpty,
+              let side = companion["pokiPane"]?.string, side == "left" || side == "right" else {
+            throw RunnerError(message: "the screenshot did not identify the companion pane", delivery: .notSent)
+        }
+        return ScreenCapture(data: data, companion: ScreenshotCompanion(identity: identity, bundleID: bundle, pokiPane: side))
     }
 
     /// /wda/screen needs no session; a session's window size fails once the app it was opened on is gone.
@@ -244,9 +274,9 @@ extension Runner {
         async let treePart: Result<(elements: [Element], foreground: Foreground), Error> = {
             do { return .success(try await self.tree(timeout: timeout, format: format, workspace: workspace)) } catch { return .failure(error) }
         }()
-        async let picturePart: Result<Data, Error>? = wantPicture ? {
+        async let picturePart: Result<ScreenCapture, Error>? = wantPicture ? {
             defer { pictureAt.value = now() }
-            do { return .success(try await self.screenshot(timeout: timeout)) } catch { return .failure(error) }
+            do { return .success(try await self.captureScreen(timeout: timeout)) } catch { return .failure(error) }
         }() : nil
         // A runner already busy when the read starts is likely to give no picture in time: the
         // host's own path starts now, beside the runner's, so the two are not in series (gym: a
@@ -306,15 +336,15 @@ extension Runner {
             nextLimits.value = readLimits.smaller
         }
         switch await picturePart {
-        case .success(let png)?: reading.png = png
+        case .success(let capture)?: reading.use(capture)
         case .failure(let e)?:
             // The tree came (on a second try, from a runner that was busy or new) but the picture
             // taken beside the first try did not: the runner gives it now (seen in the gym). Else
             // the host's own path, apart from the runner, with up to 6 s of its own (simctl on a CI
             // simulator took over 2 s).
             let readLeft = started + timeout + extra - now()
-            if treeCame, readLeft > 0.4, let again = try? await screenshot(timeout: min(1.5, readLeft)) {
-                reading.png = again
+            if treeCame, readLeft > 0.4, let again = try? await captureScreen(timeout: min(1.5, readLeft)) {
+                reading.use(again)
                 reading.notes.append("the screenshot came on the second try (the first: \(e))")
             } else if let early = hostEarly, let png = await early.value {
                 reading.png = png
@@ -345,12 +375,12 @@ extension Runner {
         // snapshot while the screen moved on), the picture is taken again so the frames and the
         // pixels agree (seen on the phone: a tree of the inside of a chat with a picture of the list).
         if treeCame, reading.png != nil, let at = pictureAt.value, treeAt - at > 0.6, started + timeout - now() > 0.4 {
-            if let first = reading.png, let again = try? await screenshot(timeout: min(1.5, started + timeout - now())) {
-                reading.png = again
+            if let first = reading.png, let again = try? await captureScreen(timeout: min(1.5, started + timeout - now())) {
+                reading.use(again)
                 reading.notes.append("the picture was taken again after the tree, which came \(Int(((treeAt - at) * 1000).rounded())) ms later than the first picture")
                 // The two pictures differ: the screen moved while the tree was read, so its frames
                 // may be off; the model should go by text (scroll_to, numbers) rather than points.
-                let before = PictureSketch(png: first), after = PictureSketch(png: again)
+                let before = PictureSketch(png: first), after = PictureSketch(png: again.data)
                 if after.differs(from: before) {
                     let share = after.change(from: before).map { " (\(Int(($0.share * 100).rounded())) % of it)" } ?? ""
                     reading.notes.append("screen: moving\(share): the picture changed while the tree was read, so frames and points may be off; prefer scroll_to, wait_until and element numbers over [x, y] taps")
