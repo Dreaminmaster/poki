@@ -221,6 +221,22 @@ final class VoiceModelTests: XCTestCase {
         h.voice.stop()
     }
 
+    func testLiveCarryOverKeepsTheWholeRequestWhenItFitsWithTheReply() async throws {
+        let h = Harness()
+        await h.liveTalk()
+        let request = "请更新明天的行程，上午的车次、取件时间和中午见面的地点都保持原样。把最后一站改成花店，回程仍然坐之前订好的那班车，回家以后提醒我把当天的收据整理好。"
+        h.link.play(["type": "session.input_transcript.delta", "delta": request, "start_ms": 0, "end_ms": 6000],
+                    ["type": "session.output_transcript.delta", "delta": "好的。", "start_ms": 6100, "end_ms": 6300])
+        h.voice.stop()
+        await h.time.advance(4 * 60)
+        await h.liveTalk()
+        let event = try XCTUnwrap(h.link.sent.first { $0["type"] as? String == "session.instructions.append" })
+        let context = try XCTUnwrap(event["content"] as? String)
+        XCTAssertLessThanOrEqual(context.utf8.count, 480)
+        XCTAssertTrue(context.contains("User: \(request)\nPoki: 好的。"), "The latest request and reply fit with the correction intact.")
+        h.voice.stop()
+    }
+
     func testLiveReconnectReportsTheCompletedResultUntilAcknowledged() async throws {
         var executed = 0
         let result = "操作已完成。草稿已保存。"
