@@ -298,28 +298,23 @@ enum BackdropClock {
     #endif
 }
 
-/// `scripts/make-launch-backdrop.sh` uses this Debug entry point to render the still home page
-/// backdrop for both appearances at one pixel per point.
+/// `-pokiLaunchBackdrop YES` draws the home page's light at rest, light, on an iPhone 16 Pro's page at one pixel a point, to
+/// Caches/LaunchBackdrop.png and quits. The launch screen shows that picture (Poki/LaunchArt), since
+/// iOS draws it before any of this code can run; `scripts/make-launch-backdrop.sh` makes it. Debug builds only.
 enum LaunchBackdropRender {
     #if DEBUG
     @MainActor static func writeIfAsked() {
         guard UserDefaults.standard.bool(forKey: "pokiLaunchBackdrop") else { return }
-        guard let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { exit(1) }
-        for (scheme, name) in [(ColorScheme.light, "LaunchBackdrop.png"), (.dark, "LaunchBackdropDark.png")] {
-            let renderer = ImageRenderer(content: HomeBackdrop(home: true, working: false, frozen: true)
-                .environment(\.colorScheme, scheme)
-                .frame(width: 402, height: 874))
-            // The mesh is drawn at a third of the screen's pixels and the grain one grey per point, so one
-            // pixel a point holds all of the light; the launch screen stretches it to the screen.
-            renderer.scale = 1
-            renderer.isOpaque = true
-            guard let data = renderer.uiImage?.pngData() else { exit(1) }
-            do {
-                try data.write(to: folder.appendingPathComponent(name), options: .atomic)
-            } catch {
-                exit(1)
-            }
-        }
+        let renderer = ImageRenderer(content: HomeBackdrop(home: true, working: false, frozen: true)
+            .environment(\.colorScheme, .light)
+            .frame(width: 402, height: 874))
+        // The mesh is drawn at a third of the screen's pixels and the grain one grey per point, so one
+        // pixel a point holds all of the light; the launch screen stretches it to the screen.
+        renderer.scale = 1
+        renderer.isOpaque = true
+        guard let data = renderer.uiImage?.pngData(),
+              let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { exit(1) }
+        try? data.write(to: folder.appendingPathComponent("LaunchBackdrop.png"), options: .atomic)
         exit(0)
     }
     #endif
