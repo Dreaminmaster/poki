@@ -622,6 +622,17 @@ public final class PokiCore: @unchecked Sendable {
                           offeredMemories: output.offeredMemories)
     }
 
+    /// Returns the indices of writes that were not saved. A required failure discards the whole batch.
+    public func saveTaskMemories(_ writes: [TaskMemoryWrite], conversation: String, task: String) -> [Int] {
+        guard !writes.isEmpty, let store = computer.memory, gate.tryEnter() else { return Array(writes.indices) }
+        defer { gate.leave() }
+        return store.saveTaskMemories(writes) { staged, write in
+            guard let args = try? JSON.parse(write.arguments),
+                  let action = args["action"]?.string, ["save", "remember"].contains(action) else { return false }
+            return !skillsCall(args, session: nil, conversation: conversation, recordingTask: task, store: staged).isError
+        }
+    }
+
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the
     /// instructions MCP clients get, for a model loop inside the app.
     public static var toolCatalogJSON: String { toolCatalogJSON(includeScreenHistory: false) }
@@ -741,6 +752,15 @@ public final class PokiCore: @unchecked Sendable {
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
             output = ToolResult(text: "error: \(error); what was sent is unknown. Call look to see the screen.", jpeg: nil, isError: true)
+        }
+        if local, session == nil, let localTask, localTask == computer.recordingTask,
+           !output.isError, let app = output.readApp?.lowercased(), app != "com.apple.springboard",
+           let memory = computer.memory, computer.memoryAppsOffered.insert(app).inserted {
+            let brief = memory.appMemoryBrief(for: app)
+            if !brief.notes.isEmpty {
+                output.text += "\n" + brief.text
+                output.offeredMemories = brief.notes
+            }
         }
         gate.current = nil
         gate.leave()

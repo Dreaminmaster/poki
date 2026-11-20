@@ -54,8 +54,8 @@ final class LiveCore: CoreSession {
     func accessChanged() { core.accessChanged() }
     /// The app's own MCP tools (ask_poki), after look, do and status.
     func setHostTools(_ tools: [HostTool]) { core.setHostTools(tools) }
-    func saveTaskMemory(arguments: String, conversation: String, task: String) -> Bool {
-        core.saveTaskMemory(arguments: arguments, conversation: conversation, task: task)
+    func saveTaskMemories(_ writes: [TaskMemoryWrite], conversation: String, task: String) -> [Int] {
+        core.saveTaskMemories(writes, conversation: conversation, task: task)
     }
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.

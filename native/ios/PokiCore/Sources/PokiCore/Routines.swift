@@ -458,26 +458,26 @@ public final class SkillStore: @unchecked Sendable {
         return d
     }()
 
-    private func withFile<T>(_ change: Bool = false, _ body: (inout MemoryFile) throws -> T) rethrows -> T {
+    private func withFile<T>(_ change: Bool = false, _ body: (inout MemoryFile) -> T) -> T {
         lock.lock()
-        let result = try body(&file)
-        let snapshot = change ? file : nil
+        let result = body(&file)
+        if change { try? persist(file) }
         lock.unlock()
-        if let snapshot { persist(snapshot) }
+        if change { onChange?() }
         return result
     }
 
     /// Notified after every change (the app's Memory page).
     public var onChange: (@Sendable () -> Void)?
 
-    private func persist(_ snapshot: MemoryFile) {
+    private func persist(_ snapshot: MemoryFile) throws {
         if let url {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             var diskSnapshot = snapshot
             diskSnapshot.schema = Self.schema
-            if let data = try? Self.encoder.encode(diskSnapshot) { try? data.write(to: url, options: .atomic) }
+            try Self.encoder.encode(diskSnapshot).write(to: url, options: .atomic)
         }
-        if let backupDirectory, let data = try? exportData(includeExtras: false) {
+        if let backupDirectory, let data = try? Self.backupData(snapshot) {
             try? FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
             let target = backupDirectory.appendingPathComponent(Self.backupName)
             try? data.write(to: target, options: .atomic)
@@ -485,7 +485,27 @@ public final class SkillStore: @unchecked Sendable {
             lastBackupHash = hash
             try? hash.write(to: backupDirectory.appendingPathComponent(".last-written"), atomically: true, encoding: .utf8)
         }
-        onChange?()
+    }
+
+    func saveTaskMemories(_ writes: [TaskMemoryWrite], apply: (SkillStore, TaskMemoryWrite) -> Bool) -> [Int] {
+        var committed = false
+        let unsaved = withFile { file in
+            let staged = SkillStore(url: nil)
+            staged.file = file
+            let rejected = writes.indices.filter { !apply(staged, writes[$0]) }
+            guard !rejected.contains(where: { !writes[$0].optional }) else { return Array(writes.indices) }
+            guard rejected.count < writes.count else { return rejected }
+            do {
+                try persist(staged.file)
+            } catch {
+                return Array(writes.indices)
+            }
+            file = staged.file
+            committed = true
+            return rejected
+        }
+        if committed { onChange?() }
+        return unsaved
     }
 
     static func hash(_ data: Data) -> String {
@@ -501,7 +521,11 @@ public final class SkillStore: @unchecked Sendable {
     public func importRestoredBackup() -> String? {
         guard let backupDirectory else { return nil }
         let target = backupDirectory.appendingPathComponent(Self.backupName)
-        guard let data = try? Data(contentsOf: target), Self.hash(data) != lastBackupHash else { return nil }
+        let restored: Data? = withFile { _ in
+            guard let data = try? Data(contentsOf: target), Self.hash(data) != lastBackupHash else { return nil }
+            return data
+        }
+        guard let data = restored else { return nil }
         return try? importData(data, by: "restore")
     }
 
@@ -733,10 +757,15 @@ public final class SkillStore: @unchecked Sendable {
 
     /// The backup file: skills, notes and the run log; with `includeExtras`, what the app adds.
     public func exportData(includeExtras: Bool = false) throws -> Data {
-        var snapshot = withFile { $0 }
+        let snapshot = withFile { $0 }
+        return try Self.backupData(snapshot, extras: includeExtras ? extrasProvider?() : nil)
+    }
+
+    private static func backupData(_ file: MemoryFile, extras: [String: JSON]? = nil) throws -> Data {
+        var snapshot = file
         snapshot.schema = Self.schema
         snapshot.exported = Date()
-        snapshot.extras = includeExtras ? extrasProvider?() : nil
+        snapshot.extras = extras
         snapshot.changes = nil
         return try Self.encoder.encode(snapshot)
     }
@@ -896,6 +925,15 @@ public final class SkillStore: @unchecked Sendable {
             within: room
         ) { "- [\($0.id)] \($0.text)" }
         return TaskBrief(text: (noteLines + skillLines).joined(separator: "\n"), notes: includedNotes)
+    }
+
+    func appMemoryBrief(for app: String) -> TaskBrief {
+        let notes = withFile { file in
+            Array(file.notes.reversed().lazy.filter { $0.app?.lowercased() == app }.prefix(8))
+        }
+        let lines = notes.map { "- [\($0.id)] \($0.text)" }
+        let header = "Saved memories for this app. Apply relevant memories and report IDs that affected this task in finish_task:"
+        return TaskBrief(text: ([header] + lines).joined(separator: "\n"), notes: notes)
     }
 
     private static let englishStopwords: Set<String> = [
@@ -1475,6 +1513,7 @@ extension Computer {
     /// A new task: its recording starts empty.
     func beginRecording(task: String? = nil) {
         recordingTask = task
+        memoryAppsOffered.removeAll()
         trace = []
         skillRanWhole = false
     }
@@ -1506,19 +1545,21 @@ extension String {
 
 // MARK: The skills tool
 
+public struct TaskMemoryWrite: Sendable {
+    let arguments: String
+    public let optional: Bool
+
+    public init(arguments: String, optional: Bool) {
+        self.arguments = arguments
+        self.optional = optional
+    }
+}
+
 extension PokiCore {
     /// What a model should know at the start of a task about this phone's owner and saved skills:
     /// the notes, and the skills that fit `task` and `apps` best. "" when nothing is saved.
     public static func memoryBrief(for task: String, app: String? = nil, apps: [String] = []) -> String {
         SkillStore.shared.brief(for: task, app: app, apps: apps)
-    }
-
-    /// Commits a memory write once the chat has finished successfully. A skill may only
-    /// use the steps recorded for that chat task.
-    public func saveTaskMemory(arguments: String, conversation: String, task: String) -> Bool {
-        guard let args = try? JSON.parse(arguments),
-              let action = args["action"]?.string, ["save", "remember"].contains(action) else { return false }
-        return !skillsCall(args, session: nil, conversation: conversation, recordingTask: task).isError
     }
 
     static let skillsTool: JSON = [
@@ -1536,8 +1577,8 @@ extension PokiCore {
 
     /// `conversation` is the app's saved conversation the call came from (Poki's own chat), kept with a
     /// note as where it was heard.
-    func skillsCall(_ args: JSON, session: String?, conversation: String? = nil, recordingTask: String? = nil) -> ToolResult {
-        guard let store = computer.memory else { return ToolResult(text: "skills: no memory on this phone", jpeg: nil, isError: true) }
+    func skillsCall(_ args: JSON, session: String?, conversation: String? = nil, recordingTask: String? = nil, store: SkillStore? = nil) -> ToolResult {
+        guard let store = store ?? computer.memory else { return ToolResult(text: "skills: no memory on this phone", jpeg: nil, isError: true) }
         let action = args["action"]?.string ?? "list"
         let name = args["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // A client's own name never passes for the owner, an import or Dream: those are the app's own.
