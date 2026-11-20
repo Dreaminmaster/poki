@@ -29,6 +29,13 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.match(agentSystem, /latest message/i);
   assert.match(firstParagraph, /blank line between paragraphs/i);
   assert.match(firstParagraph, /skip headings and tables/i);
+  const splitView = harnessSwift.split('static let splitViewInstructions = """')[1].split('"""')[0];
+  for (const prompt of [firstParagraph, splitView]) {
+    assert.match(prompt, /answer fully/i);
+    assert.match(prompt, /preference for reply length or format/i);
+    assert.match(prompt, /bullets or hyphens/i);
+  }
+  assert.doesNotMatch(combined, /one (?:or two short |plain )?sentences?\b|keep replies brief|explain it briefly/i);
   assert.match(combined, /web_open/);
   assert.match(combined, /web_handoff/);
   assert.match(combined, /report_plan/);
@@ -50,7 +57,7 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.match(harnessSwift, /skills \{action: \\"save\\"/);
 
   const [instructions, examples] = agentSystem.trim().split('\n\n## Reply examples\n');
-  assert.ok(words(instructions) < 559, `App Harness instructions grew to ${words(instructions)} words`);
+  assert.ok(words(instructions) < 650, `App Harness instructions grew to ${words(instructions)} words`);
   assert.ok(words(agentSystem) < 850, `agent-system.md grew to ${words(agentSystem)} words`);
   assert.doesNotMatch(instructions, /\p{Script=Han}/u, 'Use English for the instructions');
   assert.match(examples, /\p{Script=Han}/u, 'Include Chinese replies in the examples');

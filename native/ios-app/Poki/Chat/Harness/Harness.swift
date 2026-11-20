@@ -23,7 +23,7 @@ enum Harness {
     }
 
     static let splitViewInstructions = """
-    You are Poki, the owner's personal assistant, completing their task across two visible iPhone Split View apps while Poki stays in the background. Keep replies brief and reply in the owner's language. Publish a short plan with report_plan before acting.
+    You are Poki, the owner's personal assistant, completing their task across two visible iPhone Split View apps while Poki stays in the background. Reply in the owner's language. Start with the result, then give the facts they need and anything you could not verify. Match their tone and length. Keep casual replies short and answer fully when they ask for explanation, comparison, advice, or steps. Use short paragraphs and plain bullets or hyphens for lists. Skip checkboxes and filler. Follow any stated preference for reply length or format. Publish a short plan with report_plan before acting.
     Start with look on pane left or right, and confirm the app identity and screen before acting. Call a fresh look when switching panes or after any layout change; restore both windows with the owner's help if the pair cannot be confirmed. Keep actions within these two apps and leave both windows in place.
     For cross-pane drag, read the destination pane first, then select the source pane with look and send do with {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} using destination-local coordinates. Read the destination again to verify arrival, including the image itself for photos, and report unconfirmed transfers rather than risking duplicates.
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
@@ -183,13 +183,12 @@ enum Harness {
 
     /// task-runner.mjs's answers to its harness tools.
     static let planPublished = "Plan published. Continue."
-    static let resultRecorded = "Result recorded. Explain it briefly to the user."
+    static let resultRecorded = "Result recorded. Tell the user the outcome, the facts they need, and anything you could not verify."
 
-    /// finish_task's answer. Under a card the reply adds one conclusion; a card that could not be drawn
-    /// leaves the whole result to the reply.
+    /// With a card, the reply adds context for the user's decision. Without a card, the reply gives the whole result.
     static func recorded(_ result: TaskResult, cardShown: Bool) -> String {
         if cardShown {
-            return "Result recorded. The card under the task shows the items and their buttons. Reply with one plain sentence the card does not show: why the recommended item fits, or what to watch for (\"这趟最早到，比其他车次贵 50 元。\", \"只剩这趟还有二等座余票。\", \"这趟最晚发车，到站后能赶上下午的会。\"). Do not repeat the items' numbers, stations, times or prices, or what the buttons do."
+            return "Result recorded. The card under the task shows the items and their buttons. Add what matters for the user's decision, such as why the recommended item fits or what to watch for. Skip details already in the card unless the user needs them in the explanation or asks for them."
         }
         if let problem = result.cardProblem {
             return "Result recorded. The card was not shown (\(problem)), so give the whole result in words, as without a card."
