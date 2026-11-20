@@ -347,8 +347,8 @@ final class VoiceModel {
         var lastStartEvent: String?
         var hasSpeechStartEvents = false
         var handledItems: Set<String> = []
-        var handledTexts: Set<String> = []
         var inputRevision = 0
+        var recordedInputs: Set<String> = []
         var pending: Transcript?
         var handledTranscripts: [String: HandledText] = [:]
 
@@ -356,7 +356,11 @@ final class VoiceModel {
             self.itemID = itemID
             text = ""
             pending = nil
-            handledTexts.removeAll()
+        }
+
+        mutating func recordInput(id: String?) {
+            if let id, !recordedInputs.insert(id).inserted { return }
+            inputRevision += 1
         }
 
         var normalizedText: String {
@@ -367,38 +371,34 @@ final class VoiceModel {
 
         var alreadyHandled: Bool {
             if let itemID { return handledItems.contains(itemID) }
-            let normalized = normalizedText
-            if hasSpeechStartEvents { return handledTexts.contains(normalized) }
-            guard let pending, let previous = handledTranscripts[normalized] else { return false }
-            if let audio = pending.audio, previous.intervals.contains(where: audio.overlaps) { return true }
+            guard let pending, let previous = handledTranscripts[normalizedText] else { return false }
+            if let audio = pending.audio { return previous.intervals.contains(where: audio.overlaps) }
             return pending.inputRevision == previous.latest.inputRevision
                 && (0...3).contains(pending.received.timeIntervalSince(previous.latest.received))
         }
 
-        mutating func append(_ delta: String, start: Int, end: Int, received: Date) {
+        mutating func append(_ delta: String, audio: Range<Int>?, received: Date) {
             text += delta
-            self.end = max(self.end, end)
-            var audio = pending?.audio
-            if start >= 0, end > start {
-                audio = min(start, audio?.lowerBound ?? start)..<max(end, audio?.upperBound ?? end)
+            var combined = pending?.audio
+            if let audio {
+                end = max(end, audio.upperBound)
+                let first = min(audio.lowerBound, combined?.lowerBound ?? audio.lowerBound)
+                let last = max(audio.upperBound, combined?.upperBound ?? audio.upperBound)
+                combined = first..<last
             }
-            pending = Transcript(audio: audio, received: received, inputRevision: inputRevision)
+            pending = Transcript(audio: combined, received: received, inputRevision: inputRevision)
         }
 
         mutating func markHandled() {
             if let itemID {
                 handledItems.insert(itemID)
-            } else {
+            } else if let pending {
                 let normalized = normalizedText
                 if !normalized.isEmpty {
-                    if hasSpeechStartEvents {
-                        handledTexts.insert(normalized)
-                    } else if let pending {
-                        var previous = handledTranscripts[normalized] ?? HandledText(latest: pending)
-                        if let audio = pending.audio { previous.intervals.insert(audio) }
-                        previous.latest = pending
-                        handledTranscripts[normalized] = previous
-                    }
+                    var previous = handledTranscripts[normalized] ?? HandledText(latest: pending)
+                    if let audio = pending.audio { previous.intervals.insert(audio) }
+                    previous.latest = pending
+                    handledTranscripts[normalized] = previous
                 }
             }
             text = ""
@@ -906,13 +906,10 @@ final class VoiceModel {
     private func watchLivePlayback(_ link: VoiceConnection, session number: Int) {
         livePlayback = Task { [weak self] in
             var quiet = 0
-            var microphoneWasActive = false
             while !Task.isCancelled {
-                let activity = await link.audioActivity()
+                let playing = await link.hasRemoteSpeech()
                 guard let self, number == session, !Task.isCancelled else { return }
-                if activity.microphone && !microphoneWasActive { liveCallerSpeech.inputRevision += 1 }
-                microphoneWasActive = activity.microphone
-                if ready && activity.speaker && !liveSpeechStopped {
+                if ready && playing && !liveSpeechStopped {
                     quiet = 0
                     keepOpen()
                     lastActivity = time.now()
@@ -1129,12 +1126,13 @@ final class VoiceModel {
         case "session.input_transcript.delta", "session.output_transcript.delta":
             let role: VoiceLine.Role = type == "session.input_transcript.delta" ? .you : .poki
             guard let text = event["delta"] as? String, !text.isEmpty else { return }
-            let start = event["start_ms"] as? Int ?? 0
-            let end = event["end_ms"] as? Int ?? 0
+            let start = event["start_ms"] as? Int
+            let end = event["end_ms"] as? Int
             keepOpen()
-            appendLiveCaption(text, role: role, start: start, end: end)
+            appendLiveCaption(text, role: role, start: start ?? 0, end: end ?? 0)
             if role == .you {
-                appendLiveSpeech(text, start: start, end: end, itemID: event["item_id"] as? String)
+                let audio: Range<Int>? = if let start, let end, start >= 0, end > start { start..<end } else { nil }
+                appendLiveSpeech(text, audio: audio, itemID: event["item_id"] as? String)
                 let utterance = Self.liveSpeechParts(liveCallerSpeech.text).filter { !Self.liveBackchannels.contains($0) }
                 if !liveCallerSpeech.alreadyHandled, Self.liveRequestsStop(utterance) {
                     cancelLiveTask()
@@ -1190,12 +1188,15 @@ final class VoiceModel {
         case "input_audio_buffer.speech_started":
             keepOpen()
             if usesLive {
-                if let id = event["event_id"] as? String {
-                    guard id != liveCallerSpeech.lastStartEvent else { return }
-                    liveCallerSpeech.lastStartEvent = id
+                let eventID = event["event_id"] as? String
+                if let eventID {
+                    guard eventID != liveCallerSpeech.lastStartEvent else { return }
+                    liveCallerSpeech.lastStartEvent = eventID
                 }
                 liveCallerSpeech.hasSpeechStartEvents = true
-                liveCallerSpeech.begin(itemID: event["item_id"] as? String)
+                let itemID = event["item_id"] as? String
+                liveCallerSpeech.recordInput(id: itemID ?? eventID)
+                liveCallerSpeech.begin(itemID: itemID)
                 endIfDone()
                 return
             }
@@ -1209,6 +1210,10 @@ final class VoiceModel {
             awaitingAnswer = true
             clock = TurnClock(said: Date())
         case "input_audio_buffer.committed":
+            if usesLive {
+                liveCallerSpeech.recordInput(id: (event["item_id"] as? String) ?? (event["event_id"] as? String))
+                return
+            }
             guard manualRealtimeTurns, let item = event["item_id"] as? String, !item.isEmpty,
                   committedRealtimeItems.insert(item).inserted else { return }
             pendingRealtimeTurns += 1
@@ -1309,20 +1314,20 @@ final class VoiceModel {
     private static let liveStopPhrases: Set<String> = ["停", "停止", "停一下", "别动", "别做了", "stop", "cancel"]
     private static let liveBackchannels: Set<String> = ["嗯", "哦", "好的", "好", "uh-huh", "mm-hmm"]
 
-    private func appendLiveSpeech(_ text: String, start: Int, end: Int, itemID: String?) {
+    private func appendLiveSpeech(_ text: String, audio: Range<Int>?, itemID: String?) {
         if let itemID, itemID != liveCallerSpeech.itemID {
             liveCallerSpeech.begin(itemID: itemID)
-        } else if !liveCallerSpeech.hasSpeechStartEvents, liveCallerSpeech.itemID == nil,
-                  liveCallerSpeech.end > 0, start >= liveCallerSpeech.end, end > liveCallerSpeech.end {
+        } else if !liveCallerSpeech.hasSpeechStartEvents, liveCallerSpeech.itemID == nil, let audio,
+                  liveCallerSpeech.end > 0, audio.lowerBound >= liveCallerSpeech.end {
             let preceding = Self.liveSpeechParts(liveCallerSpeech.text)
             let joined = Self.liveSpeechParts(liveCallerSpeech.text + text)
             let afterAcknowledgment = preceding.allSatisfy(Self.liveBackchannels.contains) && !joined.allSatisfy(Self.liveBackchannels.contains)
             let afterStop = Self.liveRequestsStop(preceding) && !Self.liveRequestsStop(joined)
-            if preceding.isEmpty || afterAcknowledgment || afterStop || start - liveCallerSpeech.end >= 600 {
+            if preceding.isEmpty || afterAcknowledgment || afterStop || audio.lowerBound - liveCallerSpeech.end >= 600 {
                 liveCallerSpeech.begin(itemID: nil)
             }
         }
-        liveCallerSpeech.append(text, start: start, end: end, received: lastActivity)
+        liveCallerSpeech.append(text, audio: audio, received: lastActivity)
     }
 
     /// Match whole clauses of the caller's speech since delegation, independent of subtitle grouping.
