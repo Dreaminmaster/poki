@@ -97,7 +97,7 @@ const localTools = voiceTools.filter(tool => tool.local).map(tool => tool.name);
 const toolDefinitions = voiceTools.map(({ name, description, parameters }) => ({ type: 'function', name, description: description + silent, parameters }));
 const liveBackend = 'gpt-6-luna';
 const cancelCurrentTask = 'cancel_current_task';
-const cancellationRule = `Use the whole request and context to distinguish stopping your voice from cancelling phone work. Call ${cancelCurrentTask} immediately as the only tool when the user wants the phone task cancelled, for example “先别发了”. A request to quiet the voice only pauses playback. For “在备忘录输入停” or “把停字发过去”, the word is content to enter or send. Use the normal phone tools for that request.
+const cancellationRule = `A standalone stop such as “停” stops playback and cancels the current phone task. Call ${cancelCurrentTask} immediately as the only tool for a cancellation request such as “停” or “先别发了”. Wait for a new request before speaking or using phone tools again. A request only to quiet the voice pauses playback. For “在备忘录输入停” or “把停字发过去”, use the normal phone tools to enter or send the requested text.
 Brief acknowledgments such as “嗯” and “好的” leave the current reply and task intact. Report success only after a tool confirms the requested result. Describe pending, uncertain and failed results as they are.`;
 
 function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', language, manualTurns = false } = {}) {
