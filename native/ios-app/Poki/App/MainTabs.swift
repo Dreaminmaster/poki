@@ -80,10 +80,10 @@ struct ApprovalsSections: View {
                 } footer: {
                     Group {
                         switch model.classifierLevel {
-                        case .permissive: Text("Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
-                        case .balanced: Text("Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
-                        case .strict: Text("Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
-                        case .everything: Text("Ask All. Nothing is approved automatically. Each request needs your answer.")
+                        case .permissive: Text("Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
+                        case .balanced: Text("Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
+                        case .strict: Text("Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
+                        case .everything: Text("Nothing is approved automatically. Each request needs your answer.")
                         }
                     }
                     .settingsFooter()

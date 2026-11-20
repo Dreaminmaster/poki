@@ -22887,54 +22887,6 @@
         }
       }
     },
-    "Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "宽松。在 Poki 自己的聊天中，除非某一步明显与你的要求无关或你已拒绝，否则聊天模型会批准。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "寬鬆。在 Poki 自己的聊天中，除非某一步明顯與你的要求無關或你已拒絕，否則聊天模型會批准。"
-          }
-        }
-      }
-    },
-    "Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "适中。在 Poki 自己的聊天中，某一步直接服务于你的要求时，聊天模型会批准。其余的会询问你。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "適中。在 Poki 自己的聊天中，某一步直接服務於你的要求時，聊天模型會批准。其餘的會詢問你。"
-          }
-        }
-      }
-    },
-    "Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "严格。在 Poki 自己的聊天中，只有你明确要求过该操作时，聊天模型才会批准。其余的会询问你。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "嚴格。在 Poki 自己的聊天中，只有你明確要求過該操作時，聊天模型才會批准。其餘的會詢問你。"
-          }
-        }
-      }
-    },
     "Ask for Everything. Nothing is approved automatically. Steps that follow straight after your answer in the same app do not ask again." : {
       "localizations" : {
         "zh-Hans" : {
@@ -33407,22 +33359,6 @@
         }
       }
     },
-    "Ask All. Nothing is approved automatically. Each request needs your answer." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每次都问。不会自动批准，每项请求都需你回答。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每次都問。不會自動批准，每項請求都需你回答。"
-          }
-        }
-      }
-    },
     "Connect to Wi-Fi: the developer services need it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -42840,6 +42776,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用行動網路時，iOS 允許 Poki 保持連線，但不允許建立新連線。這個捷徑會讓它重新連線。請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
+          }
+        }
+      }
+    },
+    "Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 自己的聊天中，除非某一步明显与你的要求无关或你已拒绝，否则聊天模型会批准。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 自己的聊天中，除非某一步明顯與你的要求無關或你已拒絕，否則聊天模型會批准。"
+          }
+        }
+      }
+    },
+    "Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 自己的聊天中，某一步直接服务于你的要求时，聊天模型会批准。其余的会询问你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 自己的聊天中，某一步直接服務於你的要求時，聊天模型會批准。其餘的會詢問你。"
+          }
+        }
+      }
+    },
+    "Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 自己的聊天中，只有你明确要求过该操作时，聊天模型才会批准。其余的会询问你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 自己的聊天中，只有你明確要求過該操作時，聊天模型才會批准。其餘的會詢問你。"
+          }
+        }
+      }
+    },
+    "Nothing is approved automatically. Each request needs your answer." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不会自动批准，每项请求都需你回答。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不會自動批准，每項請求都需你回答。"
           }
         }
       }
