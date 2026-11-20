@@ -12,14 +12,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: 533
-            ref: 9635701231b2c531761f65af1b4c396a14f49428
-            tests: 'ScreenHistoryTests:25 HistoryLockTests:16 ChatHarnessTests:36'
           - pr: 322
-            ref: 7f68d2793534d575b7182766c39b13d42bf2c6ef
-            tests: 'ModelSessionMetadataTests:10 ConnectionCheckTests:6 ChatHarnessTests:39'
+            ref: f1e1e4c5c7154a93db7d580a21a26c1b8dda7614
+            tests: 'ModelSessionMetadataTests:10 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
           - pr: 249
-            ref: f8cccbcc7b83758f7ee3d5269c6226574d45ce38
+            ref: 706e1ae73e1fe9dedb6eb79711f83e0149cd5b4e
             tests: 'ConversationSearchTests:17 ChatScrollTests:9'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
@@ -143,9 +140,19 @@ jobs:
           for spec in $TEST_SUITES; do
             suite="${spec%%:*}"
             minimum="${spec##*:}"
+            # New main has three Duo-specific cases; they require separate device coverage.
+            # Select the general ChatScrollTests suite without those cases on a standard iPhone.
+            extra=()
+            if [ "$suite" = ChatScrollTests ]; then
+              extra+=(
+                -skip-testing:PokiTests/ChatScrollTests/testHomeComposerKeepsItsMarginsInTheDuoLeftPane
+                -skip-testing:PokiTests/ChatScrollTests/testFoldedDuoHomeRespectsItsLeadingSafeArea
+                -skip-testing:PokiTests/ChatScrollTests/testDuoHomeRestoresItsLeadingSafeAreaWhenFoldedDuringACompanionTask
+              )
+            fi
             "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
               -destination "id=$UDID" -derivedDataPath build/history-review \
-              -only-testing:PokiTests/$suite -parallel-testing-enabled NO \
+              -only-testing:PokiTests/$suite "${extra[@]}" -parallel-testing-enabled NO \
               -resultBundlePath out/$suite.xcresult \
               CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
               2>&1 | tee "out/$suite.log"
