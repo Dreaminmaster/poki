@@ -6,7 +6,9 @@ Versions are taken from `package-lock.json`, `native/bridge/Cargo.lock`, `native
 
 ## npm packages
 
-Includes every entry in `package-lock.json`. Optional and platform-specific entries are installed only when selected by npm for that environment. The npm column is the package metadata’s declared license; for the MCP SDK, also read the retained [upstream licensing transition terms](../third_party/LICENSE.typescript-sdk).
+The table lists the dependencies in `package-lock.json`. The `packages[""]` entry describes Poki MCP itself. The root `package.json` pins the direct dependencies, and `npm ci` uses the lockfile to install the recorded versions for your platform.
+
+The table shows each package's declared license. For the MCP SDK, see the retained [upstream licensing transition terms](../third_party/LICENSE.typescript-sdk).
 
 | Package | Version | Declared license | Source repository | Selection |
 | --- | --- | --- | --- | --- |
@@ -340,6 +342,22 @@ Versions below are the contents of `@img/sharp-libvips-darwin-arm64` 1.2.4 `vers
 The same pinned build references patches from [kleisauke’s GLib patch](https://gist.github.com/kleisauke/284d685efa00908da99ea6afbaaf39ae), [m-ab-s/aom](https://github.com/m-ab-s/aom/commit/6d2b7f71b98bfa28e372b1f2d85f137280bdb3de), [google/highway](https://github.com/google/highway/commit/ad48f2bf298bac247288c8399a5c0e9a40ed8246), [lovell’s libvips patch](https://gist.github.com/lovell/313a6901e9db1bf285f2a1f1180499e4), and [libvips/build-win64-mxe](https://github.com/libvips/build-win64-mxe/blob/v8.17.3/build/patches/vips-8-heifsave-disable-hbr-support.patch). These are source references for the upstream bundle build; Poki does not apply them or rebuild that bundle.
 
 The upstream notices also name libnsgif (MIT), but this macOS arm64 package does not report a libnsgif version. Its notice is retained without claiming it is present in the checked bundle.
+
+## Swift packages of the downloaded model
+
+The iPhone app links `MLXLLM`, `MLXLMCommon` and `Tokenizers` for the model the owner can download (see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#mlx-and-the-tokenizer-of-the-downloaded-model)). Swift Package Manager resolves them and the packages they depend on at build time; the ranges below are the ones the manifests declare (`native/ios-app/project-base.yml`, mlx-swift-lm 3.32.3 and swift-transformers 1.3.0), and a build's `Package.resolved` names the exact versions. Packages used only by tests, tools or documentation of these repositories are not linked into the app and are left out.
+
+| Package | Declared range | Declared license | Source repository | Brought in by |
+| --- | --- | --- | --- | --- |
+| `mlx-swift-lm` | 3.32.3 up to the next minor | MIT | [github.com/ml-explore/mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | the app |
+| `mlx-swift` | 0.32.3 up to the next minor | MIT | [github.com/ml-explore/mlx-swift](https://github.com/ml-explore/mlx-swift) | mlx-swift-lm |
+| `swift-numerics` | from 1.0.0 | Apache-2.0 | [github.com/apple/swift-numerics](https://github.com/apple/swift-numerics) | mlx-swift |
+| `swift-transformers` | from 1.3.0 | Apache-2.0 | [github.com/huggingface/swift-transformers](https://github.com/huggingface/swift-transformers) | the app |
+| `swift-jinja` | from 2.0.0 | Apache-2.0 | [github.com/huggingface/swift-jinja](https://github.com/huggingface/swift-jinja) | swift-transformers (`Tokenizers`) |
+| `swift-huggingface` | from 0.8.1 | Apache-2.0 | [github.com/huggingface/swift-huggingface](https://github.com/huggingface/swift-huggingface) | swift-transformers (`Hub`) |
+| `swift-collections` | from 1.0.0 | Apache-2.0 | [github.com/apple/swift-collections](https://github.com/apple/swift-collections) | swift-transformers |
+| `swift-crypto` | 3.0.0 up to 5.0.0 | Apache-2.0 | [github.com/apple/swift-crypto](https://github.com/apple/swift-crypto) | swift-transformers |
+| `yyjson` | 0.12.0 | MIT | [github.com/ibireme/yyjson](https://github.com/ibireme/yyjson) | swift-transformers |
 
 ## Updating this inventory
 

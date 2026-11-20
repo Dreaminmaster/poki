@@ -21,12 +21,12 @@ pub struct Running {
 const SIGKILL: u32 = 9;
 
 /// The CoreDevice tunnel and its service hub (iOS 17 and later).
-struct Tunnel {
-    adapter: AdapterHandle,
-    rsd: RsdHandshake,
+pub(crate) struct Tunnel {
+    pub(crate) adapter: AdapterHandle,
+    pub(crate) rsd: RsdHandshake,
 }
 
-async fn tunnel(phone: &Phone) -> std::result::Result<Tunnel, String> {
+pub(crate) async fn tunnel(phone: &Phone) -> std::result::Result<Tunnel, String> {
     let provider = phone.provider().map_err(|e| e.to_string())?;
     let go = async {
         let proxy = CoreDeviceProxy::connect(&*provider).await?;
@@ -159,7 +159,7 @@ fn is_poki(real_app_name: &str, is_application: bool, app_path: Option<&str>) ->
 
 /// Runs device work on its own thread: idevice's tunnel futures are not `Send`, and the
 /// bridge and the Tauri app run every command on a multi-threaded runtime.
-async fn on_own_thread<T: Send + 'static>(phone: &Phone, work: impl AsyncFnOnce(&Phone) -> Result<T> + Send + 'static) -> Result<T> {
+pub(crate) async fn on_own_thread<T: Send + 'static>(phone: &Phone, work: impl AsyncFnOnce(&Phone) -> Result<T> + Send + 'static) -> Result<T> {
     let phone = phone.clone();
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
@@ -168,7 +168,7 @@ async fn on_own_thread<T: Send + 'static>(phone: &Phone, work: impl AsyncFnOnce(
     });
     let answer = rx.await.map_err(|_| Error::device("Poki Setup lost its connection to the device."))?;
     if let Err(e) = &answer {
-        tracing::warn!(error = %e, "checking or closing Poki failed");
+        tracing::warn!(error = %e, "device work over Instruments or the CoreDevice tunnel failed");
     }
     answer
 }

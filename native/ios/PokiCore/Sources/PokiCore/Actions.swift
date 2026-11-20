@@ -295,13 +295,13 @@ extension Computer {
     }
 
     /// Returns the action's kind (for the settle pause) and what it did.
-    func perform(_ action: JSON, until: Double) async throws -> (String, String) {
+    func perform(_ action: JSON, until: Double, backTarget: BackTarget? = nil) async throws -> (String, String) {
         guard let kind = ActionKind(action) else { throw ActionFailure(message: "unknown action \(action.serialized())", delivery: .notSent) }
         let spec = action[kind.rawValue] ?? .null
         switch kind {
         case .run:
             runEndedOnARead = false
-            let text = try await runRoutine(spec, until: until)
+            let text = try await runSkill(spec, until: until)
             // A run whose end check found its texts has read the screen it ends on: no pause before the read.
             return (runEndedOnARead ? "run_read" : "run", text)
         case .path:
@@ -343,7 +343,7 @@ extension Computer {
             typedText = hidden ? nil : text
             return ("type", "\(describe(action)) (\(via))\(readBack)\(focusNote(reads.map { $0.contains(text) } ?? false))\(note)\(safariAddressNote(target, text))")
         case .back:
-            return ("back", try await back(until: until))
+            return ("back", try await back(to: backTarget ?? currentBackTarget, until: until))
         case .handoff:
             if case .bool(false) = spec {
                 guard let current = handoff.apply(.takeBack).takenBack else { return ("handoff", "handoff: nothing is handed to the owner") }
@@ -625,28 +625,34 @@ extension Computer {
         return (field, keyboard, true)
     }
 
-    /// The button `back` taps: a button in the top left corner of the read.
-    static func backButton(in all: [Element]) -> Element? {
-        all.filter { e in
-            e.type == "Button" && e.frame.x < 70 && e.frame.y < 130 && e.frame.y + e.frame.height > 20 && e.frame.width < 180 && e.frame.height < 70 && !e.fromPicture
-        }.min { ($0.frame.y, $0.frame.x) < ($1.frame.y, $1.frame.x) }
+    /// The return target from one tree. Without a button, back uses the left-edge gesture.
+    struct BackTarget {
+        let button: Element?
+        let sheet: Element?
+
+        init(in all: [Element]) {
+            button = all.lazy.filter { e in
+                e.type == "Button" && e.frame.x < 70 && e.frame.y < 130 && e.frame.y + e.frame.height > 20 && e.frame.width < 180 && e.frame.height < 70 && !e.fromPicture
+            }.min { ($0.frame.y, $0.frame.x) < ($1.frame.y, $1.frame.x) }
+            sheet = all.first { $0.type == "Sheet" && !$0.fromPicture }
+        }
     }
 
     /// `{back: true}`: the navigation bar's back button when the last read listed one (a button in
     /// the top left corner), else an edge swipe from the left, which most apps take as back. The
     /// answer says which, and the model sees the result in the read. No app-specific rule.
-    func back(until: Double) async throws -> String {
+    func back(to target: BackTarget, until: Double) async throws -> String {
         let screen = try await screenSize(until: until)
         // A sheet (a first-run "What's New", a share sheet) takes neither a back button nor the edge
         // swipe: the answer says so and names its buttons (gym: Photos' sheet, back "sent" and
         // nothing changed).
         var sheetNote = ""
-        if let sheet = lastAll.first(where: { $0.type == "Sheet" && !$0.fromPicture }) {
+        if let sheet = target.sheet {
             let buttons = listed.filter { $0.element.type == "Button" && sheet.contains($0.element) }.prefix(4).map { "\($0.ref) \"\($0.element.text.prefix(30))\"" }.joined(separator: ", ")
             sheetNote = "; a sheet is up\(buttons.isEmpty ? "" : " (its buttons: \(buttons))"): back does not dismiss sheets, tap one of its buttons or drag it down"
         }
-        if let button = Self.backButton(in: lastAll) {
-            let p = (x: button.frame.x + button.frame.width / 2, y: button.frame.y + button.frame.height / 2)
+        if let button = target.button {
+            let p = button.frame.centre
             try await tap(p, within: button.frame)
             return "back: tapped the top-left button \(button.text.isEmpty ? "" : "\"\(button.text)\" ")at [\(Int(p.x)), \(Int(p.y))]\(sheetNote)"
         }

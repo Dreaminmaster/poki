@@ -18,7 +18,7 @@ packages:
     url: https://github.com/xibbon/PiSwift.git
     revision: f8696524cf41ca0a7f42f5b230eafa443daececd
   # Apple's MLX language model library (MIT) and Hugging Face's tokenizers (Apache 2.0), for the
-  # model the owner can download to this iPhone: it decides for routines and writes Screen
+  # model the owner can download to this iPhone: it decides for skills and writes Screen
   # History's notes where Apple Intelligence is missing.
   MLXSwiftLM:
     url: https://github.com/ml-explore/mlx-swift-lm.git

@@ -8,7 +8,7 @@ import Tokenizers
 #endif
 
 /// The model the owner downloads to this iPhone (the owner, 2026-11-15 and 2026-11-18). It can be the
-/// decision model of routines and paths, and it writes Screen History's notes on an iPhone without
+/// decision model of skills and paths, and it writes Screen History's notes on an iPhone without
 /// Apple Intelligence. It can be downloaded whether or not the iPhone has Apple Intelligence. The
 /// weights come from Hugging Face at one pinned revision, are kept in the app's own folder, and run
 /// on the phone with MLX. Nothing it is given leaves the phone.
@@ -22,6 +22,17 @@ final class BacktapeModel {
         case downloading(Double)
         case ready
         case failed
+    }
+
+    /// Why a download stopped, for the model's page: each has its own words and the same way on.
+    enum Stop: Equatable {
+        /// The connection was lost or there was none.
+        case connection
+        /// The server did not send the file, or sent another one.
+        case server
+        /// The phone has no room for the files still to come.
+        case space
+        case other
     }
 
     /// A model the owner can pick. Each is pinned to one revision so every phone gets the same files.
@@ -60,13 +71,18 @@ final class BacktapeModel {
             guard choice != oldValue else { return }
             UserDefaults.standard.set(choice.id, forKey: "history.summaryModel")
             dropJob()
+            // Answers asked of the model before are no longer wanted: they are dropped, not returned.
+            epoch += 1
             release()
             try? FileManager.default.removeItem(at: Self.base)
             state = .missing
+            stopped = nil
+            kept = 0
         }
     }
 
-    /// MLX needs a real GPU and room for about 1 GB of weights beside the app.
+    /// MLX needs a real GPU and room for about 1 GB of weights beside the app: an iPhone with 6 GB
+    /// of memory or more (the page says so, see `requirement`).
     nonisolated static var supported: Bool {
         #if canImport(MLXLLM) && !targetEnvironment(simulator)
         return ProcessInfo.processInfo.physicalMemory >= 5_500_000_000
@@ -75,17 +91,38 @@ final class BacktapeModel {
         #endif
     }
 
+    /// Built with MLX and on a real iPhone: the models are listed, and one that `supported` rules
+    /// out says why on its page.
+    nonisolated static var offered: Bool {
+        #if canImport(MLXLLM) && !targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     private(set) var state: State = .missing
+    /// Why the last download stopped, while `state` is `.failed`.
+    private(set) var stopped: Stop?
+    /// Bytes of the picked model already on the phone as whole files: a download that was stopped
+    /// goes on after them.
+    private(set) var kept: Int64 = 0
     private var job: Task<Void, Never>?
     private var last: Task<String?, Never>?
+    /// Counts every switch and removal of the model. An answer asked under an earlier count is stale
+    /// and is dropped.
+    private var epoch = 0
     #if canImport(MLXLLM)
-    private var container: ModelContainer?
+    /// The loaded weights and the revision they are of: never used for another revision.
+    private var loaded: (revision: String, container: ModelContainer)?
     #endif
 
     private init() {
         let kept = UserDefaults.standard.string(forKey: "history.summaryModel")
         choice = Self.choices.first { $0.id == kept } ?? Self.choices[0]
         if FileManager.default.fileExists(atPath: folder.appendingPathComponent(".complete").path) { state = .ready }
+        // A download the app was closed in the middle of: its whole files are still there.
+        kept = state == .ready ? choice.bytes : wholeBytes()
         NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -104,25 +141,75 @@ final class BacktapeModel {
 
     // MARK: Download
 
+    /// Starts the download, or goes on with one that stopped (Try Again and Resume Download are
+    /// this same call: files that are whole are kept).
     func download() {
         guard Self.supported, job == nil, state != .ready else { return }
         let picked = choice
-        state = .downloading(0)
+        stopped = nil
+        // No room for what is still to come: said at once, before anything is fetched.
+        let needed = picked.bytes - wholeBytes() + 200_000_000
+        if let free = Self.freeBytes, free < needed {
+            kept = wholeBytes()
+            stopped = .space
+            state = .failed
+            return
+        }
+        state = .downloading(min(0.999, Double(wholeBytes()) / Double(max(1, picked.bytes))))
         job = Task { [weak self] in
             guard let self else { return }
-            var failed = false
+            var stop: Stop?
+            var cancelled = false
             do {
                 try await self.fetch()
             } catch {
-                failed = true
-                if !Task.isCancelled {
+                cancelled = Task.isCancelled || error is CancellationError
+                stop = Self.stop(for: error)
+                if !cancelled {
                     AppLog.shared.add("history", "summary model download failed: \(error.localizedDescription)")
                 }
             }
             // Another model was picked meanwhile: that pick already reset everything.
             guard self.choice == picked else { return }
-            self.state = failed ? (Task.isCancelled ? .missing : .failed) : .ready
             self.job = nil
+            self.kept = stop == nil ? picked.bytes : self.wholeBytes()
+            if stop == nil {
+                self.state = .ready
+            } else if cancelled {
+                // Stopped by the owner: not a failure, and the files so far wait for Resume Download.
+                self.state = .missing
+            } else {
+                self.stopped = stop
+                self.state = .failed
+            }
+        }
+    }
+
+    /// The whole files of the picked model on the phone, in bytes.
+    private func wholeBytes() -> Int64 {
+        let manager = FileManager.default
+        var sum: Int64 = 0
+        for (name, bytes) in zip(choice.files, choice.sizes) {
+            let size = (try? manager.attributesOfItem(atPath: folder.appendingPathComponent(name).path)[.size] as? NSNumber)?.int64Value
+            if size == bytes { sum += bytes }
+        }
+        return sum
+    }
+
+    private static var freeBytes: Int64? {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        return (try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage
+    }
+
+    private static func stop(for error: Error) -> Stop {
+        let cocoa = error as NSError
+        if cocoa.domain == NSCocoaErrorDomain, cocoa.code == NSFileWriteOutOfSpaceError { return .space }
+        if cocoa.domain == NSPOSIXErrorDomain, cocoa.code == Int(ENOSPC) { return .space }
+        guard let url = error as? URLError else { return .other }
+        switch url.code {
+        case .badServerResponse, .cannotParseResponse, .fileDoesNotExist, .resourceUnavailable: return .server
+        case .cannotWriteToFile, .cannotCreateFile, .cannotMoveFile: return .other
+        default: return .connection
         }
     }
 
@@ -136,10 +223,14 @@ final class BacktapeModel {
     }
 
     func remove() {
-        job?.cancel()
+        dropJob()
+        // What is being written with the removed model is dropped, not returned.
+        epoch += 1
         release()
         try? FileManager.default.removeItem(at: Self.base)
         state = .missing
+        stopped = nil
+        kept = 0
     }
 
     /// Files that are already whole are kept, so a broken download goes on where it stopped.
@@ -194,44 +285,66 @@ final class BacktapeModel {
     /// Frees the weights. They load again with the next note.
     func release() {
         #if canImport(MLXLLM)
-        container = nil
+        loaded = nil
         #endif
     }
 
-    /// One answer at a time: the phone has room for one run of the model.
+    /// One answer at a time: the phone has room for one run of the model. The answer belongs to the
+    /// model that was picked when it was asked: after a switch or a removal it is dropped. When the
+    /// caller stops waiting (a decision's deadline cancels its task), the run is stopped too, so the
+    /// next one does not wait behind an answer nobody reads.
     func respond(to text: String, instructions: String, maxTokens: Int = 240, temperature: Float = 0.3) async -> String? {
         let previous = last
+        let asked = epoch
         let task = Task<String?, Never> { [weak self] in
             _ = await previous?.value
-            return await self?.run(text, instructions: instructions, maxTokens: maxTokens, temperature: temperature)
+            guard !Task.isCancelled, let self, self.epoch == asked else { return nil }
+            let answer = await self.run(text, instructions: instructions, maxTokens: maxTokens, temperature: temperature)
+            guard !Task.isCancelled, self.epoch == asked else { return nil }
+            return answer
         }
         last = task
-        return await task.value
+        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 
     private func run(_ text: String, instructions: String, maxTokens: Int, temperature: Float) async -> String? {
         #if canImport(MLXLLM)
         guard ready, Self.supported else { return nil }
+        let revision = choice.revision, asked = epoch
         do {
             let model: ModelContainer
-            if let container {
-                model = container
+            if let loaded, loaded.revision == revision {
+                model = loaded.container
             } else {
+                loaded = nil
                 model = try await LLMModelFactory.shared.loadContainer(from: folder, using: BacktapeTokenizerLoader())
-                container = model
+                // Switched or removed while it loaded: these weights are not the picked model's.
+                guard epoch == asked, choice.revision == revision, ready else { return nil }
+                loaded = (revision, model)
             }
-            let answer = try await Task.detached(priority: .utility) {
+            // The words come as they are written, so a cancelled run ends at the next one: ending the
+            // stream stops the model.
+            let generation = Task.detached(priority: .utility) { () throws -> String in
                 let session = ChatSession(
                     model,
                     instructions: instructions,
                     generateParameters: GenerateParameters(maxTokens: maxTokens, temperature: temperature),
                     additionalContext: ["enable_thinking": false]
                 )
-                return try await session.respond(to: text)
-            }.value
+                var words = ""
+                for try await piece in session.streamResponse(to: text) {
+                    try Task.checkCancellation()
+                    words += piece
+                }
+                try Task.checkCancellation()
+                return words
+            }
+            let answer = try await withTaskCancellationHandler { try await generation.value } onCancel: { generation.cancel() }
             // Qwen3 can still open with its thinking block.
             if let end = answer.range(of: "</think>") { return String(answer[end.upperBound...]) }
             return answer
+        } catch is CancellationError {
+            return nil
         } catch {
             AppLog.shared.add("history", "summary model failed: \(error.localizedDescription)")
             return nil

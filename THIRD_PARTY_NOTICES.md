@@ -40,6 +40,22 @@ The on-phone runner is built from [appium/WebDriverAgent](https://github.com/app
 
 The Poki app's Voice tab links Google's [WebRTC](https://webrtc.googlesource.com/src) through the unmodified prebuilt framework from [stasel/WebRTC](https://github.com/stasel/WebRTC) 155.0.0 (Swift Package Manager, `native/ios-app/project.yml`). WebRTC is BSD-3-Clause licensed (Copyright (c) 2011, The WebRTC project authors); its license and patent grant ship inside the framework (`WebRTC.xcframework/LICENSE`). The framework is downloaded at build time and not stored in this repository.
 
+## MLX and the tokenizer of the downloaded model
+
+The Poki app can run a model the owner downloads to the iPhone (Settings, Models, Local Models). It links three Swift packages for that, fetched by Swift Package Manager at build time (`native/ios-app/project-base.yml`) and not stored in this repository:
+
+| Repository | Products linked and version | License |
+| --- | --- | --- |
+| [ml-explore/mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | `MLXLLM`, `MLXLMCommon`; 3.32.x from 3.32.3 | MIT, Copyright (c) 2024 ml-explore; full text in [third_party/LICENSE.mlx-swift-lm](third_party/LICENSE.mlx-swift-lm). |
+| [ml-explore/mlx-swift](https://github.com/ml-explore/mlx-swift) | `MLX`, `MLXNN`, `MLXOptimizers`, through mlx-swift-lm; 0.32.x from 0.32.3 | MIT, Copyright (c) 2023 ml-explore; full text in [third_party/LICENSE.mlx-swift](third_party/LICENSE.mlx-swift). The package builds Apple's MLX and the libraries MLX bundles from source; their notices are in the package's own `ACKNOWLEDGMENTS.md`. |
+| [huggingface/swift-transformers](https://github.com/huggingface/swift-transformers) | `Tokenizers` (with its `Hub` target); 1.3.0 or later below 2.0 | Apache-2.0, Hugging Face; full text in [third_party/LICENSE.swift-transformers](third_party/LICENSE.swift-transformers). |
+
+The versions a build resolves are the ones in its `Package.resolved`. The [dependency inventory](docs/third-party-dependencies.md#swift-packages-of-the-downloaded-model) lists the packages these three bring with them.
+
+[native/ios-app/Poki/History/BacktapeModel.swift](native/ios-app/Poki/History/BacktapeModel.swift) holds an adapter, `BacktapeTokenizerLoader` and `BacktapeTokenizer`, that puts swift-transformers' tokenizer behind mlx-swift-lm's `Tokenizer` protocol. It is written out from what mlx-swift-lm's `#huggingFaceTokenizerLoader` macro expands to (the `MLXHuggingFace` target at 3.32.3), so the build needs no macro plugin. The mlx-swift-lm MIT license applies to that code.
+
+The model weights are not part of Poki and are not in this repository or in the app: the owner downloads them from Hugging Face to the iPhone, at a pinned revision, from [mlx-community/Qwen3-1.7B-4bit](https://huggingface.co/mlx-community/Qwen3-1.7B-4bit) or [mlx-community/Qwen3.5-2B-4bit](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit). Both are published under Apache-2.0.
+
 ## JavaScript packages
 
 The exact installed versions come from `package-lock.json`. These packages provide the MCP server/client transports, image processing and input validation:

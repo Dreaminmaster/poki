@@ -315,6 +315,68 @@ final class DeciderTests: XCTestCase {
         XCTAssertEqual(app.tapped.value, [])
     }
 
+    /// What a provider or the system says when a decision fails stays out of the answer and out of the
+    /// saved run log: both hold Poki's own sentence for the failure and nothing else.
+    func testAFailuresOwnWordsStayOutOfTheAnswerAndTheSavedLog() async throws {
+        struct Loud: Error, LocalizedError { var errorDescription: String? { "socket said sk-live-PRIVATE to host 10.0.0.7" } }
+        for (thrown, safe) in [(DeciderError("the provider answered 500", detail: "upstream said <b>PRIVATE</b> request 81") as Error, "the provider answered 500"),
+                               (Loud() as Error, "the request did not go through")] {
+            let store = RoutineStore(url: nil)
+            let decider = ScriptedDecider { _, _ in throw thrown }
+            let (core, _, app) = core(store, decider: decider) { $0.actionCap = 1.2 }
+            await record(core, app)
+            app.pages[0] = [Node("Button", "Privacy", [16, 100, 358, 44])]
+            app.go(0)
+
+            let result = await run(core)
+
+            XCTAssertTrue(result.text.contains("test-decider gave no decision (\(safe))"), result.text)
+            XCTAssertFalse(result.text.contains("PRIVATE"), result.text)
+            let saved = String(decoding: try store.exportData(), as: UTF8.self)
+            XCTAssertTrue(saved.contains("gave no decision (\(safe))"), "the stop is in the saved log")
+            XCTAssertFalse(saved.contains("PRIVATE"), "the saved log holds none of the failure's own words")
+        }
+        XCTAssertEqual(DeciderError.safe(DeciderError("x", detail: "y")), DeciderError("x", detail: "y"))
+    }
+
+    /// A model on the phone is given its own time by the run that asks it, not the policy's: an answer
+    /// that takes longer than the policy allows is still used, and one that takes longer than the
+    /// model's own time ends the wait there, with the run stopped as it would be with no decider.
+    func testARunGivesAModelOnThePhoneItsOwnTimeAndNoMore() async throws {
+        func slow(_ seconds: Double, patience: Double) -> PromptDecider {
+            PromptDecider(name: "Apple Intelligence", patience: patience) { prompt, _ in
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+                // The element that reads General, by the id the prompt gave it.
+                let id = prompt.components(separatedBy: "\n").first { $0.contains("option \"") && $0.contains("General") }
+                    .flatMap { $0.components(separatedBy: "\"").dropFirst().first } ?? "none"
+                return #"{"move": {"choice": "target", "confidence": 0.95}, "element": {"choice": "\#(id)", "confidence": 0.95}}"#
+            }
+        }
+        func renamed(_ decider: Decider, stepTime: Double) async -> (ToolResult, Double, [String]) {
+            let store = RoutineStore(url: nil)
+            let (core, _, app) = core(store, decider: decider) { $0.deciderPolicy.timeout = 0.3; $0.actionCap = stepTime }
+            await record(core, app)
+            // The row moved and is another type now: the recorded target matches nothing.
+            app.pages[0] = [Node("Cell", "General", [16, 100, 358, 44])]
+            app.go(0)
+            app.tapped.value = []
+            let began = Date()
+            let result = await run(core)
+            return (result, Date().timeIntervalSince(began), app.tapped.value)
+        }
+
+        // 0.9 s is three times the policy's 0.3 s and well inside the model's own 4 s.
+        let (used, _, taps) = await renamed(slow(0.9, patience: 4), stepTime: 6)
+        XCTAssertTrue(used.text.contains("fixed on the way"), used.text)
+        XCTAssertEqual(taps.first, "General", used.text)
+
+        // 5 s is past the model's own 0.6 s: the wait ends there, and nothing is tapped on its word.
+        let (late, took, none) = await renamed(slow(5, patience: 0.6), stepTime: 2)
+        XCTAssertTrue(late.text.contains("Apple Intelligence gave no decision (no answer in time)"), late.text)
+        XCTAssertEqual(none, [])
+        XCTAssertLessThan(took, 4.5, "the run did not wait out the model's 5 s")
+    }
+
     /// Asked early, the decider says this is another screen; the page was only slow. The step still
     /// has its time, as it had without a decider.
     func testAPageThatWasOnlySlowStillGetsTheStepsWholeTime() async {
@@ -562,7 +624,7 @@ final class DeciderTests: XCTestCase {
         let refusal = Data(#"{"answers":[{"type":"refusal","name":"move"}]}"#.utf8)
         XCTAssertThrowsError(try SystemOneDecider.openAIAnswers(in: refusal, to: [questions[0]])) { XCTAssertTrue("\($0)".contains("refused"), "\($0)") }
         let denied = Data(#"{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}"#.utf8)
-        XCTAssertThrowsError(try SystemOneDecider.openAIAnswers(in: denied, to: questions)) { XCTAssertTrue("\($0)".contains("Incorrect API key"), "\($0)") }
+        XCTAssertThrowsError(try SystemOneDecider.openAIAnswers(in: denied, to: questions)) { XCTAssertEqual($0 as? DeciderError, DeciderError("the provider reported an error", detail: "Incorrect API key provided")) }
     }
 
     /// A sign-in in place of a key: the token is asked for at each call, and none is an error.
@@ -575,7 +637,7 @@ final class DeciderTests: XCTestCase {
         }))
         let check = await decider.check(timeout: 1)
         XCTAssertEqual(sent.value?.value(forHTTPHeaderField: "Authorization"), "Bearer plan-1")
-        XCTAssertEqual(check, .failure(DeciderError("the provider answered 403: This endpoint is not available for ChatGPT plan usage.")))
+        XCTAssertEqual(check, .failure(DeciderError("the provider answered 403", detail: "This endpoint is not available for ChatGPT plan usage.")))
         token.value = nil
         sent.value = nil
         let signedOut = await decider.check(timeout: 1)
@@ -597,8 +659,6 @@ final class DeciderTests: XCTestCase {
         let answers = try await decider.decide(state: ["task": .string(String(repeating: "x", count: 200))], questions: questions, timeout: 2)
 
         XCTAssertEqual(answers["move"], DecisionAnswer(choice: "wait", confidence: 0.8))
-        XCTAssertEqual(decider.patience, 8, "a model on the phone gets longer than the policy's 2.5 s")
-        XCTAssertNil(ScriptedDecider { _, _ in [:] }.patience)
         XCTAssertEqual(answers["move"]!.margin, 0.8, accuracy: 0.0001)
         XCTAssertEqual(answers["ok"]?.confidence, 0.9)
         let prompt = try XCTUnwrap(asked.value).0
@@ -621,7 +681,7 @@ final class DeciderTests: XCTestCase {
         let bare = Data(#"{"answers":{"move":{"type":"choice","choice":"tap","confidence":0.9,"probabilities":{}}}}"#.utf8)
         XCTAssertThrowsError(try SystemOneDecider.answers(in: bare, to: questions)) { XCTAssertTrue("\($0)".contains("not an option"), "\($0)") }
         let refused = Data(#"{"success":false,"errors":[{"code":10000,"message":"Authentication error"}]}"#.utf8)
-        XCTAssertThrowsError(try SystemOneDecider.answers(in: refused, to: questions)) { XCTAssertTrue("\($0)".contains("Authentication error"), "\($0)") }
+        XCTAssertThrowsError(try SystemOneDecider.answers(in: refused, to: questions)) { XCTAssertEqual($0 as? DeciderError, DeciderError("the provider reported an error", detail: "Authentication error")) }
         let good = Data(#"{"model":"jev-latest","answers":{"move":{"type":"choice","choice":"wait","confidence":0.7,"probabilities":{"stop":0.2,"wait":0.8}}}}"#.utf8)
         XCTAssertEqual(try SystemOneDecider.answers(in: good, to: questions)["move"]?.choice, "wait")
     }
@@ -630,7 +690,7 @@ final class DeciderTests: XCTestCase {
         let decider = SystemOneDecider(url: URL(string: "https://api.typesafe.ai/v1/systemone")!, model: "jev-latest", token: "t",
                                        send: { _ in (401, Data(#"{"detail":"Invalid API key"}"#.utf8)) })
         let check = await decider.check(timeout: 1)
-        XCTAssertEqual(check, .failure(DeciderError("the provider answered 401: Invalid API key")))
+        XCTAssertEqual(check, .failure(DeciderError("the provider answered 401", detail: "Invalid API key")))
     }
 
     func testOnlyCompleteSettingsMakeADecider() {

@@ -43,6 +43,14 @@ final class TaskAppsTests: XCTestCase {
         XCTAssertEqual(apps.target(request: "新建一条备忘录，写上今天的日期"), notes)
     }
 
+    func testOpeningTheNamedAppDoesNotShowTheAppItReplaced() {
+        let request = "在左侧打开微信"
+        var apps = task(steps: ["com.apple.calculator", "com.apple.calculator"])
+        XCTAssertNil(apps.target(request: request))
+        apps.step(in: "com.tencent.xin")
+        XCTAssertEqual(apps.target(request: request), "com.tencent.xin")
+    }
+
     /// "移动网络测试" showed WeChat: Settings was opened by its launch, the end read named WeChat.
     func testTheLaunchedAppWinsOverTheAppTheTaskEndedIn() {
         let launches = TaskApps.launches(inArguments: #"{"actions":[{"launch":{"bundle":"com.apple.Preferences","fresh":true}}]}"#)

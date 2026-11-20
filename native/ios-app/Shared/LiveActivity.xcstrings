@@ -275,13 +275,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "待批准"
+            "value" : "操作确认"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "待批准"
+            "value" : "操作確認"
           }
         }
       }
@@ -292,7 +292,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "等待批准"
+            "value" : "等待操作确认"
           }
         },
         "en" : {
@@ -304,7 +304,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "等待批准"
+            "value" : "等待操作確認"
           }
         }
       }
@@ -1110,7 +1110,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在配置中重新配对"
+            "value" : "在使用准备中重新配对"
           }
         },
         "en" : {
@@ -1122,7 +1122,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在設定精靈中重配"
+            "value" : "在使用準備中重配"
           }
         }
       }
@@ -1179,7 +1179,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开代理或在配置中重配"
+            "value" : "开代理或在使用准备中重配"
           }
         },
         "en" : {
@@ -1191,7 +1191,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開代理或在設定精靈重配"
+            "value" : "開代理或在使用準備重配"
           }
         }
       }
@@ -1288,13 +1288,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "回环"
+            "value" : "本机通道"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "迴環"
+            "value" : "本機通道"
           }
         }
       }
@@ -1305,13 +1305,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "回环未开"
+            "value" : "本机通道未开"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "迴環未開"
+            "value" : "本機通道未開"
           }
         }
       }
@@ -1322,13 +1322,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "回环或配对"
+            "value" : "本机通道或配对"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "迴環或配對"
+            "value" : "本機通道或配對"
           }
         }
       }
@@ -1431,13 +1431,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要回环连接"
+            "value" : "需要本机通道"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要回環連線"
+            "value" : "需要本機通道"
           }
         }
       }
@@ -1551,7 +1551,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在配置中下载最新映像"
+            "value" : "在使用准备中下载最新映像"
           }
         },
         "en" : {
@@ -1563,7 +1563,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在設定精靈下載最新映像"
+            "value" : "在使用準備下載最新映像"
           }
         }
       }
@@ -2535,13 +2535,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "配置"
+            "value" : "使用准备"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "設定精靈"
+            "value" : "使用準備"
           }
         },
         "en" : {
@@ -3136,7 +3136,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启回环"
+            "value" : "开启本机通道"
           }
         },
         "en" : {
@@ -3148,7 +3148,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟迴環"
+            "value" : "開啟本機通道"
           }
         }
       }

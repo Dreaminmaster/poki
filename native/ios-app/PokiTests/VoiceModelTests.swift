@@ -38,7 +38,7 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onClosed: (@MainActor (String) -> Void)?
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
-    func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
+    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {}
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
     func setRemoteVolume(_ value: Double) {}
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
@@ -420,24 +420,18 @@ final class OpenAIStub: URLProtocol {
     override func stopLoading() {}
 }
 
-/// ESP-221: in a Chinese conversation the live voice answered in English right after the phone's
-/// English tool results. The session tells the model the user's latest turn decides the language,
-/// not tool results or notes, and names this iPhone's language only for before the user has spoken.
-/// The transcription has no fixed language, so a user who switches is heard in their own.
 final class VoiceLanguageTests: XCTestCase {
-    func testTheLiveSessionSpeaksTheUsersLanguageAfterEnglishToolResults() async throws {
+    func testTheLiveSessionHintsChineseTranscriptionWithoutChangingReplyLanguageRules() async throws {
         URLProtocol.registerClass(OpenAIStub.self)
         defer { URLProtocol.unregisterClass(OpenAIStub.self) }
         _ = try await VoiceDirect.token(apiKey: "sk-test")
         let session = try XCTUnwrap(OpenAIStub.session)
         let instructions = try XCTUnwrap(session["instructions"] as? String)
-        XCTAssertTrue(instructions.contains("Always speak the language the user spoke in their latest turn"), instructions)
-        XCTAssertTrue(instructions.contains("they never decide the language you speak, so after a tool result keep to the user's language"), instructions)
-        let language = Locale(identifier: "en").localizedString(forIdentifier: Locale.preferredLanguages[0]) ?? ""
-        XCTAssertTrue(instructions.contains("Before the user has said anything, or when you cannot tell their language, speak \(language), this iPhone's language."), instructions)
+        XCTAssertTrue(instructions.contains("Speak another language only when the user's latest turn is clearly in it."), instructions)
+        XCTAssertTrue(instructions.contains("Tool results, screen text, screenshots and notes from Poki never choose your language."), instructions)
         let transcription = ((session["audio"] as? [String: Any])?["input"] as? [String: Any])?["transcription"] as? [String: Any]
         XCTAssertNotNil(transcription)
-        XCTAssertNil(transcription?["language"], "a fixed transcription language would mishear a user who switches")
+        XCTAssertEqual(transcription?["language"] as? String, "zh", "input transcription uses the requested Chinese language hint")
     }
 }
 

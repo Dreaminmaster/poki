@@ -10,7 +10,7 @@ struct LocalModelsSection: View {
     let model = BacktapeModel.shared
 
     var body: some View {
-        if OnDeviceDecisions.appleAvailable || BacktapeModel.supported {
+        if OnDeviceDecisions.appleAvailable || BacktapeModel.offered {
             Section {
                 if OnDeviceDecisions.appleAvailable {
                     NavigationLink { AppleIntelligenceDetail() } label: {
@@ -20,7 +20,8 @@ struct LocalModelsSection: View {
                     .accessibilityIdentifier("models.local.apple")
                 }
                 // The models that can be downloaded, whether or not the iPhone has Apple Intelligence.
-                if BacktapeModel.supported {
+                // Listed on an iPhone that cannot run them too: its page says what they need.
+                if BacktapeModel.offered {
                     ForEach(BacktapeModel.choices) { choice in
                         NavigationLink { DownloadedModelDetail(choice: choice) } label: {
                             LocalModelRow(symbol: "arrow.down.circle", name: choice.name, uses: uses(choice))
@@ -42,7 +43,8 @@ struct LocalModelsSection: View {
         switch model.state {
         case .ready: return QuickFixes.choice == .downloaded ? AppLocalization.text("Decisions") : AppLocalization.text("Downloaded")
         case .downloading(let part): return "\(Int(part * 100)) %"
-        case .missing, .failed: return AppLocalization.text("Not Downloaded")
+        case .failed: return AppLocalization.text("Download Stopped")
+        case .missing: return AppLocalization.text(model.kept > 0 ? "Download Stopped" : "Not Downloaded")
         }
     }
 }
@@ -63,6 +65,11 @@ struct DownloadedModelDetail: View {
                 LabeledContent("Type", value: choice.name)
                 LabeledContent("Connection", value: AppLocalization.text("On This iPhone"))
                 LabeledContent("Size", value: ByteCountFormatter.string(fromByteCount: choice.bytes, countStyle: .file))
+                LabeledContent("Requires", value: AppLocalization.text("iPhone with 6 GB of Memory"))
+                // A download that stopped: how much of it is already here.
+                if stoppedPart {
+                    LabeledContent("Downloaded So Far", value: ByteCountFormatter.string(fromByteCount: model.kept, countStyle: .file))
+                }
                 if current, case .downloading(let part) = model.state {
                     LabeledContent {
                         Text(verbatim: "\(Int(part * 100)) %").monospacedDigit()
@@ -71,7 +78,7 @@ struct DownloadedModelDetail: View {
                     }
                     Button("Cancel Download") { model.cancel() }
                 } else if !ready {
-                    Button("Download Model") {
+                    Button(downloadTitle) {
                         if !current {
                             // The one before goes with its files, and it no longer decides.
                             if QuickFixes.choice == .downloaded { QuickFixes.choice = .none }
@@ -79,6 +86,7 @@ struct DownloadedModelDetail: View {
                         }
                         model.download()
                     }
+                    .disabled(!BacktapeModel.supported)
                     .accessibilityIdentifier("models.local.download")
                 }
             } footer: {
@@ -91,7 +99,7 @@ struct DownloadedModelDetail: View {
             } header: {
                 Text("Use This Model For")
             } footer: {
-                Text("As the decision model it helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
+                Text("As the decision model it helps a skill go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
             }
 
             if ready {
@@ -109,8 +117,31 @@ struct DownloadedModelDetail: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    /// The picked model's download stopped partway (it failed, was cancelled, or the app was closed).
+    private var stoppedPart: Bool {
+        guard current, model.kept > 0 else { return false }
+        switch model.state {
+        case .failed, .missing: return true
+        case .downloading, .ready: return false
+        }
+    }
+
+    private var downloadTitle: LocalizedStringKey {
+        if current, model.state == .failed { return "Try Again" }
+        return stoppedPart ? "Resume Download" : "Download Model"
+    }
+
     private var footer: LocalizedStringKey {
-        if current, model.state == .failed { return "The download did not finish. Try again on Wi-Fi, and it goes on where it stopped." }
+        if !BacktapeModel.supported { return "This iPhone does not have enough memory to run this model." }
+        if current, model.state == .failed {
+            switch model.stopped {
+            case .connection: return "The download stopped because the connection was lost. The files already downloaded are kept. Try again, on Wi-Fi if you can."
+            case .server: return "The download stopped because the server did not send the file. The files already downloaded are kept. Try again later."
+            case .space: return "There is not enough free space on this iPhone for this model. Free up some space and try again."
+            case .other, nil: return "The download did not finish. The files already downloaded are kept. Try again."
+            }
+        }
+        if stoppedPart { return "The download was stopped before it finished. The files already downloaded are kept." }
         if ready { return "This model is on this iPhone and runs here. Screen History uses it for its notes where the iPhone has no Apple Intelligence." }
         return "Only one downloaded model is kept, and downloading this one removes the one before. Screen History uses it for its notes where the iPhone has no Apple Intelligence."
     }
@@ -169,7 +200,7 @@ struct AppleIntelligenceDetail: View {
             } header: {
                 Text("Use This Model For")
             } footer: {
-                Text("As the decision model it helps a routine go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
+                Text("As the decision model it helps a skill go on when a prompt is in the way or a button was renamed. It acts only when the answer is clear and never taps anything that needs your approval. Only one decision model is in use at a time.")
             }
         }
         .settingsPage()

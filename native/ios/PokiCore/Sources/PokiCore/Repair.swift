@@ -1,6 +1,6 @@
 import Foundation
 
-// Fixing a step on the way. A routine or a path stops at the first screen that differs, which is
+// Fixing a step on the way. A skill or a path stops at the first screen that differs, which is
 // what keeps it from tapping the wrong thing, and also what made it give up at a notification prompt
 // or a renamed button and hand the whole task back to the agent's model. A stopped step already says
 // what it wants (its target, and why), so one decision is enough to go on:
@@ -13,12 +13,12 @@ import Foundation
 //
 // The options are built here from the elements on screen, so the answer is always one of them. The
 // decision is trusted only above the policy's confidence and margin, a tap it leads to is held by the
-// same approval rules as any other, and a fix that worked is remembered in the routine so the next
+// same approval rules as any other, and a fix that worked is remembered in the skill so the next
 // run needs no decision at all.
 
 /// What a step wants, as the decider is told.
 struct StepWant {
-    /// The routine's name and description, or a path's goal.
+    /// The skill's name and description, or a path's goal.
     var goal: String
     var index: Int
     var total: Int
@@ -52,7 +52,7 @@ struct Fix: Equatable {
     var kind: Kind
     /// For the answer and the log: "closed Button \"Not Now\"".
     var text: String
-    /// Came from the routine's own memory of an earlier fix: no decision was asked for.
+    /// Came from the skill's own memory of an earlier fix: no decision was asked for.
     var remembered: Bool
     var ms: Int?
     var confidence: Double?
@@ -85,11 +85,16 @@ extension Computer {
     }
 
     /// The elements a fix may tap, the likeliest first in the choosing and in screen order in the
+    /// A text's words for telling a fix's candidates apart: lower case, three letters and up.
+    static func fixWords(_ text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 2 }
+    }
+
     /// asking: on screen, reachable, not a container, not a key, never a secure field.
     func fixCandidates(for want: StepWant, all: [Element], screen: ScreenSize, limit: Int) -> [FixCandidate] {
         let layout = Layout(all: all, screen: screen)
         let keyboards = all.filter { $0.type == "Keyboard" }
-        let wanted = Set(RoutineStore.words(want.target.label ?? want.target.identifier ?? "") + RoutineStore.words(want.intent ?? ""))
+        let wanted = Set(Self.fixWords(want.target.label ?? want.target.identifier ?? "") + Self.fixWords(want.intent ?? ""))
         let area = screen.width * screen.height
         let scored: [(Element, Double)] = listable(all, screen).compactMap { e in
             guard !e.fromPicture, !e.isSecure, !Self.containers.contains(e.type), !["Key", "Keyboard", "StatusBar", "ScrollBar", "PageIndicator"].contains(e.type) else { return nil }
@@ -98,7 +103,7 @@ extension Computer {
             if e.type == want.target.type { score += 3 }
             if Self.tappable.contains(e.type) { score += 1.5 }
             if Self.overlay(of: e, in: all) != nil { score += 4 }
-            let words = Set(RoutineStore.words(e.text))
+            let words = Set(Self.fixWords(e.text))
             if !wanted.isEmpty, !words.isEmpty { score += 5 * Double(wanted.intersection(words).count) / Double(wanted.count) }
             if want.target.hasPlace, hypot(e.frame.centre.x - want.target.x, e.frame.centre.y - want.target.y) < 80 { score += 2 }
             // Long texts are content, seldom controls.
@@ -194,7 +199,7 @@ extension Computer {
             if 1 - p >= policy.minConfidence { return .fails(ms: ms, p: p) }
             return .open("\(decider.name) was not sure (\(String(format: "%.2f", p)))")
         } catch {
-            return .open(error is DeadlineExceeded ? "no answer in time" : "\(error)")
+            return .open(DeciderError.safe(error).description)
         }
     }
 
@@ -209,7 +214,8 @@ extension Computer {
             answers = try await decider.decide(state: fixState(want, candidates: candidates, all: all, screen: screen), questions: fixQuestions(candidates),
                                                timeout: max(0.3, min(decider.patience ?? policy.timeout, until - now() - 0.5)))
         } catch {
-            return (.stop("\(decider.name) gave no decision (\(error is DeadlineExceeded ? "no answer in time" : "\(error)"))"), took(), 0)
+            // Only Poki's own sentence for the failure goes into the answer and the saved run log.
+            return (.stop("\(decider.name) gave no decision (\(DeciderError.safe(error).description))"), took(), 0)
         }
         guard let move = answers["move"], let choice = move.choice else { return (.stop("\(decider.name) gave no decision"), took(), 0) }
         let sure = move.confidence >= policy.minConfidence && move.margin >= policy.minMargin

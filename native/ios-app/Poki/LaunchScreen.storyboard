@@ -13,14 +13,17 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
+                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop.png" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
                                 <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                             </imageView>
-                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWordmark" translatesAutoresizingMaskIntoConstraints="NO" id="word">
-                                <rect key="frame" x="130.5" y="262.5" width="132" height="64"/>
+                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWordmark.png" translatesAutoresizingMaskIntoConstraints="NO" id="word">
+                                <rect key="frame" x="132.16" y="263.68" width="128.68" height="62.39"/>
                             </imageView>
-                            <imageView opaque="NO" tag="3" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBear" translatesAutoresizingMaskIntoConstraints="NO" id="bear">
-                                <rect key="frame" x="-48.5" y="517" width="497" height="329"/>
+                            <view opaque="NO" userInteractionEnabled="NO" translatesAutoresizingMaskIntoConstraints="NO" id="bearColumn">
+                                <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                            </view>
+                            <imageView opaque="NO" tag="3" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBear.png" translatesAutoresizingMaskIntoConstraints="NO" id="bear">
+                                <rect key="frame" x="-48" y="524.5" width="497" height="329.5"/>
                             </imageView>
                         </subviews>
                         <color key="backgroundColor" red="0.96078431372549022" green="0.96862745098039216" blue="0.98039215686274506" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
@@ -31,9 +34,15 @@
                             <constraint firstItem="backdrop" firstAttribute="trailing" secondItem="root" secondAttribute="trailing" id="br"/>
                             <constraint firstItem="word" firstAttribute="centerX" secondItem="root" secondAttribute="centerX" id="wx"/>
                             <constraint firstItem="word" firstAttribute="centerY" secondItem="root" secondAttribute="centerY" multiplier="0.6922" id="wy"/>
-                            <constraint firstItem="bear" firstAttribute="centerX" secondItem="root" secondAttribute="centerX" constant="4" id="px"/>
+                            <constraint firstItem="word" firstAttribute="height" secondItem="root" secondAttribute="height" multiplier="64:874" id="wh"/>
+                            <constraint firstItem="word" firstAttribute="width" secondItem="word" secondAttribute="height" multiplier="132:64" id="wa"/>
+                            <constraint firstItem="bearColumn" firstAttribute="left" secondItem="root" secondAttribute="left" id="cl"/>
+                            <constraint firstItem="bearColumn" firstAttribute="top" secondItem="root" secondAttribute="top" id="ct"/>
+                            <constraint firstItem="bearColumn" firstAttribute="bottom" secondItem="root" secondAttribute="bottom" id="cb"/>
+                            <constraint firstItem="bearColumn" firstAttribute="width" secondItem="root" secondAttribute="width" priority="750" id="cw"/>
+                            <constraint firstItem="bear" firstAttribute="centerX" secondItem="bearColumn" secondAttribute="centerX" constant="4" id="px"/>
                             <constraint firstItem="bear" firstAttribute="bottom" secondItem="root" secondAttribute="bottom" constant="2" id="pb"/>
-                            <constraint firstItem="bear" firstAttribute="width" secondItem="root" secondAttribute="width" multiplier="1.215311" constant="19.445" priority="750" id="pw"/>
+                            <constraint firstItem="bear" firstAttribute="width" secondItem="bearColumn" secondAttribute="width" multiplier="1.215311" constant="19.445" id="pw"/>
                             <constraint firstItem="bear" firstAttribute="height" secondItem="bear" secondAttribute="width" multiplier="0.66273" id="pa"/>
                             <constraint firstItem="bear" firstAttribute="height" relation="lessThanOrEqual" secondItem="root" secondAttribute="height" multiplier="0.485" id="ph"/>
                         </constraints>
@@ -44,8 +53,8 @@
         </scene>
     </scenes>
     <resources>
-        <image name="LaunchBackdrop" width="402" height="874"/>
-        <image name="LaunchBear" width="508" height="336.66665649414062"/>
-        <image name="LaunchWordmark" width="132" height="64"/>
+        <image name="LaunchBackdrop.png" width="402" height="874"/>
+        <image name="LaunchBear.png" width="508" height="336.66665649414062"/>
+        <image name="LaunchWordmark.png" width="132" height="64"/>
     </resources>
 </document>

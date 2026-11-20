@@ -85,7 +85,7 @@ struct MemoryView: View {
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Memory"))
+        .navigationTitle(AppLocalization.text("Memory Library"))
         .navigationBarTitleDisplayMode(.inline)
         .modifier(MemorySearch(query: $query, shown: apps.count > 8))
         .headerlessTop(library.items.isEmpty && page.editing != "")
@@ -117,7 +117,7 @@ struct MemoryView: View {
             case .failure(let error): library.message = error.localizedDescription
             }
         }
-        .confirmationDialog("Clear all routines and notes on this iPhone?", isPresented: $confirmClear, titleVisibility: .visible) {
+        .confirmationDialog("Clear all skills and notes on this iPhone?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear Memory", role: .destructive) { library.clearAll() }
         }
     }

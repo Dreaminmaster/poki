@@ -77,11 +77,7 @@ pub struct PhoneRow {
 
 #[tauri::command]
 pub async fn phones() -> R<Vec<PhoneRow>> {
-    let list = match device::Phone::list().await {
-        Ok(l) => l,
-        Err(poki_setup_core::Error::Device(m)) if m.contains("usbmuxd") => return Err(Failure { kind: "usbmuxd", message: m }),
-        Err(e) => return Err(e.into()),
-    };
+    let list = device::Phone::list().await?;
     let mut rows = vec![];
     for p in list {
         let (facts, error) = match device::info::read(&p).await {
