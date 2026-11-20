@@ -532,7 +532,7 @@ final class ChatModel {
         let answeredRequest = entries.first { $0.id == answeredID }
         let linkedTask: String?
         var countedScrollRequestID: UUID?
-        var countedScroll = MessageScrollTarget.parse(text).map(MessageScroll.init(target:))
+        var countedScroll = MessageScrollTarget.parse(text)?.messageCount.map(MessageScroll.init(target:))
         let continuation: String?
         if let resumedTask {
             linkedTask = resumedTask
@@ -544,7 +544,7 @@ final class ChatModel {
                 countedScroll = pendingCountedScroll.progress
                 countedScroll?.rereadAfterReply()
             } else {
-                countedScroll = MessageScrollTarget.parse(requestedText).map(MessageScroll.init(target:))
+                countedScroll = MessageScrollTarget.parse(requestedText)?.messageCount.map(MessageScroll.init(target:))
             }
             continuation = "The owner's latest message answers your question about this task: \(requestedText). Recheck the current screen before continuing. Verify the requested count before completing it."
         } else {
