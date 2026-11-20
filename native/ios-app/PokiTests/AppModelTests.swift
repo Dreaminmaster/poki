@@ -511,9 +511,8 @@ final class ApprovalDefaultTests: XCTestCase {
 @MainActor
 final class PasscodeTests: XCTestCase {
     /// After a restart iOS asks for the passcode before the first automation. The launcher says so
-    /// (code "passcode"); the agent reads a plain "starting" with the reason, and the Live Activity
-    /// asks the owner; the hint clears when the runner answers.
-    func testPasscodeWaitIsNamedAndClears() {
+    /// (code "passcode"); the tool waits for the owner, and the Live Activity asks them.
+    func testRunnerPasscodePromptReportsAuthorizationWaitUntilReady() {
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         model.loopback.simulate(.working(ms: 9))
         model.inProcessReadyForProbe()
@@ -522,8 +521,9 @@ final class PasscodeTests: XCTestCase {
         XCTAssertTrue(model.passcodeHint)
         let text = model.host.currentRunner.describe
         XCTAssertTrue(text.contains("passcode"), text)
-        XCTAssertTrue(text.contains("Call again"), text)
-        XCTAssertTrue(text.hasPrefix("starting"), text)
+        guard case .awaitingAutomationAuthorization = model.host.currentRunner else {
+            return XCTFail("The original tool cannot wait for the owner in state: \(text)")
+        }
         model.runnerChanged(RunnerStatus(state: "running"))
         XCTAssertFalse(model.passcodeHint)
         XCTAssertTrue(model.host.currentRunner.isRunning)

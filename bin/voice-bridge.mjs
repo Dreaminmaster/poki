@@ -45,6 +45,13 @@ const model = process.env.POKI_VOICE_MODEL || 'gpt-live-1.1';
 const usesLive = model.startsWith('gpt-live-');
 // The phone says Poki's interface language (?language=zh-Hans): the one the session speaks from its first sentence.
 const languageName = code => { try { return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(code ?? '') ? new Intl.DisplayNames(['en'], { type: 'language' }).of(code) : 'English'; } catch { return 'English'; } };
+const lockCheck = [
+  "Call the appropriate phone tool for the owner's task even if the iPhone is locked.",
+  "Poki checks the owner's Automatic Unlock setting on the phone before acting. Continue the original task when the phone unlocks.",
+  "Ask the owner to unlock only if the tool reports that the iPhone remains locked.",
+  "If iOS asks the owner to allow UI automation, call it automation authorization and tell them to approve it in the system prompt on the phone.",
+  "Never ask for or type the iPhone passcode yourself.",
+].join(' ');
 // The same text as the phone's own (VoiceDirect.swift); --mac-tools leaves out the phone's tools.
 const instructions = (language, live = false) => `# Role
 You are Poki, a voice assistant that operates the user's iPhone with tools.
@@ -61,6 +68,7 @@ You are Poki, a voice assistant that operates the user's iPhone with tools.
 
 # Tools
 - When a tool can answer or do what the user asks, call it at once. Never guess facts about the phone.${macTools ? '' : `
+- ${lockCheck}
 - ${live ? 'A description of the current screenshot may be part of the tool result' : 'A screenshot of the screen follows each look, do and open_app answer as an image'}: use it with the numbered elements to say what is on the screen. Asked what is on the screen, name the app and its main content in one sentence, without listing buttons.
 - Open an app with open_app and its name as the user said it (微信, WeChat, 设置, Settings); Poki knows its bundle id. For a page of Settings (Bluetooth, Wi-Fi, Battery and the others open_app lists), give the page too, and Settings opens on it.
 - Search the Home Screen for an app only when open_app answers that it does not know the app or the app is not installed: go home ({button: "home"}), swipe down on the Home Screen, type the app's name and tap it.`}
@@ -94,7 +102,12 @@ const macVoiceTools = [
 ];
 const voiceTools = macTools ? macVoiceTools : phoneTools;
 const localTools = voiceTools.filter(tool => tool.local).map(tool => tool.name);
-const toolDefinitions = voiceTools.map(({ name, description, parameters }) => ({ type: 'function', name, description: description + silent, parameters }));
+const toolDefinitions = voiceTools.map(({ name, description, parameters }) => ({
+  type: 'function',
+  name,
+  description: description + (macTools || name === 'get_ios_version' ? '' : ' ' + lockCheck) + silent,
+  parameters,
+}));
 const liveBackend = 'gpt-6-luna';
 const cancelCurrentTask = 'cancel_current_task';
 const cancellationRule = `A standalone stop such as “停” stops playback and cancels the current phone task. Call ${cancelCurrentTask} immediately as the only tool for a cancellation request such as “停” or “先别发了”. Wait for a new request before speaking or using phone tools again. A request only to quiet the voice pauses playback. For “在备忘录输入停” or “把停字发过去”, use the normal phone tools to enter or send the requested text.

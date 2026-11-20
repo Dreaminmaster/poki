@@ -1405,4 +1405,18 @@ extension VoiceModelTests {
             XCTAssertTrue(instructions.contains("Speak \(name), the language of Poki's interface, from your first sentence on."), language)
         }
     }
+
+    func testLiveVoiceLetsThePhoneToolsHandleAutomaticUnlock() throws {
+        let session = VoiceDirect.session
+        let instructions = try XCTUnwrap(session["instructions"] as? String)
+        XCTAssertTrue(instructions.contains("even if the iPhone is locked"))
+        XCTAssertTrue(instructions.contains("only if the tool reports that the iPhone remains locked"))
+        let tools = try XCTUnwrap(session["tools"] as? [[String: Any]])
+        for name in ["look", "do", "open_app"] {
+            let tool = try XCTUnwrap(tools.first { $0["name"] as? String == name })
+            let description = try XCTUnwrap(tool["description"] as? String)
+            XCTAssertTrue(description.contains("Automatic Unlock setting"), name)
+            XCTAssertFalse(description.contains("takes nothing but buttons"), name)
+        }
+    }
 }

@@ -124,6 +124,7 @@ enum VoiceDirect {
 
     # Tools
     - When a tool can answer or do what the user asks, call it at once. Never guess facts about the phone.
+    - \(lockCheck)
     - \(live ? "A description of the current screenshot may be part of the tool result" : "A screenshot of the screen follows each look, do and open_app answer as an image"): use it with the numbered elements to say what is on the screen. Asked what is on the screen, name the app and its main content in one sentence, without listing buttons.
     - Open an app with open_app and its name as the user said it (微信, WeChat, 设置, Settings); Poki knows its bundle id. For a page of Settings (Bluetooth, Wi-Fi, Battery and the others open_app lists), give the page too, and Settings opens on it.
     - Search the Home Screen for an app only when open_app answers that it does not know the app or the app is not installed: go home ({button: "home"}), swipe down on the Home Screen, type the app's name and tap it.
@@ -140,6 +141,12 @@ enum VoiceDirect {
 
     /// Said in every tool's description: the instructions alone left a spoken preamble before some calls.
     private static let silent = " No preamble: call it without saying anything first."
+    private static let lockCheck = "Call the appropriate phone tool for the owner's task even if the iPhone is locked. "
+        + "Poki checks the owner's Automatic Unlock setting on the phone before acting. Continue the original task when the phone unlocks. "
+        + "Ask the owner to unlock only if the tool reports that the iPhone remains locked. "
+        + "If iOS asks the owner to allow UI automation, call it automation authorization and tell them to approve it in the system prompt on the phone. "
+        + "Never ask for or type the iPhone passcode yourself."
+    private static let phoneToolGuidance = " " + lockCheck + silent
 
     private static let empty: [String: Any] = ["type": "object", "properties": [String: Any](), "additionalProperties": false]
     static let cancelCurrentTask = "cancel_current_task"
@@ -149,11 +156,11 @@ enum VoiceDirect {
         """
     private static let tools: [[String: Any]] = [
         ["type": "function", "name": "get_ios_version", "description": "Read the iPhone model and its iOS version. Changes nothing on the phone." + silent, "parameters": empty],
-        ["type": "function", "name": "look", "description": "Read the iPhone screen now: the app in front, its numbered elements (role, label, frame in points) and a screenshot." + silent, "parameters": empty],
-        ["type": "function", "name": "open_app", "description": "Open an app on this iPhone by its name, as the user says it in any language (微信, WeChat, 设置, Settings), then read the screen. With page, Settings opens straight on that page." + silent,
+        ["type": "function", "name": "look", "description": "Read the iPhone screen now: the app in front, its numbered elements (role, label, frame in points) and a screenshot." + phoneToolGuidance, "parameters": empty],
+        ["type": "function", "name": "open_app", "description": "Open an app on this iPhone by its name, as the user says it in any language (微信, WeChat, 设置, Settings), then read the screen. With page, Settings opens straight on that page." + phoneToolGuidance,
          "parameters": ["type": "object", "properties": ["app": ["type": "string"], "page": ["type": "string", "enum": VoiceApps.settingsPages.map(\.key).sorted()]],
                         "required": ["app"], "additionalProperties": false]],
-        ["type": "function", "name": "do", "description": doDescription + silent,
+        ["type": "function", "name": "do", "description": doDescription + phoneToolGuidance,
          "parameters": ["type": "object", "properties": ["actions": ["type": "array", "items": ["type": "object"]]], "required": ["actions"], "additionalProperties": false]],
     ]
 

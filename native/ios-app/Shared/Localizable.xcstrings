@@ -37663,6 +37663,166 @@
         }
       }
     },
+    "After restarting your iPhone, unlock it once yourself before Poki can unlock it automatically." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 重启后，请先手动解锁一次，Poki 才能自动解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 重新啟動後，請先手動解鎖一次，Poki 才能自動解鎖。"
+          }
+        }
+      }
+    },
+    "Automatic Unlock" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动解锁"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動解鎖"
+          }
+        }
+      }
+    },
+    "Could Not Save Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法保存密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存密碼"
+          }
+        }
+      }
+    },
+    "Delete Saved Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除已存密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除已存密碼"
+          }
+        }
+      }
+    },
+    "Enter your 4- or 6-digit iPhone passcode. Poki uses it only on the lock screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入 4 位或 6 位 iPhone 锁屏密码。Poki 只在锁定屏幕上使用它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入 4 位或 6 位 iPhone 鎖定畫面密碼。Poki 只在鎖定畫面上使用它。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t delete the saved passcode. Try again to turn off Automatic Unlock." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能删除已存的密码。请重试以关闭自动解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能刪除已存的密碼。請重試以關閉自動解鎖。"
+          }
+        }
+      }
+    },
+    "Poki could not confirm the unlock. Unlock your iPhone manually and check your saved passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能确认解锁。请手动解锁 iPhone，并检查已存的密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能確認解鎖。請手動解鎖 iPhone，並檢查已存的密碼。"
+          }
+        }
+      }
+    },
+    "Poki stores your passcode on this iPhone to unlock it for tasks you start in Poki. Turning this off deletes the passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 将密码保存在这台 iPhone 上，用于在你发起任务时解锁。关闭后会删除密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 將密碼儲存在這部 iPhone 上，用於在你發起任務時解鎖。關閉後會刪除密碼。"
+          }
+        }
+      }
+    },
+    "Update Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新密碼"
+          }
+        }
+      }
+    },
+    "iPhone Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 锁屏密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 鎖定畫面密碼"
+          }
+        }
+      }
+    },
     "Outfits": {
       "extractionState": "manual",
       "localizations": {

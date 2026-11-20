@@ -220,6 +220,8 @@ final class AppModel {
     private var launcherConfig: LauncherConfig?
 
     let host = AppCoreHost()
+    let autoUnlock = AutoUnlock()
+    var supportsAutoUnlock: Bool { UIDevice.current.userInterfaceIdiom == .phone }
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
@@ -387,6 +389,12 @@ final class AppModel {
         host.onConsent { [weak self] client, callback, connector in
             await self?.askToConnect(client: client, callback: callback, connector: connector) ?? false
         }
+        if transport == nil, supportsAutoUnlock {
+            host.onAutoUnlock { [weak self] timeout in
+                guard let self, await self.canAutoUnlock else { return false }
+                return await self.unlockForLocalTask(timeout: timeout)
+            }
+        }
         // PokiCore asks for a restart after two silent requests in a row. A slow gesture can be one of
         // them while the runner is fine, so the runner is asked first; only a runner that does not
         // answer is started again (each restart costs seconds and flashes the automation banner).
@@ -486,6 +494,15 @@ final class AppModel {
             setup.save()
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
+    }
+
+    private var canAutoUnlock: Bool {
+        sessionOn && !ownerPaused && ChatModel.delegatedBusy == nil &&
+            (automationPath == .runner || inProcessSession == .open)
+    }
+
+    private func unlockForLocalTask(timeout: Double) async -> Bool {
+        await autoUnlock.unlock(using: automation, opensSession: automationPath == .runner, timeout: timeout)
     }
 
     /// The in-process session as prepare last answered it in this process (ESP-152).
@@ -1243,7 +1260,7 @@ final class AppModel {
     }
 
     func stopSession() {
-        let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode
+        let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode || runner.code == "passcode"
         cancelPasscodeHeadsUp()
         sessionStartTask?.cancel()
         pendingPrepareForTask = false
@@ -1382,8 +1399,12 @@ final class AppModel {
         // The runner is asked to shut itself down (it ends its test and exits) and the launcher's
         // session is closed; the launcher also ends the process through the developer services.
         if !Self.onSimulator { Task { await RunnerProbe.shutdown() } }
+        let awaitingAuthorization = runner.code == "passcode"
         launcher.stop()
         standBy(reason: reason)
+        if awaitingAuthorization {
+            host.update(runner: .failed("Poki was stopped while waiting for automation authorization", fix: nil))
+        }
         confirmRunnerEnded()
     }
 
@@ -1678,7 +1699,7 @@ final class AppModel {
             return inProcessSession.agentState
         }
         if status.code == "passcode" {
-            return .starting("the phone is asking the owner for the passcode (iOS does this once before the first automation after a restart or a force quit); the Live Activity tells the owner; the runner starts the moment it is entered. Call again in about 10 s; nothing is lost and no action is needed from you")
+            return .awaitingAutomationAuthorization("iOS is waiting for the owner to enter the passcode in the system prompt on the iPhone. The Live Activity asks them. Continue the task once automation is ready")
         }
         let preLaunch = ["connecting", "pairing", "tunnel", "waiting_network", "standby", "idle"].contains(status.state)
         if preLaunch, !loopback.isWorking, loopback.state != .checking || status.state == "waiting_network" {
@@ -1732,8 +1753,7 @@ final class AppModel {
         if status.state != "launching" { launchingSince = nil; passcodeHint = inProcessPasscode }
         if status.code == "passcode", runner.code != "passcode" {
             // iOS is asking for the passcode before the first UI automation after a restart. The
-            // launcher waits minutes for it; the person is asked on the Live Activity, and the agent
-            // reads a plain "starting" meanwhile (coreState).
+            // launcher waits for it, and the Live Activity asks the owner.
             passcodeHint = true
             log.add("runner", "the runner has not answered for 12 s: asking the owner for the passcode on the Live Activity")
             activity.update { $0.phase = .handoff; $0.handoff = .init(id: Self.runnerPasscodeHandoff, kind: .runnerPasscode, text: nil, app: nil, since: Date()) }
