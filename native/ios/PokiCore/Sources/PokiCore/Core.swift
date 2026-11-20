@@ -584,6 +584,12 @@ public final class PokiCore: @unchecked Sendable {
         public let layout: String
     }
 
+    /// The elements shown to the model in a full screen read, keyed by their displayed references.
+    public struct NumberedScreen: Sendable {
+        public let bundleID: String
+        public let elements: [Int: Element]
+    }
+
     /// A tool's answer for a caller in the app itself (the chat's model loop), without MCP framing.
     public struct ToolAnswer: Sendable {
         public let text: String
@@ -597,10 +603,12 @@ public final class PokiCore: @unchecked Sendable {
         /// Handoff, a locked phone, or runner startup requires waiting rather than model progress.
         public let waitingForOwner: Bool
         public let automationAuthorizationDeclined: Bool
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false) {
+        public let numberedScreen: NumberedScreen?
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, numberedScreen: NumberedScreen? = nil) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
             self.automationAuthorizationDeclined = automationAuthorizationDeclined
+            self.numberedScreen = numberedScreen
         }
     }
 
@@ -614,7 +622,7 @@ public final class PokiCore: @unchecked Sendable {
         let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
-                          automationAuthorizationDeclined: output.automationAuthorizationDeclined)
+                          automationAuthorizationDeclined: output.automationAuthorizationDeclined, numberedScreen: output.numberedScreen)
     }
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the

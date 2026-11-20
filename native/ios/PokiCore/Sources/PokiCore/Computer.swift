@@ -15,6 +15,7 @@ public struct ToolResult: Sendable {
     var waitingForOwner = false
     var automationAuthorizationDeclined = false
     var screenEvidence: ScreenEvidence? = nil
+    var numberedScreen: PokiCore.NumberedScreen? = nil
 }
 
 struct ScreenEvidence: OptionSet, Sendable {
@@ -481,10 +482,17 @@ final class Computer: @unchecked Sendable {
         var evidence: ScreenEvidence = []
         if treeRead || pictureOnly { evidence.insert(.references) }
         if reading.png != nil, jpeg != nil, size != nil { evidence.insert(.screenshot) }
+        let numberedScreen: PokiCore.NumberedScreen?
+        if full, evidence.contains(.references), let bundleID = reading.foreground?.bundleID {
+            let elements = Dictionary(uniqueKeysWithValues: shown.indices.prefix(1000).map { (assigned[$0]!, shown[$0]) })
+            numberedScreen = PokiCore.NumberedScreen(bundleID: bundleID, elements: elements)
+        } else {
+            numberedScreen = nil
+        }
         // A screenshot helps the caller recover from a failed action without hiding the failure.
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
                           screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
-                          waitingForOwner: handoffWaiting, screenEvidence: evidence)
+                          waitingForOwner: handoffWaiting, screenEvidence: evidence, numberedScreen: numberedScreen)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner

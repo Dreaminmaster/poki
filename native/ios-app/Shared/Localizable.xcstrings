@@ -1,6 +1,210 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "I confirmed %lld of %lld older messages." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我已确认 %1$lld 条较早的消息，目标是 %2$lld 条。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我已確認 %1$lld 則較早的訊息，目標是 %2$lld 則。"
+          }
+        }
+      }
+    },
+    "I couldn't match the messages across the last scroll." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最后一次滚动前后的消息无法对上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最後一次捲動前後的訊息無法對上。"
+          }
+        }
+      }
+    },
+    "I couldn't read the messages after the scroll." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动后我没能读到消息。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "捲動後我沒能讀到訊息。"
+          }
+        }
+      }
+    },
+    "I couldn't verify a starting message." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我没能确认起始消息。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我沒能確認起始訊息。"
+          }
+        }
+      }
+    },
+    "I stopped after %lld steps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "执行 %lld 步后我停下了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行 %lld 步後我停下了。"
+          }
+        }
+      }
+    },
+    "The app or pane changed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用或分屏窗格变了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 或分割畫面的窗格變了。"
+          }
+        }
+      }
+    },
+    "The last confirmed message is at the top of the checked screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最后确认的消息在刚检查的画面顶端。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最後確認的訊息在剛檢查的畫面頂端。"
+          }
+        }
+      }
+    },
+    "The last confirmed message is “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最后确认的消息是「%@」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最後確認的訊息是「%@」。"
+          }
+        }
+      }
+    },
+    "The list stopped moving." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "消息列表不再移动。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訊息列表不再移動。"
+          }
+        }
+      }
+    },
+    "The scroll action failed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动失败了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "捲動失敗了。"
+          }
+        }
+      }
+    },
+    "The task ended before I could verify the requested count." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务在确认到目标条数前结束了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務在確認到目標則數前結束了。"
+          }
+        }
+      }
+    },
+    "The task was stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务已停止。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務已停止。"
+          }
+        }
+      }
+    },
     "Also uses" : {
       "localizations" : {
         "en" : {

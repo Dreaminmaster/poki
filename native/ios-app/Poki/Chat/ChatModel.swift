@@ -148,6 +148,15 @@ final class ChatModel {
     private var toolCalls = 0
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
+    private var messageScroll: MessageScroll?
+    private var messageScreen: PokiCore.NumberedScreen?
+    private var messagePane: String?
+
+    private var reportsMessageScroll: Bool {
+        guard let messageScroll else { return false }
+        return messageScroll.started || messageScroll.needsCount || taskResult != nil ||
+            (toolRoute == .app && planID != nil)
+    }
     /// The task under way as the owner asked it.
     private var taskText = ""
     private var client: ModelClient?
@@ -641,7 +650,7 @@ final class ChatModel {
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(prepared.you.id)
                 self.awaitingModel = false
-                self.add(.poki(text))
+                if !self.reportsMessageScroll { self.add(.poki(text)) }
             }
             if let splitSession {
                 await app.finishSplitViewTask(localSession: splitSession, authorizationDeclined: outcome == .authorizationDeclined) {
@@ -788,6 +797,9 @@ final class ChatModel {
 
     private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) async {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
+        messageScroll = MessageScroll.requestedTarget(in: taskRequest).map(MessageScroll.init(target:))
+        messageScreen = nil
+        messagePane = nil
         taskCalls.removeAll()
         // Split View needs both apps before the first model tool runs.
         if splitViewSession != nil { app.prepareForTask() }
@@ -859,26 +871,32 @@ final class ChatModel {
 
     private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID) {
         let stopped = outcome == .stopped || outcome == .authorizationDeclined
-        finishPlan(stopped: stopped)
         // The turn is over: the phone goes back to the app the task began in (Poki's chat, where the
         // reply is), or stays where it is and the reply goes out as a notification that can be answered
         // there (Advanced › When a Task Ends).
         var reply: String?
-        switch outcome {
-        case .done:
-            markDelivered(youID)
-            reply = entries.reversed().lazy.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }.first
-        case .stopped, .authorizationDeclined: add(.poki(AppLocalization.text(LocalizedStringResource("Stopped."))))
-        case .overTurns:
-            reply = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))
-            add(.poki(reply ?? ""))
-        case .stuck:
-            reply = stuckWords()
-            add(.poki(reply ?? ""))
-        case .failed(let words):
-            reply = words
-            add(.note(.problem(words)))
+        if let counted = finishMessageScroll(outcome) {
+            if outcome == .done { markDelivered(youID) }
+            reply = counted
+            add(.poki(counted))
+        } else {
+            switch outcome {
+            case .done:
+                markDelivered(youID)
+                reply = entries.reversed().lazy.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }.first
+            case .stopped, .authorizationDeclined: add(.poki(AppLocalization.text(LocalizedStringResource("Stopped."))))
+            case .overTurns:
+                reply = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))
+                add(.poki(reply ?? ""))
+            case .stuck:
+                reply = stuckWords()
+                add(.poki(reply ?? ""))
+            case .failed(let words):
+                reply = words
+                add(.note(.problem(words)))
+            }
         }
+        finishPlan(stopped: stopped)
         if stopped {
             app.chatTaskStopped()
             if !usesSplitView { app.finishTask(switching: outcome != .authorizationDeclined) }
@@ -888,6 +906,23 @@ final class ChatModel {
             app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView,
                               result: taskResult.flatMap { $0.success ? $0.summary : nil }, task: taskText)
         }
+    }
+
+    private func finishMessageScroll(_ outcome: PiLoop.Outcome) -> String? {
+        guard reportsMessageScroll, let messageScroll else { return nil }
+        if let taskResult { return taskResult.summary }
+        let verified = outcome == .done && messageScroll.verifiedTarget(in: messageScreen, pane: messagePane)
+        let reason: String?
+        switch outcome {
+        case .done: reason = nil
+        case .stopped, .authorizationDeclined: reason = AppLocalization.text(LocalizedStringResource("The task was stopped."))
+        case .overTurns: reason = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps."))
+        case .stuck: reason = stuckWords()
+        case .failed(let words): reason = words
+        }
+        let result = TaskResult(success: verified, summary: messageScroll.summary(success: verified, reason: reason))
+        recordTaskResult(result)
+        return result.summary
     }
 
     /// Where the task is stuck: the app it was working in, when it is one Poki can name.
@@ -918,7 +953,8 @@ final class ChatModel {
         runToken += 1
         running = false
         awaitingModel = false
-        guard phoneStepUnderWay else { add(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))); return }
+        let stoppedText = finishMessageScroll(.stopped) ?? AppLocalization.text(LocalizedStringResource("Stopped."))
+        guard phoneStepUnderWay else { add(.poki(stoppedText)); return }
         let stopping = ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopping…"))))
         entries.append(stopping)
         let session = sessionID
@@ -926,13 +962,12 @@ final class ChatModel {
         Task { [weak self] in
             await stopped?.value
             _ = await self?.app.phoneSettles(within: 30)
-            let text = AppLocalization.text(LocalizedStringResource("Stopped."))
             guard let self, self.sessionID == session else {
-                self?.store.finishStopping(stopping.id, in: session, text: text)
+                self?.store.finishStopping(stopping.id, in: session, text: stoppedText)
                 return
             }
             guard let i = self.entries.firstIndex(where: { $0.id == stopping.id }) else { return }
-            self.entries[i].kind = .poki(text)
+            self.entries[i].kind = .poki(stoppedText)
             self.persist()
         }
     }
@@ -951,12 +986,17 @@ final class ChatModel {
             } catch {
                 client.forgetUnansweredQuestion()
                 if stopped { return }
-                add(.note(.problem(error.localizedDescription)))
+                if let counted = finishMessageScroll(.failed(error.localizedDescription)) {
+                    add(.poki(counted))
+                    finishPlan()
+                } else {
+                    add(.note(.problem(error.localizedDescription)))
+                }
                 return
             }
             if stopped { client.forgetUnansweredQuestion(); return }
             markDelivered(youID)
-            for text in turn.texts { add(.poki(text)) }
+            if !reportsMessageScroll { for text in turn.texts { add(.poki(text)) } }
             switch turn.ending {
             case .tools:
                 var authorizationDeclined = false
@@ -980,21 +1020,27 @@ final class ChatModel {
             case .again:
                 continue
             case .refused:
+                let reason = AppLocalization.text(LocalizedStringResource("The model declined this request."))
+                let words = finishMessageScroll(.failed(reason)) ?? reason
                 finishPlan()
-                add(.poki(AppLocalization.text(LocalizedStringResource("The model declined this request."))))
+                add(.poki(words))
                 return
             case .cutOff:
+                let reason = AppLocalization.text(LocalizedStringResource("The answer was cut off."))
+                let counted = finishMessageScroll(.failed(reason))
                 finishPlan()
-                add(.note(.problem(AppLocalization.text(LocalizedStringResource("The answer was cut off.")))))
+                if let counted { add(.poki(counted)) } else { add(.note(.problem(reason))) }
                 return
             case .done:
                 // A reply without tools ends the turn, as a chat does: the model may be asking the owner something.
+                if let counted = finishMessageScroll(.done) { add(.poki(counted)) }
                 finishPlan()
                 return
             }
         }
+        let counted = finishMessageScroll(.overTurns)
         finishPlan()
-        add(.poki(AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))))
+        add(.poki(counted ?? AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))))
     }
 
     /// The phone's tools go to PokiCore; the harness's two are answered here, as task-runner.mjs answers them.
@@ -1048,7 +1094,7 @@ final class ChatModel {
                 if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["path"] != nil || $0["button"] != nil }) {
                     return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run skills. Finish with finish_task.")
                 }
-            case "report_plan", "finish_task", "status", "screen_history": break
+            case "report_plan", "finish_task", "count_messages", "status", "screen_history": break
             default:
                 return splitViewRefusal("Use the two visible apps with look and do for this task.")
             }
@@ -1062,14 +1108,30 @@ final class ChatModel {
             showPlan(steps, current: current, title: title, to: to)
             if let title { nameTask(title) }
             return PokiCore.ToolAnswer(text: Harness.planPublished, jpeg: nil, isError: false)
+        case "count_messages":
+            guard let target = args["target"] as? Int, target > 0, let refs = args["refs"] as? [Int],
+                  messageScroll == nil || messageScroll?.target == target else {
+                return PokiCore.ToolAnswer(text: "Use the owner's requested target and the current message refs.", jpeg: nil, isError: true)
+            }
+            if let refusal = selectRoute(.app) { return refusal }
+            var scroll = messageScroll ?? MessageScroll(target: target)
+            let answer = scroll.count(refs, in: messageScreen, pane: messagePane)
+            messageScroll = scroll
+            return answer
         case "finish_task":
-            guard let result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
+            guard var result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
                 return PokiCore.ToolAnswer(text: Harness.invalidResult, jpeg: nil, isError: true)
             }
-            taskResult = result
-            updatePlan { steps in
-                for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting { steps[i].state = result.success ? .done : .failed }
+            if var scroll = messageScroll, toolRoute != .web {
+                if result.success && !scroll.verifiedTarget(in: messageScreen, pane: messagePane) {
+                    let answer = scroll.rejectCompletion()
+                    messageScroll = scroll
+                    return answer
+                }
+                result = TaskResult(success: result.success, summary: scroll.summary(
+                    success: result.success, reason: scroll.observedStopReason ?? result.summary))
             }
+            recordTaskResult(result)
             // An outside agent reads the reply, not the card: its tasks answer in words.
             let card = result.success && kind == .poki ? result.card : nil
             if let card { showCard(card) }
@@ -1083,15 +1145,31 @@ final class ChatModel {
             return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
+            let actions = args["actions"] as? [[String: Any]] ?? []
+            let scrolls = actions.filter { $0["drag"] != nil || $0["swipe"] != nil || $0["scroll_to"] != nil }
+            if call.name == "do", let messageScroll, messageScroll.started, !actions.isEmpty || args["finish"] as? Bool == true {
+                if messageScroll.reachedTarget || messageScroll.needsCount { return messageScroll.progress(error: true) }
+                let skipsReads = actions.contains { $0["scroll_to"] != nil || $0["run"] != nil || $0["path"] != nil }
+                if actions.count > 1 || skipsReads || args["finish"] as? Bool == true {
+                    return PokiCore.ToolAnswer(text: "Send one scroll at a time and verify the next screen before continuing.", jpeg: nil, isError: true)
+                }
+            }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             let taskToken = runToken
             let response = await app.runTool(call.name, arguments: call.arguments, localSession: splitViewSession, expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)")
-            guard taskToken == runToken, usesSplitView else { return response }
+            guard taskToken == runToken else { return response }
+            messageScreen = response.isError || response.waitingForOwner ? nil : response.numberedScreen
+            messagePane = response.splitView?.side ?? lastSplitViewSide
+            if call.name == "do", !scrolls.isEmpty || (messageScroll?.started == true && !actions.isEmpty) {
+                messageScroll?.actionTookPlace(error: response.isError)
+            }
+            guard usesSplitView else { return response }
             let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&
                 response.splitView.map { $0.layout != lastSplitViewLayout } == true
             if let previous = lastSplitViewSide, response.splitViewNeedsRead || changedLayout {
                 hasSplitViewRead = false
+                messageScreen = nil
                 let side = (args["pane"] as? String) ?? previous
                 return await recoverSplitView(side: side, token: taskToken,
                                               layoutSeen: changedLayout,
@@ -1104,6 +1182,15 @@ final class ChatModel {
         default:
             // A note Poki keeps remembers this conversation: the Memory page links back to it.
             return await app.runTool(call.name, arguments: call.arguments, conversation: call.name == "skills" || call.name == "routines" ? sessionID : nil)
+        }
+    }
+
+    private func recordTaskResult(_ result: TaskResult) {
+        taskResult = result
+        updatePlan { steps in
+            for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting {
+                steps[i].state = result.success ? .done : .failed
+            }
         }
     }
 
@@ -1590,6 +1677,12 @@ struct TaskResult: Decodable, Equatable {
     var cardProblem: String?
 
     private enum CodingKeys: String, CodingKey { case success, summary, details, answer, card }
+
+    init(success: Bool, summary: String) {
+        self.success = success
+        self.summary = summary
+        details = []
+    }
 
     /// success and summary are required, as task-runner.mjs requires them; details, answer and card are
     /// kept when they are well formed. A card that is not loses only itself, never the result.
