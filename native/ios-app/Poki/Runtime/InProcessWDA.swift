@@ -54,11 +54,14 @@ enum InProcessSession: Equatable {
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:
-            return .starting("waiting for the owner to enter the iPhone passcode on the phone: iOS asks for it before it allows automation, after Poki restarts and 8 hours after the last time. Only the owner can do this; the Live Activity asks them. Call again in about 10 s")
+            return .awaitingAutomationAuthorization("waiting for the owner to enter the iPhone passcode on the phone: iOS asks for it before it allows automation, after Poki restarts and 8 hours after the last time. Only the owner can do this; the Live Activity asks them. Call again in about 10 s")
         case .passcodeMissed:
-            return .failed("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
+            return .automationAuthorizationDeclined("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
                            fix: "Turn Poki off and on, then enter the iPhone passcode when iOS asks for it to allow automation")
         case .failed(let code, let detail):
+            if code == "passcode_declined" {
+                return .automationAuthorizationDeclined(detail, fix: "Turn Poki off and on to ask again")
+            }
             if code == "session_unreadable" {
                 return .failed("the automation session opened but could not read the screen (\(detail)). Nothing was sent, and that session was closed; the next call opens a new one",
                                fix: "Try the step again. If it keeps failing, turn Poki off and on")
@@ -194,7 +197,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             "GET /wda/locked": { [unowned self] _, _ in .bool(self.native.screenLocked()) },
             "GET /wda/activeAppInfo": { [unowned self] _, _ in
                 let app = self.native.frontApp()
-                return ["bundleId": .string(app["bundleId"] as? String ?? ""), "name": .string(app["name"] as? String ?? ""), "pid": .number(Double(app["pid"] as? Int ?? 0))]
+                var info: [String: JSON] = ["bundleId": .string(app["bundleId"] as? String ?? ""), "name": .string(app["name"] as? String ?? ""), "pid": .number(Double(app["pid"] as? Int ?? 0))]
+                if let side = app["pokiPane"] as? String { info["pokiPane"] = .string(side) }
+                return .object(info)
             },
             "GET /source": { [unowned self] _, _ in
                 var code: NSString?
@@ -320,14 +325,28 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         if let session, session != "inprocess-\(native.generation())", key != "DELETE /session" {
             return refused(404, "invalid session id", "the automation session \(session) has ended (now generation \(native.generation()))")
         }
-        if native.hasSelectedPane, ["POST /wda/homescreen", "POST /wda/apps/launch", "POST /wda/apps/activate", "POST /wda/apps/terminate"].contains(key) {
+        if native.hasSelectedPane, ["POST /wda/homescreen", "POST /wda/apps/launch", "POST /wda/apps/activate", "POST /wda/apps/terminate"].contains(key),
+           !(key == "POST /wda/apps/activate" && native.hasDuoCompanion) {
             return refused(400, "invalid argument", "this would leave Split View; choose look {pane: \"auto\"} first to return to normal control")
+        }
+        if key == "POST /wda/homescreen", native.hasDuoCompanion {
+            return refused(400, "invalid argument", "not sent: Home would hide a Split View app. Keep Poki visible and ask the owner to open the task's app beside it.")
         }
         do {
             if key == "GET /screenshot" {
                 var code: NSString?
-                guard let png = native.screenshot(&code, refreshViewport: refreshViewport) else { throw Refusal("unable to capture screen", "no screenshot: \(code ?? "unknown")") }
-                return (200, (["value": .string(png.base64EncodedString())] as JSON).data())
+                var observation: NSDictionary?
+                guard let png = native.screenshot(&code, refreshViewport: refreshViewport, observation: &observation) else {
+                    throw Refusal("unable to capture screen", "no screenshot: \(code ?? "unknown")")
+                }
+                let image = JSON.string(png.base64EncodedString())
+                let value: JSON
+                if let companion = observation as? [String: String] {
+                    value = ["image": image, "companion": .object(companion.mapValues(JSON.string))]
+                } else {
+                    value = image
+                }
+                return (200, (["value": value] as JSON).data())
             }
             guard let route else { return refused(404, "unknown command", "not answered in-process: \(key)") }
             return (200, (["value": try route(body, element)] as JSON).data())

@@ -62,13 +62,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 使用面容 ID 解锁屏幕历史，确保只有你能打开。"
+            "value" : "Poki 使用面容 ID 解锁屏幕记录，确保只有你能打开。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 使用 Face ID 解鎖螢幕歷史，確保只有你能打開。"
+            "value" : "Poki 使用 Face ID 解鎖螢幕記錄，確保只有你能打開。"
           }
         }
       }

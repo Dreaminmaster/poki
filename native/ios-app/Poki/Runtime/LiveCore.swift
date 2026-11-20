@@ -57,11 +57,12 @@ final class LiveCore: CoreSession {
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
     /// `conversation`: the chat a `skills` call comes from, kept with a note as where it was heard.
-    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> PokiCore.ToolAnswer {
-        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation)
+    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> PokiCore.ToolAnswer {
+        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation, localTask: localTask)
     }
     func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
     func prepareWorkspace(session: String) async -> Bool { await core.prepareWorkspace(session: session) }
+    func discardWorkspace(session: String) async { await core.discardWorkspace(session: session) }
     func clearWorkspacePaneForSetup(session: String) async -> Bool {
         await core.clearWorkspacePaneForSetup(session: session)
     }

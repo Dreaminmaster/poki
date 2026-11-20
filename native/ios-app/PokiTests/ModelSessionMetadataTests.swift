@@ -1,5 +1,6 @@
 import XCTest
 import PiSwiftAI
+import PokiCore
 @testable import Poki
 
 /// Provider request metadata follows the saved conversation, including auxiliary model calls.
@@ -134,6 +135,101 @@ final class ModelSessionMetadataTests: XCTestCase {
         XCTAssertEqual(title, "Test conversation")
         XCTAssertEqual(server.requestHeaders.first?["x-opencode-session"], chatID)
         XCTAssertEqual(server.requestHeaders.count, 1)
+    }
+
+    /// Only the selected model is injected; ChatModel restoration, send, model loop, SDK
+    /// transport and classifier execute their production paths against disposable HTTP fixtures.
+    private func fixtureModel(_ server: FakeCompletions, id: String = "routing-fixture") -> Model {
+        Model(id: id, name: id, api: .openAICompletions, provider: "opencode-go",
+              baseUrl: "http://127.0.0.1:\(server.port)/v1", reasoning: false, input: [.text],
+              cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
+              contextWindow: 128_000, maxTokens: 100)
+    }
+
+    private func withRoutingFixture(_ body: (AppModel, SessionStore) async throws -> Void) async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiChat"]
+        let original = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "ModelSessionMetadataTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer {
+            for (key, value) in original { UserDefaults.standard.set(value, forKey: key) }
+            try? FileManager.default.removeItem(at: folder)
+            defaults.removePersistentDomain(forName: suite)
+        }
+        UserDefaults.standard.removeObject(forKey: "pokiChat")
+        ModelKeys.selectedProvider = .custom
+        ModelKeys.customURL = "http://127.0.0.1:1/v1"
+        ModelKeys.customModel = "routing-fixture"
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        app.inProcessReadyForProbe()
+        try await body(app, SessionStore(folder: folder, defaults: defaults))
+    }
+
+    private func waitForTask(_ chat: ChatModel) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while chat.running && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(chat.running)
+    }
+
+    func testRestoredSavedChatSendsItsPersistedIdentityThroughChatModel() async throws {
+        let server = try FakeCompletions(replies: [FakeCompletions.text("First answer."), FakeCompletions.text("Reopened answer.")])
+        try await withRoutingFixture { app, store in
+            let model = self.fixtureModel(server)
+            let chat = ChatModel(app: app, store: store, resolveModel: { _, _ in model })
+            defer { chat.stop() }
+            chat.newConversation()
+            chat.send("First synthetic request.")
+            try await self.waitForTask(chat)
+            let originalID = chat.sessionID
+            let saved = try XCTUnwrap(store.session(originalID))
+            let restored = try JSONDecoder().decode(SavedSession.self, from: JSONEncoder().encode(saved))
+            chat.newConversation()
+            XCTAssertNotEqual(chat.sessionID, originalID)
+            chat.restore(restored)
+            XCTAssertEqual(chat.sessionID, originalID)
+            let before = server.requestHeaders.count
+            chat.send("Second synthetic request.")
+            try await self.waitForTask(chat)
+            let headers = Array(server.requestHeaders.dropFirst(before))
+            XCTAssertFalse(headers.isEmpty)
+            XCTAssertTrue(headers.allSatisfy { $0["x-opencode-session"] == originalID }, "\(headers)")
+            XCTAssertTrue(chat.entries.contains { if case .poki("Reopened answer.") = $0.kind { return true }; return false })
+        }
+    }
+
+    func testApprovalClassifierUsesLiveChatIDButIdleChatGetsApprovalID() async throws {
+        let received = expectation(description: "Live chat request reached its transport")
+        let liveServer = try FakeCompletions(replies: [FakeCompletions.text("Held reply.")], holdFirstReply: { received.fulfill() })
+        let approvals = try FakeCompletions(replies: [FakeCompletions.text("REFUSE: fixture"), FakeCompletions.text("REFUSE: fixture")])
+        try await withRoutingFixture { app, store in
+            let model = self.fixtureModel(liveServer)
+            let approvalModel = self.fixtureModel(approvals)
+            let chat = ChatModel(app: app, store: store, resolveModel: { _, _ in model })
+            let originalApp = AskPoki.app
+            let originalChat = AskPoki.chat
+            AskPoki.install(app: app, chat: chat)
+            defer {
+                chat.stop()
+                if let originalApp, let originalChat { AskPoki.install(app: originalApp, chat: originalChat) }
+            }
+            chat.newConversation()
+            chat.send("Synthetic owner request.")
+            await self.fulfillment(of: [received], timeout: 5)
+            XCTAssertTrue(chat.running)
+            let live = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Synthetic call", reason: "a call", expires: .now.addingTimeInterval(60))
+            _ = await ApprovalClassifier.decide(live, level: .strict, voice: [], resolveModel: { _, _ in approvalModel })
+            XCTAssertEqual(approvals.requestHeaders.first?["x-opencode-session"], chat.sessionID)
+            chat.stop()
+            try await self.waitForTask(chat)
+            let idle = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Synthetic call", reason: "a call", expires: .now.addingTimeInterval(60))
+            _ = await ApprovalClassifier.decide(idle, level: .strict, voice: [], resolveModel: { _, _ in approvalModel })
+            XCTAssertEqual(approvals.requestHeaders.count, 2)
+            XCTAssertEqual(approvals.requestHeaders.last?["x-opencode-session"], "approval-\(idle.id)")
+        }
     }
 
     func testNewConversationGetsNewRequestIdentity() {

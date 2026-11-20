@@ -134,7 +134,7 @@ extension InProcessProbe {
             async let picture = runner.raw("GET", "/screenshot", timeout: 8)
             let (t, p) = try await (tree, picture)
             found = t.string?.contains("inprocess-field") == true
-            pictureBytes = p.string.flatMap { Data(base64Encoded: $0, options: .ignoreUnknownCharacters) }?.count ?? 0
+            pictureBytes = (p.string ?? p["image"]?.string).flatMap { Data(base64Encoded: $0, options: .ignoreUnknownCharacters) }?.count ?? 0
         }
         out.append(Sample(path: name, action: "read", ms: readMs, ok: readError == nil && found && pictureBytes > 0, note: readError ?? "tree has the field: \(found), picture \(pictureBytes) bytes"))
         return out

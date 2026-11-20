@@ -188,6 +188,50 @@ final class ChatHarnessTests: XCTestCase {
                        "Stop must end the Live Activity started by this session")
     }
 
+    func testSplitViewPreparationStopsWhenActivationReportsAuthorizationCancellation() async throws {
+        try await assertSplitViewPreparationStops(cancelDuringConfirmation: false)
+    }
+
+    func testSplitViewPreparationStopsWhenConfirmationReportsAuthorizationCancellation() async throws {
+        try await assertSplitViewPreparationStops(cancelDuringConfirmation: true)
+    }
+
+    private func assertSplitViewPreparationStops(cancelDuringConfirmation: Bool) async throws {
+        let transport = RotatingWorkspace(startingLayout: .otherPair)
+        let server = try FakeCompletions(replies: [FakeCompletions.text("SPLIT 1 2"), FakeCompletions.text("The task continued.")])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        let host = try XCTUnwrap(app).host
+        let declined = RunnerState.automationAuthorizationDeclined("the owner cancelled automation authorization", fix: nil)
+        if cancelDuringConfirmation {
+            transport.onNotesActivated = { host.update(runner: declined) }
+        } else {
+            host.update(runner: declined)
+        }
+        chat.restore(SavedSession(id: UUID().uuidString, kind: .poki, title: "Duo test", started: .now,
+                                  updated: .now, live: false,
+                                  entries: [ChatEntry(.you("Earlier message", delivered: true))], calls: []))
+        let marker = UUID().uuidString
+        AppLog.shared.add("test", marker)
+        func confirmationReads() -> Int {
+            AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).filter { $0.contains("[agent] started: Look at the screen") }.count
+        }
+        let allowedReads = cancelDuringConfirmation ? 1 : 0
+        defer { if chat.running { chat.stop() } }
+        chat.send("Compare Safari and Notes in Split View.", attachments: [])
+
+        let endedOrContinued = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated { !chat.running || confirmationReads() > allowedReads }
+        }, object: nil)
+        await fulfillment(of: [endedOrContinued], timeout: 8)
+
+        XCTAssertFalse(chat.running)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Stopped.") = $0.kind { return true }; return false })
+        XCTAssertEqual(confirmationReads(), allowedReads)
+        XCTAssertEqual(transport.launchEvents, cancelDuringConfirmation ? ["activate Notes"] : [])
+        if !cancelDuringConfirmation { XCTAssertEqual(transport.requests, 0, "Cleanup must not probe the device after cancellation") }
+        XCTAssertEqual(server.requests.count, 1)
+    }
+
     func testSplitViewStartupReplacesADifferentExistingPair() async throws {
         let transport = RotatingWorkspace(rotateAt: .drop, startingLayout: .otherPair)
         let server = try FakeCompletions(replies: [FakeCompletions.text("SPLIT 1 2"), FakeCompletions.text("Both apps are open.")])
@@ -1481,6 +1525,8 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
     private var inputs = 0
     private var drops = 0
     private var launchLog: [String] = []
+    private var requestCount = 0
+    var onNotesActivated: (@Sendable () -> Void)?
 
     @MainActor init(rotateAt: RotateAt = .paneRead, startingLayout: Layout = .original) {
         self.rotateAt = rotateAt
@@ -1499,6 +1545,7 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
     var taps: Int { lock.withLock { inputs } }
     var drags: Int { lock.withLock { drops } }
     var launchEvents: [String] { lock.withLock { launchLog } }
+    var requests: Int { lock.withLock { requestCount } }
 
     private var app: String { side == "left" ? "com.apple.mobilesafari" : "com.apple.mobilenotes" }
     private var other: String { side == "left" ? "com.apple.mobilenotes" : "com.apple.mobilesafari" }
@@ -1507,6 +1554,7 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
         let raw = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
         let path = raw.isEmpty ? "/session" : raw
         return try lock.withLock {
+            requestCount += 1
             func reply(_ value: JSON = .null, status: Int = 200) -> (Int, Data) {
                 (status, (["value": value] as JSON).data())
             }
@@ -1556,7 +1604,9 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
                 throw TransportError.other("sent, no confirmation: split_view_changed_after_dispatch")
             case ("POST", "/wda/apps/activate"):
                 switch body.flatMap({ try? JSON.parse($0)["bundleId"]?.string }) {
-                case "com.apple.mobilenotes": launchLog.append("activate Notes")
+                case "com.apple.mobilenotes":
+                    launchLog.append("activate Notes")
+                    onNotesActivated?()
                 case "com.apple.springboard": launchLog.append("activate Home")
                 case "com.apple.mobilesafari": launchLog.append("activate Safari"); layout = .restored
                 default: return reply(["error": "unexpected app"], status: 400)
