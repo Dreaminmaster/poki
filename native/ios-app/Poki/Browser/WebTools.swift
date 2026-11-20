@@ -129,7 +129,7 @@ enum WebTools {
             guard send() else { return stopped }
             let step = browser.begin(AppLocalization.text(LocalizedStringResource("Type “\(short(text))” in “\(short(label))”")))
             let typed = await browser.act {
-                let receipt = (try? await browser.call("return window.__pokiReader.type(ref, text, submit)", input)) as? [String: Any]
+                let receipt = (try? await browser.call("return await window.__pokiReader.type(ref, text, submit)", input)) as? [String: Any]
                 if receipt?["ok"] as? Bool == true, !Task.isCancelled { onActionSucceeded?() }
                 return receipt
             }
@@ -220,6 +220,7 @@ enum WebTools {
             switch result["error"] as? String {
             case "stale": return answer("[\(ref)] is not on the page any more. Read the page again and use a current ref.", error: true)
             case "disabled": return answer("[\(ref)] is disabled.", error: true)
+            case "input_not_applied": return answer("The page did not keep the requested input in [\(ref)]. Read the page again before retrying.", error: true)
             case "owner": return answer("That field is for the owner (a password, card or one-time code): call web_handoff.", error: true)
             case "ownerform": return answer("The text is typed, but this form also holds the owner's details, so it was not sent. Sending it is the owner's to do: call web_handoff.", error: true)
             case "option": return answer("No such option. The options are: \((result["options"] as? [String] ?? []).joined(separator: " | "))", error: true)

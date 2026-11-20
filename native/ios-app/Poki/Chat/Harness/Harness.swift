@@ -61,7 +61,7 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report a memory used only to answer with finish_task. Do not report memories you only read.")
+        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report IDs only on the actions that used them.")
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
@@ -168,7 +168,7 @@ enum Harness {
         schema: object([
             "success": ["type": "boolean"], "summary": string,
             "details": ["type": "array", "items": object(["label": string, "value": string], ["label", "value"])],
-            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "IDs of saved memories used to answer the task. Report memories that drove actions on those specific actions instead."],
+            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "Obsolete and ignored. Omit this field."],
             "answer": object([
                 "kind": ["type": "string", "enum": ["action", "field", "list"]],
                 "items": ["type": "array", "items": object(["ref": string, "field": ["type": "string", "enum": ["label", "value"]], "prefix": string, "suffix": string], ["ref", "field"])],

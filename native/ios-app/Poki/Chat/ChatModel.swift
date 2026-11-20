@@ -1196,7 +1196,6 @@ final class ChatModel {
                 return PokiCore.ToolAnswer(text: Harness.invalidResult, jpeg: nil, isError: true)
             }
             taskResult = result
-            recordMemoryUse(result.usedMemoryIDs)
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting { steps[i].state = result.success ? .done : .failed }
             }
@@ -1749,13 +1748,12 @@ struct TaskResult: Decodable, Equatable {
     var summary: String
     var details: [Detail]
     var answer: Answer?
-    var usedMemoryIDs: [String]
     /// The result card, when the model sent one that can be drawn.
     var card: ResultCard?
     /// Why the card the model sent cannot be drawn: its reply then gives the whole result in words.
     var cardProblem: String?
 
-    private enum CodingKeys: String, CodingKey { case success, summary, details, answer, card, usedMemoryIDs = "used_memory_ids" }
+    private enum CodingKeys: String, CodingKey { case success, summary, details, answer, card }
 
     /// success and summary are required, as task-runner.mjs requires them; details, answer and card are
     /// kept when they are well formed. A card that is not loses only itself, never the result.
@@ -1765,7 +1763,6 @@ struct TaskResult: Decodable, Equatable {
         summary = try c.decode(String.self, forKey: .summary)
         details = (try? c.decodeIfPresent([Detail].self, forKey: .details)) ?? []
         answer = (try? c.decodeIfPresent(Answer.self, forKey: .answer)) ?? nil
-        usedMemoryIDs = Array(((try? c.decodeIfPresent([String].self, forKey: .usedMemoryIDs)) ?? []).prefix(20))
         guard c.contains(.card), (try? c.decodeNil(forKey: .card)) == false else { return }
         do {
             let card = try c.decode(ResultCard.self, forKey: .card)

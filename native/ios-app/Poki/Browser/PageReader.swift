@@ -384,7 +384,7 @@ enum PageReader {
     return { ok: true, name: name(el), covered };
   }
 
-  function type(ref, text, submit) {
+  async function type(ref, text, submit) {
     const el = element(ref);
     if (!el) return { ok: false, error: 'stale' };
     const view = el.ownerDocument.defaultView;
@@ -399,6 +399,8 @@ enum PageReader {
       el.value = option.value;
       el.dispatchEvent(new view.Event('input', { bubbles: true }));
       el.dispatchEvent(new view.Event('change', { bubbles: true }));
+      await settle(100, 500);
+      if (!el.isConnected || el.selectedOptions[0] !== option) return { ok: false, error: 'input_not_applied' };
       return { ok: true, name: name(el), value: squash(option.text) };
     }
     if (!el.isContentEditable && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return { ok: false, error: 'notfield', name: name(el) };
@@ -409,7 +411,7 @@ enum PageReader {
     el.focus();
     if (el.isContentEditable) {
       el.ownerDocument.execCommand('selectAll');
-      el.ownerDocument.execCommand('insertText', false, text);
+      if (!el.ownerDocument.execCommand('insertText', false, text)) return { ok: false, error: 'input_not_applied' };
     } else {
       // Through the prototype's setter, so pages that track the field's value (React) see the change.
       const proto = el.tagName === 'TEXTAREA' ? view.HTMLTextAreaElement.prototype : view.HTMLInputElement.prototype;
@@ -420,6 +422,10 @@ enum PageReader {
       el.dispatchEvent(new view.InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
       el.dispatchEvent(new view.Event('change', { bubbles: true }));
     }
+    // Page handlers can clear, rewrite or replace a field after an input event.
+    await settle(100, 500);
+    const value = el.isContentEditable ? el.innerText : String(el.value);
+    if (!el.isConnected || value !== text) return { ok: false, error: 'input_not_applied' };
     // Enter sends the whole form. One that also holds a password, a code, a card or an identity
     // document already filled in is the owner's to send, so the text stays typed and nothing is sent.
     const owners = submit && el.form ? [...el.form.elements].find((other) => other !== el && !['private field', null].includes(privateField(other)) && String(other.value || '').trim() !== '') : null;
@@ -430,7 +436,7 @@ enum PageReader {
       }
       if (el.form) { if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit(); }
     }
-    return { ok: true, name: name(el), value: el.isContentEditable ? squash(el.innerText) : String(el.value) };
+    return { ok: true, name: name(el), value };
   }
 
   // Resolves once the page has had no changes for `quiet` ms, or after `max` ms.

@@ -920,7 +920,7 @@ public final class SkillStore: @unchecked Sendable {
             within: Self.maxBriefLength / 2
         ) { "- \($0.briefLine)" }
         let (noteLines, includedNotes) = section(
-            "Saved memories, newest first. Apply relevant memories and report only the IDs that affected this task in finish_task:",
+            "Saved memories, newest first. Apply relevant memories:",
             Array(eligible),
             within: room
         ) { "- [\($0.id)] \($0.text)" }
@@ -932,7 +932,7 @@ public final class SkillStore: @unchecked Sendable {
             Array(file.notes.reversed().lazy.filter { $0.app?.lowercased() == app }.prefix(8))
         }
         let lines = notes.map { "- [\($0.id)] \($0.text)" }
-        let header = "Saved memories for this app. Apply relevant memories and report IDs that affected this task in finish_task:"
+        let header = "Saved memories for this app. Apply relevant memories:"
         return TaskBrief(text: ([header] + lines).joined(separator: "\n"), notes: notes)
     }
 

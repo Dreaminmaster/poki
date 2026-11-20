@@ -596,11 +596,100 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testTaskCardIncludesMemoryReadFromTheSkillList() async throws {
-        try await assertSkillListMemoryOnTaskCard(plan: ["Find the device name"])
+        try await assertSkillListMemoryOnTaskCard(plan: ["Open Settings"])
+    }
+
+    func testFailedOperationCannotGainMemoryAtFinish() async throws {
+        let unavailable = "nz.example.archived-checklist"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use the archived checklist app for this check.", by: "Poki"))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the archived checklist"], "currentStep": 1]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": unavailable, "used_memory_ids": [memory.id]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The archived checklist app is unavailable.",
+                "details": [], "answer": ["kind": "action"], "used_memory_ids": [memory.id],
+            ]),
+            FakeCompletions.text("The archived checklist app is unavailable."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation, unavailableApp: unavailable),
+                        automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        defer { MemoryLibrary.shared.forget(memory.id); SessionStore.shared.delete(chat.sessionID) }
+
+        let result = await chat.runDelegated("Open the archived checklist.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        let answers = server.requests.map(Self.toolAnswer)
+        XCTAssertTrue(answers.contains { $0.contains(memory.id) })
+        XCTAssertTrue(answers.contains { $0.contains("no app with that bundle id is installed on this device") })
+        let card = try XCTUnwrap(SessionStore.shared.session(chat.sessionID)?.entries.last {
+            if case .plan = $0.kind { true } else { false }
+        })
+        XCTAssertTrue(card.failed == true)
+        XCTAssertNotNil(card.ended)
+        XCTAssertNil(card.memoryUse, "Finishing a failed operation cannot assign its memory to the card")
+        if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "finish-rejected-memory") }
+    }
+
+    func testBrowserRejectedInputDoesNotLeaveAMemoryOnTheCard() async throws {
+        let text = "Maple-83"
+        let pages = try PageServer(pages: [
+            "/rejected": #"<html><title>Search test</title><input type="search" aria-label="Search query" id="query" oninput="this.value = ''"></html>"#,
+            "/accepted": #"<html><title>Search test</title><input type="search" aria-label="Search query" id="query"></html>"#,
+        ])
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Maple-83 as the web search term.", by: "Poki"))
+        let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
+        let browser = PokiBrowser.shared
+        browser.close()
+        defer { browser.close() }
+
+        for accepted in [false, true] {
+            let path = accepted ? "/accepted" : "/rejected"
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Fill the search field"], "currentStep": 1]),
+                FakeCompletions.tool("skills", ["action": "list"]),
+                FakeCompletions.tool("web_open", ["url": "http://127.0.0.1:\(pages.port)\(path)"]),
+                FakeCompletions.tool("web_type", ["ref": "e1", "text": text, "used_memory_ids": [memory.id]]),
+                FakeCompletions.tool("finish_task", [
+                    "success": accepted, "summary": "Search field checked.", "details": [], "answer": ["kind": "field"],
+                ]),
+                FakeCompletions.text("Search field checked."),
+            ])
+            let chat = chat(on: server)
+            let app = try XCTUnwrap(app)
+            let imported = await app.runTool("skills", arguments: Self.json(["action": "import", "data": backup]))
+            XCTAssertFalse(imported.isError, imported.text)
+            defer { MemoryLibrary.shared.forget(memory.id); SessionStore.shared.delete(chat.sessionID) }
+
+            let result = await chat.runDelegated("Fill the saved web search term.")
+
+            XCTAssertEqual(result.success, accepted, result.text)
+            let answers = server.requests.map(Self.toolAnswer)
+            XCTAssertTrue(answers.contains { $0.contains(memory.id) })
+            XCTAssertTrue(answers.contains { $0.contains("[e1]") && $0.contains("Search query") })
+            let value = try await browser.call("return document.querySelector('#query').value") as? String
+            XCTAssertEqual(value, accepted ? text : "")
+            XCTAssertEqual(chat.savedCalls.first { $0.name == "web_type" }?.ok, accepted)
+            let card = try XCTUnwrap(SessionStore.shared.session(chat.sessionID)?.entries.last {
+                if case .plan = $0.kind { true } else { false }
+            })
+            XCTAssertEqual(card.memoryUse?.notes.map(\.id) ?? [], accepted ? [memory.id] : [],
+                           "Only a web field that accepted the input may leave a memory on the card")
+            if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "web-memory-\(accepted)") }
+        }
     }
 
     func testFailedTaskCardsKeepTheMemoryAndSkillTheyUsed() async throws {
-        let note = "The recovery checklist is named \(UUID().uuidString)"
+        let note = "Start in Settings before looking for recovery checklist \(UUID().uuidString)"
         let name = "Read the recovery label \(UUID().uuidString)"
         let fixture = SkillStore(url: nil)
         let memory = try XCTUnwrap(fixture.remember(note, by: "Poki"))
@@ -613,18 +702,19 @@ final class ChatHarnessTests: XCTestCase {
         let automation = FakeAutomation()
         _ = automation.prepare()
         let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
-        let readsAndFails = [
-            FakeCompletions.tool("skills", ["action": "list"]),
+        let memoryList = FakeCompletions.tool("skills", ["action": "list"])
+        let endsInFailure = [
             FakeCompletions.tool("finish_task", [
                 "success": false, "summary": "The saved checklist could not be opened.", "details": [], "answer": ["kind": "field"],
-                "used_memory_ids": [memory.id],
             ]),
             FakeCompletions.text("I could not open the saved checklist."),
         ]
-        let server = try FakeCompletions(replies: readsAndFails + [
+        let direct = FakeCompletions.tool("do", ["actions": [["launch": settings, "used_memory_ids": [memory.id]]]])
+        let replay = FakeCompletions.tool("do", ["actions": [["run": ["name": name, "step_memory_ids": ["1": [memory.id]]]]]])
+        let server = try FakeCompletions(replies: [memoryList, direct] + endsInFailure + [
             FakeCompletions.tool("report_plan", ["steps": ["Read the recovery label", "Open the checklist"], "currentStep": 2]),
-            FakeCompletions.tool("do", ["actions": [["run": name]]]),
-        ] + readsAndFails)
+            memoryList, replay,
+        ] + endsInFailure)
         defer { withExtendedLifetime(server) {} }
         let chat = chat(on: server, transport: transport, automation: automation)
         let app = try XCTUnwrap(app)
@@ -1159,7 +1249,8 @@ final class ChatHarnessTests: XCTestCase {
 
     func testReopeningANoPlanRetryInterruptsTheRetryCardAndLeavesTheEarlierCardAlone() async throws {
         let fixture = SkillStore(url: nil)
-        let note = try XCTUnwrap(fixture.remember("The verification nickname is Test Device.", by: "Poki"))
+        let settings = "com.apple.Preferences"
+        let note = try XCTUnwrap(fixture.remember("Use Settings to check the verification nickname.", by: "Poki"))
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let suiteName = "ChatHarnessTests.retry.\(UUID().uuidString)"
@@ -1181,14 +1272,18 @@ final class ChatHarnessTests: XCTestCase {
         let askedForReply = expectation(description: "The model received finish_task's reply but hasn't answered")
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": settings, "used_memory_ids": [note.id]]]]),
             FakeCompletions.tool("finish_task", [
-                "success": true, "summary": "Test Device", "details": [], "answer": ["kind": "field"], "used_memory_ids": [note.id],
+                "success": true, "summary": "Test Device", "details": [], "answer": ["kind": "field"],
             ]),
             FakeCompletions.text("Test Device."),
-        ], holdAfter: 2, onRequest: { request in
+        ], holdAfter: 3, onRequest: { request in
             if Self.toolAnswer(request).contains("Result recorded.") { askedForReply.fulfill() }
         })
-        let chat = chat(on: server, kind: .poki, store: store)
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation,
+                        kind: .poki, store: store)
         let app = try XCTUnwrap(app)
         let imported = await app.runTool("skills", arguments: Self.json([
             "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
@@ -1284,7 +1379,7 @@ final class ChatHarnessTests: XCTestCase {
     private func assertSkillListMemoryOnTaskCard(plan: [String]) async throws {
         let appID = "com.apple.Preferences"
         let fixture = SkillStore(url: nil)
-        let text = "Call this test device \(UUID().uuidString)"
+        let text = "Use Settings for the test device check \(UUID().uuidString)"
         let old = try XCTUnwrap(fixture.remember(text, by: SkillStore.owner, app: appID))
         for number in 1...20 {
             fixture.remember("Settings test preference \(number) \(UUID().uuidString)", by: SkillStore.owner, app: appID)
@@ -1294,13 +1389,15 @@ final class ChatHarnessTests: XCTestCase {
         ]
         let server = try FakeCompletions(replies: planReplies + [
             FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": appID, "used_memory_ids": [old.id, old.id, "unseen-id"]]]]),
             FakeCompletions.tool("finish_task", [
-                "success": true, "summary": text, "details": [["label": "Device name", "value": text]],
-                "answer": ["kind": "field"], "used_memory_ids": [old.id, old.id, "unseen-id"],
+                "success": true, "summary": "Settings is open.", "details": [], "answer": ["kind": "action"],
             ]),
-            FakeCompletions.text(text),
+            FakeCompletions.text("Settings is open."),
         ])
-        let chat = chat(on: server)
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation)
         let app = try XCTUnwrap(app)
         let imported = await app.runTool("skills", arguments: Self.json([
             "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
@@ -1311,15 +1408,17 @@ final class ChatHarnessTests: XCTestCase {
         let item = try XCTUnwrap(library.item(old.id))
         defer { for note in fixture.notes { library.forget(note.id) } }
 
-        let result = await chat.runDelegated("What do I call this test device in Settings?")
+        let result = await chat.runDelegated("Open the app for this test device.")
 
         let first = try XCTUnwrap(server.requests.first)
         XCTAssertFalse(FakeCompletions.system(first).contains(text))
         XCTAssertEqual(result.success, true, result.text)
-        XCTAssertTrue(result.text.contains(text))
+        XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(text) })
+        XCTAssertEqual(chat.savedCalls.first { $0.name == "do" }?.ok, true)
+        XCTAssertEqual(chat.savedCalls.contains { $0.name == "report_plan" }, !plan.isEmpty)
         let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
         guard case .plan(let steps) = card.kind else { return XCTFail("Missing task card") }
-        XCTAssertEqual(steps.map(\.text), plan)
+        if !plan.isEmpty { XCTAssertEqual(steps.map(\.text), plan) }
         XCTAssertNotNil(card.ended)
         XCTAssertEqual(card.memoryUse?.notes, [.init(id: old.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))])
     }
