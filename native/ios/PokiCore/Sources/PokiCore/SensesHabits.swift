@@ -179,6 +179,9 @@ public struct SensesHabit: Codable, Equatable, Sendable, Identifiable {
 public enum SensesHabits {
     /// Reads of the same app this close together are one use.
     public static let sameUseGap: TimeInterval = 30 * 60
+    /// A use needs this many reads: the collector reads an app about a second after it comes to the
+    /// front and again about 4 s later, so a glance or a mistaken tap leaves one read and is no use.
+    public static let minReads = 2
     /// A read of an app within this long after an agent worked in it is the agent's, not the owner's.
     public static let agentShadow: TimeInterval = 10 * 60
     public static let week: TimeInterval = 7 * 86_400
@@ -204,7 +207,13 @@ public enum SensesHabits {
         keeps: (String) -> Bool = { _ in true }
     ) -> [String: [Date]] {
         var last: [String: Date] = [:]
+        // The run under way for each app: when it started and how many reads it has.
+        var runs: [String: (start: Date, reads: Int)] = [:]
         var out: [String: [Date]] = [:]
+        func close(_ app: String) {
+            if let run = runs[app], run.reads >= minReads { out[app, default: []].append(run.start) }
+            runs[app] = nil
+        }
         for sighting in sightings.sorted(by: { $0.at < $1.at }) {
             guard sighting.at > floor, sighting.at <= now, !sighting.app.isEmpty, keeps(sighting.app) else { continue }
             let app = SensesCategory.canonical(sighting.app)
@@ -214,11 +223,15 @@ public enum SensesHabits {
             }
             if let previous = last[app], sighting.at.timeIntervalSince(previous) <= sameUseGap {
                 last[app] = sighting.at
+                runs[app]?.reads += 1
                 continue
             }
+            close(app)
             last[app] = sighting.at
-            out[app, default: []].append(sighting.at)
+            runs[app] = (sighting.at, 1)
         }
+        for app in Array(runs.keys) { close(app) }
+        for app in out.keys { out[app]?.sort() }
         return out
     }
 
