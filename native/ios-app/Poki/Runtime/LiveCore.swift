@@ -64,6 +64,7 @@ final class LiveCore: CoreSession {
     func itemPictures(_ requests: [String: ItemPictureRequest], localTask: String) async -> [ItemPictures] {
         await core.itemPictures(requests, localTask: localTask)
     }
+    func bindCompanionTarget() async -> Bool { await core.bindCompanionTarget() }
     func prepareWorkspace(session: String) async -> Bool { await core.prepareWorkspace(session: session) }
     func discardWorkspace(session: String) async { await core.discardWorkspace(session: session) }
     func clearWorkspacePaneForSetup(session: String) async -> Bool {

@@ -168,6 +168,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 }
                 return try self.touch(fingers, into: other)
             },
+            "POST /poki/companion-target": { [unowned self] _, _ in
+                .bool(self.native.bindDuoCompanionTarget())
+            },
             "POST /poki/workspace-launcher": { [unowned self] body, _ in
                 let labels = body?["labels"]?.array?.compactMap(\.string) ?? []
                 guard !self.native.hasSelectedPane, let menu = body?["menu"]?.bool, !labels.isEmpty else {
@@ -330,7 +333,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             return refused(400, "invalid argument", "this would leave Split View; choose look {pane: \"auto\"} first to return to normal control")
         }
         if key == "POST /wda/homescreen", native.hasDuoCompanion {
-            return refused(400, "invalid argument", "not sent: Home would hide a Split View app. Keep Poki visible and ask the owner to open the task's app beside it.")
+            return refused(400, "invalid argument", "not sent: Home would hide the task's Split View app.")
         }
         do {
             if key == "GET /screenshot" {
@@ -382,6 +385,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     /// the front app), a touch or text is refused here, the last place before it would be sent.
     /// Opening an app and the Home button stay: they are how a task leaves Poki.
     private func refuseInPoki() throws {
+        if native.hasDuoCompanionTask { return }
         guard let own = Bundle.main.bundleIdentifier, native.frontApp()["bundleId"] as? String == own else { return }
         throw Refusal("unknown error", "not sent: Poki itself is in front, and nothing is tapped or typed in Poki. Open the task's app first (launch)")
     }

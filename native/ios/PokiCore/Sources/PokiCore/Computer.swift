@@ -484,7 +484,8 @@ final class Computer: @unchecked Sendable {
         if reading.png != nil, jpeg != nil, size != nil { evidence.insert(.screenshot) }
         var itemPictureSource: ItemPictureSource?
         let pokiPane = reading.foreground?.pokiPane
-        if !inWorkspace, pokiPane != "left", pokiPane != "right", let png = reading.png, jpeg != nil, let size {
+        if !inWorkspace, reading.screenshotCompanion == nil, pokiPane != "left", pokiPane != "right",
+           let png = reading.png, jpeg != nil, let size {
             let images = reading.elements.filter { $0.type == "Image" && !$0.fromPicture }.map(\.frame)
             itemPictureSource = ItemPictureSource(png: png, screen: size, images: images)
         }
@@ -886,6 +887,12 @@ final class Computer: @unchecked Sendable {
             return .blocked(ToolResult(text: "runner: \(state.describe)\nNothing was sent. Fix it on the phone, then call look again.", jpeg: nil, isError: true))
         }
         return .blocked(ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. It is still starting (the first start after a restart can wait for the owner to enter their password on the phone, which the phone asks them for); call look or status again every few seconds, and go on with the task when it answers with the screen.", jpeg: nil, isError: false, waitingForOwner: true))
+    }
+
+    func bindCompanionTarget() async -> Bool {
+        guard case .ready = await waitForRunner(until: now() + config.toolDeadline, authorization: .read),
+              !Task.isCancelled else { return false }
+        return (try? await runner.call("POST", "/poki/companion-target", timeout: 4, countsAsMiss: false))?.bool == true
     }
 
     private func readRequiredAfterAuthorization() -> ToolResult {

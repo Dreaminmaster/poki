@@ -50,10 +50,13 @@ enum ConnectionCheck {
 
     /// One request with `key` (a custom endpoint may have none) to the provider's chat model, or for a
     /// custom endpoint to `customURL` and `modelID`. The first of the answer and the deadline wins.
+    /// A custom address goes in `customAPI` (chat completions unless named), with the page's thinking choice.
     @MainActor
-    static func run(_ provider: ModelProvider, key: String, customURL: String = "", modelID: String = "") async -> Result {
+    static func run(_ provider: ModelProvider, key: String, customURL: String = "", modelID: String = "",
+                    customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil) async -> Result {
         let id = provider == .custom ? modelID.trimmingCharacters(in: .whitespaces) : ModelKeys.model(for: provider)
-        guard let model = provider.piModel(id, customURL: provider == .custom ? customURL : nil) else {
+        guard let model = provider.piModel(id, customURL: provider == .custom ? customURL : nil,
+                                           customAPI: customAPI.resolved(found: nil), customReasoning: customReasoning) else {
             return .failed(status: nil, reason: nil)
         }
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,6 +67,7 @@ enum ConnectionCheck {
         let cancel = CancellationToken()
         var options = SimpleStreamOptions()
         options.apiKey = key.isEmpty && provider == .custom ? "none" : key
+        if provider == .custom, model.reasoning { options.reasoning = .low }
         // A connection check runs before a conversation exists. Give this probe its own
         // routing identifier, using PiSwift's OpenCode host and provider checks.
         options.headers = openCodeSessionHeaders(model: model, sessionId: UUID().uuidString, headers: options.headers)
@@ -97,6 +101,32 @@ enum ConnectionCheck {
             AppLog.shared.add("model", "Test Connection, " + answered.summary(key: key))
         }
         return ending
+    }
+
+    /// One custom address in its API. Automatic tries the Responses API first, and chat completions
+    /// when the address has no Responses API there; `api` says which one answered (or was tried last).
+    @MainActor
+    static func runCustom(url: String, key: String, modelID: String, api: CustomAPIStyle, reasoning: Bool?) async -> (result: Result, api: CustomAPIStyle) {
+        switch api {
+        case .responses, .chatCompletions:
+            return (await run(.custom, key: key, customURL: url, modelID: modelID, customAPI: api, customReasoning: reasoning), api)
+        case .automatic:
+            let responses = await run(.custom, key: key, customURL: url, modelID: modelID, customAPI: .responses, customReasoning: reasoning)
+            guard !responses.passed, lacksResponses(responses) else { return (responses, .responses) }
+            AppLog.shared.add("model", "Test Connection, no Responses API at \(CustomEndpointClient.shown(URL(string: url))), trying chat completions")
+            return (await run(.custom, key: key, customURL: url, modelID: modelID, customAPI: .chatCompletions, customReasoning: reasoning), .chatCompletions)
+        }
+    }
+
+    /// A Responses test that failed the way an address without the Responses API fails: no such path,
+    /// a refused method or body, or an answer pi could not read as a Responses stream. A wrong key, no
+    /// network, no quota or no answer at all would fail chat completions too.
+    static func lacksResponses(_ result: Result) -> Bool {
+        switch result {
+        case .noEndpoint, .noModel: true
+        case .failed(let status, _): status.map { [400, 404, 405, 415, 422, 501].contains($0) || (200..<300).contains($0) } ?? true
+        case .works, .badKey, .unreachable, .timedOut, .notAllowed: false
+        }
     }
 
     private static func result(of outcome: Outcome, seen: Probe.Seen, key: String, model id: String, custom: Bool) -> Result {

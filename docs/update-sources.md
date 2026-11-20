@@ -26,13 +26,15 @@ Publish all immutable resources before exposing a new signed catalog. Retain the
 
 An installed client that only knows GitHub must first receive a migration build through GitHub. Give that build a higher version and numeric build than every eligible installed candidate. Use independently numbered releases and identical artifacts for Beta and the Stable compatibility record. Verify the actual old picker for Stable, Beta, Alpha and Pre-alpha before publishing. Keep existing compatibility endpoints for users who update later.
 
-To stop distribution, restore the last verified catalog and withdraw the bad candidate from discovery through the approved release process. Keep the source address and historical files available. This does not downgrade an installed app. Ship any repair at a higher version or build, preserving the user's signing identity, login and data. A network outage automatically retries through GitHub for that operation; the next check tries R2 again.
+To stop distribution, check the current signed catalog for releases added after the bad candidate. If there are none, restore the last verified catalog through the approved release process. If there are later releases, remove only the bad entry from the current catalog and sign it again. Withdraw the bad candidate from GitHub discovery as well, then check both update sources. Keep the source address and historical files available. This does not downgrade an installed app. Ship any repair at a higher version or build, preserving the user's signing identity, login and data. A network outage automatically retries through GitHub for that operation; the next check tries R2 again.
 
 Release approval, production source configuration, real-device migration and installation on supported desktop platforms remain separate release gates. Loopback fixtures and download probes do not prove that an installed phone retained its data.
 
-## Publishing an approved Beta
+## Publishing an approved release
 
-`publish-promotion.yml` copies the already-built IPA using its numeric build filename, publishes GitHub, then calls `publish-r2.yml`. The R2 job uses the existing Beta approval environment and runs on Linux. It never compiles or promotes a preview. A failed mirror can be retried through **Mirror approved Beta to R2**, with the same published tag. A release dispatch still requires the owner's authorization.
+`publish-promotion.yml` copies the already-built IPA using its numeric build filename, publishes GitHub, then calls `publish-r2.yml`. The R2 job runs on Linux and uses the `beta` environment, which requires the repository owner's approval. Use **Mirror approved release to R2** to retry with the same published tag.
+
+For a Setup-only update, publish the Mac DMG, Windows x64 installer and `SHA256SUMS-desktop.txt` on a public GitHub prerelease tagged `desktop-vX.Y.Z`. Both installers must match the tag version, share one numeric build number, and match the checksums in the list. On `main`, run **Mirror approved release to R2** with `tag` set to that exact desktop tag. The same `beta` approval applies. The mirror adds the Setup entry to the existing signed catalog. Phone installs and updates still select a numbered phone Beta and its signing archive.
 
 The repository needs these Actions secrets:
 
@@ -43,7 +45,7 @@ The repository needs these Actions secrets:
 | `POKI_R2_SECRET_ACCESS_KEY` | Secret for that bucket-scoped credential |
 | `POKI_R2_ENDPOINT` | The account's HTTPS R2 S3 endpoint |
 
-Do not use a developer's short-lived Wrangler OAuth token in Actions. The publisher refuses missing credentials, an incorrect signing key, drafts, previews, nonnumeric IPA filenames, and files that differ from GitHub's recorded sizes or digests. It retains previous signed entries and refuses changed bytes under an existing tag. All files are uploaded and downloaded again from the public R2 address before the catalog changes. The previous catalog is retained under `catalog-history/`; publication evidence is retained as the workflow artifact `r2-publication-evidence`.
+Do not use a developer's short-lived Wrangler OAuth token in Actions. The publisher checks the GitHub tag and release type, and matches every file against GitHub's recorded URL, size and digest. It retains previous signed entries and refuses changed bytes under an existing tag. All files are uploaded and downloaded again from the public R2 address before the catalog changes. The previous catalog is retained under `catalog-history/`; publication evidence is retained as the workflow artifact `r2-publication-evidence`.
 
 For an offline preparation check in Actions, supply downloaded public release files, the GitHub release JSON, the reviewed source configuration and the signing secret through the process environment. Local tests use a separate generated key and an isolated configuration. Do not extract the production private key from Actions:
 
