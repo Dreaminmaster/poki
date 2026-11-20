@@ -15,6 +15,7 @@ public struct ToolResult: Sendable {
     var waitingForOwner = false
     var replayedSkills: [String] = []
     var offeredMemories: [MemoryNote] = []
+    var readApp: String?
     var automationAuthorizationDeclined = false
     var screenEvidence: ScreenEvidence? = nil
 }
@@ -141,6 +142,7 @@ final class Computer: @unchecked Sendable {
     var memory: SkillStore?
     var trace: [RecordedStep] = []
     var recordingTask: String?
+    var memoryAppsOffered: Set<String> = []
     /// A skill ran whole in this task (the finish line does not offer to save it again).
     var skillRanWhole = false
     /// The app a session named with `app`: kept across its calls until it lets go of it.
@@ -487,7 +489,8 @@ final class Computer: @unchecked Sendable {
         // A screenshot helps the caller recover from a failed action without hiding the failure.
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
                           screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
-                          waitingForOwner: handoffWaiting, screenEvidence: evidence)
+                          waitingForOwner: handoffWaiting, readApp: treeRead ? reading.foreground?.bundleID : nil,
+                          screenEvidence: evidence)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner

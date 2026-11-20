@@ -48,6 +48,7 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var total: Int?
     var stopped: Bool?
     var saveFailed: Bool?
+    var failed: Bool?
     var memoryUse: TaskMemoryUse?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
@@ -162,7 +163,7 @@ final class ChatModel {
     private var taskResult: TaskResult?
     private var offeredMemories: [MemoryNote] = []
     private var replayedSkills: [String] = []
-    private var pendingMemoryWrites: [(arguments: String, skillName: String?, optional: Bool)] = []
+    private var pendingMemoryWrites: [(write: TaskMemoryWrite, skillName: String?)] = []
     /// The task under way as the owner asked it.
     private var taskText = ""
     private var client: ModelClient?
@@ -593,7 +594,7 @@ final class ChatModel {
             offeredMemories = notes
             let completed = await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
-            finishTaskMemory(completed: current && completed, token: token, requestID: prepared.you.id)
+            finishTaskMemory(completed: completed, stopped: stopAsked, token: token, requestID: prepared.you.id)
             // The direct engine does not say when its task ends: the quiet wait finishes the run.
             if !current { app.finishTask() } else { app.chatReleasesRun() }
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
@@ -665,7 +666,8 @@ final class ChatModel {
                 }
             }
             let current = runToken == token
-            finishTaskMemory(completed: current && outcome == .done, token: token, requestID: prepared.you.id)
+            finishTaskMemory(completed: outcome == .done, stopped: outcome == .stopped || outcome == .authorizationDeclined,
+                             token: token, requestID: prepared.you.id)
             if current { ended(outcome, delivered: prepared.you.id) } else if splitSession == nil { app.finishTask() }
             logEnd("pi", outcome: outcome, session: prepared.runSession, text: prepared.text, stopped: !current || outcome == .authorizationDeclined)
             guard current else { return }
@@ -816,52 +818,59 @@ final class ChatModel {
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
-    private func finishTaskMemory(completed: Bool, token: Int, requestID: UUID) {
+    private func finishTaskMemory(completed: Bool, stopped: Bool, token: Int, requestID: UUID) {
+        guard runToken == token else { return }
         defer {
             pendingMemoryWrites.removeAll()
             offeredMemories.removeAll()
             replayedSkills.removeAll()
         }
-        guard completed, !Task.isCancelled, var result = taskResult, result.success else { return }
-        var failures: [String] = []
-        var requiredSaveFailed = false
-        for write in pendingMemoryWrites {
-            if !app.saveTaskMemory(arguments: write.arguments, conversation: sessionID, task: "\(sessionID)#\(token)") {
-                if !write.optional { requiredSaveFailed = true }
-                if let name = write.skillName {
-                    failures.append(AppLocalization.text(LocalizedStringResource("Couldn’t save the skill “\(name)”.")))
-                } else {
-                    failures.append(AppLocalization.text(LocalizedStringResource("Couldn’t save that memory.")))
-                }
-            }
-        }
-        if !failures.isEmpty {
-            let notice = failures.joined(separator: "\n")
-            add(.poki(notice))
-            if requiredSaveFailed {
-                result.success = false
-                result.summary = notice
-                taskResult = result
-                if let planID, let index = entries.firstIndex(where: { $0.id == planID }) { entries[index].saveFailed = true }
-            }
-        }
-        var reported = Set(result.usedMemoryIDs)
+        guard !Task.isCancelled else { return }
+        let saveFailed = completed && !stopped && taskResult?.success == true && saveTaskMemory(token: token)
+        var reported = Set(taskResult?.usedMemoryIDs ?? [])
         let notes = offeredMemories.reversed().compactMap { note -> TaskMemoryUse.Note? in
             guard reported.remove(note.id) != nil else { return nil }
             return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
         }
-        guard !notes.isEmpty || !replayedSkills.isEmpty else { return }
-        let memoryUse = TaskMemoryUse(notes: notes, skills: replayedSkills)
+        let memoryUse = notes.isEmpty && replayedSkills.isEmpty ? nil : TaskMemoryUse(notes: notes, skills: replayedSkills)
+        guard memoryUse != nil || saveFailed else { return }
+        let failed = !stopped && (!completed || taskResult?.success == false)
         if let planID, let index = entries.firstIndex(where: { $0.id == planID }) {
             entries[index].memoryUse = memoryUse
-        } else if result.success, let index = entries.firstIndex(where: { $0.id == requestID }) {
+            if saveFailed { entries[index].saveFailed = true }
+            else if failed { entries[index].failed = true }
+        } else if (taskResult != nil || !completed), let index = entries.firstIndex(where: { $0.id == requestID }) {
             var card = ChatEntry(.plan([]))
             card.at = taskStart
             card.ended = Date()
             card.app = taskApp
+            if stopped { card.stopped = true }
+            if saveFailed { card.saveFailed = true }
+            else if failed { card.failed = true }
             card.memoryUse = memoryUse
             entries.insert(card, at: index + 1)
         }
+    }
+
+    private func saveTaskMemory(token: Int) -> Bool {
+        guard !pendingMemoryWrites.isEmpty, var result = taskResult else { return false }
+        let unsaved = app.saveTaskMemories(pendingMemoryWrites.map(\.write), conversation: sessionID, task: "\(sessionID)#\(token)")
+        guard !unsaved.isEmpty else { return false }
+        let failures = unsaved.map { index in
+            if let name = pendingMemoryWrites[index].skillName {
+                return AppLocalization.text(LocalizedStringResource("Couldn’t save the skill “\(name)”."))
+            }
+            return AppLocalization.text(LocalizedStringResource("Couldn’t save that memory."))
+        }
+        let notice = failures.joined(separator: "\n")
+        add(.poki(notice))
+        let requiredSaveFailed = unsaved.contains { !pendingMemoryWrites[$0].write.optional }
+        if requiredSaveFailed {
+            result.success = false
+            result.summary = notice
+            taskResult = result
+        }
+        return requiredSaveFailed
     }
 
     private func logEnd(_ engine: String, outcome: PiLoop.Outcome?, session: String, text: String, stopped: Bool) {
@@ -1084,6 +1093,7 @@ final class ChatModel {
             return answer
         }
         if runToken == token {
+            offeredMemories.append(contentsOf: answer.offeredMemories)
             for name in answer.replayedSkills where !replayedSkills.contains(name) { replayedSkills.append(name) }
         }
         // A launch that went through says which app the task is for; a refused one says nothing.
@@ -1158,13 +1168,11 @@ final class ChatModel {
                 guard let value = (args[required] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
                     return PokiCore.ToolAnswer(text: "Give the \(required) to save.", jpeg: nil, isError: true)
                 }
-                pendingMemoryWrites.append((call.arguments, action == "save" ? value : nil, args["optional"] as? Bool == true))
+                let write = TaskMemoryWrite(arguments: call.arguments, optional: args["optional"] as? Bool == true)
+                pendingMemoryWrites.append((write, action == "save" ? value : nil))
                 return PokiCore.ToolAnswer(text: "Queued. This is saved only if the task finishes successfully.", jpeg: nil, isError: false)
             }
-            let token = runToken
-            let response = await app.runTool(call.name, arguments: call.arguments, conversation: sessionID)
-            if runToken == token { offeredMemories.append(contentsOf: response.offeredMemories) }
-            return response
+            return await app.runTool(call.name, arguments: call.arguments, conversation: sessionID)
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
             phoneStepUnderWay = true

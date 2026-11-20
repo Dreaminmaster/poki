@@ -2070,8 +2070,8 @@ final class AppModel {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "poki-reply", content: content, trigger: nil))
     }
 
-    func saveTaskMemory(arguments: String, conversation: String, task: String) -> Bool {
-        core.saveTaskMemory(arguments: arguments, conversation: conversation, task: task)
+    func saveTaskMemories(_ writes: [TaskMemoryWrite], conversation: String, task: String) -> [Int] {
+        core.saveTaskMemories(writes, conversation: conversation, task: task)
     }
 
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
