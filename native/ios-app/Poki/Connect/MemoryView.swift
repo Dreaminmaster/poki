@@ -49,7 +49,7 @@ struct MemoryView: View {
         let about = library.about
         let apps = library.apps
         List {
-            if library.items.isEmpty, page.editing != "" {
+            if library.items.isEmpty {
                 Section { MemoryEmptyCard(title: "No memories yet", message: "The preferences and habits Poki notes will appear here.", bear: true, add: startAdding) }
             } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 MemorySearchResults(query: query, page: page)
@@ -88,25 +88,27 @@ struct MemoryView: View {
         .navigationTitle(AppLocalization.text("Memory Library"))
         .navigationBarTitleDisplayMode(.inline)
         .modifier(MemorySearch(query: $query, shown: apps.count > 8))
-        .headerlessTop(library.items.isEmpty && page.editing != "")
+        .headerlessTop(library.items.isEmpty)
         .toolbar {
+            // Recent Updates is an icon (the owner, Nov 20 2026): words pushed the title off the centre,
+            // and the dot sits on the icon's corner. On iOS 26 it shares one glass group with More.
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: SettingsRoute.memoryPage(.recent())) {
-                    // No padding of its own: with the dot, a wider pill pushed the title off the centre.
-                    // In English the page's whole name is too wide for that too, so the pill is "Recent".
-                    HStack(spacing: 5) {
-                        Text("Recent Updates button", comment: "The Memory page's button to Recent Updates: short, so the title stays centred")
-                            .font(.subheadline.weight(.semibold)).fixedSize()
-                        if library.unread { Circle().fill(Tint.blueText).frame(width: 7, height: 7) }
-                    }
+                    Image(systemName: "clock.arrow.circlepath")
+                        .overlay(alignment: .topTrailing) {
+                            if library.unread {
+                                Circle().fill(Tint.blueText).frame(width: 7, height: 7).offset(x: 3, y: -2)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                 }
                 .accessibilityLabel(Text("Recent Updates"))
+                .accessibilityValue(library.unread ? Text("New") : Text(verbatim: ""))
                 .accessibilityIdentifier("memory.recent")
             }
-            // Two shapes, as the design draws them: the Recent Updates capsule and the More circle.
-            if #available(iOS 26.0, *) { ToolbarSpacer(.fixed, placement: .topBarTrailing) }
             ToolbarItem(placement: .topBarTrailing) { more }
         }
+        .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
         .environment(library)
         .onAppear { library.reload(); exportURL = library.exportFile() }
@@ -122,24 +124,13 @@ struct MemoryView: View {
         }
     }
 
-    /// Add Memory, or the editor while a memory is being written.
+    /// Add Memory, and changing memory by telling Poki in the chat.
     @ViewBuilder private var adding: some View {
-        if page.editing == "" {
-            MemoryEditor(page: page, placeholder: "e.g., Mom is “Mama” in Contacts", onSave: {
-                library.add(page.draft, app: page.draftApp)
-                page.editing = nil
-            }, onCancel: { page.editing = nil })
-        } else {
-            MemoryAddRow(action: startAdding)
-        }
+        MemoryAddRow(action: startAdding)
+        MemoryChatRow(app: nil)
     }
 
-    private func startAdding() {
-        page.draft = ""
-        page.draftApp = nil
-        page.open = nil
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = "" }
-    }
+    private func startAdding() { page.start(nil) }
 
     /// Export, Import and Clear: the earlier page's own section, now one menu.
     private var more: some View {
@@ -300,6 +291,7 @@ struct MemoryScopeView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { title }
         }
+        .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
         .environment(library)
         .onAppear { if let open, page.open == nil { page.open = open } }
@@ -341,19 +333,8 @@ struct MemoryScopeView: View {
     }
 
     @ViewBuilder private func adding(app: String?) -> some View {
-        if page.editing == "" {
-            MemoryEditor(page: page, placeholder: "e.g., Mom is “Mama” in Contacts", onSave: {
-                library.add(page.draft, app: page.draftApp)
-                page.editing = nil
-            }, onCancel: { page.editing = nil })
-        } else {
-            MemoryAddRow {
-                page.draft = ""
-                page.draftApp = app
-                page.open = nil
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = "" }
-            }
-        }
+        MemoryAddRow { page.start(nil, app: app) }
+        MemoryChatRow(app: app)
     }
 }
 
@@ -440,11 +421,7 @@ extension View {
     func memorySwipes(_ item: MemoryItem, page: MemoryPageState, library: MemoryLibrary) -> some View {
         swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) { MemoryForget.run(item.id, library: library) } label: { Label("Forget", systemImage: "trash") }
-            Button {
-                page.draft = item.text
-                page.draftApp = item.app
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = item.id }
-            } label: { Label("Edit", systemImage: "pencil") }
+            Button { page.start(item) } label: { Label("Edit", systemImage: "pencil") }
                 .tint(Color(.systemGray))
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {

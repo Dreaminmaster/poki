@@ -53,6 +53,9 @@ enum DynamicApps {
         lock.withLock { byID[id.lowercased()]?.name }
     }
 
+    /// Every installed User app (the Memory page's app list).
+    static var userApps: [Entry] { lock.withLock { entries.filter(\.user) } }
+
     /// The installed User apps whose name no other installed app shares: the ones a name can stand for.
     static var uniquelyNamedUserApps: [Entry] {
         lock.withLock { entries.filter { $0.user && byName[$0.name.lowercased()]?.caseInsensitiveCompare($0.id) == .orderedSame } }

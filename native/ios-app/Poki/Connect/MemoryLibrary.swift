@@ -188,44 +188,53 @@ final class MemoryLibrary {
 
     // MARK: Changing
 
-    /// Adds a memory the owner wrote; it is locked from the start.
-    func add(_ text: String, app: String?) {
+    /// Adds a memory the owner wrote; locked from the start unless the editor's switch left it open.
+    func add(_ text: String, app: String?, locked: Bool = true) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= Self.noteLimit else { return }
         if let store {
-            store.remember(clean, by: RoutineStore.owner, app: app, locked: true)
+            store.remember(clean, by: RoutineStore.owner, app: app, locked: locked)
             reload()
             return
         }
-        let item = MemoryItem(id: UUID().uuidString, kind: .memory, text: clean, app: app, source: .wrote, updated: Date(), locked: true)
+        let item = MemoryItem(id: UUID().uuidString, kind: .memory, text: clean, app: app, source: .wrote, updated: Date(), locked: locked)
         items.append(item)
         log(.added, .owner, item)
     }
 
-    /// Saves the owner's change; the item locks.
-    func edit(_ id: String, text: String, app: String?) {
+    /// Saves the owner's change. A change of words or app locks the item, as the store does, unless the
+    /// editor's switch says Poki may still change it; the switch alone can lock or unlock it too.
+    func edit(_ id: String, text: String, app: String?, locked: Bool = true) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= Self.noteLimit, let i = items.firstIndex(where: { $0.id == id }) else { return }
         let before = items[i]
         // Saving the same words again changes nothing (a skill keeps its name; a memory its app too).
-        guard clean != before.text || (before.kind == .memory && app != before.app) else { return }
+        let changed = clean != before.text || (before.kind == .memory && app != before.app)
         if let store {
-            switch before.kind {
-            case .memory: store.editNote(id, text: clean, app: .some(app))
-            case .skill: store.rename(before.text, to: clean, by: RoutineStore.owner)
-            case .habit: break
+            if changed {
+                switch before.kind {
+                case .memory: store.editNote(id, text: clean, app: .some(app))
+                case .skill: store.rename(before.text, to: clean, by: RoutineStore.owner)
+                case .habit: break
+                }
             }
+            // The store locked what it changed; the switch has the last word.
+            let lockedNow = changed ? true : before.locked
+            // A skill is found by its name, which the rename may just have changed.
+            if lockedNow != locked { store.setLocked(before.kind == .skill ? (changed ? clean : before.text) : id, locked) }
             reload()
             return
         }
-        items[i].text = clean
-        items[i].app = app
-        items[i].source = .edited
-        // What you wrote or changed was not heard in a conversation: no link back to one.
-        items[i].heard = nil
-        items[i].locked = true
-        items[i].updated = Date()
-        log(.edited, .owner, items[i], previous: before.text == clean ? nil : before.text)
+        if changed {
+            items[i].text = clean
+            items[i].app = app
+            items[i].source = .edited
+            // What you wrote or changed was not heard in a conversation: no link back to one.
+            items[i].heard = nil
+            items[i].updated = Date()
+            log(.edited, .owner, items[i], previous: before.text == clean ? nil : before.text)
+        }
+        items[i].locked = locked
     }
 
     func setLocked(_ id: String, _ locked: Bool) {
