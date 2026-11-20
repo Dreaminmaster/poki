@@ -260,6 +260,55 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
+    func testLiveOnlySuppressesIdenticalWholeTurnsWithinTwoSeconds() async {
+        var operations: [String] = []
+        let h = Harness(phoneTool: { _, arguments in
+            operations.append(arguments)
+            return ("verified result", false, nil)
+        })
+        await h.liveTalk()
+        let turns: [(id: String, segments: [String], end: Int)] = [
+            ("original", ["打开", "微信"], 500),
+            ("repeated", [" 打开微信！ "], 2_500),
+            ("similar", ["打开微信", "设置"], 3_000),
+            ("later", ["打开微信"], 4_650),
+        ]
+        for turn in turns {
+            for (index, delta) in turn.segments.enumerated() {
+                let end = turn.end - (turn.segments.count - index - 1) * 200
+                h.link.play(["type": "session.input_transcript.delta", "delta": delta, "start_ms": end - 200, "end_ms": end])
+            }
+            h.link.play(["type": "session.delegation.created", "offset_ms": turn.end, "delegation": ["id": turn.id]])
+            h.link.call(turn.id, "do", arguments: turn.id, delegation: turn.id)
+            await h.time.settle()
+        }
+        XCTAssertEqual(operations, ["original", "similar", "later"])
+        h.voice.stop()
+    }
+
+    func testRealtimeOnlyRequestsOneResponsePerCommittedUserItem() async {
+        let h = Harness()
+        await h.connect()
+        h.link.play(["type": "session.created", "session": ["audio": ["input": ["turn_detection": ["create_response": false]]]]])
+        func commit(_ item: String) {
+            h.link.play(["type": "input_audio_buffer.speech_started", "item_id": item],
+                        ["type": "input_audio_buffer.speech_stopped", "item_id": item],
+                        ["type": "input_audio_buffer.committed", "item_id": item])
+        }
+        func responseCount() -> Int { h.link.sent.filter { $0["type"] as? String == "response.create" }.count }
+
+        commit("item-1")
+        XCTAssertEqual(responseCount(), 1)
+        h.link.play(["type": "response.created", "response": ["id": "r1"]],
+                    ["type": "response.done", "response": ["id": "r1"]])
+        h.link.play(["type": "input_audio_buffer.committed", "item_id": "item-1"])
+        XCTAssertEqual(responseCount(), 1)
+
+        commit("item-2")
+        XCTAssertEqual(responseCount(), 2)
+        h.voice.stop()
+    }
+
     func testLiveStopPreventsTheNextRunnerRequestInAnActiveBatch() async {
         let firstStarted = expectation(description: "the first phone request entered the runner")
         let batchFinished = expectation(description: "the batch reported its result")
