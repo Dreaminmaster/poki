@@ -1797,6 +1797,63 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(runnerIssue?.fix, .setup)
     }
 
+    /// Any web page, message or app can open a `poki://` link. One that names a relay only asks: the
+    /// relay could see the screen and act on the phone, so nothing changes until the owner allows it.
+    func testARelayLinkAsksAndDoesNotSetTheRelay() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let before = model.relayAddress
+        XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))))
+        XCTAssertEqual(model.relayAddress, before, "not set by the link alone")
+        XCTAssertEqual(model.linkAsk?.host, "https://evil.example")
+        model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
+        XCTAssertNil(model.linkAsk)
+        XCTAssertEqual(model.relayAddress, before, "declined")
+    }
+
+    /// #350 review: a second link while the first one's alert is on screen. Allow and Don't Allow apply
+    /// to the request the alert shows, and the second link changes nothing.
+    func testASecondLinkWhileOneAsksChangesNothing() throws {
+        for allow in [true, false] {
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            let keys = ["relayAddress", "relayEnabled"]
+            let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+            defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+            let before = model.relayAddress
+            XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fmine.example"))))
+            let shown = try XCTUnwrap(model.linkAsk)
+            XCTAssertEqual(shown.host, "https://mine.example")
+            XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))))
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "the second link does not replace the one on screen")
+            let sum = String(repeating: "ab", count: 32)
+            _ = model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.66%3A4000%2Fp.plist&sha256=\(sum)")))
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "nor does a pairing link")
+
+            model.answerLink(allow, to: UUID())
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "an answer to another request does nothing")
+            model.answerLink(allow, to: shown.id)
+            XCTAssertNil(model.linkAsk, "nothing else waits: the second link was turned away")
+            XCTAssertNotEqual(model.relayAddress?.origin.host(), "evil.example")
+            if allow {
+                XCTAssertEqual(model.relayAddress?.origin.host(), "mine.example", "Allow sets the relay the alert showed")
+            } else {
+                XCTAssertEqual(model.relayAddress, before, "Don't Allow leaves the relay as it was")
+            }
+        }
+    }
+
+    /// A pairing link from outside asks before it replaces the pairing file, and one that fetches a
+    /// file must say which file (its checksum), or Poki would fetch and keep whatever the address serves.
+    func testAPairingLinkAsksAndNeedsItsChecksum() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist"))), .pairing)
+        XCTAssertNil(model.linkAsk, "no checksum, nothing to ask")
+        let sum = String(repeating: "ab", count: 32)
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist&sha256=\(sum)"))), .pairing)
+        XCTAssertEqual(model.linkAsk?.host, "192.168.1.5")
+        model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
+        XCTAssertNil(model.linkAsk)
+    }
+
     /// Every setup step done and a connection chosen, with the loopback not yet checked.
     private func modelWithLoopbackChosen(launcher: FakeLauncher, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) throws -> (model: AppModel, restore: () -> Void) {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom", "relayAddress", "relayEnabled", "wantsOn"]

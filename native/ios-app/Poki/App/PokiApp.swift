@@ -300,7 +300,11 @@ struct RootView: View {
             let windowWidth = width + geometry.safeAreaInsets.leading + geometry.safeAreaInsets.trailing
             return min(Self.regularSidebarWidth, max(Self.minimumDuoSidebarWidth, windowWidth / 3))
         } action: { sidebarWidth = $0 }
-        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
+        .fullScreenCover(isPresented: $welcoming) {
+            FirstRunGuide(link: $welcomeLink, done: { welcoming = false })
+                .modifier(LinkAskAlert())
+        }
+        .modifier(LinkAskAlert(active: !welcoming))
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
@@ -383,7 +387,10 @@ struct RootView: View {
         }
         // A pairing file or a setup link (from Poki Setup on a computer, AirDrop or Files) opens
         // setup at that step, where the result is shown.
-        if let step = model.open(link: url) {
+        let step = model.open(link: url)
+        // Settings covers the screen on iPhone and would hide the question a link raised.
+        if model.linkAsk != nil { detailsOpen = false }
+        if let step {
             detailsOpen = false
             threadsOpen = false
             if showsSidebar { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }
