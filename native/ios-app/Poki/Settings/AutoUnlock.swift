@@ -9,9 +9,13 @@ final class AutoUnlock {
     private static let account = "device-unlock.passcode.v1"
     private static let enabledKey = "deviceUnlock.enabled"
     private static let retryKey = "deviceUnlock.needsPasscode"
+    private static let deletionFailedKey = "deviceUnlock.deletionFailed"
 
     private(set) var enabled = UserDefaults.standard.bool(forKey: AutoUnlock.enabledKey)
     private(set) var needsPasscode = UserDefaults.standard.bool(forKey: AutoUnlock.retryKey)
+    private(set) var deletionFailed = UserDefaults.standard.bool(forKey: AutoUnlock.deletionFailedKey) {
+        didSet { UserDefaults.standard.set(deletionFailed, forKey: Self.deletionFailedKey) }
+    }
     @ObservationIgnored private var attempt: OSAllocatedUnfairLock<Bool>?
     @ObservationIgnored private var configurationVersion: UInt64 = 0
 
@@ -32,16 +36,23 @@ final class AutoUnlock {
             throw error
         }
         resetAttempt()
+        deletionFailed = false
         UserDefaults.standard.set(true, forKey: Self.enabledKey)
         enabled = true
     }
 
     func disable() throws {
         attempt?.withLock { $0 = false }
+        do {
+            try Keychain.remove(Self.account)
+        } catch {
+            deletionFailed = true
+            throw error
+        }
         configurationVersion &+= 1
         enabled = false
         UserDefaults.standard.removeObject(forKey: Self.enabledKey)
-        try Keychain.remove(Self.account)
+        deletionFailed = false
         resetAttempt()
     }
 

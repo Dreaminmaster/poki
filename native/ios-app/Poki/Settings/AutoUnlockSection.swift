@@ -4,7 +4,6 @@ struct AutoUnlockSection: View {
     let setting: AutoUnlock
     let canEnable: Bool
     @Binding var showsPasscode: Bool
-    @State private var needsDeletion = false
 
     var body: some View {
         Section {
@@ -16,13 +15,17 @@ struct AutoUnlockSection: View {
             if canEnable && setting.enabled {
                 Button("Update Passcode") { showsPasscode = true }
             }
-            if needsDeletion {
+            if setting.deletionFailed {
                 Button("Delete Saved Passcode", role: .destructive) { change(false) }
+                    .accessibilityIdentifier("autoUnlock.retryDelete")
             }
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Poki stores your passcode on this iPhone to unlock it for tasks you start in Poki. Turning this off deletes the passcode.")
                 Text("After restarting your iPhone, unlock it once yourself before Poki can unlock it automatically.")
+                if setting.deletionFailed {
+                    Text("Poki couldn’t delete the saved passcode. Try again to turn off Automatic Unlock.")
+                }
                 if setting.needsPasscode && setting.enabled {
                     Text("Poki could not confirm the unlock. Unlock your iPhone manually and check your saved passcode.")
                 }
@@ -34,8 +37,7 @@ struct AutoUnlockSection: View {
         if on {
             showsPasscode = true
         } else {
-            do { try setting.disable(); needsDeletion = false }
-            catch { needsDeletion = true }
+            try? setting.disable()
         }
     }
 }

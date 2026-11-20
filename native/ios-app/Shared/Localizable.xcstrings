@@ -37560,6 +37560,22 @@
         }
       }
     },
+    "Poki couldn’t delete the saved passcode. Try again to turn off Automatic Unlock." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能删除已存的密码。请重试以关闭自动解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能刪除已存的密碼。請重試以關閉自動解鎖。"
+          }
+        }
+      }
+    },
     "Poki could not confirm the unlock. Unlock your iPhone manually and check your saved passcode." : {
       "localizations" : {
         "zh-Hans" : {
