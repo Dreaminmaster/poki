@@ -85,6 +85,7 @@ targets:
             CFBundleURLSchemes: [poki]
         NSLocalNetworkUsageDescription: Poki connects to this iPhone's own developer services to pair with it and to run the automation, and to the voice bridge on your Mac.
         NSFaceIDUsageDescription: Poki uses Face ID to unlock Screen History, so only you can open it.
+        NSPhotoLibraryUsageDescription: Poki shows your recent photos when you add to a message, so you can send one with a tap.
         NSCameraUsageDescription: Poki uses the camera to take photos you send in a message, and to scan the pairing code Poki Setup shows on your computer.
         NSMicrophoneUsageDescription: Poki listens while you talk to it in Voice, and sends that audio to OpenAI to understand what you ask.
         NSSpeechRecognitionUsageDescription: Without an OpenAI key, Poki turns what you say in Voice into text on this iPhone and sends the text to your chosen model.
@@ -118,6 +119,9 @@ targets:
         product: PiSwiftAgent
       - package: PiSwift
         product: PiSwiftAI
+      # Connectors (remote MCP servers): pi's MCP client, streamable HTTP and OAuth.
+      - package: PiSwift
+        product: PiSwiftMCP
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID)

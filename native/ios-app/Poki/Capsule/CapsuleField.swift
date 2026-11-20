@@ -18,6 +18,9 @@ struct CapsuleField: UIViewRepresentable {
     var onSwipe: ((Bool) -> Void)? = nil
     /// Return: the keyboard's Send key, as on the current field.
     var onSubmit: () -> Void
+    /// What is being written at the caret that may name an app or a connector, for the list that
+    /// follows the caret; and the way to put a picked name in.
+    var mentions: MentionBridge? = nil
 
     func makeUIView(context: Context) -> CapsuleTextView {
         let view = CapsuleTextView()
@@ -36,6 +39,7 @@ struct CapsuleField: UIViewRepresentable {
         view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
         view.updateFont(for: UIContentSizeCategory(typeSize))
         view.setPlain(text)
+        mentions?.view = view
         let swipe = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.swiped(_:)))
         swipe.delegate = context.coordinator
         swipe.cancelsTouchesInView = false
@@ -45,6 +49,7 @@ struct CapsuleField: UIViewRepresentable {
 
     func updateUIView(_ view: CapsuleTextView, context: Context) {
         context.coordinator.parent = self
+        mentions?.view = view
         view.updateFont(for: UIContentSizeCategory(typeSize))
         view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
         // A write from outside (a recommendation, dictation, Send emptying the field): render it whole,
@@ -88,6 +93,16 @@ struct CapsuleField: UIViewRepresentable {
             guard let view = textView as? CapsuleTextView else { return }
             view.reconcile()
             if parent.text != view.plainText { parent.text = view.plainText }
+            parent.mentions?.update(view.mentionQuery())
+        }
+
+        /// Also when SwiftUI writes the text (inside its own update), so the report waits a turn.
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            guard let view = textView as? CapsuleTextView else { return }
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.parent.mentions?.update(view.mentionQuery())
+            }
         }
 
         @objc func swiped(_ pan: UIPanGestureRecognizer) {
@@ -118,7 +133,39 @@ struct CapsuleField: UIViewRepresentable {
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) { if !parent.focused { parent.focused = true } }
-        func textViewDidEndEditing(_ textView: UITextView) { if parent.focused { parent.focused = false } }
+        func textViewDidEndEditing(_ textView: UITextView) {
+            if parent.focused { parent.focused = false }
+            parent.mentions?.update(nil)
+        }
+    }
+}
+
+/// Between the field and the list that follows its caret: the field reports what it is writing, and
+/// the list's pick goes back into the field.
+@MainActor
+@Observable
+final class MentionBridge {
+    private(set) var query: MentionQuery?
+    /// The words the owner put the list away for; it stays away until other words are written.
+    private var dismissed: NSRange?
+    @ObservationIgnored weak var view: CapsuleTextView?
+
+    func update(_ next: MentionQuery?) {
+        if let dismissed, let next, next.range.location == dismissed.location { return }
+        dismissed = nil
+        if query != next { query = next }
+    }
+
+    func dismiss() {
+        dismissed = query?.range
+        query = nil
+    }
+
+    func pick(_ match: MentionMatch) {
+        guard let query, let view else { return }
+        if !match.isConnector { CapsuleText.confirm(match.insert); MentionRecents.used(match.capsule.id) }
+        self.query = nil
+        view.insertMention(match.insert, replacing: query.range)
     }
 }
 
@@ -296,6 +343,38 @@ final class CapsuleTextView: UITextView {
             seen += length
         }
         return result
+    }
+
+    // MARK: Mentions
+
+    /// The words at the caret, with the keyboard's pending text, and where the caret is on screen.
+    func mentionQuery() -> MentionQuery? {
+        guard isFirstResponder, selectedRange.length == 0, let caretPosition = selectedTextRange?.end else { return nil }
+        let caretPlain = plainOffset(selectedRange.location)
+        let before = String((plainText as NSString).substring(to: min(caretPlain, (plainText as NSString).length)))
+        let pendingStart = markedTextRange.map { plainOffset(offset(from: beginningOfDocument, to: $0.start)) }
+        guard let found = MentionSearch.query(before: before, pendingStart: pendingStart) else { return nil }
+        let caret = convert(caretRect(for: caretPosition), to: nil)
+        return MentionQuery(text: found.text, range: NSRange(location: found.start, length: caretPlain - found.start),
+                            caret: caret, pending: pendingStart != nil, explicit: found.explicit)
+    }
+
+    /// Puts a picked name where its words were: the keyboard's composition is ended first (its pending
+    /// letters are replaced, never left behind), then the words give way to the name, which becomes its
+    /// capsule, and a space follows a name of a spaced script.
+    func insertMention(_ name: String, replacing range: NSRange) {
+        if markedTextRange != nil {
+            inputDelegate?.textWillChange(self)
+            unmarkText()
+            inputDelegate?.textDidChange(self)
+        }
+        let from = storageOffset(range.location), to = storageOffset(range.location + range.length)
+        guard let start = position(from: beginningOfDocument, offset: from),
+              let end = position(from: beginningOfDocument, offset: max(from, to)),
+              let target = textRange(from: start, to: end) else { return }
+        let spaced = !name.unicodeScalars.contains(where: CapsuleText.isUnspaced)
+        replace(target, withText: spaced ? name + " " : name)
+        delegate?.textViewDidChange?(self)
     }
 
     // MARK: Copy, cut and paste carry plain text

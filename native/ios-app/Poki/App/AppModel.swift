@@ -2157,6 +2157,13 @@ final class AppModel {
         }
     }
 
+    /// A connector's step (Settings › Connectors) asks with the same approval as a step on the phone.
+    func clearConnectorStep(connector: String, summary: String, always: Bool) async -> Bool {
+        let clearance = await core.clearConnectorStep(connector: connector, summary: summary, always: always, waiting: VoiceModel.approvalWait)
+        log.add("approval", "connector \(connector): \(clearance.mayTap ? "allowed" : "not allowed")")
+        return clearance.mayTap
+    }
+
     func resolve(_ approval: PendingApproval, approved: Bool) {
         core.resolveApproval(id: approval.id, approved: approved)
     }

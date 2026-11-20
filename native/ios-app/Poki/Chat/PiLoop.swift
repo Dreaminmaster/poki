@@ -29,6 +29,12 @@ final class PiLoop {
     /// answered for the log.
     private let endpoint: CustomEndpointClient?
     private let stall = StallWatch()
+    /// The connectors' tools for the message under way (Settings › Connectors), beside the phone's.
+    private let shelf = ToolShelf()
+    var connectorTools: [AgentTool] {
+        get { shelf.tools }
+        set { shelf.tools = newValue }
+    }
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
@@ -46,6 +52,7 @@ final class PiLoop {
         let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
         self.endpoint = endpoint
         let stall = self.stall
+        let shelf = self.shelf
         let grants = HistoryDeliveryGrants()
         let agentTools = tools.map { spec in
             AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
@@ -109,7 +116,7 @@ final class PiLoop {
             },
             prepareRequest: { request, _ in
                 let revision = HistoryCapture.agentQueryRevision
-                let tools = Self.availableTools(agentTools, allowed: revision != nil)
+                let tools = Self.availableTools(agentTools, allowed: revision != nil) + shelf.tools
                 var context = request.context
                 context.tools = tools
                 context.messages = context.messages.map { message in
@@ -141,7 +148,7 @@ final class PiLoop {
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
-        agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed)
+        agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed) + shelf.tools
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -257,6 +264,16 @@ final class HistoryDeliveryGrants: @unchecked Sendable {
             return safe
         }
         return result
+    }
+}
+
+/// The connectors' tools, read by pi's tasks at each request.
+private final class ToolShelf: @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [AgentTool] = []
+    var tools: [AgentTool] {
+        get { lock.withLock { list } }
+        set { lock.withLock { list = newValue } }
     }
 }
 

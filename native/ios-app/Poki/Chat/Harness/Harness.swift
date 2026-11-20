@@ -29,6 +29,14 @@ enum Harness {
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
     """
 
+    /// With connectors in use: their tools reach the service directly, which is faster than its app.
+    static func connectorInstructions(_ names: [String]) -> String? {
+        guard !names.isEmpty else { return nil }
+        return """
+        Connectors in use: \(names.joined(separator: ", ")). Their tools are named after the connector (for example notion__search; a second account adds a number, notion2__search) and reach the service directly. Prefer a connector's tool over opening its app on the phone when it can do the step. A message that writes @Name means that connector. Steps that change data may wait for the owner's approval; if one is not approved, say so and do not try it another way.
+        """
+    }
+
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
     @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
         if inSplitView {
