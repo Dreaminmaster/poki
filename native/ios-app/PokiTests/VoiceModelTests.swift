@@ -132,6 +132,26 @@ final class FakeTime {
     func settle() async { for _ in 0..<50 { await Task.yield() } }
 }
 
+private actor VoiceRunnerTransport: HTTPTransport {
+    let firstStarted: XCTestExpectation
+    let firstMayFinish: AsyncStream<Void>
+    private(set) var operations: [String] = []
+
+    init(firstStarted: XCTestExpectation, firstMayFinish: AsyncStream<Void>) {
+        self.firstStarted = firstStarted
+        self.firstMayFinish = firstMayFinish
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        operations.append(url.path)
+        if url.path == "/first" {
+            firstStarted.fulfill()
+            for await _ in firstMayFinish { break }
+        }
+        return (200, Data(#"{"value":{}}"#.utf8))
+    }
+}
+
 @MainActor
 final class VoiceModelTests: XCTestCase {
     func testAConnectionWhoseSessionNeverStartsEndsAfterSixtySeconds() async {
@@ -161,27 +181,112 @@ final class VoiceModelTests: XCTestCase {
         h.link.call("read", "look")
         await time.settle()
         XCTAssertEqual(executed, ["look"])
-        h.link.play(["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 500, "end_ms": 800],
+        h.link.play(["type": "session.input_transcript.delta", "delta": "请先别把这条消息发出去", "start_ms": 500, "end_ms": 800],
                     ["type": "session.delegation.created", "delegation": ["id": "cancel"]])
         h.link.call("queued", "do")
         h.link.call("stop", "cancel_current_task", delegation: "cancel")
         h.link.call("later", "do")
         h.link.call("unscoped", "do", delegation: nil)
         await time.advance(1)
-        XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text).joined(), "打开微信停。")
+        XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text).joined(), "打开微信请先别把这条消息发出去")
         XCTAssertEqual(executed, ["look"], "Only the phone step already executing may finish.")
         let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
             .compactMap { ($0["item"] as? [String: String])?["call_id"] }
         XCTAssertEqual(Set(results), ["read", "stop", "queued", "later", "unscoped"])
         XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
 
-        h.link.play(["type": "session.delegation.created", "delegation": ["id": "d2"]])
+        h.link.play(["type": "session.input_transcript.delta", "delta": "打开设置", "start_ms": 1500, "end_ms": 1900],
+                    ["type": "session.delegation.created", "delegation": ["id": "d2"]])
         h.link.call("stop", "cancel_current_task", delegation: "cancel")
         h.link.call("old-task", "do")
         h.link.call("new-task", "open_app", delegation: "d2")
         await time.settle()
         XCTAssertEqual(executed, ["look", "open_app"])
         h.voice.stop()
+    }
+
+    func testLiveShortStopBlocksFollowOnToolsBeforeModelCancellation() async {
+        for stop in [["停"], ["停止"], ["别动"], [" stop. "], [" 停", ",别", "做了"], ["停，别做了"]] {
+            var executed: [String] = []
+            let h = Harness(phoneTool: { name, _ in
+                executed.append(name)
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.input_transcript.delta", "delta": "给文件传输助手发个hello", "start_ms": 0, "end_ms": 400],
+                        ["type": "session.delegation.created", "offset_ms": 400, "delegation": ["id": "d1"]])
+            h.link.call("started", "open_app")
+            await h.time.settle()
+            for (index, text) in stop.enumerated() {
+                let start = 500 + index * 200
+                h.link.play(["type": "session.input_transcript.delta", "delta": text, "start_ms": start, "end_ms": start + 200])
+            }
+            h.link.call("old-step", "do")
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "late"]])
+            h.link.call("late-step", "do", delegation: "late")
+            await h.time.settle()
+            XCTAssertEqual(executed, ["open_app"], "No further work may start after \(stop.joined()).")
+            h.link.play(["type": "session.input_transcript.delta", "delta": "打开设置", "start_ms": 1400, "end_ms": 1900],
+                        ["type": "session.delegation.created", "delegation": ["id": "fresh"]])
+            h.link.call("new-step", "open_app", delegation: "fresh")
+            await h.time.settle()
+            XCTAssertEqual(executed, ["open_app", "open_app"])
+            h.voice.stop()
+        }
+    }
+
+    func testLiveStopPreventsTheNextRunnerRequestInAnActiveBatch() async {
+        let firstStarted = expectation(description: "the first phone request entered the runner")
+        let batchFinished = expectation(description: "the batch reported its result")
+        let (firstMayFinish, releaseFirst) = AsyncStream<Void>.makeStream()
+        let transport = VoiceRunnerTransport(firstStarted: firstStarted, firstMayFinish: firstMayFinish)
+        let runner = Runner(url: URL(string: "http://voice-runner.test")!, transport: transport)
+        let h = Harness(phoneTool: { _, _ in
+            defer { batchFinished.fulfill() }
+            do {
+                _ = try await runner.raw("POST", "/first")
+                _ = try await runner.raw("POST", "/second")
+                return ("both requests sent", false, nil)
+            } catch {
+                return ("the batch stopped before the second request", true, nil)
+            }
+        })
+        await h.liveTalk()
+        h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        h.link.call("batch", "do")
+        await fulfillment(of: [firstStarted], timeout: 2)
+        h.link.play(["type": "session.input_transcript.delta", "delta": "停", "start_ms": 100, "end_ms": 300])
+        releaseFirst.finish()
+        await fulfillment(of: [batchFinished], timeout: 2)
+        let operations = await transport.operations
+        XCTAssertEqual(operations, ["/first"])
+        h.voice.stop()
+    }
+
+    func testLiveCancellationWithRecordedServerEvents() async throws {
+        guard let replay = ProcessInfo.processInfo.environment["POKI_VOICE_STOP_REPLAY"] else {
+            throw XCTSkip("This check replays events from the Live service captured by the desktop speech check.")
+        }
+        let scenarios = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(replay.utf8)) as? [String: [[String: Any]]])
+        for scenario in ["stop", "stop_explicit", "literal"] {
+            let events = try XCTUnwrap(scenarios[scenario])
+            var executed: [(name: String, arguments: String)] = []
+            let h = Harness(phoneTool: { name, arguments in
+                executed.append((name, arguments))
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            for event in events {
+                h.link.play(event)
+                await h.time.settle()
+            }
+            if scenario == "literal" {
+                XCTAssertTrue(executed.contains { $0.name == "do" && $0.arguments.contains("停") })
+            } else {
+                XCTAssertEqual(executed.map(\.name), ["open_app"], "The recorded \(scenario) must stop all subsequent steps.")
+            }
+            h.voice.stop()
+        }
     }
 
     func testLiveDictatesTheWordStopWhenItCompletesTheSameUtterance() async {
