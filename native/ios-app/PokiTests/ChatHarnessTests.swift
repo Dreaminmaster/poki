@@ -534,7 +534,7 @@ final class ChatHarnessTests: XCTestCase {
 
     /// A result card the app cannot draw costs only the card: the task's result stays, no card appears
     /// and the model is told to give the whole result in words. A card it can draw appears under the
-    /// task with Poki's suggestion selected and the model adds only a conclusion; the item you select
+    /// task with Poki's suggestion selected and the model is asked to add decision context; the item you select
     /// comes back with the conversation as it is saved.
     func testAResultCardTheAppCannotDrawLeavesTheWholeResultToTheReply() async throws {
         let train = Self.train, finish = Self.finishWithCard
@@ -559,7 +559,9 @@ final class ChatHarnessTests: XCTestCase {
         guard case .card(let card) = entry.kind, let next = card.next else { return XCTFail("no card") }
         guard server.requests.count == 4 else { return XCTFail("\(server.requests.count) model requests") }
         XCTAssertEqual(card.selected(entry.chosen).fill(next.say), "把 G1 次发到公司差旅群")
-        XCTAssertTrue(Self.toolAnswer(server.requests[3]).contains("one plain sentence"), Self.toolAnswer(server.requests[3]))
+        let cardAnswer = Self.toolAnswer(server.requests[3])
+        XCTAssertTrue(cardAnswer.contains("what matters for the user's decision"), cardAnswer)
+        XCTAssertFalse(cardAnswer.contains("one plain sentence"), cardAnswer)
 
         chat.choose("G3", on: entry.id)
         let saved = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(chat.entries))
