@@ -33,6 +33,23 @@ struct SavedSession: Codable, Identifiable, Equatable {
     /// Its age for the limit: the later of its last change and its return from the archive.
     var keptSince: Date { max(updated, unarchived ?? .distantPast) }
 
+    mutating func stopInterruptedTask() {
+        guard live else { return }
+        live = false
+        outcome = .stopped
+        guard kind == .poki || kind == .handoff,
+              let request = entries.lastIndex(where: {
+                  switch $0.kind { case .you, .request: return true; default: return false }
+              }),
+              let card = entries[(request + 1)...].lastIndex(where: {
+                  if case .plan = $0.kind { return true }
+                  return false
+              }),
+              entries[card].ended == nil else { return }
+        entries[card].ended = updated
+        entries[card].stopped = true
+    }
+
     var continuationTask: String? {
         entries.reversed().compactMap { entry -> String? in
             guard case .you(let text, _) = entry.kind else { return nil }
@@ -355,7 +372,7 @@ final class SessionStore {
                     for url in slice {
                         guard let data = try? Data(contentsOf: url) else { batchComplete = false; continue }
                         if var session = try? decoder.decode(SavedSession.self, from: data) {
-                            if session.live { session.live = false; session.outcome = .stopped }
+                            session.stopInterruptedTask()
                             loaded.append(session)
                         }
                     }
@@ -456,7 +473,7 @@ final class SessionStore {
             if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
         }
         // Nothing is live after a relaunch.
-        for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = .stopped }
+        for i in loaded.indices { loaded[i].stopInterruptedTask() }
         sessions = loaded.sorted { $0.updated > $1.updated }
         trim()
         return complete
@@ -819,12 +836,19 @@ final class SessionStore {
         }
     }
 
-    /// Writes the changed sessions now, rather than after the half-second gathering.
-    func flush() {
-        writeTask?.cancel()
-        writeTask = nil
-        let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
-        pendingWrites = []
+    /// Writes the changed sessions now, or only the requested conversation.
+    func flush(sessionID: String? = nil) {
+        let ids: Set<String>
+        if let sessionID {
+            guard pendingWrites.remove(sessionID) != nil else { return }
+            ids = [sessionID]
+        } else {
+            writeTask?.cancel()
+            writeTask = nil
+            ids = pendingWrites
+            pendingWrites = []
+        }
+        let snapshots = ids.compactMap { id in session(id).map { (file(id), $0) } }
         writeQueue.sync {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .deferredToDate

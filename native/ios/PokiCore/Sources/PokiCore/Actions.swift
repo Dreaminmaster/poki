@@ -294,7 +294,7 @@ extension Computer {
     }
 
     /// Returns the action's kind (for the settle pause) and what it did.
-    func perform(_ action: JSON, until: Double, backTarget: BackTarget? = nil, onSkillReplayed: (@Sendable (String) -> Void)? = nil) async throws -> (String, String) {
+    func perform(_ action: JSON, until: Double, backTarget: BackTarget? = nil, onSkillReplayed: (@Sendable (String) async -> Void)? = nil) async throws -> (String, String) {
         guard let kind = ActionKind(action) else { throw ActionFailure(message: "unknown action \(action.serialized())", delivery: .notSent) }
         let spec = action[kind.rawValue] ?? .null
         switch kind {

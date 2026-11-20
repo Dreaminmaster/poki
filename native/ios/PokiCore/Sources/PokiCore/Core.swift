@@ -597,13 +597,11 @@ public final class PokiCore: @unchecked Sendable {
         /// Handoff, a locked phone, or runner startup requires waiting rather than model progress.
         public let waitingForOwner: Bool
         public let automationAuthorizationDeclined: Bool
-        public let replayedSkills: [String]
         public let offeredMemories: [MemoryNote]
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, replayedSkills: [String] = [], offeredMemories: [MemoryNote] = []) {
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, offeredMemories: [MemoryNote] = []) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
             self.automationAuthorizationDeclined = automationAuthorizationDeclined
-            self.replayedSkills = replayedSkills
             self.offeredMemories = offeredMemories
         }
     }
@@ -613,12 +611,12 @@ public final class PokiCore: @unchecked Sendable {
     /// object the model sent.
     /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
     /// where it was heard.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> ToolAnswer {
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onSkillReplayed: (@Sendable (String) async -> Void)? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession, onSkillReplayed: onSkillReplayed)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
-                          automationAuthorizationDeclined: output.automationAuthorizationDeclined, replayedSkills: output.replayedSkills,
+                          automationAuthorizationDeclined: output.automationAuthorizationDeclined,
                           offeredMemories: output.offeredMemories)
     }
 
@@ -691,7 +689,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, onSkillReplayed: (@Sendable (String) async -> Void)? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -737,7 +735,6 @@ public final class PokiCore: @unchecked Sendable {
         // The owner's time on an approval, and the runner's start, come on top of the tool's own time.
         let deadline = config.toolDeadline + (name == "do" ? config.approvalWait : 0) + config.runnerWait + 1
             + (local ? Computer.authorizationWait : 0)
-        let replayedSkills = LockedBox<[String]>([])
         var output: ToolResult
         computer.failureLog.value = nil
         do {
@@ -748,15 +745,12 @@ public final class PokiCore: @unchecked Sendable {
                     }
                     return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps, localTask: localTask)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask) { name in
-                    replayedSkills.update { $0.append(name) }
-                }
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onSkillReplayed: onSkillReplayed)
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
             output = ToolResult(text: "error: \(error); what was sent is unknown. Call look to see the screen.", jpeg: nil, isError: true)
         }
-        output.replayedSkills = replayedSkills.value
         if local, session == nil, let localTask, localTask == computer.recordingTask,
            !output.isError, let app = output.readApp?.lowercased(), app != "com.apple.springboard",
            let memory = computer.memory, computer.memoryAppsOffered.insert(app).inserted {

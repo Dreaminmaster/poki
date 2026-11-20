@@ -13,7 +13,6 @@ public struct ToolResult: Sendable {
     /// that goes nowhere can be told from a task that moves. Nil when no tree was read.
     var screen: String?
     var waitingForOwner = false
-    var replayedSkills: [String] = []
     var offeredMemories: [MemoryNote] = []
     var readApp: String?
     var automationAuthorizationDeclined = false
@@ -969,7 +968,7 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onSkillReplayed: @escaping @Sendable (String) -> Void) async -> ToolResult {
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onSkillReplayed: (@Sendable (String) async -> Void)?) async -> ToolResult {
         var actions = actions
         var bound: String?
         if config.appNames() {
@@ -1036,7 +1035,7 @@ final class Computer: @unchecked Sendable {
         return action
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onSkillReplayed: @escaping @Sendable (String) -> Void) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onSkillReplayed: (@Sendable (String) async -> Void)?) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
         var started = now()
@@ -1466,7 +1465,7 @@ final class Computer: @unchecked Sendable {
     /// deadline. Stops at the first that fails.
     /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
     /// approved an action, by its number in the do.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onSkillReplayed: @escaping @Sendable (String) -> Void) async -> (did: [String], error: String?, lastKind: String?) {
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onSkillReplayed: (@Sendable (String) async -> Void)?) async -> (did: [String], error: String?, lastKind: String?) {
         var did: [String] = []
         var error: String?
         var logError: String?
