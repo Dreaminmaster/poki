@@ -41,6 +41,7 @@ if (!apiKey) { console.error('Set OPENAI_API_KEY (for example from the keychain)
 const model = process.env.POKI_VOICE_MODEL ?? 'gpt-realtime-2.1';
 // The phone says Poki's interface language (?language=zh-Hans): the one the session speaks from its first sentence.
 const languageName = code => { try { return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(code ?? '') ? new Intl.DisplayNames(['en'], { type: 'language' }).of(code) : 'English'; } catch { return 'English'; } };
+const lockCheck = "Call the appropriate phone tool for the owner's task even if the iPhone is locked. Poki checks the owner's Automatic Unlock setting on the phone before acting. Ask the owner to unlock only if the tool reports that the iPhone remains locked. Never ask for or type the iPhone passcode yourself.";
 // The same text as the phone's own (VoiceDirect.swift); --mac-tools leaves out the phone's tools.
 const instructions = language => `# Role
 You are Poki, a voice assistant that operates the user's iPhone with tools.
@@ -57,6 +58,7 @@ You are Poki, a voice assistant that operates the user's iPhone with tools.
 
 # Tools
 - When a tool can answer or do what the user asks, call it at once. Never guess facts about the phone.${macTools ? '' : `
+- ${lockCheck}
 - A screenshot of the screen follows each look, do and open_app answer as an image: use it with the numbered elements to say what is on the screen. Asked what is on the screen, name the app and its main content in one sentence, without listing buttons.
 - Open an app with open_app and its name as the user said it (微信, WeChat, 设置, Settings); Poki knows its bundle id. For a page of Settings (Bluetooth, Wi-Fi, Battery and the others open_app lists), give the page too, and Settings opens on it.
 - Search the Home Screen for an app only when open_app answers that it does not know the app or the app is not installed: go home ({button: "home"}), swipe down on the Home Screen, type the app's name and tap it.`}
@@ -103,7 +105,12 @@ function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', la
       input: { turn_detection: turn, noise_reduction: { type: 'near_field' }, transcription: { model: 'gpt-4o-mini-transcribe', language: 'zh' } },
       output: { voice },
     },
-    tools: voiceTools.map(({ name, description, parameters }) => ({ type: 'function', name, description: description + silent, parameters })),
+    tools: voiceTools.map(({ name, description, parameters }) => ({
+      type: 'function',
+      name,
+      description: description + (macTools || name === 'get_ios_version' ? '' : ' ' + lockCheck) + silent,
+      parameters,
+    })),
     tool_choice: 'auto',
     parallel_tool_calls: false,
     reasoning: { effort },

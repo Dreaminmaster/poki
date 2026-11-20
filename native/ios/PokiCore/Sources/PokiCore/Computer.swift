@@ -834,8 +834,9 @@ final class Computer: @unchecked Sendable {
     }
 
     private func unlockForLocalTask(until: Double) async -> Bool {
-        guard approvals.pending == nil, !handoffWaiting, !Task.isCancelled,
-              await host.unlockForLocalTask(timeout: min(8, until - now() - config.readTimeout)) else { return false }
+        let timeout = min(16, until - now() - config.readTimeout)
+        guard timeout > 0, approvals.pending == nil, !handoffWaiting, !Task.isCancelled,
+              await host.unlockForLocalTask(timeout: timeout) else { return false }
         if selectedPane != nil {
             invalidateWorkspaceRead()
             selectedPane = nil

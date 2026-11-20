@@ -1153,14 +1153,20 @@ final class ApprovalTests: XCTestCase {
     }
 
     func testOnDeviceVoiceUnlocksAndReadsTheCurrentApp() async {
-        let (core, wda, host) = makeCore()
+        let (core, wda, host) = makeCore { $0.toolDeadline = 25 }
         wda.source([("Button", "Timer")], app: "Clock")
         let locked = LockedBox(true)
         wda.set("GET /wda/locked") { _ in (200, ["value": .bool(locked.value)]) }
-        host.unlock.value = { locked.value = false; return true }
+        host.unlock.value = { time in
+            guard time >= 11 else { return false }
+            locked.value = false
+            return true
+        }
 
         let remote = await core.call("look", [:])
         XCTAssertTrue(remote.text.contains("screen: locked"), remote.text)
+        let attempt = await core.tool("do", arguments: #"{"actions":[{"launch":"com.apple.mobiletimer"}]}"#)
+        XCTAssertTrue(attempt.text.contains("The iPhone unlocked"), attempt.text)
         let voice = await core.tool("look", arguments: "{}")
         XCTAssertFalse(voice.text.contains("screen: locked"), voice.text)
         XCTAssertTrue(voice.text.contains("Timer"), voice.text)

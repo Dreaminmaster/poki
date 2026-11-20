@@ -2816,7 +2816,7 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
         if ([self touch:@[swipe] timeout:MIN(1, remaining()) geometry:display session:session generation:generation
                 lockDisplay:lockDisplay check:canSend].delivery != PKDeliverySent)
             return PKUnlockResultTouchRejected;
-        const double keypadDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + 2.4);
+        const double keypadDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + 3);
         do {
             keys = [self passcodeKeysForSession:session generation:generation display:display before:keypadDeadline];
             if (keys.count) break;
@@ -2825,8 +2825,11 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
         } while (NSProcessInfo.processInfo.systemUptime < keypadDeadline);
         if (!keys.count) return PKUnlockResultKeypadUnavailable;
         BOOL touchRejected = NO;
-        for (NSUInteger i = 0; keys.count && i < passcode.length; i++) {
-            NSValue *key = keys[@([passcode characterAtIndex:i])];
+        NSUInteger delivered = 0;
+        // The system keypad keeps the same digit positions during entry. Reuse its
+        // confirmed points, with the lock, display and automation session checked for every touch.
+        while (delivered < passcode.length) {
+            NSValue *key = keys[@([passcode characterAtIndex:delivered])];
             if (!key || !canSend() || (!duo && !PKSameDisplay(display, self.displayGeometry))) break;
             CGPoint point = key.CGPointValue;
             NSArray *finger = @[[PKTouchPoint at:point offset:0], [PKTouchPoint at:point offset:0.04]];
@@ -2837,11 +2840,10 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
                 touchRejected = outcome.delivery == PKDeliveryNotSent;
                 break;
             }
-            if (i + 1 < passcode.length) {
-                keys = [self passcodeKeysForSession:session generation:generation display:display before:deadline];
-            }
+            delivered++;
         }
-        const double resultDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + 1.5);
+        const BOOL submitted = delivered == passcode.length;
+        const double resultDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + (submitted ? 4 : 0.5));
         do {
             uint64_t state;
             if (PKReadPhoneLock(&state) && state == 0) return PKUnlockResultUnlocked;
@@ -2849,10 +2851,11 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             [NSThread sleepForTimeInterval:0.15];
         } while (NSProcessInfo.processInfo.systemUptime < resultDeadline);
         if (touchRejected && !mayHaveEnteredDigit) return PKUnlockResultTouchRejected;
+        if (mayHaveEnteredDigit) return submitted ? PKUnlockResultSubmissionUnconfirmed : PKUnlockResultSubmissionIncomplete;
     } @catch (__unused NSException *e) {
-        return PKUnlockResultSubmissionUnconfirmed;
+        return PKUnlockResultSubmissionIncomplete;
     }
-    return mayHaveEnteredDigit ? PKUnlockResultSubmissionUnconfirmed : PKUnlockResultUnavailable;
+    return PKUnlockResultUnavailable;
 }
 
 - (NSDictionary<NSString *, id> *)readProbe {
