@@ -43,9 +43,8 @@ struct ResultCardView: View {
             .contentTransition(.opacity)
             .animation(.snappy(duration: 0.2), value: item.id)
             .frame(maxWidth: 420)
-            .background(Color(light: 0xFFFFFF, dark: 0x1C1C1E), in: .rect(cornerRadius: 22, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Tint.line, lineWidth: 0.5) }
-            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            // The chat's surface, as Poki's bubbles and the task card.
+            .chatSurface(RoundedRectangle(cornerRadius: .cornerRadius, style: .continuous))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

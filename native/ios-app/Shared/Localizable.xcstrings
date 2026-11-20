@@ -6715,6 +6715,22 @@
         }
       }
     },
+    "Done another way" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已换种方式完成"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已換種方式完成"
+          }
+        }
+      }
+    },
     "Failed" : {
       "localizations" : {
         "zh-Hans" : {
