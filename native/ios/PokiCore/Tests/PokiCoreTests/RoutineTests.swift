@@ -221,6 +221,24 @@ final class RoutineTests: XCTestCase {
         XCTAssertFalse(ambiguous.contains(competing))
     }
 
+    func testChatScreenReadOffersMemoryForAnAppOmittedFromTheRequest() async throws {
+        let store = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let preference = try XCTUnwrap(store.remember("Include the build number.", by: SkillStore.owner, app: settings))
+        store.remember("Calculator results use two decimal places.", by: SkillStore.owner, app: "com.apple.calculator")
+        let (core, _, _) = core(store)
+        let brief = store.taskBrief(for: "What iOS version is this phone running?", apps: [])
+        XCTAssertTrue(brief.notes.isEmpty)
+
+        let read = await core.callTool("look", arguments: "{}", localTask: "version-check")
+
+        XCTAssertFalse(read.isError, read.text)
+        XCTAssertTrue(read.text.contains("General"), read.text)
+        XCTAssertTrue(read.text.contains("[\(preference.id)] \(preference.text)"), read.text)
+        XCTAssertEqual(read.offeredMemories.map(\.id), [preference.id])
+        XCTAssertFalse(read.text.contains("Calculator results"))
+    }
+
     func testAStaleRoutineIsNotOfferedAndASaveOverItStartsItsRecordAgain() async {
         let store = RoutineStore(url: nil)
         let (core, _, pages) = core(store)

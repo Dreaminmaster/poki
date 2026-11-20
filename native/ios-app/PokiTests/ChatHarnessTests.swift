@@ -598,6 +598,101 @@ final class ChatHarnessTests: XCTestCase {
         try await assertSkillListMemoryOnTaskCard(plan: ["Find the device name"])
     }
 
+    func testFailedTaskCardsKeepTheMemoryAndSkillTheyUsed() async throws {
+        let note = "The recovery checklist is named \(UUID().uuidString)"
+        let name = "Read the recovery label \(UUID().uuidString)"
+        notes.append(note)
+        let memory = try XCTUnwrap(SkillStore.shared.remember(note, by: "Poki"))
+        let skill = Skill(name: name, description: "", app: nil, steps: [SkillStep(action: ["wait": 0])],
+                          params: [:], expect: [], read: ["Settings"], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(SkillStore.shared.save(skill))
+        defer { SkillStore.shared.forget(name) }
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let readsAndFails = [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The saved checklist could not be opened.",
+                "used_memory_ids": [memory.id],
+            ]),
+            FakeCompletions.text("I could not open the saved checklist."),
+        ]
+        let server = try FakeCompletions(replies: readsAndFails + [
+            FakeCompletions.tool("report_plan", ["steps": ["Read the recovery label", "Open the checklist"], "currentStep": 2]),
+            FakeCompletions.tool("do", ["actions": [["run": name]]]),
+        ] + readsAndFails)
+        defer { withExtendedLifetime(server) {} }
+        let chat = chat(on: server, transport: transport, automation: automation)
+
+        for expectsReplay in [false, true] {
+            let result = await chat.runDelegated(expectsReplay ? "Read the recovery label and open the checklist." : "Open the recovery checklist.")
+            XCTAssertEqual(result.success, false, result.text)
+            let card = chat.entries.last { if case .plan = $0.kind { true } else { false } }
+            XCTAssertNotNil(card?.ended)
+            XCTAssertEqual(card?.memoryUse?.notes.map(\.id), [memory.id])
+            XCTAssertEqual(card?.memoryUse?.skills, expectsReplay ? [name] : [])
+            if expectsReplay {
+                XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.answer.contains("run \"\(name)\"") && $0.ok })
+            }
+        }
+    }
+
+    func testRejectedRequiredSaveLeavesTheTaskMemoryBatchUnchanged() async throws {
+        let name = "Required locked workflow \(UUID().uuidString)"
+        let newSkill = "New recovery workflow \(UUID().uuidString)"
+        let note = "New recovery preference \(UUID().uuidString)"
+        let optionalNote = "Automatic recovery preference \(UUID().uuidString)"
+        notes += [note, optionalNote]
+        let fixture = SkillStore(url: nil)
+        let original = Skill(name: name, description: "Owner's workflow", app: "com.apple.Preferences",
+                             steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
+                             params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                             lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(original))
+        defer { SkillStore.shared.forget(newSkill) }
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+            FakeCompletions.tool("skills", ["action": "remember", "text": note]),
+            FakeCompletions.tool("skills", ["action": "save", "name": newSkill]),
+            FakeCompletions.tool("skills", ["action": "save", "name": name]),
+            FakeCompletions.tool("skills", ["action": "remember", "text": optionalNote, "optional": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready."]),
+            FakeCompletions.text("Settings is ready."),
+        ])
+        defer { withExtendedLifetime(server) {} }
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        library.setLocked(item.id, true)
+        defer { library.setLocked(item.id, false); library.forget(item.id) }
+        let list = #"{"action":"list"}"#
+        let before = await app.runTool("skills", arguments: list)
+        XCTAssertTrue(before.text.split(separator: "\n").contains { $0.contains(name) && $0.hasSuffix("(locked)") })
+
+        let result = await chat.runDelegated("Check Settings and save the preference and the procedure.")
+        let after = await app.runTool("skills", arguments: list)
+        library.reload()
+
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("Couldn’t save the skill “\(name)”."))
+        XCTAssertFalse(after.text.contains(note))
+        XCTAssertFalse(after.text.contains(newSkill))
+        XCTAssertFalse(after.text.contains(optionalNote))
+        let rejected = Set([note, newSkill, optionalNote])
+        XCTAssertTrue(library.changes.allSatisfy { !rejected.contains($0.item.text) })
+    }
+
     func testMemoryLookupWithoutAPlanShowsTheUsedMemoryOnTheTaskCard() async throws {
         try await assertSkillListMemoryOnTaskCard(plan: [])
     }
