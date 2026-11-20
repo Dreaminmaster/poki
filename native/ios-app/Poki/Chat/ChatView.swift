@@ -1,4 +1,5 @@
 import AVFoundation
+import Photos
 import PhotosUI
 import SwiftUI
 
@@ -51,7 +52,7 @@ struct ChatView: View {
     }
     /// The message field has the keyboard.
     @State private var writing = false
-    /// Plus's ways to add a photo or a file stand over the message field.
+    /// Plus's sheet is up: photos, files, mentions and how the chat runs.
     @State private var adding = false
     @State private var standaloneDraft = ""
     private var draft: Binding<String> { sharedDraft ?? $standaloneDraft }
@@ -1251,7 +1252,7 @@ struct ComposerInputView: View {
     @Binding var input: String
     /// The message field has the keyboard; the home page's suggestions set it.
     @Binding var focused: Bool
-    /// Plus is open: its ways to add stand over the message field until one is picked or the page is tapped.
+    /// Plus is open: its sheet is up until it is closed or something it opened has added to the message.
     @Binding var adding: Bool
     var running: Bool
     /// How far the running task is, 0 to 1, for the ring around Stop; nil when unknown.
@@ -1284,6 +1285,12 @@ struct ComposerInputView: View {
     @State private var picked: [PhotosPickerItem] = []
     @State private var takingPhoto = false
     @State private var choosingFiles = false
+    /// Recent photos tapped in plus's sheet, by their library id, so a second tap takes one out again.
+    @State private var photoAssets: [String: UUID] = [:]
+    /// What the field writes at its caret, for the list of apps and connectors that follows it.
+    @State private var mentions = MentionBridge()
+    /// The composer's glass in the window, where the list is placed over the caret.
+    @State private var barFrame: CGRect = .zero
     /// A file Poki can't read, said for a moment over the message field.
     @State private var problem: String?
     @State private var fieldScroll = CapsuleScroll()
@@ -1296,7 +1303,6 @@ struct ComposerInputView: View {
     @ScaledMetric(relativeTo: .body) private var scaledControlInset = 6.0
     @ScaledMetric(relativeTo: .body) private var scaledControlSpacing = 8.0
     @ScaledMetric(relativeTo: .body) private var fieldHeight = 112.0
-    @ScaledMetric(relativeTo: .body) private var wayIconWidth = 28.0
 
     private var buttonDiameter: CGFloat { min(56, max(36, scaledButtonDiameter)) }
     private var buttonHitSide: CGFloat { max(44, buttonDiameter) }
@@ -1323,9 +1329,9 @@ struct ComposerInputView: View {
             if !attachments.isEmpty {
                 AttachmentStrip(attachments: attachments) { item in
                     withAnimation(.snappy) { attachments.removeAll { $0.id == item.id } }
+                    photoAssets = photoAssets.filter { $0.value != item.id }
                 }
             }
-            if adding, voice.talkState == nil, !needsKey, attachments.count < Self.most { ways }
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             Group {
@@ -1351,7 +1357,8 @@ struct ComposerInputView: View {
                         plus
                         // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                         CapsuleField(text: $input, focused: $focused, maxLines: 6, maxHeight: min(200, fieldHeight), scroll: fieldScroll,
-                                     onSwipe: { up in if up { focused = true } else if focused { focused = false } }, onSubmit: submit)
+                                     onSwipe: { up in if up { focused = true } else if focused { focused = false } }, onSubmit: submit,
+                                     mentions: mentions)
                             .overlay(alignment: .topLeading) {
                                 if input.isEmpty {
                                     Text(dictation.on ? "Listening…" : attachments.isEmpty ? "Message Poki" : "Add a message")
@@ -1376,6 +1383,9 @@ struct ComposerInputView: View {
             .onTapGesture { if voice.talkState == nil, !needsKey { focused = true } }
             .glassSurface(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), fallback: .bar)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: expanded)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { barFrame = $0 }
+            .overlay(alignment: .topLeading) { mentionList }
+            .animation(.snappy(duration: 0.22), value: mentions.query == nil)
         }
         .animation(.snappy, value: dictation.on)
         .animation(.snappy, value: adding)
@@ -1417,28 +1427,23 @@ struct ComposerInputView: View {
             try? await Task.sleep(for: .seconds(3))
             if !Task.isCancelled { problem = nil }
         }
-        .photosPicker(isPresented: $choosingPhotos, selection: $picked, maxSelectionCount: Self.most - attachments.count, matching: .images)
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
+            adding = false
             Task { await addPhotos(items) }
         }
-        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result else { return }
-            for url in urls { add { try AttachmentReader.file(url) } }
-        }
-        .fullScreenCover(isPresented: $takingPhoto) {
-            CameraPicker { image in
-                takingPhoto = false
-                if let image { add { try AttachmentReader.photo(image) } }
-            }
-            .ignoresSafeArea()
-        }
+        // Plus: a sheet that rises from the bottom (it was a menu that appeared at once). The library,
+        // Files and the camera open over it, and it goes down once they have added something.
+        .sheet(isPresented: $adding) { addSheet }
+        .onAppear { _ = MCPConnectors.shared }
+        .onChange(of: focused) { _, now in if !now { mentions.update(nil) } }
         .onChange(of: restarts) {
             adding = false
             if !input.isEmpty || !attachments.isEmpty {
                 input = ""
                 withAnimation(.snappy) { attachments = [] }
+                photoAssets = [:]
                 focused = false
             } else {
                 focused = true
@@ -1542,7 +1547,6 @@ struct ComposerInputView: View {
                 .contentShape(.interaction, Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(attachments.count >= Self.most)
         .accessibilityLabel(Text("Add Photos or Files"))
         .accessibilityAddTraits(adding ? .isSelected : [])
         .accessibilityIdentifier("composer.plus")
@@ -1551,42 +1555,68 @@ struct ComposerInputView: View {
         }
     }
 
-    /// Plus's three ways, on their own glass right over the message field, which stays where it is.
-    /// A system menu can't do this here: it opens out of the glass around it, and that is the
-    /// whole composer.
-    private var ways: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            way("Photos", "photo", "composer.photos") { choosingPhotos = true }
-            way("Take Photo", "camera", "composer.camera", enabled: UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
-            way("Files", "folder", "composer.files") { choosingFiles = true }
-        }
-        .padding(.vertical, 6)
-        .fixedSize()
-        // A card over the conversation like the approval's, without its tint.
-        .glassSurface(in: RoundedRectangle(cornerRadius: 26, style: .continuous), fallback: .card)
-        .glassAppearing()
-        // Beside the card is the composer's bar, over the conversation's tap that closes it.
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(.rect)
-        .onTapGesture { adding = false }
-        .accessibilityElement(children: .contain)
-        .accessibilityAction(.escape) { adding = false }
+    /// Plus's sheet, with the library, Files and the camera opening over it.
+    private var addSheet: some View {
+        ComposerAddSheet(room: Self.most - attachments.count, picked: Set(photoAssets.keys),
+                         togglePhoto: { asset in Task { await toggle(asset) } },
+                         choosePhotos: { choosingPhotos = true },
+                         takePhoto: { takingPhoto = true },
+                         chooseFiles: { choosingFiles = true },
+                         mention: mention)
+            .photosPicker(isPresented: $choosingPhotos, selection: $picked, maxSelectionCount: max(1, Self.most - attachments.count), matching: .images)
+            .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
+                guard case .success(let urls) = result else { return }
+                for url in urls { add { try AttachmentReader.file(url) } }
+                adding = false
+            }
+            .fullScreenCover(isPresented: $takingPhoto) {
+                CameraPicker { image in
+                    takingPhoto = false
+                    if let image {
+                        add { try AttachmentReader.photo(image) }
+                        adding = false
+                    }
+                }
+                .ignoresSafeArea()
+            }
     }
 
-    private func way(_ title: LocalizedStringKey, _ symbol: String, _ id: String, enabled: Bool = true,
-                     _ pick: @escaping () -> Void) -> some View {
-        Button { adding = false; pick() } label: {
-            HStack(spacing: 12) {
-                Image(systemName: symbol).frame(width: wayIconWidth)
-                Text(title)
-            }
-            .font(.allo(.body)).foregroundStyle(enabled ? Color(.label) : Color(.tertiaryLabel))
-            .padding(.horizontal, 20).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .contentShape(.rect)
+    /// A recent photo from the sheet's strip: in the message, or out of it again.
+    private func toggle(_ asset: PHAsset) async {
+        let key = asset.localIdentifier
+        if let id = photoAssets[key] {
+            photoAssets[key] = nil
+            withAnimation(.snappy) { attachments.removeAll { $0.id == id } }
+            return
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityIdentifier(id)
+        guard attachments.count < Self.most, let data = await RecentPhotos.data(asset) else {
+            if attachments.count < Self.most { problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file.")) }
+            return
+        }
+        if let id = add({ try AttachmentReader.photo(data) }) { photoAssets[key] = id }
+    }
+
+    /// An app or connector picked in plus's sheet: its name goes at the end of the message, as its capsule.
+    private func mention(_ match: MentionMatch) {
+        if !match.isConnector { CapsuleText.confirm(match.insert); MentionRecents.used(match.capsule.id) }
+        let separator = input.isEmpty || input.hasSuffix(" ") || input.hasSuffix("\n") ? "" : " "
+        input += separator + match.insert + " "
+        focused = true
+    }
+
+    /// The apps and connectors that fit the words at the caret, just above it.
+    @ViewBuilder private var mentionList: some View {
+        if focused, let query = mentions.query {
+            let matches = MentionSearch.matches(query.text, pending: query.pending, explicit: query.explicit)
+            if !matches.isEmpty, query.explicit || !query.pending || query.text.count >= 2 {
+                let caretTop = query.caret.minY - barFrame.minY
+                let x = min(max(0, query.caret.minX - barFrame.minX - 14), max(0, barFrame.width - 260))
+                MentionPicker(matches: matches, pick: { mentions.pick($0) }, dismiss: { mentions.dismiss() })
+                    .alignmentGuide(.leading) { _ in -x }
+                    .alignmentGuide(.top) { d in d[.bottom] - (caretTop - 8) }
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomLeading)))
+            }
+        }
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {
@@ -1600,11 +1630,13 @@ struct ComposerInputView: View {
     }
 
     /// One more photo or PDF, up to the limit; a file Poki can't read says so.
-    private func add(_ read: () throws -> ChatAttachment) {
-        guard attachments.count < Self.most else { return }
+    @discardableResult
+    private func add(_ read: () throws -> ChatAttachment) -> UUID? {
+        guard attachments.count < Self.most else { return nil }
         do {
             let item = try read()
             withAnimation(.snappy) { attachments.append(item) }
+            return item.id
         } catch AttachmentReader.Failure.tooLarge {
             problem = AppLocalization.text(LocalizedStringResource("Text files must be 100 KB or smaller."))
         } catch AttachmentReader.Failure.invalidUTF8 {
@@ -1614,6 +1646,7 @@ struct ComposerInputView: View {
         } catch {
             problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
         }
+        return nil
     }
 
     /// One button: talk when the field is empty, send when it has words, stop while a task runs. Poki's
@@ -1665,8 +1698,11 @@ struct ComposerInputView: View {
         dictation.cancel(model)
         let text = input
         send(text, attachments)
+        MentionRecents.sent(text)
+        mentions.update(nil)
         adding = false
         withAnimation(.snappy) { attachments = [] }
+        photoAssets = [:]
         sends += 1
         sent = (text, Date())
         input = ""

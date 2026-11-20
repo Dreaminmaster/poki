@@ -658,7 +658,14 @@ final class ChatModel {
             let continuation = prepared.resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
             let context = Harness.taskInstructions(for: prepared.resumedTask ?? prepared.message, inSplitView: splitSession != nil)
             offeredMemories = context.notes
-            let instructions = [context.text, restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
+            // Connectors: the accounts used automatically and those the message mentions with @.
+            let mentioned = ConnectorTools.mentioned(in: prepared.message)
+            await ConnectorTools.prepare(mentioned)
+            loop.connectorTools = splitSession != nil ? [] : ConnectorTools.tools(mentioned: mentioned) { [weak self] connector, summary, always in
+                await self?.app.clearConnectorStep(connector: connector, summary: summary, always: always) ?? false
+            }
+            let instructions = [context.text, restoredContext, continuation,
+                                Harness.connectorInstructions(loop.connectorTools.isEmpty ? [] : MCPConnectors.shared.connected.map(\.name))].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message, images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(prepared.you.id)

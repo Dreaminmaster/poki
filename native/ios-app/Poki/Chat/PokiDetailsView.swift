@@ -96,6 +96,11 @@ struct PokiDetailsView: View {
                             .id(modelVersion)
                     }
                     .accessibilityIdentifier("details.accountsAndModels")
+                    // Services the chat's model reaches directly (remote MCP servers), each with its accounts.
+                    NavigationLink(value: DetailsRoute.connectors) {
+                        SettingsRow(title: "Connectors", symbol: "puzzlepiece.extension", value: connectorsValue)
+                    }
+                    .accessibilityIdentifier("details.connectors")
                     // Named for what is on it: the dictation button and Poki's voice. Live voice starts in the chat.
                     NavigationLink(value: DetailsRoute.voice) {
                         SettingsRow(title: "Dictation & Mute", symbol: "mic")
@@ -189,6 +194,8 @@ struct PokiDetailsView: View {
                     ModelSettingsView()
                 case .voiceKey:
                     ModelSettingsView(opensVoiceKey: true)
+                case .connectors:
+                    ConnectorsView()
                 case .history:
                     ActionLogView(openSession: { id in dismiss(); openSession(id) })
                 case .conversations:
@@ -235,6 +242,11 @@ struct PokiDetailsView: View {
     private var brainValue: String {
         if isSample { return "GPT-6.1 Terra" }
         return hasModel ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add Model"))
+    }
+
+    private var connectorsValue: String? {
+        let count = isSample ? 2 : MCPConnectors.shared.connected.count
+        return count == 0 ? nil : "\(count)"
     }
 
     /// Setup first, then whether Poki is on.
@@ -284,7 +296,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
+    case model, connectors, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey

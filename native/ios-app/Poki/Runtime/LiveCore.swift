@@ -55,6 +55,9 @@ final class LiveCore: CoreSession {
     func clearTap(on text: String, inApp bundleID: String?, named name: String?, waiting seconds: Double) async -> TapClearance {
         await core.clearTap(on: text, inApp: bundleID, named: name, waiting: seconds)
     }
+    func clearConnectorStep(connector: String, summary: String, always: Bool, waiting seconds: Double) async -> TapClearance {
+        await core.clearConnectorStep(connector: connector, summary: summary, always: always, waiting: seconds)
+    }
     func accessChanged() { core.accessChanged() }
     /// The app's own MCP tools (ask_poki), after look, do and status.
     func setHostTools(_ tools: [HostTool]) { core.setHostTools(tools) }

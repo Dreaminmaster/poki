@@ -444,6 +444,29 @@ public final class PokiCore: @unchecked Sendable {
         }
     }
 
+    /// A step the chat's model takes through a connector (a remote MCP server) rather than on the phone:
+    /// it asks the owner with the same approval (card, Live Activity, notification, and the chat's
+    /// sensitivity check) as a sensitive `do`. Never Ask lets it through unless `always`, the
+    /// connector's own Always Ask.
+    public func clearConnectorStep(connector: String, summary: String, always: Bool, waiting seconds: Double) async -> TapClearance {
+        let reason = "a change through the \(connector) connector"
+        if !always, config.approvalMode() == .off { return .clear }
+        let approval = approvals.request(app: connector, summary: summary, reason: reason,
+                                         scope: ApprovalScope(actions: "connector:\(UUID().uuidString)"), stopsWhenOff: always)
+        switch await approvals.wait(id: approval.id, seconds: seconds) {
+        case .approved?:
+            _ = approvals.consumeGrant(scope: approval.scope)
+            return .approved(reason)
+        case .declined?:
+            return .declined(reason)
+        case .expired?:
+            return .unanswered(reason)
+        case nil:
+            approvals.withdraw(id: approval.id)
+            return .unanswered(reason)
+        }
+    }
+
     /// look, do or status for another part of the app (the Voice tab), run here on the phone exactly as a
     /// relay call: same gate, approvals, Live Activity and deadlines. `arguments` is the call's JSON object.
     /// The Voice tab acts for the owner, so a step handed to the owner does not hold its input back.
