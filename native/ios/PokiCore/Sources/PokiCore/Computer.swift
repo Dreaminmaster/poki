@@ -1632,35 +1632,10 @@ final class Computer: @unchecked Sendable {
             guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false), reason != approved else { continue }
             return ("the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
-        if let moved = movedUnder(kind, action, fresh: elements.all) {
-            return ("the action before it changed the screen where it touches: \(moved). Choose the remaining actions from the fresh screen below and send them in a new do", nil)
+        if let moved = movedUnder(kind, action, fresh: elements.all), await !stillMeant(action, moved: moved, fresh: listable(elements.all, screen), front: elements.foreground, until: until) {
+            return ("the action before it changed the screen where it touches: it was aimed at \(moved.meant), and \(moved.now) is there now. Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
         return (nil, backTarget)
-    }
-
-    /// A tap by number or point aimed at what the latest read had there. On the screen it lands on,
-    /// the same element there (by its type and words) means the model's choice still stands, and the
-    /// chain goes on; another element there means the earlier action opened another screen, and the
-    /// tap is not sent blind. Steps named by their text (a path, a skill) find their own target.
-    func movedUnder(_ kind: ActionKind, _ action: JSON, fresh: [Element]) -> String? {
-        let specs: [JSON?] = switch kind {
-        case .tap, .longPress, .pinch: [action[kind.rawValue]]
-        case .type: [action["ref"]]
-        case .drag where action["drag"]?["to_pane"] == nil:
-            if let a = action["drag"]?.array, a.count == 4 { [[a[0], a[1]]] } else { [action["drag"]?["from"]] }
-        default: []
-        }
-        for case let spec? in specs {
-            guard let p = try? point(spec) else { continue }
-            let meant = target(spec), now = element(at: p, in: fresh)
-            guard meant?.key != now?.key else { continue }
-            func name(_ e: Element?) -> String { e.map { "\($0.type) \"\($0.text.prefix(40))\"" } ?? "nothing" }
-            return "it was aimed at \(name(meant)), and \(name(now)) is there now"
-        }
-        if let moved = movedUnder(kind, action, fresh: elements.all), await !stillMeant(action, moved: moved, fresh: listable(elements.all, screen), front: elements.foreground, until: until) {
-            return "the action before it changed the screen where it touches: it was aimed at \(moved.meant), and \(moved.now) is there now. Choose the remaining actions from the fresh screen below and send them in a new do"
-        }
-        return nil
     }
 
     /// A tap by number or point aimed at what the latest read had there, and what lies there on the

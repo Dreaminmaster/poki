@@ -501,10 +501,10 @@ extension PokiCore {
             let hold = answerBy.map { max(0, min(config.approvalWait, $0 - monotonicNow() - config.readTimeout - 3)) } ?? config.approvalWait
             if let pending = approvals.pending { approvals.withdraw(id: pending.id) }
             let approval = approvals.request(app: "Screen History", summary: "Share Screen History", reason: reason.isEmpty ? "reading Screen History" : reason,
-                                             fingerprint: "history:\(UUID().uuidString)")
+                                             scope: ApprovalScope(actions: "history:\(UUID().uuidString)"))
             switch await approvals.wait(id: approval.id, seconds: hold) {
             case .approved?:
-                _ = approvals.consumeGrant(fingerprint: approval.fingerprint)
+                _ = approvals.consumeGrant(scope: approval.scope)
                 return ToolResult(text: text, jpeg: nil, isError: false)
             case .declined?, .expired?:
                 return ToolResult(text: Self.screenHistoryNotShared, jpeg: nil, isError: true)

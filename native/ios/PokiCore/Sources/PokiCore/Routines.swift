@@ -504,7 +504,8 @@ public final class SkillStore: @unchecked Sendable {
 
     func withFile<T>(_ change: Bool = false, _ body: (inout MemoryFile) throws -> T) rethrows -> T {
         lock.lock()
-        let result = body(&file)
+        let result: T
+        do { result = try body(&file) } catch { lock.unlock(); throw error }
         if change { try? persist(file) }
         lock.unlock()
         if change { onChange?() }
