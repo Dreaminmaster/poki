@@ -90,11 +90,11 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
     func close() { closed = true }
     @MainActor func play(_ events: [String: Any]...) { for event in events { onEvent?(event) } }
-    @MainActor func backend(_ type: String, _ fields: [String: Any] = [:]) {
-        play(["type": "response.event", "delegation_id": "d1", "event": fields.merging(["type": type]) { _, type in type }])
+    @MainActor func backend(_ type: String, _ fields: [String: Any] = [:], delegation: String? = "d1") {
+        play(["type": "response.event", "delegation_id": delegation as Any? ?? NSNull(), "event": fields.merging(["type": type]) { _, type in type }])
     }
-    @MainActor func call(_ id: String, _ name: String, arguments: String = "{}") {
-        backend("response.output_item.done", ["item": ["type": "function_call", "call_id": id, "name": name, "arguments": arguments]])
+    @MainActor func call(_ id: String, _ name: String, arguments: String = "{}", delegation: String? = "d1") {
+        backend("response.output_item.done", ["item": ["type": "function_call", "call_id": id, "name": name, "arguments": arguments]], delegation: delegation)
     }
     /// The text of every system note sent on this connection.
     var notes: [String] {
@@ -146,49 +146,60 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(h.microphone, [true, false])
     }
 
-    func testLiveCaptionsAndStopKeepTheNextDelegatedToolFromRunning() async {
-        for gap in [200, 1200] {
-            var executed: [String] = []
-            let h = Harness(phoneTool: { name, _ in
-                executed.append(name)
-                return ("mock result", false, nil)
-            })
-            await h.liveTalk()
-            XCTAssertEqual(h.link.liveAnswer, "sdp-answer")
-            h.link.play(["type": "session.input_transcript.delta", "delta": "打开", "start_ms": 0, "end_ms": 200],
-                        ["type": "session.input_transcript.delta", "delta": "微信", "start_ms": 200, "end_ms": 400],
-                        ["type": "session.delegation.created", "delegation": ["id": "d1"]])
-            h.link.call("c1", "look")
-            h.link.play(["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 400 + gap, "end_ms": 700 + gap])
-            h.link.call("c2", "do")
-            h.link.play(["type": "session.output_transcript.delta", "delta": "收到。", "start_ms": 2100, "end_ms": 2300])
-            await h.time.settle()
-            XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text).joined(), "打开微信停。")
-            XCTAssertEqual(h.voice.lines.filter { $0.role == .poki }.map(\.text), ["收到。"])
-            XCTAssertEqual(executed, ["look"], "Stop must block the next phone action at \(gap) ms.")
-            let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
-                .compactMap { ($0["item"] as? [String: String])?["call_id"] }
-            XCTAssertEqual(Set(results), ["c1", "c2"])
-            XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
-            h.voice.stop()
-        }
+    func testLiveCancelToolStopsRunningDelegationAndAllowsTheNextTask() async {
+        let time = FakeTime()
+        var executed: [String] = []
+        let h = Harness(time: time, phoneTool: { name, _ in
+            executed.append(name)
+            if name == "look" { await time.clock.sleep(.seconds(1)) }
+            return ("mock result", false, nil)
+        })
+        await h.liveTalk()
+        XCTAssertEqual(h.link.liveAnswer, "sdp-answer")
+        h.link.play(["type": "session.input_transcript.delta", "delta": "打开微信", "start_ms": 0, "end_ms": 400],
+                    ["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        h.link.call("read", "look")
+        await time.settle()
+        XCTAssertEqual(executed, ["look"])
+        h.link.play(["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 500, "end_ms": 800],
+                    ["type": "session.delegation.created", "delegation": ["id": "cancel"]])
+        h.link.call("queued", "do")
+        h.link.call("stop", "cancel_current_task", delegation: "cancel")
+        h.link.call("later", "do")
+        h.link.call("unscoped", "do", delegation: nil)
+        await time.advance(1)
+        XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text).joined(), "打开微信停。")
+        XCTAssertEqual(executed, ["look"], "Only the phone step already executing may finish.")
+        let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
+            .compactMap { ($0["item"] as? [String: String])?["call_id"] }
+        XCTAssertEqual(Set(results), ["read", "stop", "queued", "later", "unscoped"])
+        XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
+
+        h.link.play(["type": "session.delegation.created", "delegation": ["id": "d2"]])
+        h.link.call("stop", "cancel_current_task", delegation: "cancel")
+        h.link.call("old-task", "do")
+        h.link.call("new-task", "open_app", delegation: "d2")
+        await time.settle()
+        XCTAssertEqual(executed, ["look", "open_app"])
+        h.voice.stop()
     }
 
     func testLiveDictatesTheWordStopWhenItCompletesTheSameUtterance() async {
-        for gap in [0, 100] {
+        for (prefix, suffix) in [("在备忘录输入", ""), ("把", "字发过去")] {
             var written: [String] = []
             let h = Harness(phoneTool: { _, arguments in
                 written.append(arguments)
                 return ("Text entered in Notes", false, nil)
             })
             await h.liveTalk()
-            h.link.play(["type": "session.input_transcript.delta", "delta": "在备忘录输入", "start_ms": 0, "end_ms": 700],
-                        ["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 700 + gap, "end_ms": 950 + gap],
+            h.link.play(["type": "session.input_transcript.delta", "delta": prefix, "start_ms": 0, "end_ms": 700],
+                        ["type": "session.input_transcript.delta", "delta": "停", "start_ms": 950, "end_ms": 1200],
+                        ["type": "session.input_transcript.delta", "delta": suffix, "start_ms": 1200, "end_ms": 1500],
                         ["type": "session.delegation.created", "delegation": ["id": "d1"]])
             let arguments = #"{"actions":[{"type":"停"}]}"#
             h.link.call("write-stop", "do", arguments: arguments)
             await h.time.settle()
-            XCTAssertEqual(written, [arguments], "The dictated word must reach Notes at a \(gap) ms gap.")
+            XCTAssertEqual(written, [arguments], "The tool must receive the requested text for \(prefix)停\(suffix).")
             h.voice.stop()
         }
     }
@@ -343,8 +354,8 @@ final class VoiceModelTests: XCTestCase {
         private(set) var microphone: [Bool] = []
         var link: FakeConnection { links.last! }
 
-        @MainActor init(phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
-            let time = FakeTime()
+        @MainActor init(time: FakeTime? = nil, phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
+            let time = time ?? FakeTime()
             self.time = time
             var made: (() -> FakeConnection)!
             var held: ((Bool) -> Void)!
@@ -654,6 +665,24 @@ final class VoiceLanguageTests: XCTestCase {
         for rule in ["Act first, then talk.", "Say nothing before or between tool calls.", "Give the verified result in one short sentence."] {
             XCTAssertTrue(prompt.contains(rule), rule)
         }
+    }
+
+    func testDirectLiveOfferExposesCancellationOnlyInLive() async throws {
+        URLProtocol.registerClass(OpenAIStub.self)
+        defer { URLProtocol.unregisterClass(OpenAIStub.self) }
+        _ = try await VoiceDirect.exchangeLiveOffer("offer", model: "gpt-live-1.1", apiKey: "sk-test")
+        let session = try XCTUnwrap(OpenAIStub.session)
+        let delegation = try XCTUnwrap(session["delegation"] as? [String: Any])
+        let backend = try XCTUnwrap(delegation["responses"] as? [String: Any])
+        let tools = try XCTUnwrap(backend["tools"] as? [[String: Any]])
+        XCTAssertNotNil(tools.first { $0["name"] as? String == "cancel_current_task" })
+        for owner in [session, backend] {
+            let prompt = try XCTUnwrap(owner["instructions"] as? String)
+            XCTAssertTrue(prompt.contains("cancel_current_task"))
+            XCTAssertTrue(prompt.contains("把停字发过去"))
+        }
+        let realtime = try XCTUnwrap(VoiceDirect.session["tools"] as? [[String: Any]])
+        XCTAssertFalse(realtime.contains { $0["name"] as? String == "cancel_current_task" })
     }
 
     func testTheLiveSessionHintsChineseTranscriptionWithoutChangingReplyLanguageRules() async throws {

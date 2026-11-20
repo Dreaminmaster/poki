@@ -48,6 +48,7 @@ test('legacy voice token requests hint Chinese transcription for each interface 
     assert.equal((await response.json()).value, 'ek_test');
     const { body: { session } } = await request();
     assert.equal(session.audio.input.transcription.language, 'zh');
+    assert.ok(!session.tools.some(tool => tool.name === 'cancel_current_task'));
   }
 });
 
@@ -69,6 +70,11 @@ test('the voice bridge exchanges a Live offer and returns only the SDP answer', 
   assert.equal(session.model, 'gpt-live-1.1');
   assert.equal(session.delegation.type, 'responses');
   assert.ok(session.delegation.responses.tools.some(tool => tool.name === 'do'));
+  assert.ok(session.delegation.responses.tools.some(tool => tool.name === 'cancel_current_task'));
+  for (const prompt of [session.instructions, session.delegation.responses.instructions]) {
+    assert.match(prompt, /cancel_current_task/);
+    assert.match(prompt, /把停字发过去/);
+  }
   assert.match(session.instructions, /Chinese/i);
   assert.match(session.instructions, /Act first, then talk\./);
   assert.match(session.instructions, /Say nothing before or between tool calls\./);
