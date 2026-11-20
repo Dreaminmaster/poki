@@ -117,7 +117,7 @@ struct AgentsView: View {
                     }
                     NavigationLink(value: SettingsRoute.memory) {
                         LabeledContent {
-                            Text("\(RoutineStore.shared.routines.count) skills")
+                            Text("\(RoutineStore.shared.usableSkills.count) skills")
                         } label: { Label("Memory Library", systemImage: "brain") }
                     }
                 } header: {

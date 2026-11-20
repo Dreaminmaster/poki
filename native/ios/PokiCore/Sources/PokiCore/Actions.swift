@@ -294,13 +294,13 @@ extension Computer {
     }
 
     /// Returns the action's kind (for the settle pause) and what it did.
-    func perform(_ action: JSON, until: Double, backTarget: BackTarget? = nil) async throws -> (String, String) {
+    func perform(_ action: JSON, until: Double, backTarget: BackTarget? = nil, onSkillReplayed: (@Sendable (String) -> Void)? = nil) async throws -> (String, String) {
         guard let kind = ActionKind(action) else { throw ActionFailure(message: "unknown action \(action.serialized())", delivery: .notSent) }
         let spec = action[kind.rawValue] ?? .null
         switch kind {
         case .run:
             runEndedOnARead = false
-            let text = try await runSkill(spec, until: until)
+            let text = try await runSkill(spec, until: until, onCompleted: onSkillReplayed)
             // A run whose end check found its texts has read the screen it ends on: no pause before the read.
             return (runEndedOnARead ? "run_read" : "run", text)
         case .path:

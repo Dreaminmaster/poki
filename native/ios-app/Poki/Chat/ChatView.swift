@@ -764,7 +764,7 @@ struct ChatTranscript<Footer: View>: View {
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
                      asker: ask.from, app: current ? app : entry.app, usedBrowser: ChatEntry.taskUsedBrowser(in: entries, at: i), started: entry.at, shot: current ? shot : nil,
-                     ended: current ? nil : entry.ended, plannedTotal: entry.total)
+                     ended: current ? nil : entry.ended, plannedTotal: entry.total, memoryUse: entry.memoryUse)
                 .contentShape(.contextMenuPreview, .rect(cornerRadius: 26, style: .continuous))
 
                 .padding(.vertical, 6)
