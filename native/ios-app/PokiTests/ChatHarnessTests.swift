@@ -45,6 +45,44 @@ final class ChatHarnessTests: XCTestCase {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 
+    func testCountedMessageScrollShowsVerifiedProgressAndStopsAtTheTarget() async throws {
+        for target in [4, 100] {
+            let transport = MessageListTransport()
+            let scroll = FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true])
+            let screens = [[1, 2, 3], [4, 5, 1], [6, 7, 4]]
+            func count(_ refs: [Int]) -> String {
+                FakeCompletions.tool("count_messages", ["target": target, "refs": refs])
+            }
+            var turns = [
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]), count(screens[0]),
+                scroll, count(screens[1]), scroll, count(screens[2]),
+            ]
+            if target == 100 { turns += [scroll, count(screens[2])] }
+            turns += [
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling."]),
+                FakeCompletions.text("I finished scrolling."),
+            ]
+            let server = try FakeCompletions(replies: turns)
+            let chat = chat(on: server, transport: transport)
+            let result = await chat.runDelegated("Scroll up \(target) messages in the open conversation.")
+            let plan = try XCTUnwrap(chat.entries.compactMap { entry -> [PlanStep]? in
+                if case .plan(let steps) = entry.kind { return steps }
+                return nil
+            }.last)
+            XCTAssertEqual(plan.map(\.state), target == 4 ? [.done] : [.failed], result.text)
+            let reply = try XCTUnwrap(chat.entries.compactMap { entry -> String? in
+                if case .poki(let text) = entry.kind { return text }
+                return nil
+            }.last)
+            XCTAssertTrue(reply.contains("4") && reply.contains("Message 01"), reply)
+            if target == 100 {
+                XCTAssertTrue(reply.contains("100") && reply.contains("stopped moving"), reply)
+            }
+            XCTAssertEqual(transport.topMessage, 1)
+        }
+    }
+
     func testExistingConversationUsesTheNewCustomEndpointForTheSameModel() async throws {
         let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done."])
         let first = try FakeCompletions(replies: [done, FakeCompletions.text("First endpoint.")])
@@ -1640,6 +1678,37 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
             default: return reply(["error": "unknown command", "message": .string(path)], status: 404)
             }
         }
+    }
+}
+
+private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var top = 5
+    var topMessage: Int { lock.withLock { top } }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/session": value = ["sessionId": "message-list"]
+        case "/status": value = ["ready": true]
+        case "/wda/locked": value = false
+        case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
+        case "/wda/activeAppInfo": value = ["bundleId": "local.fixture.messages", "name": "Messages fixture"]
+        case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
+        case "/source":
+            let first = topMessage
+            let rows = (0..<3).map { line in
+                let title = String(format: "Message %02d", first + line)
+                return #"<XCUIElementTypeStaticText label="\#(title)" x="20" y="\#(140 + line * 100)" width="250" height="40"/>"#
+            }.joined()
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
+        case "/wda/pressAndDragWithVelocity", "/actions":
+            lock.withLock { top = max(1, top - 2) }
+            value = .null
+        default: value = .null
+        }
+        return (200, (["value": value] as JSON).data())
     }
 }
 
