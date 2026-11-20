@@ -60,8 +60,8 @@ final class LiveCore: CoreSession {
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
     /// `conversation`: the chat a `skills` call comes from, kept with a note as where it was heard.
-    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionWillSend: PokiCore.ActionWillSend? = nil) async -> PokiCore.ToolAnswer {
-        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation, localTask: localTask, onActionWillSend: onActionWillSend)
+    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
+        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation, localTask: localTask, onActionSucceeded: onActionSucceeded)
     }
     func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
     func bindCompanionTarget() async -> Bool { await core.bindCompanionTarget() }

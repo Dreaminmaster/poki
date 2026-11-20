@@ -850,8 +850,8 @@ final class ChatModel {
         return request + 1
     }
 
-    private func recordMemoryUse(notes: [TaskMemoryUse.Note], skill: String?) -> PokiCore.InputRollback? {
-        guard !notes.isEmpty || skill != nil, let index = taskCardIndex(create: true) else { return nil }
+    private func recordMemoryUse(notes: [TaskMemoryUse.Note], skill: String?) {
+        guard !notes.isEmpty || skill != nil, let index = taskCardIndex(create: true) else { return }
         let previous = entries[index].memoryUse
         var use = previous ?? TaskMemoryUse(notes: [], skills: [])
         for note in notes {
@@ -859,51 +859,53 @@ final class ChatModel {
             else { use.notes.append(note) }
         }
         if let skill, !use.skills.contains(skill) { use.skills.append(skill) }
-        guard use != previous else { return nil }
-        let card = entries[index].id, session = sessionID, recorded = use
+        guard use != previous else { return }
         entries[index].memoryUse = use
         store.flush(sessionID: sessionID)
-        return { [weak self, store] in
-            if let self, self.sessionID == session {
-                guard let index = self.entries.firstIndex(where: { $0.id == card }),
-                      self.entries[index].memoryUse == recorded else { return }
-                self.entries[index].memoryUse = previous
-                store.flush(sessionID: session)
-            } else {
-                store.restoreMemoryUse(previous, replacing: recorded, card: card, in: session)
-            }
-        }
     }
 
-    @discardableResult
-    private func recordReportedMemories(_ ids: [String], skill: String? = nil) -> PokiCore.InputRollback? {
-        guard !ids.isEmpty || skill != nil else { return nil }
+    private func recordReportedMemories(_ ids: [String], skill: String? = nil) {
+        guard !ids.isEmpty || skill != nil else { return }
         var reported = Set(ids.prefix(20))
         let notes = offeredMemories.reversed().compactMap { note -> TaskMemoryUse.Note? in
             guard reported.remove(note.id) != nil else { return nil }
             return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
         }
-        return recordMemoryUse(notes: notes, skill: skill)
+        recordMemoryUse(notes: notes, skill: skill)
     }
 
     private struct ActionMemory {
         var direct: [String] = []
-        var path: [[String]] = []
+        var steps: [Int: [String]] = [:]
     }
 
     private static func takeActionMemory(from action: inout [String: Any], fallback: [String]) -> ActionMemory {
         let direct = action.removeValue(forKey: "used_memory_ids") as? [String] ?? fallback
+        if action["run"] != nil {
+            guard var run = action["run"] as? [String: Any] else { return ActionMemory() }
+            let ids = run.removeValue(forKey: "step_memory_ids") as? [String: [String]] ?? [:]
+            action["run"] = run
+            var steps: [Int: [String]] = [:]
+            for (key, notes) in ids {
+                guard let number = Int(key), number > 0, String(number) == key else { continue }
+                steps[number - 1] = notes
+            }
+            return ActionMemory(steps: steps)
+        }
         guard let path = action["path"] else { return ActionMemory(direct: direct) }
         var options = path as? [String: Any]
         guard var steps = (options?["steps"] ?? path) as? [[String: Any]] else { return ActionMemory() }
-        let ids = steps.indices.map { steps[$0].removeValue(forKey: "used_memory_ids") as? [String] ?? [] }
+        var ids: [Int: [String]] = [:]
+        for index in steps.indices {
+            ids[index] = steps[index].removeValue(forKey: "used_memory_ids") as? [String]
+        }
         if options != nil {
             options?["steps"] = steps
             action["path"] = options
         } else {
             action["path"] = steps
         }
-        return ActionMemory(path: ids)
+        return ActionMemory(steps: ids)
     }
 
     private func saveTaskMemory(token: Int) -> Bool {
@@ -1211,10 +1213,9 @@ final class ChatModel {
             let ids = args["used_memory_ids"] as? [String] ?? []
             let taskToken = runToken
             showBrowser(opening: name == "web_open")
-            return await WebTools.perform(name, arguments: call.arguments, beforeAction: ids.isEmpty ? nil : { [weak self] in
-                guard let self, self.runToken == taskToken else { return false }
+            return await WebTools.perform(name, arguments: call.arguments, onActionSucceeded: ids.isEmpty ? nil : { [weak self] in
+                guard let self, self.runToken == taskToken, !self.stopAsked else { return }
                 self.recordReportedMemories(ids)
-                return true
             })
         case "find_app":
             let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
@@ -1251,16 +1252,10 @@ final class ChatModel {
             let taskToken = runToken
             let response = await app.runTool(call.name, arguments: phoneArguments, localSession: splitViewSession,
                                              expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)") { [weak self, notesByAction] index, step, skill in
-                guard let self, self.runToken == taskToken, !self.stopAsked else { throw CancellationError() }
-                guard notesByAction.indices.contains(index) else { return nil }
+                guard let self, self.runToken == taskToken, !self.stopAsked, notesByAction.indices.contains(index) else { return }
                 let action = notesByAction[index]
-                let ids: [String]
-                if let step, skill == nil {
-                    ids = action.path.indices.contains(step) ? action.path[step] : []
-                } else {
-                    ids = action.direct
-                }
-                return self.recordReportedMemories(ids, skill: skill)
+                let ids = step.map { action.steps[$0] ?? [] } ?? action.direct
+                self.recordReportedMemories(ids, skill: skill)
             }
             guard taskToken == runToken, usesSplitView else { return response }
             let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&

@@ -62,13 +62,13 @@ enum WebTools {
         return nil
     }
 
-    @MainActor static func perform(_ name: String, arguments: String, beforeAction: (() -> Bool)? = nil) async -> PokiCore.ToolAnswer {
+    @MainActor static func perform(_ name: String, arguments: String, onActionSucceeded: (() -> Void)? = nil) async -> PokiCore.ToolAnswer {
         let args = (arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
         let browser = PokiBrowser.shared
         let stopped = answer("Task stopped. Action not executed.", error: true)
         guard await browser.waitForPoki(), !Task.isCancelled else { return stopped }
         func send() -> Bool {
-            !Task.isCancelled && !browser.ownerHasIt && (beforeAction?() ?? true)
+            !Task.isCancelled && !browser.ownerHasIt
         }
         let started = Date()
         let result: PokiCore.ToolAnswer
@@ -82,7 +82,7 @@ enum WebTools {
             }
             guard send() else { return stopped }
             let step = browser.begin(AppLocalization.text(LocalizedStringResource("Open \(url.host(percentEncoded: false) ?? url.absoluteString)")))
-            await browser.open(url)
+            await browser.open(url, onCommitted: onActionSucceeded)
             result = await page(browser, budget: 7000)
             browser.end(step, ok: !result.isError, started: started)
         case "web_read":
@@ -102,10 +102,6 @@ enum WebTools {
             if banner["accept"] as? Bool == true, let reject = banner["reject"] as? String {
                 return answer("This notice has “\(banner["rejectName"] as? String ?? "")” [\(reject)]: tap that instead. Accept, continue or close a notice only when it has no reject or necessary-only choice.", error: true)
             }
-            if beforeAction != nil {
-                let check = (try? await browser.call("return window.__pokiReader.click(ref, true)", ["ref": ref])) as? [String: Any]
-                if check?["ok"] as? Bool != true { return await after(browser, check, ref: ref, did: "") }
-            }
             // A notice Poki dismisses is named in its step, so the owner sees what Poki closed.
             let notice = banner["banner"] as? Bool == true && banner["dismiss"] as? Bool == true ? banner["kind"] as? String ?? "" : ""
             let site = browser.host, button = short(label)
@@ -117,7 +113,11 @@ enum WebTools {
             }
             guard send() else { return stopped }
             let step = browser.begin(title)
-            let tapped = await browser.act { (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any] }
+            let tapped = await browser.act {
+                let receipt = (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any]
+                if receipt?["ok"] as? Bool == true, !Task.isCancelled { onActionSucceeded?() }
+                return receipt
+            }
             result = await after(browser, tapped, ref: ref, did: notice.isEmpty ? "Tapped “\(label)”." : "Dismissed the notice with “\(label)”.")
             browser.end(step, ok: !result.isError, started: started)
         case "web_type":
@@ -126,14 +126,12 @@ enum WebTools {
             }
             let label = await label(browser, ref) ?? ref
             let input: [String: Any] = ["ref": ref, "text": text, "submit": args["submit"] as? Bool ?? false]
-            if beforeAction != nil {
-                let check = (try? await browser.call("return window.__pokiReader.type(ref, text, submit, true)", input)) as? [String: Any]
-                if check?["ok"] as? Bool != true { return await after(browser, check, ref: ref, did: "") }
-            }
             guard send() else { return stopped }
             let step = browser.begin(AppLocalization.text(LocalizedStringResource("Type “\(short(text))” in “\(short(label))”")))
             let typed = await browser.act {
-                (try? await browser.call("return window.__pokiReader.type(ref, text, submit)", input)) as? [String: Any]
+                let receipt = (try? await browser.call("return window.__pokiReader.type(ref, text, submit)", input)) as? [String: Any]
+                if receipt?["ok"] as? Bool == true, !Task.isCancelled { onActionSucceeded?() }
+                return receipt
             }
             result = await after(browser, typed, ref: ref, did: "Typed into “\(label)”: \(typed?["value"] as? String ?? text).")
             browser.end(step, ok: !result.isError, started: started)

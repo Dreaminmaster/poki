@@ -968,7 +968,7 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionWillSend: PokiCore.ActionWillSend?) async -> ToolResult {
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
         let originalActionCount = actions.count
         var actions = actions
         var bound: String?
@@ -991,17 +991,16 @@ final class Computer: @unchecked Sendable {
             }
             if let kept = sessionApp, kept.session == session { bound = kept.bundle }
         }
-        let actionWillSend: PokiCore.ActionWillSend?
-        if let onActionWillSend, actions.count > originalActionCount {
+        let actionSucceeded: PokiCore.ActionSucceeded?
+        if let onActionSucceeded, actions.count > originalActionCount {
             // The app binding prepended a launch, which has no index in the model's batch.
-            actionWillSend = { index, step, skill in
-                guard index > 0 else { return nil }
-                return try onActionWillSend(index - 1, step, skill)
+            actionSucceeded = { index, step, skill in
+                if index > 0 { onActionSucceeded(index - 1, step, skill) }
             }
         } else {
-            actionWillSend = onActionWillSend
+            actionSucceeded = onActionSucceeded
         }
-        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionWillSend: actionWillSend))
+        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: actionSucceeded))
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
             authorizationRead = (read.revision, localTask, result.isError ? [] : evidence)
@@ -1046,7 +1045,7 @@ final class Computer: @unchecked Sendable {
         return action
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionWillSend: PokiCore.ActionWillSend?) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
         var started = now()
@@ -1122,7 +1121,7 @@ final class Computer: @unchecked Sendable {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
                 if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, onActionWillSend: onActionWillSend)
+                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, onActionSucceeded: onActionSucceeded)
                     result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
                     return result
                 }
@@ -1171,7 +1170,7 @@ final class Computer: @unchecked Sendable {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
-                    (did, error, lastKind) = await run(Array(actions[..<at]), started: started, until: until, onActionWillSend: onActionWillSend)
+                    (did, error, lastKind) = await run(Array(actions[..<at]), started: started, until: until, onActionSucceeded: onActionSucceeded)
                     if error != nil {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
@@ -1222,7 +1221,7 @@ final class Computer: @unchecked Sendable {
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
-        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved, onActionWillSend: onActionWillSend)
+        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved, onActionSucceeded: onActionSucceeded)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -1476,7 +1475,7 @@ final class Computer: @unchecked Sendable {
     /// deadline. Stops at the first that fails.
     /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
     /// approved an action, by its number in the do.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onActionWillSend: PokiCore.ActionWillSend?) async -> (did: [String], error: String?, lastKind: String?) {
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onActionSucceeded: PokiCore.ActionSucceeded?) async -> (did: [String], error: String?, lastKind: String?) {
         var did: [String] = []
         var error: String?
         var logError: String?
@@ -1506,12 +1505,15 @@ final class Computer: @unchecked Sendable {
             let began = now()
             let givenUp = runner.actionsGivenUp.value
             let recorded = recordable(action)
-            do {
-                let beforeInput: Runner.BeforeInput? = onActionWillSend.map { notify in
-                    { @MainActor @Sendable step in try notify(index, step?.index, step?.skill) }
+            let afterInput: Runner.AfterInput? = onActionSucceeded.map { notify in
+                { @MainActor @Sendable step in
+                    guard !Task.isCancelled, now() <= min(actionsUntil, step?.deadline ?? actionsUntil) else { return }
+                    notify(index, step?.index, step?.skill)
                 }
+            }
+            do {
                 let (kind, text) = try await withDeadline(left, "action \(index + 1)") { [self] in
-                    try await Runner.$beforeInput.withValue(beforeInput) {
+                    try await Runner.$afterInput.withValue(afterInput) {
                         try await perform(action, until: actionsUntil, backTarget: check.backTarget)
                     }
                 }
@@ -1544,7 +1546,9 @@ final class Computer: @unchecked Sendable {
                 var recoveryNote = "", recoveryLog = ""
                 if let text = action["type"]?.text, action["via"]?.string != "paste", !why.contains("split_view_changed"),
                    !(failure is ActionFailure), failure is RunnerError || failure is DeadlineExceeded {
-                    let recovered = await recoverType(action, text: text, why: why, until: until - config.readTimeout - 0.5)
+                    let recovered = await Runner.$afterInput.withValue(afterInput) {
+                        await recoverType(action, text: text, why: why, until: until - config.readTimeout - 0.5)
+                    }
                     if let done = recovered.done {
                         lastKind = "type"
                         did.append("\(done) (sent, \(Int(((now() - began) * 1000).rounded())) ms)")

@@ -30,34 +30,17 @@ public struct RunnerError: Error, CustomStringConvertible, Sendable {
     public var description: String { message }
 }
 
-/// The driver's last check before sending input. False leaves the action unsent.
-public typealias BeforeDriverDispatch = @Sendable () -> Bool
-
 /// One HTTP exchange. URLSession on the phone; a fake in tests.
 public protocol HTTPTransport: Sendable {
     /// In-process reads may change their coordinate space as the owner moves or resizes a window.
     var usesDynamicScreenSize: Bool { get }
     var supportsPaneSelection: Bool { get }
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data)
-    func sendInput(method: String, url: URL, body: Data?, timeout: Double,
-                   beforeDispatch: @escaping BeforeDriverDispatch) async throws -> (status: Int, body: Data)
 }
 
 public extension HTTPTransport {
     var usesDynamicScreenSize: Bool { false }
     var supportsPaneSelection: Bool { false }
-
-    // An HTTP-only driver cannot call back from its checks. Its successful response is the first
-    // evidence that the action was admitted. The in-process driver calls before dispatch instead.
-    func sendInput(method: String, url: URL, body: Data?, timeout: Double,
-                   beforeDispatch: @escaping BeforeDriverDispatch) async throws -> (status: Int, body: Data) {
-        let response = try await send(method: method, url: url, body: body, timeout: timeout)
-        if (200..<300).contains(response.status),
-           (try? JSON.parse(response.body))?["value"]?["error"] == nil {
-            _ = beforeDispatch()
-        }
-        return response
-    }
 }
 
 public enum TransportError: Error, Sendable {
@@ -334,9 +317,10 @@ public final class Runner: @unchecked Sendable {
     struct ReplayStep: Sendable {
         let index: Int
         let skill: String?
+        let deadline: Double
     }
-    typealias BeforeInput = @MainActor @Sendable (ReplayStep?) throws -> PokiCore.InputRollback?
-    @TaskLocal static var beforeInput: BeforeInput?
+    typealias AfterInput = @MainActor @Sendable (ReplayStep?) -> Void
+    @TaskLocal static var afterInput: AfterInput?
     @TaskLocal static var replayStep: ReplayStep?
 
     /// Send checked device input. Session setup and screen reads use call/raw directly.
@@ -361,40 +345,15 @@ public final class Runner: @unchecked Sendable {
         let busyBefore = queued ? busyWith : nil
         if queued { waitingOn.update { $0 += 1 } }
         defer { if queued { waitingOn.update { $0 -= 1 } } }
-        let beforeInput = sendsInput ? Self.beforeInput : nil
-        let step = Self.replayStep
-        let rollback = LockedBox<PokiCore.InputRollback?>(nil)
-        let active = LockedBox(true)
-        var delivery = Delivery.unknown
-        defer {
-            active.value = false
-            if delivery == .notSent, let undo = rollback.value { Self.onMain(undo) }
-        }
         func busyNote() -> String { busyBefore.map { "; the runner is still finishing an earlier \($0)" } ?? "" }
         let result: (status: Int, body: Data)
+        let receiptDeadline = now() + timeout + 0.5
         do {
             result = try await withDeadline(timeout + 0.5, "the runner's answer to \(method) \(Self.short(path))") { [transport] in
                 let payload = body?.data()
-                guard let beforeInput else {
-                    return try await transport.send(method: method, url: target, body: payload, timeout: timeout)
-                }
-                return try await withTaskCancellationHandler {
-                    try Task.checkCancellation()
-                    return try await transport.sendInput(method: method, url: target, body: payload, timeout: timeout) {
-                        Self.onMain {
-                            guard active.value else { return false }
-                            do {
-                                rollback.value = try beforeInput(step)
-                                return true
-                            } catch { return false }
-                        }
-                    }
-                } onCancel: {
-                    active.value = false
-                }
+                return try await transport.send(method: method, url: target, body: payload, timeout: timeout)
             }
         } catch TransportError.refused {
-            delivery = .notSent
             // A refused connection is a runner process that is gone: what it was finishing went with it.
             stall.value = nil
             miss()
@@ -423,21 +382,18 @@ public final class Runner: @unchecked Sendable {
         // holds that request (it answers others beside it).
         if queued, (transport as? LocalRunner)?.holdsARequest != true { stall.value = nil }
         if let code = value["error"]?.string {
-            delivery = value["delivery"]?.string == Delivery.unknown.rawValue ? .unknown : .notSent
             let message = (value["message"]?.string ?? code).split(separator: "\n").first.map(String.init) ?? code
+            let delivery: Delivery = value["delivery"]?.string == Delivery.unknown.rawValue ? .unknown : .notSent
             throw RunnerError(message: "the runner refused \(method) \(Self.short(path)): \(message)", delivery: delivery, status: result.status, code: code)
         }
         if !(200..<300).contains(result.status) {
-            delivery = .notSent
             throw RunnerError(message: "the runner answered HTTP \(result.status) to \(method) \(Self.short(path))", delivery: .notSent, status: result.status)
         }
-        delivery = .sent
+        // Only the response that won the deadline race can attribute an input.
+        if sendsInput, let afterInput = Self.afterInput, !Task.isCancelled, now() <= receiptDeadline {
+            await afterInput(Self.replayStep)
+        }
         return value
-    }
-
-    private static func onMain<T: Sendable>(_ body: @MainActor @Sendable () -> T) -> T {
-        if Thread.isMainThread { return MainActor.assumeIsolated(body) }
-        return DispatchQueue.main.sync { MainActor.assumeIsolated(body) }
     }
 
     /// This side gave up on a queued request. The runner still serves it, and everything sent after

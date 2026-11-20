@@ -25,7 +25,6 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
         public var session: String?
         public var element: String?
         public var body: JSON?
-        public var beforeDispatch: BeforeDriverDispatch?
         /// An earlier request is held: a screenshot then takes the picture and nothing more (no
         /// lookup of the app in front, which would wait behind the held request).
         public var whileHeld = false
@@ -107,16 +106,6 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
     }
 
     public func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        try await send(method: method, url: url, body: body, timeout: timeout, admission: nil)
-    }
-
-    public func sendInput(method: String, url: URL, body: Data?, timeout: Double,
-                          beforeDispatch: @escaping BeforeDriverDispatch) async throws -> (status: Int, body: Data) {
-        try await send(method: method, url: url, body: body, timeout: timeout, admission: beforeDispatch)
-    }
-
-    private func send(method: String, url: URL, body: Data?, timeout: Double,
-                      admission: BeforeDriverDispatch?) async throws -> (status: Int, body: Data) {
         var request = Self.request(method: method, path: url.path, body: body)
         let key = request.key
         if key == "GET /status" { return status() }
@@ -125,9 +114,6 @@ public final class LocalRunner: HTTPTransport, @unchecked Sendable {
         let asked = now()
         // The moment the caller gives up (Runner waits for its timeout and half a second).
         let givesUp = asked + timeout + 0.5
-        if let admission {
-            request.beforeDispatch = { now() < givesUp && admission() }
-        }
         return try await withCheckedThrowingContinuation { continuation in
             lane.async { [self] in
                 let began = now()

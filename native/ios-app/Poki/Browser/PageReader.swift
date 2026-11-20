@@ -361,11 +361,10 @@ enum PageReader {
 
   const describe = (el) => privateField(el) || squash(el.getAttribute('aria-label') || el.innerText || el.tagName.toLowerCase()).slice(0, 60);
 
-  function click(ref, checkOnly = false) {
+  function click(ref) {
     const el = element(ref);
     if (!el) return { ok: false, error: 'stale' };
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') return { ok: false, error: 'disabled', name: name(el) };
-    if (checkOnly) return { ok: true };
     driving = true;
     quiet(el);
     el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
@@ -385,7 +384,7 @@ enum PageReader {
     return { ok: true, name: name(el), covered };
   }
 
-  function type(ref, text, submit, checkOnly = false) {
+  function type(ref, text, submit) {
     const el = element(ref);
     if (!el) return { ok: false, error: 'stale' };
     const view = el.ownerDocument.defaultView;
@@ -395,7 +394,6 @@ enum PageReader {
       const wanted = text.toLowerCase();
       const option = [...el.options].find((o) => squash(o.text).toLowerCase() === wanted) || [...el.options].find((o) => squash(o.text).toLowerCase().includes(wanted));
       if (!option) return { ok: false, error: 'option', options: [...el.options].map((o) => squash(o.text)).slice(0, 30) };
-      if (checkOnly) return { ok: true };
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       flash(el);
       el.value = option.value;
@@ -404,7 +402,6 @@ enum PageReader {
       return { ok: true, name: name(el), value: squash(option.text) };
     }
     if (!el.isContentEditable && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return { ok: false, error: 'notfield', name: name(el) };
-    if (checkOnly) return { ok: true };
     el.scrollIntoView({ block: 'center', behavior: 'instant' });
     flash(el);
     driving = true;

@@ -1235,7 +1235,7 @@ extension Computer {
         if let app = skill.startingApp, lastForeground?.bundleID != app, skill.steps.first?.action["launch"] == nil, !config.isPoki(Foreground(bundleID: app, name: nil)) {
             do {
                 // Bringing up the starting app prepares the replay. The saved steps do the work.
-                _ = try await Runner.$beforeInput.withValue(nil) {
+                _ = try await Runner.$afterInput.withValue(nil) {
                     try await perform(["launch": .string(app)], until: until)
                 }
                 log.append("launched \(app)")
@@ -1351,7 +1351,7 @@ extension Computer {
                         throw stop(index, "\(why); \(element.type) \"\(element.text.prefix(40))\" is in the way and closing it needs the owner's approval (\(reason))")
                     }
                     do {
-                        _ = try await Runner.$beforeInput.withValue(nil) {
+                        _ = try await Runner.$afterInput.withValue(nil) {
                             try await perform(tap, until: min(until, now() + config.actionCap))
                         }
                     }
@@ -1405,9 +1405,10 @@ extension Computer {
             let began = now()
             let kind: String, text: String
             do {
-                let step = Runner.ReplayStep(index: index, skill: saved ? skill.name : nil)
+                let deadline = min(until, now() + actionCap(action))
+                let step = Runner.ReplayStep(index: index, skill: saved ? skill.name : nil, deadline: deadline)
                 (kind, text) = try await Runner.$replayStep.withValue(step) {
-                    try await perform(action, until: min(until, now() + actionCap(action)))
+                    try await perform(action, until: deadline)
                 }
             }
             catch let failure as ActionFailure {

@@ -61,7 +61,7 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a multi-step path, put used_memory_ids inside the specific path.steps object that uses the memory, never on the outer path. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report a memory used only to answer with finish_task. Do not report memories you only read.")
+        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report a memory used only to answer with finish_task. Do not report memories you only read.")
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
@@ -136,7 +136,7 @@ enum Harness {
         properties["used_memory_ids"] = [
             "type": "array", "items": string, "maxItems": 20,
             "description": tool.name == "do"
-                ? "For a single non-path action only. Prefer attaching used_memory_ids to the individual action, or to the individual step inside path.steps."
+                ? "For a single action except path and run. Put memory IDs on the specific action, path step, or numbered step in run.step_memory_ids."
                 : "IDs of supplied saved memories that changed this action. Omit memories you only read.",
         ] as [String: Any]
         tool.schema["properties"] = properties

@@ -81,7 +81,6 @@ enum InProcessSession: Equatable {
 /// sent; `Runner` opens a new session and sends it there once.
 final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     private typealias Route = (_ body: JSON?, _ element: String?) throws -> JSON
-    @TaskLocal private static var beforeDispatch: BeforeDriverDispatch?
     private let native = PKInProcess.shared()
     /// When each request runs: one action or read at a time, screenshots beside them (PokiCore).
     private var lanes: LocalRunner!
@@ -272,16 +271,14 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 // `frequency`: characters a second for this burst (PokiCore's Humanize types a word at
                 // a time at an uneven pace); without one, the fixed 120 of before.
                 let speed = UInt(max(1, min(240, body?["frequency"]?.int ?? 120)))
-                return try self.answer(self.native.type(text, typingSpeed: speed,
-                                                       timeout: 3 + Double(text.count) / Double(speed) + 0.02 * Double(text.count),
-                                                       beforeDispatch: Self.beforeDispatch))
+                return try self.answer(self.native.type(text, typingSpeed: speed, timeout: 3 + Double(text.count) / Double(speed) + 0.02 * Double(text.count)))
             },
-            "POST /wda/homescreen": { [unowned self] _, _ in try self.done(self.native.press("home", beforeDispatch: Self.beforeDispatch)) },
-            "POST /wda/lock": { [unowned self] _, _ in try self.done(self.native.press("lock", beforeDispatch: Self.beforeDispatch)) },
-            "POST /wda/pressButton": { [unowned self] body, _ in try self.done(self.native.press(body?["name"]?.string ?? "", beforeDispatch: Self.beforeDispatch)) },
-            "POST /wda/apps/launch": { [unowned self] body, _ in try self.done(self.native.app(try Self.bundle(body), action: "launch", beforeDispatch: Self.beforeDispatch)) },
-            "POST /wda/apps/activate": { [unowned self] body, _ in try self.done(self.native.app(try Self.bundle(body), action: "activate", beforeDispatch: Self.beforeDispatch)) },
-            "POST /wda/apps/terminate": { [unowned self] body, _ in try self.done(self.native.app(try Self.bundle(body), action: "terminate", beforeDispatch: Self.beforeDispatch)) },
+            "POST /wda/homescreen": { [unowned self] _, _ in try self.done(self.native.press("home")) },
+            "POST /wda/lock": { [unowned self] _, _ in try self.done(self.native.press("lock")) },
+            "POST /wda/pressButton": { [unowned self] body, _ in try self.done(self.native.press(body?["name"]?.string ?? "")) },
+            "POST /wda/apps/launch": { [unowned self] body, _ in try self.done(self.native.app(try Self.bundle(body), action: "launch")) },
+            "POST /wda/apps/activate": { [unowned self] body, _ in try self.done(self.native.app(try Self.bundle(body), action: "activate")) },
+            "POST /wda/apps/terminate": { [unowned self] body, _ in try self.done(self.native.app(try Self.bundle(body), action: "terminate")) },
             // The clipboard is Poki's own to read and write here; WDA's wire form is base64 text.
             // Empty only when it is: no text while it holds something (an image, or a paste the owner
             // did not allow), or while Poki is in the background and iOS may hide it, is unreadable.
@@ -306,9 +303,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         // The phone side's own request it gave up on (a pid that has not answered), which testmanagerd
         // still serves: LocalRunner sends nothing that needs testmanagerd until it is through.
         lanes = LocalRunner(serve: { [unowned self] request in
-            Self.$beforeDispatch.withValue(request.beforeDispatch) {
-                self.answer(request.key, session: request.session, element: request.element, body: request.body, route: self.routes[request.key], refreshViewport: !request.whileHeld)
-            }
+            self.answer(request.key, session: request.session, element: request.element, body: request.body, route: self.routes[request.key], refreshViewport: !request.whileHeld)
         }, unanswered: { [unowned self] in
             guard let held = self.native.unanswered(), let seconds = held["seconds"] as? Double else { return nil }
             let pid = held["pid"] as? Int ?? 0
@@ -324,11 +319,6 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
         try await lanes.send(method: method, url: url, body: body, timeout: timeout)
-    }
-
-    func sendInput(method: String, url: URL, body: Data?, timeout: Double,
-                   beforeDispatch: @escaping BeforeDriverDispatch) async throws -> (status: Int, body: Data) {
-        try await lanes.sendInput(method: method, url: url, body: body, timeout: timeout, beforeDispatch: beforeDispatch)
     }
 
     private func answer(_ key: String, session: String?, element: String?, body: JSON?, route: Route?, refreshViewport: Bool) -> (status: Int, body: Data) {
@@ -432,7 +422,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         }
         let paths = fingers.map { $0.map { PKTouchPoint.at(CGPoint(x: $0.0.x + shift.x, y: $0.0.y + shift.y), offset: $0.1) } }
         let longest = fingers.compactMap { $0.last?.1 }.max() ?? 0
-        return try answer(native.touch(paths, timeout: longest + 3, geometry: geometry, beforeDispatch: Self.beforeDispatch))
+        return try answer(native.touch(paths, timeout: longest + 3, geometry: geometry))
     }
 
     private static func point(_ body: JSON?, _ x: String, _ y: String) throws -> CGPoint {

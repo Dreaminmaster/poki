@@ -319,7 +319,9 @@ extension Computer {
             }
             let target: Element? = try action["ref"]?.int.map(element)
             if let ref = action["ref"] {
-                try await tap(try point(ref), within: frame(of: ref))
+                try await Runner.$afterInput.withValue(nil) {
+                    try await tap(try point(ref), within: frame(of: ref))
+                }
             }
             // Keys go to the focused field; a tap takes a moment to focus one (seen on the phone:
             // text typed right after the tap went nowhere). Wait for a field to be focused, up to
@@ -441,7 +443,7 @@ extension Computer {
                 // CI: a fresh launch gave up at the terminate and Settings never came). A slow end
                 // is not a miss, and the launch goes anyway: it queues behind the end and runs
                 // after it, within the launch's own time.
-                do { _ = try await runner.input("/wda/apps/terminate", ["bundleId": .string(bundle)], timeout: 6, countsAsMiss: false) }
+                do { _ = try await runner.call("POST", "/wda/apps/terminate", ["bundleId": .string(bundle)], timeout: 6, countsAsMiss: false) }
                 catch let e as RunnerError where e.delivery == .notSent {}
                 catch let e as RunnerError { note = "; ending the app first did not answer in time (\(e.message)); the launch was sent anyway" }
                 // In-process a launch answers once the app is in front, 9 s for a cold Photos (gym finding 39).
@@ -531,22 +533,24 @@ extension Computer {
     func sendKeys(deletes: Int, text: String, until: Double) async throws {
         let backspaces = Array(repeating: "\u{8}", count: deletes)
         let plan = humanize.enabled ? Humanize.merged(humanize.typing(text), into: Self.maxBursts) : []
-        func dispatchKeys(_ body: JSON, timeout: Double) async throws {
-            do {
-                _ = try await runner.input("/wda/keys", body, timeout: timeout)
-            } catch let error as RunnerError where hasLocalWorkspace && error.delivery == .notSent && error.message.contains("nothing lands late") {
-                // LocalRunner can still be draining a focus read after the keyboard appeared.
-                // Only its explicit not-sent response permits another dispatch.
-                try Task.checkCancellation()
-                let remaining = min(1.5, until - now() - timeout)
-                guard remaining > 0.2 else { throw error }
-                await sleep(seconds: remaining)
-                try Task.checkCancellation()
-                _ = try await runner.input("/wda/keys", body, timeout: timeout)
+        func dispatchKeys(_ body: JSON, timeout: Double, final: Bool) async throws {
+            try await Runner.$afterInput.withValue(final ? Runner.afterInput : nil) {
+                do {
+                    _ = try await runner.input("/wda/keys", body, timeout: timeout)
+                } catch let error as RunnerError where hasLocalWorkspace && error.delivery == .notSent && error.message.contains("nothing lands late") {
+                    // LocalRunner can still be draining a focus read after the keyboard appeared.
+                    // Only its explicit not-sent response permits another dispatch.
+                    try Task.checkCancellation()
+                    let remaining = min(1.5, until - now() - timeout)
+                    guard remaining > 0.2 else { throw error }
+                    await sleep(seconds: remaining)
+                    try Task.checkCancellation()
+                    _ = try await runner.input("/wda/keys", body, timeout: timeout)
+                }
             }
         }
-        func oneCall(_ keys: [String]) async throws {
-            try await dispatchKeys(["value": .array(keys.map(JSON.string))], timeout: 3 + 0.06 * Double(keys.count))
+        func oneCall(_ keys: [String], final: Bool = true) async throws {
+            try await dispatchKeys(["value": .array(keys.map(JSON.string))], timeout: 3 + 0.06 * Double(keys.count), final: final)
         }
         // Bursts only with room for the plan, a guessed cost per call and the read after.
         let budget = until - now() - 0.8
@@ -555,7 +559,7 @@ extension Computer {
             return
         }
         if deletes > 0 {
-            try await oneCall(backspaces)
+            try await oneCall(backspaces, final: false)
         }
         var overhead = Self.burstCallCost
         for (i, burst) in plan.enumerated() {
@@ -570,7 +574,7 @@ extension Computer {
             let keys: [JSON] = burst.text.map { .string(String($0)) }
             let body: JSON = ["value": .array(keys), "frequency": .number(Double(burst.frequency))]
             let sent = now()
-            try await dispatchKeys(body, timeout: 3 + Double(burst.text.count) / Double(burst.frequency))
+            try await dispatchKeys(body, timeout: 3 + Double(burst.text.count) / Double(burst.frequency), final: i == plan.count - 1)
             let took = now() - sent - Double(burst.text.count) / Double(max(1, burst.frequency))
             overhead = i == 0 ? max(0, took) : max(overhead, took)
         }
@@ -741,7 +745,7 @@ extension Computer {
         }
         do {
             if clear, let value = field.value, !value.isEmpty {
-                _ = try await runner.input("/wda/keys", ["value": .array(Array(repeating: JSON.string("\u{8}"), count: min(400, value.count)))], timeout: 3 + 0.06 * Double(min(400, value.count)))
+                _ = try await runner.call("POST", "/wda/keys", ["value": .array(Array(repeating: JSON.string("\u{8}"), count: min(400, value.count)))], timeout: 3 + 0.06 * Double(min(400, value.count)))
             }
             _ = try await runner.call("POST", "/wda/setPasteboard", ["content": .string(Data(text.utf8).base64EncodedString()), "contentType": "plaintext"], timeout: 2, countsAsMiss: false)
             let holds = (try? await runner.call("POST", "/wda/getPasteboard", ["contentType": "plaintext"], timeout: 2, countsAsMiss: false))?.string
@@ -750,7 +754,9 @@ extension Computer {
                 await restore()
                 throw ActionFailure(message: "the clipboard could not be set to the text (the runner's write did not take), so nothing was pasted; type the text instead", delivery: .notSent)
             }
-            try await longPress(holdPoint, seconds: 0.7, within: field.frame)
+            try await Runner.$afterInput.withValue(nil) {
+                try await longPress(holdPoint, seconds: 0.7, within: field.frame)
+            }
             var item: Element?
             let menuBy = min(until - 0.3, now() + 2)
             while item == nil, now() < menuBy {

@@ -715,7 +715,7 @@ final class ChatHarnessTests: XCTestCase {
             FakeCompletions.tool("report_plan", ["steps": ["Read the version in Settings"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
             FakeCompletions.tool("skills", ["action": "list"]),
-            FakeCompletions.tool("do", ["actions": [["run": name]], "used_memory_ids": [memory.id]]),
+            FakeCompletions.tool("do", ["actions": [["run": ["name": name, "step_memory_ids": ["1": [memory.id]]]]]]),
             FakeCompletions.tool("finish_task", [
                 "success": false, "summary": "The saved target was missing.",
                 "details": [], "answer": ["kind": "field"],
@@ -776,7 +776,7 @@ final class ChatHarnessTests: XCTestCase {
         }
 
         for ending in Ending.allCases {
-            var actions: [[String: Any]] = [["run": name, "used_memory_ids": [opening.id]]]
+            var actions: [[String: Any]] = [["run": ["name": name, "step_memory_ids": ["1": [opening.id]]]]]
             let needsApproval = ending == .declined || ending == .stopped
             if needsApproval { actions.append(["tap": 1, "used_memory_ids": [followUp.id]]) }
             if ending == .failed { actions.append(["wait": -1, "used_memory_ids": [followUp.id]]) }
@@ -868,42 +868,100 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(cards.stopped.memoryUse?.skills, [name], "Stopped card after a partial replay")
     }
 
-    func testStoppingAMemoryDrivenActionKeepsTheUsedMemoryOnTheCard() async throws {
+    func testStoppingAfterAMemoryDrivenActionSucceedsKeepsTheUsedMemoryOnTheCard() async throws {
         let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
         let fixture = SkillStore(url: nil)
         let memory = try XCTUnwrap(fixture.remember("Open Settings first when checking the device version.", by: "Poki"))
         XCTAssertNotNil(fixture.remember("Use 24-hour time on the device.", by: "Poki"))
-        let cards = try await stopWhenActivating(settings, fixture: fixture, replies: [
+        let cards = try await stopWhenActivating(calculator, fixture: fixture, replies: [
             FakeCompletions.tool("skills", ["action": "list"]),
-            FakeCompletions.tool("do", ["actions": [["launch": settings]], "used_memory_ids": [memory.id, "unseen-id"]]),
-        ], expectedActivations: [settings], offeredMemory: memory.id)
-        XCTAssertEqual(cards.active?.memoryUse?.notes.map(\.id), [memory.id], "Active card when the memory-driven action is sent")
+            FakeCompletions.tool("do", ["actions": [
+                ["launch": settings, "used_memory_ids": [memory.id, "unseen-id"]],
+                ["launch": calculator],
+            ]]),
+        ], expectedActivations: [settings, calculator], offeredMemory: memory.id)
+        XCTAssertEqual(cards.active?.memoryUse?.notes.map(\.id), [memory.id], "Active card after the memory-driven action succeeded")
         XCTAssertEqual(cards.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopped card without finish_task")
     }
 
-    func testPathMemoryAppearsOnlyWhenItsOwnStepIsSent() async throws {
+    func testPathMemoryAppearsOnlyAfterItsOwnStepSucceeds() async throws {
         let settings = "com.apple.Preferences"
         let calculator = "com.apple.calculator"
+        let safari = "com.apple.mobilesafari"
         let fixture = SkillStore(url: nil)
         let memory = try XCTUnwrap(fixture.remember("Use Calculator for the second step of the check.", by: "Poki"))
         let steps: [[String: Any]] = [
             ["launch": settings],
             ["launch": calculator, "used_memory_ids": [memory.id]],
+            ["launch": safari],
         ]
         let replies = [
             FakeCompletions.tool("skills", ["action": "list"]),
             FakeCompletions.tool("do", ["actions": [["path": ["steps": steps], "used_memory_ids": [memory.id]]]]),
         ]
 
-        let first = try await stopWhenActivating(settings, fixture: fixture, replies: replies,
-                                                 expectedActivations: [settings], offeredMemory: memory.id)
-        XCTAssertTrue(first.active?.memoryUse?.notes.isEmpty ?? true, "The unrelated first path step must not claim memory")
-        XCTAssertTrue(first.stopped.memoryUse?.notes.isEmpty ?? true, "Stopping before the attributed step keeps memory off the card")
-
         let second = try await stopWhenActivating(calculator, fixture: fixture, replies: replies,
                                                   expectedActivations: [settings, calculator], offeredMemory: memory.id)
-        XCTAssertEqual(second.active?.memoryUse?.notes.map(\.id), [memory.id], "The attributed path step records memory before it acts")
-        XCTAssertEqual(second.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopping during the attributed step preserves its memory")
+        XCTAssertNil(second.active?.memoryUse, "An unrelated successful step and a pending step have no memory source")
+        XCTAssertNil(second.stopped.memoryUse, "A late successful receipt for the attributed step cannot add memory")
+
+        let third = try await stopWhenActivating(safari, fixture: fixture, replies: replies,
+                                                 expectedActivations: [settings, calculator, safari], offeredMemory: memory.id)
+        XCTAssertEqual(third.active?.memoryUse?.notes.map(\.id), [memory.id], "The attributed path step recorded its successful receipt")
+        XCTAssertEqual(third.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopping preserves previously confirmed memory")
+    }
+
+    func testSavedSkillRecordsMemoryOnlyAfterTheStepThatUsesItSucceeds() async throws {
+        let name = "Check Settings and Calculator before opening Safari"
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let safari = "com.apple.mobilesafari"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Calculator for the calculation step.", by: "Poki"))
+        let skill = Skill(name: name, description: "", app: settings, steps: [settings, calculator, safari].map {
+            SkillStep(action: ["launch": .string($0)])
+        }, params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+           lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let replies = [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [[
+                "run": ["name": name, "step_memory_ids": ["2": [memory.id]]],
+                "used_memory_ids": [memory.id],
+            ]]]),
+        ]
+
+        let before = try await stopWhenActivating(calculator, fixture: fixture, replies: replies,
+                                                   expectedActivations: [settings, calculator], offeredMemory: memory.id)
+        XCTAssertEqual(before.active?.memoryUse?.skills, [name], "The first step already succeeded")
+        XCTAssertTrue(before.active?.memoryUse?.notes.isEmpty ?? true, "The first successful skill step must not claim the later step's memory")
+        XCTAssertTrue(before.stopped.memoryUse?.notes.isEmpty ?? true, "Stopping before step two's receipt keeps its memory off the card")
+
+        let after = try await stopWhenActivating(safari, fixture: fixture, replies: replies,
+                                                  expectedActivations: [settings, calculator, safari], offeredMemory: memory.id)
+        XCTAssertEqual(after.active?.memoryUse?.notes.map(\.id), [memory.id])
+        XCTAssertEqual(after.stopped.memoryUse?.notes.map(\.id), [memory.id])
+    }
+
+    func testStoppingBeforeADriverRefusalLeavesNoSourcesOnTheCard() async throws {
+        let unavailable = "nz.example.removed-utility"
+        let name = "Open the removed utility"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use the removed utility to check the reading.", by: "Poki"))
+        let skill = Skill(name: name, description: "", app: unavailable, steps: [SkillStep(action: ["launch": .string(unavailable)])],
+                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let cards = try await stopWhenActivating(unavailable, fixture: fixture, replies: [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [[
+                "run": ["name": name, "step_memory_ids": ["1": [memory.id]]],
+                "used_memory_ids": [memory.id],
+            ]]]),
+        ], expectedActivations: [unavailable], offeredMemory: memory.id, unavailableApp: unavailable)
+        XCTAssertNil(cards.stopped.memoryUse, "A late refusal must never leave a skill or memory on the stopped card")
+        XCTAssertNil(cards.active?.memoryUse, "An operation awaiting the driver's receipt has no source")
     }
 
     func testDriverRefusedSkillLaunchLeavesNoSourcesOnTheCard() async throws {
@@ -921,7 +979,7 @@ final class ChatHarnessTests: XCTestCase {
             FakeCompletions.tool("report_plan", ["steps": ["Open the archived utility"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
             FakeCompletions.tool("skills", ["action": "list"]),
-            FakeCompletions.tool("do", ["actions": [["run": name, "used_memory_ids": [memory.id]]]]),
+            FakeCompletions.tool("do", ["actions": [["run": ["name": name, "step_memory_ids": ["1": [memory.id]]]]]]),
             FakeCompletions.tool("finish_task", [
                 "success": false, "summary": "The app is no longer installed.", "details": [], "answer": ["kind": "action"],
             ]),
@@ -958,17 +1016,22 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     private func stopWhenActivating(_ bundle: String, fixture: SkillStore, replies: [String],
-                                    expectedActivations: [String], offeredMemory: String? = nil) async throws -> (active: ChatEntry?, stopped: ChatEntry) {
+                                    expectedActivations: [String], offeredMemory: String? = nil,
+                                    unavailableApp: String? = nil) async throws -> (active: ChatEntry?, stopped: ChatEntry) {
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Check the device"], "currentStep": 1]),
         ] + replies)
         let activations = AsyncStream.makeStream(of: String.self)
         let gate = ChatTransportGate()
+        let refusals = AsyncStream.makeStream(of: String.self)
         let automation = FakeAutomation()
         _ = automation.prepare()
         let transport = SessionScreenTransport(session: automation, beforeActivation: {
             activations.continuation.yield($0)
             if $0 == bundle { await gate.holdFirstRequest() }
+        }, unavailableApp: unavailableApp, onRefusal: {
+            refusals.continuation.yield($0)
+            refusals.continuation.finish()
         })
         let chat = chat(on: server, transport: transport, automation: automation)
         let app = try XCTUnwrap(app)
@@ -1006,6 +1069,11 @@ final class ChatHarnessTests: XCTestCase {
         _ = await chat.runDelegated("Check the device version.")
         activations.continuation.finish()
         await owner.value
+        if let unavailableApp, sent.contains(unavailableApp) {
+            var refused = refusals.stream.makeAsyncIterator()
+            let refusal = await refused.next()
+            XCTAssertEqual(refusal, unavailableApp, "The admitted request returned an explicit refusal after Stop")
+        }
         defer { withExtendedLifetime(server) {} }
         XCTAssertEqual(sent, expectedActivations)
         if let offeredMemory { XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(offeredMemory) }) }
@@ -2326,6 +2394,7 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let screenLabel: @Sendable () -> String
     private let beforeActivation: (@Sendable (String) async -> Void)?
     private let unavailableApp: String?
+    private let onRefusal: (@Sendable (String) -> Void)?
     private let lock = NSLock()
     private var reads = 0
     private var firstRead: TimeInterval?
@@ -2334,37 +2403,30 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     /// `screenLabel` is the one button the fake screen shows, read at each look.
     init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
          beforeActivation: (@Sendable (String) async -> Void)? = nil, unavailableApp: String? = nil,
+         onRefusal: (@Sendable (String) -> Void)? = nil,
          screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
         self.beforeActivation = beforeActivation
         self.unavailableApp = unavailableApp
+        self.onRefusal = onRefusal
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        try await answer(url: url, body: body, beforeDispatch: nil)
-    }
-
-    func sendInput(method: String, url: URL, body: Data?, timeout: Double,
-                   beforeDispatch: @escaping BeforeDriverDispatch) async throws -> (status: Int, body: Data) {
-        try await answer(url: url, body: body, beforeDispatch: beforeDispatch)
-    }
-
-    private func answer(url: URL, body: Data?, beforeDispatch: BeforeDriverDispatch?) async throws -> (status: Int, body: Data) {
         await beforeRequest?()
         guard session.isOpen else { throw URLError(.cannotConnectToHost) }
-        if let beforeDispatch, !beforeDispatch() { throw CancellationError() }
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
         let value: JSON
         switch path {
         case "/wda/apps/activate":
             if let body, let bundle = (try? JSON.parse(body))?["bundleId"]?.string {
+                await beforeActivation?(bundle)
                 if bundle == unavailableApp {
                     let failure: JSON = ["value": ["error": "unknown error", "message": .string("Application \"\(bundle)\" is unknown to FrontBoard.")]]
+                    onRefusal?(bundle)
                     return (500, failure.data())
                 }
-                await beforeActivation?(bundle)
             }
             value = .null
         case "/session": value = ["sessionId": "fixture-session"]
