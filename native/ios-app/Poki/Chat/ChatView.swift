@@ -757,7 +757,7 @@ struct ChatTranscript<Footer: View>: View {
                 .transition(PlanMotion.stepTransition)
         case .plan(let steps):
             let ask = asking(at: i)
-            let current = live && isLastPlan(i)
+            let current = live && entry.ended == nil && isLastPlan(i)
             TaskCard(title: entry.title ?? ask.title, steps: steps,
                      state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver,
                                           stopped: entry.stopped == true, saveFailed: entry.saveFailed == true),

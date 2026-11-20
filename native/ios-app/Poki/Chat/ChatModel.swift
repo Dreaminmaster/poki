@@ -593,7 +593,7 @@ final class ChatModel {
             offeredMemories = notes
             let completed = await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
-            finishTaskMemory(completed: current && completed, token: token)
+            finishTaskMemory(completed: current && completed, token: token, requestID: prepared.you.id)
             // The direct engine does not say when its task ends: the quiet wait finishes the run.
             if !current { app.finishTask() } else { app.chatReleasesRun() }
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
@@ -665,7 +665,7 @@ final class ChatModel {
                 }
             }
             let current = runToken == token
-            finishTaskMemory(completed: current && outcome == .done, token: token)
+            finishTaskMemory(completed: current && outcome == .done, token: token, requestID: prepared.you.id)
             if current { ended(outcome, delivered: prepared.you.id) } else if splitSession == nil { app.finishTask() }
             logEnd("pi", outcome: outcome, session: prepared.runSession, text: prepared.text, stopped: !current || outcome == .authorizationDeclined)
             guard current else { return }
@@ -816,7 +816,7 @@ final class ChatModel {
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
     }
 
-    private func finishTaskMemory(completed: Bool, token: Int) {
+    private func finishTaskMemory(completed: Bool, token: Int, requestID: UUID) {
         defer {
             pendingMemoryWrites.removeAll()
             offeredMemories.removeAll()
@@ -850,9 +850,18 @@ final class ChatModel {
             guard reported.remove(note.id) != nil else { return nil }
             return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
         }
-        guard !notes.isEmpty || !replayedSkills.isEmpty,
-              let planID, let index = entries.firstIndex(where: { $0.id == planID }) else { return }
-        entries[index].memoryUse = TaskMemoryUse(notes: notes, skills: replayedSkills)
+        guard !notes.isEmpty || !replayedSkills.isEmpty else { return }
+        let memoryUse = TaskMemoryUse(notes: notes, skills: replayedSkills)
+        if let planID, let index = entries.firstIndex(where: { $0.id == planID }) {
+            entries[index].memoryUse = memoryUse
+        } else if result.success, let index = entries.firstIndex(where: { $0.id == requestID }) {
+            var card = ChatEntry(.plan([]))
+            card.at = taskStart
+            card.ended = Date()
+            card.app = taskApp
+            card.memoryUse = memoryUse
+            entries.insert(card, at: index + 1)
+        }
     }
 
     private func logEnd(_ engine: String, outcome: PiLoop.Outcome?, session: String, text: String, stopped: Bool) {
