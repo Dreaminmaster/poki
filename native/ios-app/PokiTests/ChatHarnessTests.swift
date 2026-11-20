@@ -199,6 +199,117 @@ final class ChatHarnessTests: XCTestCase {
         }
     }
 
+    func testCountedScrollDoesNotUseADragDistanceAsProofOfOverlap() async throws {
+        let transport = MessageListTransport(
+            messages: ["D", "E", "F", "G", "Got it", "OK", "Got it", "OK", "A", "B", "C", "Z"],
+            visibleCount: 6, step: 6, spacing: 120
+        )
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 640]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [7, 8, 9, 10, 1, 2]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 2 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The list moved six rows, although the finger travelled four")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+    }
+
+    func testExplicitScrollClarificationTreatsTheGroupNameAsAnAnswer() async throws {
+        let result = try await sendAfterCountedScrollQuestion("取消订阅讨论群", replying: true)
+        XCTAssertFalse(result.success, result.summary)
+        XCTAssertTrue(result.summary.contains("0 of 100 older messages"), result.summary)
+    }
+
+    func testOrdinaryComposerRequestDoesNotInheritAnUnansweredScrollTarget() async throws {
+        let result = try await sendAfterCountedScrollQuestion("去聊天记录最早的地方", replying: false)
+        XCTAssertTrue(result.success, result.summary)
+        XCTAssertEqual(result.summary, "Scrolled the conversation.")
+    }
+
+    private func sendAfterCountedScrollQuestion(_ text: String, replying: Bool) async throws -> TaskResult {
+        let transport = MessageListTransport()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.text("哪个群？"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "Poki asks for the group")
+        ChatModel.afterTask = { _ in asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertTrue(chat.entries.contains { if case .poki("哪个群？") = $0.kind { true } else { false } })
+
+        let finished = expectation(description: "The composer request ends")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer(text, replying: replying, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        return try XCTUnwrap(result)
+    }
+
+    private func sendCountedScrollComposer(_ text: String, replying: Bool, chat: ChatModel) async throws {
+        let app = try XCTUnwrap(app)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: ChatView(
+            sharedDraft: .constant(text), openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}
+        ).environment(app).environment(chat).environment(\.accessibilityEnabled, true))
+        window.makeKeyAndVisible()
+        defer { window.endEditing(true); window.isHidden = true }
+        await drawCountedScrollComposer(window)
+        if replying, let reply = composerButton(in: window, id: "chat.counted-scroll.reply") {
+            XCTAssertTrue(reply.accessibilityActivate())
+            await drawCountedScrollComposer(window)
+        }
+        let send = try XCTUnwrap(composerButton(in: window, id: "composer.main"))
+        XCTAssertTrue(send.accessibilityActivate())
+    }
+
+    private func drawCountedScrollComposer(_ window: UIWindow) async {
+        await withCheckedContinuation { done in
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { done.resume() }
+            window.layoutIfNeeded()
+            CATransaction.commit()
+        }
+        await Task.yield()
+    }
+
+    private func composerButton(in root: UIView, id: String) -> NSObject? {
+        var pending: [NSObject] = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if identifier == id && item.accessibilityTraits.contains(.button) && !item.accessibilityFrame.isEmpty { return item }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for i in 0..<count {
+                    if let child = item.accessibilityElement(at: i) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
+    }
+
     func testCountedScrollRetainsTheActionFailureWhenItsScreenCannotBeCounted() async throws {
         let transport = MessageListTransport(failsDrag: true)
         let server = try FakeCompletions(replies: [
@@ -1873,15 +1984,17 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
     private let messages: [String]
     private let visibleCount: Int
     private let step: Int
+    private let spacing: Int
     private let failsDrag: Bool
     private var top: Int
     var topMessage: Int { lock.withLock { top } }
 
     init(messages: [String] = (1...8).map { String(format: "Message %02d", $0) },
-         visibleCount: Int = 4, step: Int = 2, failsDrag: Bool = false) {
+         visibleCount: Int = 4, step: Int = 2, spacing: Int = 100, failsDrag: Bool = false) {
         self.messages = messages
         self.visibleCount = visibleCount
         self.step = step
+        self.spacing = spacing
         self.failsDrag = failsDrag
         top = messages.count - visibleCount + 1
     }
@@ -1900,7 +2013,7 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
             let first = topMessage
             let rows = (0..<visibleCount).map { line in
                 let title = messages[first + line - 1]
-                return #"<XCUIElementTypeStaticText label="\#(title)" x="20" y="\#(140 + line * 100)" width="250" height="40"/>"#
+                return #"<XCUIElementTypeStaticText label="\#(title)" x="20" y="\#(140 + line * spacing)" width="250" height="40"/>"#
             }.joined()
             value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
         case "/wda/pressAndDragWithVelocity", "/actions":
