@@ -561,6 +561,7 @@ final class Computer: @unchecked Sendable {
         var unlocked = false
         if localTask != nil, await locked {
             unlocked = await unlockForLocalTask(until: until)
+            if !unlocked { unlocked = await !isLocked() }
         }
         if let pane, !(await locked) || unlocked {
             if let failure = await selectPane(pane, session: session, until: until) { return failure }
@@ -615,14 +616,16 @@ final class Computer: @unchecked Sendable {
         }
         if begins, let app = lastForeground { origin = (app, session, now()) } else if origin?.session == session { origin?.lastCall = now() }
         if begins, let line = skillsLine() { result.text += "\n" + line }
-        let wasLocked = await locked
-        guard wasLocked && !unlocked else {
-            if local, let revision, !Task.isCancelled, !result.isError, let evidence = result.screenEvidence,
-               host.currentRunner.automationRevision == revision {
-                authorizationRead = (revision, localTask, evidence)
-            }
-            return result
+        if await locked, !unlocked { return lockedScreen(result) }
+        if local, let revision, !Task.isCancelled, !result.isError, let evidence = result.screenEvidence,
+           host.currentRunner.automationRevision == revision {
+            authorizationRead = (revision, localTask, evidence)
         }
+        return result
+    }
+
+    private func lockedScreen(_ result: ToolResult) -> ToolResult {
+        var result = result
         var lines = result.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         lines.insert("screen: locked (the owner has to unlock the phone before anything can be done)", at: min(1, lines.count))
         result.text = lines.joined(separator: "\n")
@@ -835,8 +838,8 @@ final class Computer: @unchecked Sendable {
 
     private func unlockForLocalTask(until: Double) async -> Bool {
         let timeout = min(16, until - now() - config.readTimeout)
-        guard timeout > 0, approvals.pending == nil, !handoffWaiting, !Task.isCancelled,
-              await host.unlockForLocalTask(timeout: timeout) else { return false }
+        guard timeout > 0, approvals.pending == nil, !handoffWaiting, !Task.isCancelled else { return false }
+        let unlocked = await host.unlockForLocalTask(timeout: timeout)
         if selectedPane != nil {
             invalidateWorkspaceRead()
             selectedPane = nil
@@ -845,8 +848,7 @@ final class Computer: @unchecked Sendable {
             clearPaneRead()
         }
         authorizationRead = nil
-        lastForeground = nil
-        return true
+        return unlocked
     }
 
     static let authorizationWait: Double = 90
@@ -866,7 +868,7 @@ final class Computer: @unchecked Sendable {
         var waitedForOwner = false
         while state.isStarting, !Task.isCancelled {
             if authorization != .none {
-                if state.isOpeningInProcessAutomation, authorizationDeadline == nil {
+                if state.isWaitingForAutomation, authorizationDeadline == nil {
                     authorizationDeadline = now() + Self.authorizationWait
                 }
                 if case .awaitingAutomationAuthorization = state { waitedForOwner = true }
@@ -1106,8 +1108,12 @@ final class Computer: @unchecked Sendable {
         }
         let onlyButtons = actions.allSatisfy { $0["button"] != nil || $0["wait"] != nil }
         if !onlyButtons, await isLocked() {
-            guard localTask != nil, !harmless, await unlockForLocalTask(until: until) else {
+            guard localTask != nil, !harmless else {
                 return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
+            }
+            guard await unlockForLocalTask(until: until) else {
+                let result = await readAndReply(until: until, full: true, error: "Automatic unlock could not be confirmed. Nothing was sent. Call look before choosing the next action.")
+                return await isLocked() ? lockedScreen(result) : result
             }
             if needsCurrentScreen {
                 return await readAndReply(until: until, full: true, error: "The iPhone unlocked. No requested action was sent. Call look before acting on the new screen.")

@@ -120,7 +120,7 @@ public enum RunnerState: Sendable, Equatable {
         return nil
     }
 
-    var isOpeningInProcessAutomation: Bool {
+    var isWaitingForAutomation: Bool {
         switch self {
         case .openingAutomationSession, .awaitingAutomationAuthorization: true
         default: false
@@ -704,7 +704,7 @@ public final class PokiCore: @unchecked Sendable {
         let activity = ToolActivity(id: UUID().uuidString, name: name, summary: name == "do" ? computer.labels(actions) : "Look at the screen", started: Date(), session: local ? nil : session)
         // One tool call at a time per phone; a second waits briefly, then says what the first is doing.
         guard await gate.enter(waiting: config.busyWait) else {
-            if host?.currentRunner.isOpeningInProcessAutomation == true {
+            if host?.currentRunner.isWaitingForAutomation == true {
                 return ToolResult(text: "Poki is waiting for automation to be ready. Nothing was sent.", jpeg: nil, waitingForOwner: true)
             }
             if computer.hasLocalWorkspace {

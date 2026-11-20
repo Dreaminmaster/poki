@@ -1212,6 +1212,37 @@ final class ApprovalTests: XCTestCase {
         }
     }
 
+    func testUnconfirmedAutoUnlockReturnsTheCurrentScreenWithoutSendingTheAction() async {
+        for tool in ["do", "look"] {
+            for remainsLocked in [false, true] {
+                let (core, wda, host) = makeCore()
+                let attempted = LockedBox(false)
+                wda.set("GET /wda/locked") { _ in (200, ["value": .bool(!attempted.value || remainsLocked)]) }
+                let caption = remainsLocked ? "Lock screen after the attempt" : "Home screen after manual unlock"
+                let freshPicture = Data("new screenshot".utf8)
+                host.unlock.value = { [weak wda] _ in
+                    attempted.value = true
+                    wda?.source([("StaticText", caption)])
+                    wda?.set("GET /screenshot") { _ in (200, ["value": .string(freshPicture.base64EncodedString())]) }
+                    return false
+                }
+
+                let arguments = tool == "do" ? #"{"actions":[{"launch":"com.apple.mobiletimer"}]}"# : "{}"
+                let result = await core.tool(tool, arguments: arguments)
+
+                XCTAssertTrue(result.text.contains(caption), result.text)
+                XCTAssertEqual(result.jpeg, Data("jpeg:\(freshPicture.count)".utf8))
+                XCTAssertEqual(result.waitingForOwner, remainsLocked, result.text)
+                XCTAssertEqual(result.text.contains("screen: locked"), remainsLocked, result.text)
+                if tool == "do" {
+                    XCTAssertTrue(result.isError, result.text)
+                    XCTAssertTrue(result.text.contains("Nothing was sent"), result.text)
+                    XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty, result.text)
+                }
+            }
+        }
+    }
+
     func testTheVoiceTabStillTapsWhileAStepIsHandedToTheOwner() async throws {
         let wda = FakeWDA()
         wda.source([("Button", "Continue")], app: "Shop")

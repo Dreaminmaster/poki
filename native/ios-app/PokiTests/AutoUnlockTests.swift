@@ -101,6 +101,37 @@ final class AutoUnlockTests: XCTestCase {
         XCTAssertFalse(AutoUnlock().enabled)
         XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecItemNotFound)
     }
+
+    func testFailedPasscodeUpdateKeepsTheSavedPasscodeAndSwitchOn() throws {
+        let symbol = dlsym(dlopen(nil, RTLD_LAZY), "poki_test_fail_next_auto_unlock_write")
+        try XCTSkipUnless(symbol != nil, "Run scripts/auto-unlock-deletion-tests.sh to inject the Keychain error")
+        let failNextWrite = unsafeBitCast(try XCTUnwrap(symbol), to: (@convention(c) (CInt) -> Void).self)
+        let account = "device-unlock.passcode.v1"
+        let setting = AutoUnlock()
+        guard !setting.enabled, try Keychain.read(account) == nil else {
+            throw XCTSkip("This simulator already has an automatic unlock configuration")
+        }
+        defer {
+            failNextWrite(0)
+            try? setting.disable()
+        }
+
+        let original = "046215"
+        let replacement = "517406"
+        try setting.save(original)
+        failNextWrite(1)
+        XCTAssertThrowsError(try setting.save(replacement))
+        XCTAssertTrue(try Keychain.read(account) == Data(original.utf8), "A failed update must keep the saved passcode")
+        XCTAssertTrue(setting.enabled, "The switch must still be on after the update fails")
+        XCTAssertTrue(AutoUnlock().enabled, "The enabled setting must survive reopening Settings")
+        XCTAssertFalse(setting.deletionFailed, "The update failed, not a request to turn off Automatic Unlock")
+
+        try setting.save(replacement)
+        XCTAssertTrue(try Keychain.read(account) == Data(replacement.utf8), "Retry must replace the passcode")
+        XCTAssertTrue(AutoUnlock().enabled)
+        try setting.disable()
+        XCTAssertNil(try Keychain.read(account))
+    }
 }
 
 private final class UnlockSession: InProcessAutomation, @unchecked Sendable {

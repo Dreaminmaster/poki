@@ -26,15 +26,9 @@ final class AutoUnlock {
 
     func save(_ passcode: String) throws {
         guard Self.accepts(passcode) else { throw SettingsError.invalidPasscode }
+        try Keychain.write(Data(passcode.utf8), account: Self.account)
         attempt?.withLock { $0 = false }
         configurationVersion &+= 1
-        do {
-            try Keychain.write(Data(passcode.utf8), account: Self.account)
-        } catch {
-            enabled = false
-            UserDefaults.standard.removeObject(forKey: Self.enabledKey)
-            throw error
-        }
         resetAttempt()
         deletionFailed = false
         UserDefaults.standard.set(true, forKey: Self.enabledKey)

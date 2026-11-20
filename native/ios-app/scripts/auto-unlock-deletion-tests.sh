@@ -23,4 +23,5 @@ SIMCTL_CHILD_DYLD_LIBRARY_PATH="$X/usr/lib" \
     -XCTest AutoUnlockTests -AppleLanguages '(en)' -AppleLocale en_US > "$OUT/test-run.log" 2>&1 || true
 rg '^Test Suite|^Test Case|error:|Executed' "$OUT/test-run.log" || true
 rg -q 'testFailedPasscodeDeletionKeepsAutomaticUnlockOnUntilRetrySucceeds.*passed' "$OUT/test-run.log"
+rg -q 'testFailedPasscodeUpdateKeepsTheSavedPasscodeAndSwitchOn.*passed' "$OUT/test-run.log"
 rg -q 'testSavingAndTurningOffAutomaticUnlockUpdatesThePrivateKeychain.*passed' "$OUT/test-run.log"
