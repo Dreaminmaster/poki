@@ -323,6 +323,12 @@ public final class Runner: @unchecked Sendable {
     @TaskLocal static var afterInput: AfterInput?
     @TaskLocal static var replayStep: ReplayStep?
 
+    /// A step whose effect is confirmed can report its sources through the current action.
+    func confirmInput() async {
+        guard !Task.isCancelled, let afterInput = Self.afterInput else { return }
+        await afterInput(Self.replayStep)
+    }
+
     /// Send checked device input. Session setup and screen reads use call/raw directly.
     func input(_ path: String, _ body: JSON, timeout: Double = 4, countsAsMiss: Bool = true,
                inSession: Bool = true) async throws -> JSON {
@@ -390,8 +396,8 @@ public final class Runner: @unchecked Sendable {
             throw RunnerError(message: "the runner answered HTTP \(result.status) to \(method) \(Self.short(path))", delivery: .notSent, status: result.status)
         }
         // Only the response that won the deadline race can attribute an input.
-        if sendsInput, let afterInput = Self.afterInput, !Task.isCancelled, now() <= receiptDeadline {
-            await afterInput(Self.replayStep)
+        if sendsInput, now() <= receiptDeadline {
+            await confirmInput()
         }
         return value
     }

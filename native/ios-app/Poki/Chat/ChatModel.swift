@@ -850,7 +850,13 @@ final class ChatModel {
         return request + 1
     }
 
-    private func recordMemoryUse(notes: [TaskMemoryUse.Note], skill: String?) {
+    private func recordMemoryUse(_ ids: [String], skill: String? = nil) {
+        guard !ids.isEmpty || skill != nil else { return }
+        var reported = Set(ids.prefix(20))
+        let notes = offeredMemories.reversed().compactMap { note -> TaskMemoryUse.Note? in
+            guard reported.remove(note.id) != nil else { return nil }
+            return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
+        }
         guard !notes.isEmpty || skill != nil, let index = taskCardIndex(create: true) else { return }
         let previous = entries[index].memoryUse
         var use = previous ?? TaskMemoryUse(notes: [], skills: [])
@@ -862,16 +868,6 @@ final class ChatModel {
         guard use != previous else { return }
         entries[index].memoryUse = use
         store.flush(sessionID: sessionID)
-    }
-
-    private func recordReportedMemories(_ ids: [String], skill: String? = nil) {
-        guard !ids.isEmpty || skill != nil else { return }
-        var reported = Set(ids.prefix(20))
-        let notes = offeredMemories.reversed().compactMap { note -> TaskMemoryUse.Note? in
-            guard reported.remove(note.id) != nil else { return nil }
-            return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
-        }
-        recordMemoryUse(notes: notes, skill: skill)
     }
 
     private struct ActionMemory {
@@ -1200,7 +1196,7 @@ final class ChatModel {
                 return PokiCore.ToolAnswer(text: Harness.invalidResult, jpeg: nil, isError: true)
             }
             taskResult = result
-            recordReportedMemories(result.usedMemoryIDs)
+            recordMemoryUse(result.usedMemoryIDs)
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .current || steps[i].state == .waiting { steps[i].state = result.success ? .done : .failed }
             }
@@ -1215,7 +1211,7 @@ final class ChatModel {
             showBrowser(opening: name == "web_open")
             return await WebTools.perform(name, arguments: call.arguments, onActionSucceeded: ids.isEmpty ? nil : { [weak self] in
                 guard let self, self.runToken == taskToken, !self.stopAsked else { return }
-                self.recordReportedMemories(ids)
+                self.recordMemoryUse(ids)
             })
         case "find_app":
             let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
@@ -1255,7 +1251,7 @@ final class ChatModel {
                 guard let self, self.runToken == taskToken, !self.stopAsked, notesByAction.indices.contains(index) else { return }
                 let action = notesByAction[index]
                 let ids = step.map { action.steps[$0] ?? [] } ?? action.direct
-                self.recordReportedMemories(ids, skill: skill)
+                self.recordMemoryUse(ids, skill: skill)
             }
             guard taskToken == runToken, usesSplitView else { return response }
             let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&

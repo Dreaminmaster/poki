@@ -737,6 +737,18 @@ extension Computer {
         }
         // Resolve the field before clearing it: an off-screen target must not lose its old text.
         let holdPoint = try pastePoint(field)
+        func pasteValue(in elements: [Element]) -> String? {
+            let fields = elements.filter { !$0.fromPicture && $0.type == field.type }
+            if let id = field.identifier, !id.isEmpty {
+                let identified = fields.filter { $0.identifier == id }
+                if identified.count == 1, let match = identified.first { return match.value ?? "" }
+            }
+            let nearby = fields.filter {
+                $0.label == field.label && ($0.frame.contains(field.frame.centre) || field.frame.contains($0.frame.centre))
+            }
+            guard nearby.count == 1, let match = nearby.first else { return nil }
+            return match.value ?? ""
+        }
         var restored = false
         func restore() async {
             guard !restored else { return }
@@ -758,26 +770,39 @@ extension Computer {
                 try await longPress(holdPoint, seconds: 0.7, within: field.frame)
             }
             var item: Element?
+            var beforeTap = field.value ?? ""
+            var appBeforeTap: String?
             let menuBy = min(until - 0.3, now() + 2)
             while item == nil, now() < menuBy {
                 await sleep(seconds: 0.2)
                 if let seen = try? await runner.tree(timeout: max(0.3, min(1.2, menuBy - now())), format: config.treeFormat) {
                     item = seen.elements.first { e in Self.pasteWords.contains { e.text.lowercased() == $0 } }
+                    if item != nil {
+                        beforeTap = pasteValue(in: seen.elements) ?? beforeTap
+                        appBeforeTap = seen.foreground.bundleID
+                    }
                 }
             }
             guard let item else {
                 await restore()
                 throw ActionFailure(message: "the field's menu showed no Paste item; the text was not pasted (a long press was sent)", delivery: .sent)
             }
-            try await tap(try pastePoint(item, delivery: .sent), within: item.frame)
+            try await Runner.$afterInput.withValue(nil) {
+                try await tap(try pastePoint(item, delivery: .sent), within: item.frame)
+            }
             // The paste has landed when the field shows the text; until then the clipboard stays.
             let landedBy = min(until - 0.3, now() + 2.5)
             var landed = false
-            while !landed, now() < landedBy {
+            while !landed, !Task.isCancelled, now() < landedBy {
                 await sleep(seconds: 0.25)
-                landed = await fieldValue(target: target, holding: text, timeout: 0.8)?.contains(text) == true
+                if let seen = try? await runner.tree(timeout: 0.8, format: config.treeFormat),
+                   appBeforeTap == nil || seen.foreground.bundleID == appBeforeTap,
+                   let value = pasteValue(in: seen.elements) {
+                    landed = !text.isEmpty && value != beforeTap && value.contains(text)
+                }
             }
             if landed {
+                if now() <= landedBy { await runner.confirmInput() }
                 await restore()
                 return ""
             }

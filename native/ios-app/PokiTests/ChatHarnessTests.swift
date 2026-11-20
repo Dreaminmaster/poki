@@ -868,6 +868,74 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(cards.stopped.memoryUse?.skills, [name], "Stopped card after a partial replay")
     }
 
+    func testPasteRecordsMemoryOnlyWhenTheFieldReceivesTheText() async throws {
+        enum Outcome: CaseIterable { case refused, stopped, pasted }
+        let text = "Maple-83"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Maple-83 in the Settings search field.", by: "Poki"))
+        let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
+        let store = SessionStore.shared
+        let library = MemoryLibrary.shared
+
+        for outcome in Outcome.allCases {
+            let automation = FakeAutomation()
+            _ = automation.prepare()
+            let check = AsyncStream.makeStream(of: Void.self)
+            let gate = ChatTransportGate()
+            let transport = PasteReceiptTransport(session: automation, fillsField: outcome == .pasted) {
+                check.continuation.yield(())
+                await gate.holdFirstRequest()
+            }
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Fill Settings search"], "currentStep": 1]),
+                FakeCompletions.tool("skills", ["action": "list"]),
+                FakeCompletions.tool("do", ["actions": [
+                    ["type": text, "via": "paste", "used_memory_ids": [memory.id]],
+                ]]),
+                FakeCompletions.tool("finish_task", [
+                    "success": outcome == .pasted, "summary": "Settings search checked.",
+                    "details": [], "answer": ["kind": "action"],
+                ]),
+                FakeCompletions.text("Settings search checked."),
+            ])
+            let chat = chat(on: server, transport: transport, automation: automation)
+            let app = try XCTUnwrap(app)
+            let imported = await app.runTool("skills", arguments: Self.json(["action": "import", "data": backup]))
+            XCTAssertFalse(imported.isError, imported.text)
+            library.reload()
+            let session = chat.sessionID
+            defer { library.forget(memory.id); store.delete(session) }
+            var waitingCard: ChatEntry?
+            let owner = Task { @MainActor in
+                for await _ in check.stream {
+                    waitingCard = store.session(session)?.entries.last { if case .plan = $0.kind { true } else { false } }
+                    if outcome == .stopped { chat.stop() }
+                    await gate.release()
+                    return
+                }
+            }
+
+            _ = await chat.runDelegated("Fill Settings search with the saved value.")
+            check.continuation.finish()
+            await owner.value
+
+            XCTAssertNotNil(waitingCard, "The menu tap was acknowledged and the field confirmation was still pending")
+            XCTAssertNil(waitingCard?.memoryUse, "An acknowledged menu tap alone must leave no source: \(outcome)")
+            let field = await transport.field
+            XCTAssertEqual(field, outcome == .pasted ? text : "")
+            let card = try XCTUnwrap(store.session(session)?.entries.last { if case .plan = $0.kind { true } else { false } })
+            XCTAssertNotNil(card.ended)
+            if outcome == .stopped { XCTAssertEqual(card.stopped, true) }
+            if outcome == .refused {
+                XCTAssertTrue(card.failed == true)
+                XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains("the field did not show the text") })
+            }
+            XCTAssertEqual(card.memoryUse?.notes.map(\.id) ?? [], outcome == .pasted ? [memory.id] : [],
+                           "Only a paste confirmed in the field can leave a memory source: \(outcome)")
+            if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "paste-memory-\(outcome)") }
+        }
+    }
+
     func testStoppingAfterAMemoryDrivenActionSucceedsKeepsTheUsedMemoryOnTheCard() async throws {
         let settings = "com.apple.Preferences"
         let calculator = "com.apple.calculator"
@@ -2385,6 +2453,57 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
             default: return reply(["error": "unknown command", "message": .string(path)], status: 404)
             }
         }
+    }
+}
+
+private actor PasteReceiptTransport: HTTPTransport {
+    private let screen: SessionScreenTransport
+    private let fillsField: Bool
+    private let beforeVerification: @Sendable () async -> Void
+    private var clipboard = Data("Owner clipboard".utf8)
+    private var menu = false
+    private var awaitingVerification = false
+    private(set) var field = ""
+
+    init(session: FakeAutomation, fillsField: Bool, beforeVerification: @escaping @Sendable () async -> Void) {
+        screen = SessionScreenTransport(session: session)
+        self.fillsField = fillsField
+        self.beforeVerification = beforeVerification
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/wda/getPasteboard":
+            value = .string(clipboard.base64EncodedString())
+        case "/wda/setPasteboard":
+            if let body, let content = (try? JSON.parse(body))?["content"]?.string,
+               let data = Data(base64Encoded: content) { clipboard = data }
+            value = .null
+        case "/wda/touchAndHold":
+            menu = true
+            value = .null
+        case "/wda/tap", "/actions":
+            if menu {
+                menu = false
+                awaitingVerification = true
+            } else {
+                menu = true
+            }
+            value = .null
+        case "/source":
+            if awaitingVerification {
+                awaitingVerification = false
+                await beforeVerification()
+                if fillsField { field = String(decoding: clipboard, as: UTF8.self) }
+            }
+            let paste = menu ? #"<XCUIElementTypeMenuItem name="Paste" label="Paste" x="150" y="50" width="80" height="40" />"# : ""
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844"><XCUIElementTypeTextField name="Search" label="Search" value="\#(field)" x="16" y="100" width="358" height="44" /><XCUIElementTypeKeyboard x="0" y="500" width="390" height="344" />\#(paste)</XCUIElementTypeApplication></AppiumAUT>"#)
+        default:
+            return try await screen.send(method: method, url: url, body: body, timeout: timeout)
+        }
+        return (200, (["value": value] as JSON).data())
     }
 }
 
