@@ -41,7 +41,13 @@ if (!apiKey) { console.error('Set OPENAI_API_KEY (for example from the keychain)
 const model = process.env.POKI_VOICE_MODEL ?? 'gpt-realtime-2.1';
 // The phone says Poki's interface language (?language=zh-Hans): the one the session speaks from its first sentence.
 const languageName = code => { try { return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(code ?? '') ? new Intl.DisplayNames(['en'], { type: 'language' }).of(code) : 'English'; } catch { return 'English'; } };
-const lockCheck = "Call the appropriate phone tool for the owner's task even if the iPhone is locked. Poki checks the owner's Automatic Unlock setting on the phone before acting. Ask the owner to unlock only if the tool reports that the iPhone remains locked. Never ask for or type the iPhone passcode yourself.";
+const lockCheck = [
+  "Call the appropriate phone tool for the owner's task even if the iPhone is locked.",
+  "Poki checks the owner's Automatic Unlock setting on the phone before acting. Continue the original task when the phone unlocks.",
+  "Ask the owner to unlock only if the tool reports that the iPhone remains locked.",
+  "If iOS asks the owner to allow UI automation, call it automation authorization and tell them to approve it in the system prompt on the phone.",
+  "Never ask for or type the iPhone passcode yourself.",
+].join(' ');
 // The same text as the phone's own (VoiceDirect.swift); --mac-tools leaves out the phone's tools.
 const instructions = language => `# Role
 You are Poki, a voice assistant that operates the user's iPhone with tools.

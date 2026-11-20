@@ -448,7 +448,7 @@ public final class PokiCore: @unchecked Sendable {
         guard let args = try? JSON.parse(arguments.isEmpty ? "{}" : arguments) else {
             return ToolResult(text: "error: the arguments are not JSON; nothing was sent", jpeg: nil, isError: true)
         }
-        return await call(name, args, byOwnersVoice: true, localTask: "owner-voice")
+        return await call(name, args, local: true, byOwnersVoice: true, localTask: "owner-voice")
     }
 
     /// The task is over (the app stops an idle runner, or its chat's turn ended): the phone goes back

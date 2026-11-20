@@ -1161,10 +1161,13 @@ final class ApprovalTests: XCTestCase {
             let locked = LockedBox(true)
             let authorized = LockedBox(!ownerMustAuthorize)
             if ownerMustAuthorize {
-                host.state.value = .awaitingAutomationAuthorization("waiting for the owner to allow automation")
+                let runnerState = host.state
+                let ready = RunnerState.automationReady(revision: 1)
+                runnerState.value = .awaitingAutomationAuthorization("waiting for the owner to allow automation")
                 host.readRunnerState.value = {
                     authorized.value = true
-                    return .automationReady(revision: 1)
+                    runnerState.value = ready
+                    return ready
                 }
             }
             wda.set("GET /wda/locked") { _ in (200, ["value": .bool(locked.value)]) }
@@ -1183,6 +1186,10 @@ final class ApprovalTests: XCTestCase {
                 wda?.source([("Button", "Timer")], app: "Clock")
                 return (200, ["value": nil])
             }
+            wda.set("POST /wda/tap") { [weak wda] _ in
+                wda?.source([("Button", "Start countdown")], app: "Clock")
+                return (200, ["value": nil])
+            }
 
             if !ownerMustAuthorize {
                 let external = await core.call("look", [:])
@@ -1195,6 +1202,13 @@ final class ApprovalTests: XCTestCase {
             XCTAssertFalse(result.text.contains("screen: locked"), result.text)
             XCTAssertFalse(result.text.localizedCaseInsensitiveContains("owner has to unlock"), result.text)
             XCTAssertTrue(result.text.contains("Timer"), result.text)
+            guard !result.isError, result.text.contains("Timer") else { continue }
+
+            let timer = await core.tool("do", arguments: #"{"actions":[{"tap":1}]}"#)
+
+            XCTAssertFalse(timer.isError, timer.text)
+            XCTAssertFalse(timer.waitingForOwner, timer.text)
+            XCTAssertTrue(timer.text.contains("Start countdown"), timer.text)
         }
     }
 

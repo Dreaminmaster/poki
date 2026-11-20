@@ -138,7 +138,11 @@ enum VoiceDirect {
 
     /// Said in every tool's description: the instructions alone left a spoken preamble before some calls.
     private static let silent = " No preamble: call it without saying anything first."
-    private static let lockCheck = "Call the appropriate phone tool for the owner's task even if the iPhone is locked. Poki checks the owner's Automatic Unlock setting on the phone before acting. Ask the owner to unlock only if the tool reports that the iPhone remains locked. Never ask for or type the iPhone passcode yourself."
+    private static let lockCheck = "Call the appropriate phone tool for the owner's task even if the iPhone is locked. "
+        + "Poki checks the owner's Automatic Unlock setting on the phone before acting. Continue the original task when the phone unlocks. "
+        + "Ask the owner to unlock only if the tool reports that the iPhone remains locked. "
+        + "If iOS asks the owner to allow UI automation, call it automation authorization and tell them to approve it in the system prompt on the phone. "
+        + "Never ask for or type the iPhone passcode yourself."
     private static let phoneToolGuidance = " " + lockCheck + silent
 
     private static let empty: [String: Any] = ["type": "object", "properties": [String: Any](), "additionalProperties": false]

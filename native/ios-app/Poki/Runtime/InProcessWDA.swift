@@ -66,7 +66,7 @@ enum InProcessSession: Equatable {
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:
-            return .awaitingAutomationAuthorization("waiting for the owner to enter the iPhone passcode on the phone: iOS asks for it before it allows automation, after Poki restarts and 8 hours after the last time. Only the owner can do this; the Live Activity asks them. Call again in about 10 s")
+            return .awaitingAutomationAuthorization("iOS is waiting for the owner to allow UI automation in the system prompt on the iPhone. The Live Activity asks them. Continue the task once automation is ready")
         case .passcodeMissed:
             return .automationAuthorizationDeclined("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
                            fix: "Turn Poki off and on, then enter the iPhone passcode when iOS asks for it to allow automation")

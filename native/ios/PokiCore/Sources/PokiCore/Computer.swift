@@ -552,7 +552,7 @@ final class Computer: @unchecked Sendable {
         if local { authorizationRead = nil }
         let until: Double
         let revision: UInt64?
-        switch await waitForRunner(until: now() + config.toolDeadline, authorization: local ? .read : .none) {
+        switch await waitForRunner(until: now() + config.toolDeadline, authorization: local ? .ready : .none) {
         case .ready(let deadline, let readyRevision): (until, revision) = (deadline, readyRevision)
         case .blocked(let result): return result
         }
@@ -851,7 +851,7 @@ final class Computer: @unchecked Sendable {
 
     static let authorizationWait: Double = 90
 
-    private enum AuthorizationWait { case none, read, action }
+    private enum AuthorizationWait { case none, ready, freshScreen }
 
     private enum RunnerReadiness {
         case ready(deadline: Double, revision: UInt64?)
@@ -885,7 +885,7 @@ final class Computer: @unchecked Sendable {
         if state.isRunning {
             if authorizationDeadline != nil {
                 // The owner may have left the phone on a different screen while approving automation.
-                if authorization == .action, waitedForOwner { return .blocked(readRequiredAfterAuthorization()) }
+                if authorization == .freshScreen, waitedForOwner { return .blocked(readRequiredAfterAuthorization()) }
                 return .ready(deadline: now() + config.toolDeadline, revision: state.automationRevision)
             }
             return .ready(deadline: until, revision: state.automationRevision)
@@ -899,11 +899,11 @@ final class Computer: @unchecked Sendable {
         if case .failed = state {
             return .blocked(ToolResult(text: "runner: \(state.describe)\nNothing was sent. Fix it on the phone, then call look again.", jpeg: nil, isError: true))
         }
-        return .blocked(ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. It is still starting (the first start after a restart can wait for the owner to enter their password on the phone, which the phone asks them for); call look or status again every few seconds, and go on with the task when it answers with the screen.", jpeg: nil, isError: false, waitingForOwner: true))
+        return .blocked(ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. Call look or status again in a few seconds and continue the task when automation is ready.", jpeg: nil, isError: false, waitingForOwner: true))
     }
 
     func bindCompanionTarget() async -> Bool {
-        guard case .ready = await waitForRunner(until: now() + config.toolDeadline, authorization: .read),
+        guard case .ready = await waitForRunner(until: now() + config.toolDeadline, authorization: .ready),
               !Task.isCancelled else { return false }
         return (try? await runner.call("POST", "/poki/companion-target", timeout: 4, countsAsMiss: false))?.bool == true
     }
@@ -913,7 +913,7 @@ final class Computer: @unchecked Sendable {
                    jpeg: nil, isError: true)
     }
 
-    private func canActAfterAuthorization(_ action: JSON, evidence: ScreenEvidence) -> Bool {
+    private func hasRequiredScreenEvidence(_ action: JSON, evidence: ScreenEvidence) -> Bool {
         guard let kind = ActionKind(action) else { return true }
         let target = action[kind.rawValue]
         func sourceForPoint(_ point: JSON?) -> ScreenEvidence {
@@ -941,7 +941,7 @@ final class Computer: @unchecked Sendable {
         case .path:
             let steps = target?["steps"]?.array ?? target?.array ?? []
             return !evidence.isEmpty && steps.allSatisfy {
-                ActionKind($0) != .path && canActAfterAuthorization($0, evidence: evidence)
+                ActionKind($0) != .path && hasRequiredScreenEvidence($0, evidence: evidence)
             }
         case .back:
             return currentBackTarget.button == nil ? !evidence.isEmpty : evidence.contains(.references)
@@ -1059,14 +1059,16 @@ final class Computer: @unchecked Sendable {
         var approvalWaited = 0.0
         var until: Double
         let revision: UInt64?
-        switch await waitForRunner(until: started + config.toolDeadline, authorization: local ? .action : .none) {
+        let needsCurrentScreen = actions.contains { !hasRequiredScreenEvidence($0, evidence: []) }
+        let authorization: AuthorizationWait = local ? (needsCurrentScreen ? .freshScreen : .ready) : .none
+        switch await waitForRunner(until: started + config.toolDeadline, authorization: authorization) {
         case .ready(let deadline, let readyRevision): (until, revision) = (deadline, readyRevision)
         case .blocked(let result): return result
         }
         if local, let revision {
             let read = authorizationRead
             let evidence = read?.revision == revision && read?.task == localTask ? read?.evidence ?? [] : []
-            if actions.contains(where: { !canActAfterAuthorization($0, evidence: evidence) }) {
+            if actions.contains(where: { !hasRequiredScreenEvidence($0, evidence: evidence) }) {
                 return readRequiredAfterAuthorization()
             }
         }
@@ -1088,7 +1090,6 @@ final class Computer: @unchecked Sendable {
             return await withPicture("not_sent: the runner is still finishing an earlier \(busy); nothing was sent. Call look again in a few seconds; it answers when the runner is through, or after the restart.", timeout: until - now() - 0.5, isErrorWithoutPicture: false)
         }
 
-        // A locked phone takes no input but the buttons; the owner unlocks it.
         // While a step is handed to the owner, nothing is sent (they may be typing a password):
         // the model sees the screen, waits, or takes the step back.
         let harmless = actions.allSatisfy { $0["wait"] != nil || $0["wait_until"] != nil || $0["handoff"] != nil }
@@ -1105,11 +1106,12 @@ final class Computer: @unchecked Sendable {
         }
         let onlyButtons = actions.allSatisfy { $0["button"] != nil || $0["wait"] != nil }
         if !onlyButtons, await isLocked() {
-            if localTask != nil, !harmless, await unlockForLocalTask(until: until) {
-                return ToolResult(text: "The iPhone unlocked. No requested action was sent. Call look to read the current screen before acting.",
-                                  jpeg: nil, isError: true)
+            guard localTask != nil, !harmless, await unlockForLocalTask(until: until) else {
+                return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
             }
-            return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
+            if needsCurrentScreen {
+                return await readAndReply(until: until, full: true, error: "The iPhone unlocked. No requested action was sent. Call look before acting on the new screen.")
+            }
         }
         if selectedPane != nil, !harmless, !confirmedPaneRead {
             return ToolResult(text: "Split View: look at the selected pane before sending input; nothing was sent",
@@ -1319,6 +1321,10 @@ final class Computer: @unchecked Sendable {
         lastCallTook = total
         if total >= 8 || total - parts > 2 {
             result.text += "\ntook: \(Self.seconds(total)) s in all: \(Self.seconds(prepared - callStarted)) s before the actions (runner start, busy wait, lock check), \(Self.seconds(actionsTook)) s actions, \(Self.seconds(readTook)) s read\(approvalWaited > 0 ? ", \(Self.seconds(approvalWaited)) s the owner's approval" : "")\(total - parts > 2 ? ", \(Self.seconds(total - parts)) s elsewhere" : "")"
+        }
+        if local, !finish, let revision, !result.isError, let launched, lastForeground?.bundleID == launched,
+           let evidence = result.screenEvidence, host.currentRunner.automationRevision == revision {
+            authorizationRead = (revision, localTask, evidence)
         }
         // The read above is the work's last screen; the owner then sees their own app again.
         if finish, error == nil {
