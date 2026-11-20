@@ -36,9 +36,18 @@ struct MemoryDestination: View {
 /// Memory's first page.
 struct MemoryView: View {
     var back: () -> Void
+    /// The panel's ask bar, when the page opens as Settings' Memory panel: the bar's words search the
+    /// page, and sending them asks Poki. Without it the page has the system's search field.
+    var asked: Binding<String>? = nil
     private let library = MemoryLibrary.shared
     @State private var page = MemoryPageState()
-    @State private var query = ""
+    @State private var typed = ""
+    private var query: String { asked?.wrappedValue ?? typed }
+
+    init(back: @escaping () -> Void, query: Binding<String>? = nil) {
+        self.back = back
+        self.asked = query
+    }
     @State private var importing = false
     @State private var confirmClear = false
     @State private var exportURL: URL?
@@ -87,7 +96,7 @@ struct MemoryView: View {
         }
         .navigationTitle(AppLocalization.text("Memory Library"))
         .navigationBarTitleDisplayMode(.inline)
-        .modifier(MemorySearch(query: $query, shown: apps.count > 8))
+        .modifier(MemorySearch(query: $typed, shown: asked == nil && apps.count > 8))
         .headerlessTop(library.items.isEmpty)
         .toolbar {
             // Recent Updates is an icon (the owner, Nov 20 2026): words pushed the title off the centre,
@@ -110,6 +119,7 @@ struct MemoryView: View {
         }
         .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
+        .safeAreaInset(edge: .bottom) { if let asked { PokiAskBar(text: asked, scope: .memory) } }
         .environment(library)
         .onAppear { library.reload(); exportURL = library.exportFile() }
         .onChange(of: library.items) { exportURL = library.exportFile() }
