@@ -68,9 +68,17 @@ runs:
         fi
         SDK="$(xcrun --sdk iphoneos --show-sdk-version)"
         echo "iOS SDK $SDK"
-        if [ "$(printf '%s\n' 27.3 "$SDK" | sort -V | head -1)" != 27.3 ]; then
-          echo "::error::The iOS SDK is $SDK. Poki needs 27.3 or later, for the iPhone Duo's displays and for Siri AI's tools; run this job on the xcode-27 runner."
+        ls -d /Applications/Xcode_*.app
+        if [ "$(printf '%s\n' 27.1 "$SDK" | sort -V | head -1)" != 27.1 ]; then
+          echo "::error::The iOS SDK is $SDK. Poki needs 27.1 or later to fill the iPhone Duo's displays; run this job on the xcode-27 runner."
           exit 1
+        fi
+        # Siri AI's tools need the 27.3 SDK. On an older one the IPA is built without them.
+        if [ "$(printf '%s\n' 27.3 "$SDK" | sort -V | head -1)" = 27.3 ]; then
+          echo "POKI_SIRI_TOOLS_FLAG=POKI_SIRI_TOOLS" >> "$GITHUB_ENV"
+        else
+          echo "::warning::The iOS SDK is $SDK, before 27.3: this IPA has no Siri AI tools."
+          echo "POKI_SIRI_TOOLS_FLAG=" >> "$GITHUB_ENV"
         fi
 
     # The phone's Rust library is rebuilt only when its sources change.
@@ -135,7 +143,7 @@ runs:
             -destination generic/platform=iOS -derivedDataPath "build/app-$edition" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ARCHS=arm64 \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
-            POKI_SIRI_TOOLS_FLAG=POKI_SIRI_TOOLS \
+            POKI_SIRI_TOOLS_FLAG="$POKI_SIRI_TOOLS_FLAG" \
             2>&1 | tee "build/app-$edition.log" | grep --line-buffered -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* |^=== BUILD TARGET|^SwiftDriver |^Ld "
           native/ios-app/scripts/package-app.sh \
             "build/app-$edition/Build/Products/Release-iphoneos/Poki.app" \
