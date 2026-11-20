@@ -136,6 +136,7 @@ private enum AnswerMarkdown {
         }
         var result = AttributedString()
         var block: Int?
+        var previousWasParagraph = false
         var lastItem: Int?
         for run in parsed.runs {
             let components = run.presentationIntent?.components ?? []
@@ -143,8 +144,12 @@ private enum AnswerMarkdown {
             var piece = AttributedString(parsed[run.range])
             piece.presentationIntent = nil
             if identity != block {
-                if !result.characters.isEmpty { result.append(AttributedString("\n")) }
+                let isParagraph = components.count == 1 && components.first?.kind == .paragraph
+                if !result.characters.isEmpty {
+                    result.append(AttributedString(previousWasParagraph && isParagraph ? "\n\n" : "\n"))
+                }
                 block = identity
+                previousWasParagraph = isParagraph
                 let lists = components.filter {
                     switch $0.kind { case .orderedList, .unorderedList: true; default: false }
                 }
@@ -211,7 +216,12 @@ private enum AnswerMarkdown {
             if trimmed.count >= 3, trimmed.allSatisfy({ $0 == "*" || $0 == "_" || $0 == " " }) {
                 return line
             }
-            return stableInline(line)
+            let stable = stableInline(line)
+            // Full Markdown parsing folds soft breaks into spaces. Keep chat lines as hard breaks.
+            if trimmed.isEmpty || line.hasPrefix("    ") || line.hasPrefix("\t") || stable.hasSuffix("\\") {
+                return stable
+            }
+            return stable + "  "
         }.joined(separator: "\n")
     }
 

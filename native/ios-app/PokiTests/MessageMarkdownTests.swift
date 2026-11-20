@@ -64,6 +64,13 @@ final class MessageMarkdownTests: XCTestCase {
         }
     }
 
+    func testReplyKeepsLineBreaksAndParagraphSpacing() async throws {
+        await show("First line.\nSecond line.\n\nAnother paragraph.\n\n- One\n- Two")
+        let labels = try Labels(try await screen())
+        XCTAssertTrue(labels.text.contains("First line.\nSecond line.\n\nAnother paragraph.\n• One\n• Two"),
+                      "The reply should keep its lines and paragraph break: \(labels.text)")
+    }
+
     func testStreamingPrefixesDoNotExposeMarkersOrRestyleCompletedWords() async throws {
         let samples: [(String, [String])] = [
             ("### Title", ["", "", "", "", "T", "Ti", "Tit", "Titl", "Title"]),
