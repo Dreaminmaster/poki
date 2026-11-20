@@ -80,7 +80,7 @@ private struct SensesMemoryRows: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: memory.text)
                     if !memory.detail.isEmpty {
-                        Text(verbatim: memory.detail).font(.footnote).foregroundStyle(.secondary)
+                        Text(verbatim: memory.detail).font(.allo(.footnote)).foregroundStyle(.secondary)
                     }
                 }
             }

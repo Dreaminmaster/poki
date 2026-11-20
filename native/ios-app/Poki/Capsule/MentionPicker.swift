@@ -31,9 +31,9 @@ struct MentionPicker: View {
         HStack(spacing: 10) {
             MentionIcon(capsule: match.capsule, size: min(icon, 34))
             VStack(alignment: .leading, spacing: 0) {
-                Text(verbatim: match.title).font(.body).foregroundStyle(Color(.label)).lineLimit(1)
+                Text(verbatim: match.title).font(.allo(.body)).foregroundStyle(Color(.label)).lineLimit(1)
                 if match.isConnector {
-                    Text("Connector").font(.caption).foregroundStyle(Color(.secondaryLabel))
+                    Text("Connector").font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
                 }
             }
             Spacer(minLength: 0)

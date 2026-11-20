@@ -445,7 +445,7 @@ struct ModelTickList: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(verbatim: row.name).foregroundStyle(Color(.label))
-                                if row.fast { Text("Fast").font(.caption).foregroundStyle(Color(.secondaryLabel)) }
+                                if row.fast { Text("Fast").font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel)) }
                             }
                             Spacer()
                             if row.on { Image(systemName: "checkmark").fontWeight(.semibold).foregroundStyle(.tint) }

@@ -202,7 +202,7 @@ struct ConnectorAccountView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(verbatim: tool.annotations?.title ?? tool.title ?? tool.name)
                                     if let about = tool.description, !about.isEmpty {
-                                        Text(verbatim: about).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                                        Text(verbatim: about).font(.allo(.footnote)).foregroundStyle(.secondary).lineLimit(2)
                                     }
                                 }
                             }

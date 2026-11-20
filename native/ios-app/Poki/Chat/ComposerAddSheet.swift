@@ -132,7 +132,7 @@ struct ComposerAddSheet: View {
                     Button { mention(match); dismiss() } label: {
                         HStack(spacing: 6) {
                             MentionIcon(capsule: match.capsule, size: 22)
-                            Text(verbatim: match.title).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
+                            Text(verbatim: match.title).font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
                         }
                         .padding(.leading, 5).padding(.trailing, 12).frame(minHeight: 34)
                         .background(Color(.label).opacity(0.07), in: UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10,
@@ -236,7 +236,7 @@ private struct RecentPhotoTile: View {
             .frame(width: side, height: side).clipped()
             if on {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.title3).symbolRenderingMode(.palette).foregroundStyle(.white, Tint.blue)
+                    .font(.alloRounded(.title3)).symbolRenderingMode(.palette).foregroundStyle(.white, Tint.blue)
                     .padding(6).transition(.scale.combined(with: .opacity))
             }
         }

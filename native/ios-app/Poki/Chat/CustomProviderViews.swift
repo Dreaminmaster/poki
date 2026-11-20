@@ -8,7 +8,7 @@ struct CustomAccountRow: View {
             ProviderTile(provider: .custom)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: provider.displayName)
-                Text(verbatim: ProviderUseValue.summary(.custom(provider.id))).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: ProviderUseValue.summary(.custom(provider.id))).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }

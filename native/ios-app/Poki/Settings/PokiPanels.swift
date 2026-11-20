@@ -18,16 +18,16 @@ struct PokiSpaceCard: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.title2.weight(.bold)).foregroundStyle(Color(.label)).lineLimit(1).minimumScaleFactor(0.8)
-            detail.font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+            Text(title).font(.alloRounded(.title2, .bold)).foregroundStyle(Color(.label)).lineLimit(1).minimumScaleFactor(0.8)
+            detail.font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
             Spacer(minLength: 16)
             HStack(alignment: .lastTextBaseline) {
                 if let date {
                     Text(date, format: .dateTime.month(.abbreviated).day().locale(AppLocalization.locale))
-                        .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                 }
                 Spacer(minLength: 8)
-                Image(systemName: symbol).font(.title2.weight(.semibold)).foregroundStyle(tint)
+                Image(systemName: symbol).font(.alloRounded(.title2, .semibold)).foregroundStyle(tint)
                     .accessibilityHidden(true)
             }
         }
@@ -114,7 +114,7 @@ struct PokiAskBar: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: scope == .memory ? "magnifyingglass" : "sparkle")
-                .font(.body.weight(.medium)).foregroundStyle(Color(.secondaryLabel))
+                .font(.allo(.body, .medium)).foregroundStyle(Color(.secondaryLabel))
                 .accessibilityHidden(true)
             Group {
                 if scope == .memory {
@@ -130,7 +130,7 @@ struct PokiAskBar: View {
             if hasText {
                 // A plain symbol in Poki's blue, not a blue ground under a white one.
                 Button(action: send) {
-                    Image(systemName: "arrow.up.right").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                    Image(systemName: "arrow.up.right").font(.allo(.body, .semibold)).foregroundStyle(Tint.blueText)
                         .frame(width: 32, height: 32).contentShape(.rect)
                 }
                 .buttonStyle(.plain)

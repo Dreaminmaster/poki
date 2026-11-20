@@ -240,7 +240,7 @@ struct WelcomeHello: View {
                     .font(Prominent.font(size: 22, relativeTo: .title2, .semibold))
                     .foregroundStyle(Color(.label))
                 Text(verbatim: line)
-                    .font(.body)
+                    .font(.allo(.body))
                     .foregroundStyle(Tint.homeSecondary)
             }
             .multilineTextAlignment(.center)
@@ -248,7 +248,7 @@ struct WelcomeHello: View {
             VStack(spacing: 6) {
                 Button(action: setUp) {
                     Text(kind == .firstRun ? LocalizedStringKey("Set Up Poki") : LocalizedStringKey("Check Setup"))
-                        .font(.headline)
+                        .font(.allo(.headline))
                         .padding(.horizontal, 26)
                         .frame(minHeight: 34)
                 }
@@ -257,7 +257,7 @@ struct WelcomeHello: View {
                 .accessibilityIdentifier("firstRun.primary")
                 if kind != .firstRun {
                     Button(action: later) {
-                        Text("Not Now").font(.subheadline.weight(.medium)).foregroundStyle(Color(.label).opacity(0.72))
+                        Text("Not Now").font(.allo(.subheadline, .medium)).foregroundStyle(Color(.label).opacity(0.72))
                             .frame(minWidth: 120, minHeight: 44).contentShape(.rect)
                     }
                     .buttonStyle(.plain)

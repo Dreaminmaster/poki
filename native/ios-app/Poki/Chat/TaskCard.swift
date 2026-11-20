@@ -136,7 +136,7 @@ struct TaskCard: View {
                 let usedNames = (memoryUse?.skills ?? []) + usedNotes.map(\.text)
                 if !usedNames.isEmpty {
                     Text("Used: \(usedNames.formatted(.list(type: .and)))")
-                        .font(.footnote).foregroundStyle(soft).lineLimit(big ? nil : 1)
+                        .font(.allo(.footnote)).foregroundStyle(soft).lineLimit(big ? nil : 1)
                         .accessibilityIdentifier("taskCard.memoryUse")
                 }
                 // At the accessibility text sizes the title wraps and the label goes under it.
@@ -232,10 +232,10 @@ struct TaskCard: View {
 
     @ViewBuilder private var details: some View {
         ForEach(memoryUse?.skills ?? [], id: \.self) { name in
-            Text("Skill: \(name)").font(.subheadline).foregroundStyle(ink)
+            Text("Skill: \(name)").font(.allo(.subheadline)).foregroundStyle(ink)
         }
         ForEach(usedNotes) { note in
-            Text("Memory reported by Poki: \(note.text)").font(.subheadline).foregroundStyle(ink)
+            Text("Memory reported by Poki: \(note.text)").font(.allo(.subheadline)).foregroundStyle(ink)
         }
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {

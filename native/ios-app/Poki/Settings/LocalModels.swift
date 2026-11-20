@@ -96,7 +96,7 @@ struct LocalProviderRow: View {
             SettingsIcon(symbol: "iphone", neutral: true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: ProviderRef.local.name)
-                Text(verbatim: ProviderUseValue.summary(.local)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: ProviderUseValue.summary(.local)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
@@ -110,14 +110,14 @@ struct LocalRecommendation: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label {
-                Text(message).font(.subheadline)
+                Text(message).font(.allo(.subheadline))
             } icon: {
                 Image(systemName: "apple.intelligence")
             }
             .labelStyle(SettingsLabelStyle())
             if model.choice == LocalModels.recommended, case .downloading(let part) = model.state {
                 ProgressView(value: part) {
-                    Text(verbatim: "\(Int(part * 100)) %").font(.footnote).monospacedDigit()
+                    Text(verbatim: "\(Int(part * 100)) %").font(.allo(.footnote)).monospacedDigit()
                 }
                 Button("Cancel Download") { model.cancel() }
             } else {
@@ -129,7 +129,7 @@ struct LocalRecommendation: View {
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("models.local.recommended")
                 Text(verbatim: ByteCountFormatter.string(fromByteCount: LocalModels.recommended.bytes, countStyle: .file))
-                    .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
         .padding(.vertical, 4)
@@ -247,7 +247,7 @@ struct LocalModelRow: View {
             SettingsIcon(symbol: symbol, neutral: true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: name)
-                Text(verbatim: status).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: status).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }

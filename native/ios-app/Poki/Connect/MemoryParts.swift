@@ -134,7 +134,7 @@ struct MemoryItemDetail: View {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 8) {
                 ForEach(Array(facts.enumerated()), id: \.offset) { _, fact in
                     GridRow {
-                        Text(fact.0).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).fixedSize()
+                        Text(fact.0).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).fixedSize()
                         fact.1.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -179,7 +179,7 @@ struct MemoryItemDetail: View {
                 rows.append(("Worked", AnyView(Text("\(item.ok) of \(item.runs) times").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
             }
             if item.fixes > 0 {
-                rows.append(("Fixed", AnyView(Text("\(item.fixes) steps").font(.subheadline).foregroundStyle(Color(.label)))))
+                rows.append(("Fixed", AnyView(Text("\(item.fixes) steps").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
             }
             if let ms = item.lastMs {
                 rows.append(("Last", AnyView(Text("\(Int((Double(ms) / 1000).rounded())) s").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
@@ -414,7 +414,7 @@ struct MemoryAppPicker: View {
                 .foregroundStyle(Color(.label))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if selection?.lowercased() == app?.lowercased() {
-                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                    Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(Tint.blueText)
                         .accessibilityLabel(Text("Selected"))
                 }
             }
@@ -465,15 +465,15 @@ struct MemoryPageCard: View {
         let lines = library.pageLines(app)
         VStack(alignment: .leading, spacing: 10) {
             if let summary = library.pageSummary(app) {
-                Text(verbatim: summary).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: summary).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
             }
             ForEach(limit.map { Array(lines.prefix($0)) } ?? lines) { item in
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(verbatim: item.text).font(.body).foregroundStyle(Color(.label))
+                        Text(verbatim: item.text).font(.allo(.body)).foregroundStyle(Color(.label))
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if item.locked {
-                            Image(systemName: "lock.fill").font(.caption.weight(.semibold)).foregroundStyle(Color(.secondaryLabel))
+                            Image(systemName: "lock.fill").font(.allo(.caption, .semibold)).foregroundStyle(Color(.secondaryLabel))
                                 .accessibilityLabel(Text("Locked"))
                         }
                     }
@@ -557,7 +557,7 @@ struct MemoryPageEditRow: View {
         Button { editing = true } label: {
             HStack(spacing: 10) {
                 Image(systemName: "doc.text").font(.system(size: 16, weight: .semibold))
-                Text("Edit Page").font(.body)
+                Text("Edit Page").font(.allo(.body))
             }
             .foregroundStyle(Tint.blueText)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -587,7 +587,7 @@ struct MemoryChatRow: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "bubble.left").font(.system(size: 16, weight: .semibold))
-                Text("Tell Poki in Chat").font(.body)
+                Text("Tell Poki in Chat").font(.allo(.body))
             }
             .foregroundStyle(Tint.blueText)
             .frame(maxWidth: .infinity, alignment: .leading)

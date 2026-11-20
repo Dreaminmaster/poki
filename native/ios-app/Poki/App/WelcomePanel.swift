@@ -121,7 +121,7 @@ struct WelcomePanel: View {
             if nextStep != nil || !hasModel {
                 Button(action: finish) {
                     Text(kind == .firstRun ? LocalizedStringKey("Finish Later") : LocalizedStringKey("Not Now"))
-                        .font(.subheadline.weight(.medium)).foregroundStyle(Color(.label).opacity(0.72))
+                        .font(.allo(.subheadline, .medium)).foregroundStyle(Color(.label).opacity(0.72))
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(.rect)
                 }
                 .buttonStyle(.plain)

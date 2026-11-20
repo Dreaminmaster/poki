@@ -396,7 +396,7 @@ private struct PokiNameRow: View {
                 .accessibilityAddTraits(.isHeader)
             HStack(spacing: 6) {
                 Circle().fill(mood.dot).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(verbatim: status).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                Text(verbatim: status).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
             }
             .padding(.leading, 2)
             Spacer(minLength: 8)

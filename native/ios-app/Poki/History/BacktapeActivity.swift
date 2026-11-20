@@ -179,7 +179,7 @@ struct BacktapeDetail: View {
         VStack(alignment: .leading, spacing: 12) {
             if let note, !note.body.isEmpty {
                 Text(verbatim: note.body.prefix(1).uppercased() + note.body.dropFirst())
-                    .font(.footnote)
+                    .font(.allo(.footnote))
                     .foregroundStyle(pending ? Color.secondary : Color.primary)
                     .modifier(BacktapePending(on: pending))
                     .fixedSize(horizontal: false, vertical: true)
@@ -206,7 +206,7 @@ struct BacktapeDetail: View {
                     Spacer()
                     Text(verbatim: tile.end.formatted(style))
                 }
-                .font(.caption2)
+                .font(.allo(.caption2))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
             }
@@ -225,16 +225,16 @@ struct BacktapeDetail: View {
                     }
                     .frame(width: 30)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: name(part)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(verbatim: name(part)).font(.allo(.subheadline, .semibold)).lineLimit(1)
                         ForEach(part.titles, id: \.self) { title in
-                            Text(verbatim: title).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                            Text(verbatim: title).font(.allo(.footnote)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         if part.more > 0 {
-                            Text("\(part.more) more").font(.footnote).foregroundStyle(.tertiary)
+                            Text("\(part.more) more").font(.allo(.footnote)).foregroundStyle(.tertiary)
                         }
                     }
                     Spacer(minLength: 6)
-                    Text(verbatim: length(part)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Text(verbatim: length(part)).font(.allo(.caption)).monospacedDigit().foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
             }

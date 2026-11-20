@@ -112,7 +112,7 @@ private struct AccountRow: View {
             ProviderTile(provider: provider)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: provider.name)
-                Text(verbatim: ProviderUseValue.summary(.account(provider))).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: ProviderUseValue.summary(.account(provider))).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
