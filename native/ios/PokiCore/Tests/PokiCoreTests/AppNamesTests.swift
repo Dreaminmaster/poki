@@ -4,7 +4,8 @@ import XCTest
 
 /// Apps by name, the session's app, and the read that comes as soon as the screen has settled.
 final class AppNamesTests: XCTestCase {
-    static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer"]
+    static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer",
+                        "com.example.alias": "com.example.other"]
 
     func core(names: Bool = true, quick: Bool = true) -> (PokiCore, FakeWDA) {
         let wda = FakeWDA()
@@ -121,6 +122,32 @@ final class AppNamesTests: XCTestCase {
             XCTAssertTrue(result.text.contains("no app named \"Nonesuch\" is known") && result.text.contains("nothing was sent"), result.text)
             XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, "\(actions): the tap before the unknown name was not sent")
             XCTAssertEqual(launched(wda), [])
+        }
+    }
+
+    func testExplicitLaunchFieldsKeepTheirMeaningInBatchesAndPaths() async {
+        for inPath in [false, true] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let unknown: JSON = ["launch": ["name": "tutti.ch"]]
+            let actions: [JSON] = inPath
+                ? [["path": ["steps": [["tap": "General"], unknown]]]]
+                : [["tap": 1], unknown]
+            let refused = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(refused.isError, refused.text)
+            XCTAssertTrue(refused.text.contains("no app named \"tutti.ch\" is known") && refused.text.contains("nothing was sent"), refused.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, refused.text)
+            XCTAssertEqual(launched(wda), [], refused.text)
+
+            for bundle in ["vendor.app", "com.example.alias"] {
+                let (core, wda) = self.core()
+                _ = await core.call("look", [:])
+                let launch: JSON = ["launch": ["bundle": .string(bundle)]]
+                let actions: [JSON] = inPath ? [["path": ["steps": [launch]]]] : [launch]
+                let opened = await core.call("do", ["actions": .array(actions)])
+                XCTAssertFalse(opened.isError, opened.text)
+                XCTAssertEqual(launched(wda), [bundle], opened.text)
+            }
         }
     }
 
