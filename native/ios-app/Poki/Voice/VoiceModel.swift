@@ -813,16 +813,19 @@ final class VoiceModel {
         // Preserve the latest request even when Poki's reply is long.
         var priority = [turns.lastIndex { $0.role == .you }, turns.indices.last].compactMap { $0 }
         if priority.count == 2 && priority[0] == priority[1] { priority.removeLast() }
+        func label(for index: Int) -> String { turns[index].role == .you ? "\nUser: " : "\nPoki: " }
+        let replyBytes = priority.dropFirst().first.map { label(for: $0).utf8.count + turns[$0].text.utf8.count } ?? 0
+        let replyReserve = min(available / 2, replyBytes)
         var kept: [Int: String] = [:]
         for (position, index) in priority.enumerated() {
-            let label = turns[index].role == .you ? "\nUser: " : "\nPoki: "
-            let limit = available / (priority.count - position) - label.utf8.count
-            let line = label + Self.liveExcerpt(turns[index].text, bytes: limit)
+            let prefix = label(for: index)
+            let limit = available - prefix.utf8.count - (position == 0 ? replyReserve : 0)
+            let line = prefix + Self.liveExcerpt(turns[index].text, bytes: limit)
             kept[index] = line
             available -= line.utf8.count
         }
         for index in turns.indices.reversed() where kept[index] == nil {
-            let line = "\n\(turns[index].role == .you ? "User" : "Poki"): \(turns[index].text)"
+            let line = label(for: index) + turns[index].text
             guard line.utf8.count <= available else { continue }
             kept[index] = line
             available -= line.utf8.count
