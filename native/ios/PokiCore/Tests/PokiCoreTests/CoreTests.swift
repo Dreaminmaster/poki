@@ -1152,24 +1152,50 @@ final class ApprovalTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1)
     }
 
-    func testOnDeviceVoiceUnlocksAndReadsTheCurrentApp() async {
-        let (core, wda, host) = makeCore { $0.toolDeadline = 25 }
-        wda.source([("Button", "Timer")], app: "Clock")
-        let locked = LockedBox(true)
-        wda.set("GET /wda/locked") { _ in (200, ["value": .bool(locked.value)]) }
-        host.unlock.value = { time in
-            guard time >= 11 else { return false }
-            locked.value = false
-            return true
-        }
+    func testOnDeviceVoiceOpensTheRequestedAppAfterUnlocking() async {
+        for ownerMustAuthorize in [false, true] {
+            let (core, wda, host) = makeCore {
+                $0.toolDeadline = 25
+                $0.runnerWait = 0
+            }
+            let locked = LockedBox(true)
+            let authorized = LockedBox(!ownerMustAuthorize)
+            if ownerMustAuthorize {
+                host.state.value = .awaitingAutomationAuthorization("waiting for the owner to allow automation")
+                host.readRunnerState.value = {
+                    authorized.value = true
+                    return .automationReady(revision: 1)
+                }
+            }
+            wda.set("GET /wda/locked") { _ in (200, ["value": .bool(locked.value)]) }
+            host.unlock.value = { time in
+                guard authorized.value, time >= 11 else { return false }
+                locked.value = false
+                return true
+            }
+            wda.set("POST /wda/apps/activate") { [weak wda] body in
+                guard authorized.value, !locked.value, body?["bundleId"]?.string == "com.apple.mobiletimer" else {
+                    return (500, ["value": ["error": "the app could not open"]])
+                }
+                wda?.set("GET /wda/activeAppInfo") { _ in
+                    (200, ["value": ["bundleId": "com.apple.mobiletimer", "name": "Clock"]])
+                }
+                wda?.source([("Button", "Timer")], app: "Clock")
+                return (200, ["value": nil])
+            }
 
-        let remote = await core.call("look", [:])
-        XCTAssertTrue(remote.text.contains("screen: locked"), remote.text)
-        let attempt = await core.tool("do", arguments: #"{"actions":[{"launch":"com.apple.mobiletimer"}]}"#)
-        XCTAssertTrue(attempt.text.contains("The iPhone unlocked"), attempt.text)
-        let voice = await core.tool("look", arguments: "{}")
-        XCTAssertFalse(voice.text.contains("screen: locked"), voice.text)
-        XCTAssertTrue(voice.text.contains("Timer"), voice.text)
+            if !ownerMustAuthorize {
+                let external = await core.call("look", [:])
+                XCTAssertTrue(external.text.contains("screen: locked"), external.text)
+            }
+            let result = await core.tool("do", arguments: #"{"actions":[{"launch":"com.apple.mobiletimer"}]}"#)
+
+            XCTAssertFalse(result.isError, result.text)
+            XCTAssertFalse(result.waitingForOwner, result.text)
+            XCTAssertFalse(result.text.contains("screen: locked"), result.text)
+            XCTAssertFalse(result.text.localizedCaseInsensitiveContains("owner has to unlock"), result.text)
+            XCTAssertTrue(result.text.contains("Timer"), result.text)
+        }
     }
 
     func testTheVoiceTabStillTapsWhileAStepIsHandedToTheOwner() async throws {
