@@ -94,6 +94,21 @@ final class LaunchScreenTests: XCTestCase {
         }
     }
 
+    /// The welcome's hello starts as the launch screen: its word and bear are where the storyboard puts
+    /// them, with the storyboard's pictures, on every screen.
+    func testTheWelcomeStartsWhereTheLaunchScreenIs() throws {
+        let (_, view) = try launchView()
+        for size in [CGSize(width: 402, height: 874), CGSize(width: 320, height: 568), CGSize(width: 1024, height: 768)] {
+            view.frame = CGRect(origin: .zero, size: size)
+            view.layoutIfNeeded()
+            let art = LaunchArt.on(size, dark: false)
+            XCTAssertNotNil(art.wordPicture)
+            XCTAssertNotNil(art.bearPicture)
+            XCTAssertEqual(art.word, try XCTUnwrap(view.viewWithTag(LaunchCurtain.Part.word.rawValue)).frame)
+            XCTAssertEqual(art.bear, try XCTUnwrap(view.viewWithTag(LaunchCurtain.Part.bear.rawValue)).frame)
+        }
+    }
+
     /// The picture shrunk to 20 by 44 RGB samples, which evens out the grain.
     private func samples(_ image: CGImage) throws -> [UInt8] {
         let (width, height) = (20, 44)

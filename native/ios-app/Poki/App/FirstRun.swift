@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import SwiftUI
+import UserNotifications
 
 /// What an earlier version of Poki left on this phone. None of it is written by this version before
 /// launch has read it, so it tells an update (or a reinstall the Keychain restored) from a fresh install:
@@ -15,13 +16,26 @@ enum EarlierVersion {
     }
 }
 
-/// The first run: Poki says hello, then goes through what it needs (this iPhone, a model, the microphone),
-/// each of which can wait, and says what to try. Someone who used an earlier version never sees it on
-/// updating; it can be gone through again from Settings › Connection.
+/// The welcome panel: on a fresh install, and once after each new version (the owner, 2026-11-20), Poki
+/// comes out of the launch screen into one page that sets up everything it uses. A fresh install gets the
+/// hello first; an update gets a shorter hello that names the version. It can be gone through again from
+/// Settings › Connection.
 enum FirstRun {
     /// Absent until the first launch of a version with the first run decides it, once.
     static let key = "pokiFirstRun"
+    /// The version whose welcome was last closed. A newer version shows the update's welcome once.
+    static let versionKey = "pokiWelcomeVersion"
     enum Record: String { case due, done }
+
+    /// Which welcome a launch shows.
+    enum Kind: Equatable {
+        case firstRun
+        /// After an update, with the version now installed.
+        case update(String)
+    }
+
+    /// The version as people see it (0.4.7): builds of one version share a welcome.
+    nonisolated static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "" }
 
     /// Call at launch before anything this version writes to the defaults.
     nonisolated static func decide(defaults: UserDefaults = .standard, sessionsFolder: URL = SessionStore.defaultFolder) {
@@ -30,319 +44,279 @@ enum FirstRun {
         defaults.set(record.rawValue, forKey: key)
     }
 
-    /// Whether to show it at this launch. Scripted launches (the in-app tests, the screenshot and check
-    /// scripts, which all pass `-poki…` arguments) have nobody to go through it; `-pokiScreen welcome` asks
-    /// for it.
-    static func isDue(defaults: UserDefaults = .standard) -> Bool {
-        let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
-        if arguments["pokiScreen"] as? String == "welcome" { return true }
-        if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil { return false }
-        if arguments.keys.contains(where: { $0.hasPrefix("poki") }) { return false }
-        return defaults.string(forKey: key) == Record.due.rawValue
+    /// The welcome the records ask for. Someone who used a version before the welcome panel existed has
+    /// no version noted, so they see the update's welcome once too.
+    nonisolated static func pending(defaults: UserDefaults, version: String) -> Kind? {
+        switch defaults.string(forKey: key).flatMap(Record.init) {
+        case .due: return .firstRun
+        case .done:
+            guard !version.isEmpty, defaults.string(forKey: versionKey) != version else { return nil }
+            return .update(version)
+        case nil: return nil
+        }
     }
 
-    static func finish(defaults: UserDefaults = .standard) { defaults.set(Record.done.rawValue, forKey: key) }
+    /// The welcome to show at this launch. Scripted launches (the in-app tests, the screenshot and check
+    /// scripts, which all pass `-poki…` arguments) have nobody to go through it; `-pokiScreen welcome`
+    /// asks for the first run's, `-pokiScreen welcomeUpdate` for an update's.
+    static func due(defaults: UserDefaults = .standard) -> Kind? {
+        let arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        switch arguments["pokiScreen"] as? String {
+        case "welcome": return .firstRun
+        case "welcomeUpdate": return .update(version)
+        default: break
+        }
+        if ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil { return nil }
+        if arguments.keys.contains(where: { $0.hasPrefix("poki") }) { return nil }
+        return pending(defaults: defaults, version: version)
+    }
+
+    /// Whether the first run (not an update's welcome) is up or still to come at this launch: entries
+    /// from outside wait for it.
+    static func isDue(defaults: UserDefaults = .standard) -> Bool { due(defaults: defaults) == .firstRun }
+
+    static func finish(defaults: UserDefaults = .standard, version: String = FirstRun.version) {
+        defaults.set(Record.done.rawValue, forKey: key)
+        if !version.isEmpty { defaults.set(version, forKey: versionKey) }
+    }
 }
 
-/// The pages of the first run, over the home page's light.
+/// The launch screen and the welcome, over the app: at a launch that has a welcome, the welcome is drawn
+/// under the launch screen with the word and the bear where the launch screen has them, so the launch
+/// screen goes without a seam and the hello starts from it. Without a welcome the launch screen lets go
+/// into the home page as before (`LaunchCurtain`). Kept here so the app's body adds one line.
+struct LaunchLayers: ViewModifier {
+    @Binding var curtain: Bool
+    @Binding var welcome: FirstRun.Kind?
+    @Binding var link: SetupStep?
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(welcome != nil)
+            .overlay {
+                if let kind = welcome {
+                    FirstRunGuide(kind: kind, fromLaunch: true, link: $link, done: { welcome = nil })
+                        .transition(.opacity)
+                }
+            }
+            .overlay {
+                if curtain {
+                    LaunchCurtain(handsOver: welcome != nil, done: { curtain = false })
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+/// The welcome: the hello over the home page's light, then the setup panel.
 struct FirstRunGuide: View {
-    @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var typeSize
-    /// A setup step a link opened (a pairing file from Poki Setup) while the first run is up.
+    var kind: FirstRun.Kind = .firstRun
+    /// Drawn under the launch screen: the hello starts as the launch screen's own picture.
+    var fromLaunch = false
+    /// A setup step a link opened (a pairing file from Poki Setup) while the welcome is up.
     @Binding var link: SetupStep?
     var done: () -> Void
 
-    enum Page: Int, CaseIterable { case hello, phone, model, voice, ready }
-
-    @State private var page = Page.hello
+    @State private var stage = WelcomeHello.Stage.launch
     @State private var path = NavigationPath()
-    @State private var hasModel = ModelKeys.hasUsableKey
-    @State private var voiceAllowed = FirstRunGuide.voiceAllowedNow
-    @State private var addingAccount = false
-    @State private var keyFor: ModelProvider?
-    @State private var signingIn = false
 
-    private static var voiceAllowedNow: Bool {
-        AVAudioApplication.shared.recordPermission == .granted && SFSpeechRecognizer.authorizationStatus() == .authorized
-    }
-
-    /// The first item still open on the phone's list, numbered from one.
-    private var nextStep: (number: Int, step: SetupStep)? {
-        SetupStep.shown.enumerated().first { !model.isDone($0.element) }.map { ($0.offset + 1, $0.element) }
-    }
-
-    private var ready: Bool { model.setupLooksComplete }
-
-    private var mood: PokiMood {
-        switch page {
-        case .hello: .hello
-        case .phone: .onYourPhone
-        case .model: .thinking
-        case .voice: .listening
-        case .ready: ready ? .done : .ready
-        }
-    }
-
-    private var title: String {
-        switch page {
-        case .hello: AppLocalization.text(LocalizedStringResource("Hello, I’m Poki"))
-        case .phone: AppLocalization.text(LocalizedStringResource("Set Up This iPhone"))
-        case .model: AppLocalization.text(LocalizedStringResource("Pick a Model"))
-        case .voice: AppLocalization.text(LocalizedStringResource("Talk Instead of Typing"))
-        case .ready: ready ? AppLocalization.text(LocalizedStringResource("All Set")) : AppLocalization.text(LocalizedStringResource("Nearly There"))
-        }
-    }
-
-    private var words: String {
-        switch page {
-        case .hello:
-            return AppLocalization.text(LocalizedStringResource("Tell me what you need, by text or by voice, and I do it on your iPhone while you watch."))
-        case .phone:
-            return AppLocalization.text(LocalizedStringResource("\(SetupStep.shown.count) switches, each turned on once. They tick themselves as you go."))
-        case .model:
-            return AppLocalization.text(LocalizedStringResource("I think with a model from your own account. Sign in or add a key. You can change it any time."))
-        case .voice:
-            return AppLocalization.text(LocalizedStringResource("To hear you, I need the microphone and speech recognition."))
-        case .ready:
-            return ready
-                ? AppLocalization.text(LocalizedStringResource("Try “Order my usual coffee”. Type it, or say it."))
-                : AppLocalization.text(LocalizedStringResource("Look around now. Once the switches are on, I can use this iPhone. They are in Settings › Connection."))
-        }
-    }
+    private var showsPanel: Bool { stage == .leaving || stage == .gone }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        FirstRunPortrait(mood: mood)
-                            .padding(.top, 28)
-                        dots.padding(.top, 22)
-                        VStack(spacing: 10) {
-                            Text(verbatim: title)
-                                .font(Prominent.font(size: 28, relativeTo: .title, .semibold))
-                                .foregroundStyle(Color(.label))
-                                .accessibilityAddTraits(.isHeader)
-                            Text(verbatim: words)
-                                .font(.allo(.body))
-                                .foregroundStyle(Tint.homeSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            detail.padding(.top, 14)
-                        }
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 16)
-                        .id(page)
-                        .transition(reduceMotion ? .opacity : .asymmetric(insertion: .offset(y: 12).combined(with: .opacity), removal: .opacity))
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
-                    .frame(maxWidth: 520)
-                    .frame(maxWidth: .infinity)
+        ZStack {
+            if showsPanel {
+                NavigationStack(path: $path) {
+                    WelcomePanel(kind: kind, path: $path, finish: finish)
+                        .welcomeDestinations(path: $path)
                 }
-                .scrollBounceBehavior(.basedOnSize)
-                buttons
+                .transition(.opacity)
             }
-            .background { HomeBackdrop(home: true, working: false) }
-            .toolbar {
-                if page != .hello {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Back", systemImage: "chevron.left") { go(Page(rawValue: page.rawValue - 1) ?? .hello) }
-                            .accessibilityIdentifier("firstRun.back")
-                    }
-                }
+            if stage != .gone {
+                WelcomeHello(kind: kind, stage: stage, setUp: openPanel, later: finish)
             }
-            .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).toolbar(.visible, for: .navigationBar) }
-            .onChange(of: path.count) { _, _ in refresh() }
-            .onChange(of: link, initial: true) { _, step in
-                guard let step else { return }
-                link = nil
-                page = .phone
-                path = NavigationPath([step])
-            }
-            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
-            .onAppear { model.loopback.resume() }
-            .sheet(isPresented: $addingAccount, onDismiss: refresh) { AddAccount() }
-            .sheet(item: $keyFor, onDismiss: refresh) { KeyEntry(provider: $0) }
-            .sheet(isPresented: $signingIn, onDismiss: refresh) { ChatGPTSignIn() }
         }
+        .background { HomeBackdrop(home: true, working: false).ignoresSafeArea() }
         .interactiveDismissDisabled()
-        // Keep the existing limit until the guide's rows and buttons are verified at AX3–AX5.
+        // Keep the existing limit until the panel's rows and buttons are verified at AX3–AX5.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-    }
-
-    private var dots: some View {
-        HStack(spacing: 6) {
-            ForEach(Page.allCases, id: \.self) { each in
-                Capsule()
-                    .fill(each == page ? Tint.blueText : Tint.blueLine)
-                    .frame(width: each == page ? 20 : 6, height: 6)
-            }
+        .task {
+            // The launch screen holds still, then lets go onto this picture of itself (LaunchCurtain).
+            if fromLaunch { try? await Task.sleep(for: .seconds(LaunchMotion.hold + LaunchMotion.handOver * 0.6)) }
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.3) : .spring(duration: 0.7, bounce: 0.12)) { stage = .hello }
         }
-        .accessibilityElement()
-        .accessibilityLabel(Text("Step \(page.rawValue + 1) of \(Page.allCases.count)"))
-    }
-
-    @ViewBuilder private var detail: some View {
-        switch page {
-        case .phone:
-            FirstRunCard {
-                ForEach(Array(SetupStep.shown.enumerated()), id: \.element) { index, step in
-                    if index > 0 { Divider().padding(.leading, 58) }
-                    NavigationLink(value: step) { stepRow(step) }
-                        .buttonStyle(PressedDimStyle())
-                        .accessibilityIdentifier("firstRun.step.\(step.rawValue)")
-                }
-            }
-        case .model:
-            FirstRunCard {
-                ForEach(Array(Self.namedProviders.enumerated()), id: \.element) { index, provider in
-                    if index > 0 { Divider().padding(.leading, 58) }
-                    Button { open(provider) } label: { providerRow(provider) }
-                        .buttonStyle(PressedDimStyle())
-                }
-                Divider().padding(.leading, 58)
-                Button { addingAccount = true } label: {
-                    HStack(spacing: 14) {
-                        SettingsIcon(symbol: "ellipsis", size: 30)
-                        Text("More Providers").font(.allo(.body)).foregroundStyle(Color(.label))
-                        Spacer(minLength: 8)
-                        Text(verbatim: "\(ModelProvider.allCases.count - Self.namedProviders.count)").foregroundStyle(Color(.secondaryLabel))
-                        Image(systemName: "chevron.right").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
-                    }
-                    .padding(.horizontal, 14).frame(minHeight: 56).contentShape(.rect)
-                }
-                .buttonStyle(PressedDimStyle())
-            }
-            .id(hasModel)
-        default:
-            EmptyView()
+        .onChange(of: link, initial: true) { _, step in
+            guard let step else { return }
+            link = nil
+            if stage != .gone { stage = .gone }
+            path = NavigationPath([step])
         }
     }
 
-    /// The providers named on the page; the rest are behind More Providers.
-    private static let namedProviders: [ModelProvider] = [.chatgpt, .anthropic, .openai]
-
-    private func stepRow(_ step: SetupStep) -> some View {
-        let ticked = model.isDone(step)
-        // At the accessibility sizes the state goes under the name, as Settings lays its rows out.
-        let stacked = typeSize.isAccessibilitySize
-        return HStack(spacing: 14) {
-            if !stacked { SettingsIcon(symbol: ticked ? "checkmark" : step.symbol, size: 30) }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(step.pageTitle).font(.allo(.body)).foregroundStyle(Color(.label)).multilineTextAlignment(.leading)
-                if stacked { stepState(step, ticked: ticked) }
-            }
-            Spacer(minLength: 8)
-            if !stacked { stepState(step, ticked: ticked) }
-            Image(systemName: "chevron.right").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
-        }
-        .padding(.horizontal, 14).padding(.vertical, stacked ? 10 : 0).frame(minHeight: 56).contentShape(.rect)
-    }
-
-    @ViewBuilder private func stepState(_ step: SetupStep, ticked: Bool) -> some View {
-        if ticked {
-            Text("Done").font(.allo(.subheadline)).foregroundStyle(Tint.greenInk)
-        } else if nextStep?.step == step {
-            Text("Next").font(.allo(.footnote, .semibold)).foregroundStyle(Tint.amberInk)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(Tint.amberSoft, in: .capsule)
+    private func openPanel() {
+        guard stage == .hello else { return }
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.25) : .easeIn(duration: LaunchMotion.sink)) { stage = .leaving }
+        Task {
+            try? await Task.sleep(for: .seconds(reduceMotion ? 0.25 : LaunchMotion.sink))
+            stage = .gone
         }
     }
 
-    private func providerRow(_ provider: ModelProvider) -> some View {
-        HStack(spacing: 14) {
-            ProviderTile(provider: provider, size: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: provider.name).font(.allo(.body)).foregroundStyle(Color(.label))
-                Text(ModelAccounts.method(provider)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
-            }
-            Spacer(minLength: 8)
-            if ModelAccounts.isSetUp(provider) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Tint.green)
-                    .accessibilityLabel(Text("Account Added"))
-            } else {
-                Image(systemName: "chevron.right").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
-            }
-        }
-        .padding(.horizontal, 14).frame(minHeight: 56).contentShape(.rect)
-    }
-
-    /// The one button to press, and under it the way past on a page that asks for something not done.
-    private var buttons: some View {
-        VStack(spacing: 4) {
-            SettingsPill(title: primaryWord, prominent: true, action: primary)
-                .accessibilityIdentifier("firstRun.primary")
-            if showsLater {
-                Button { go(next) } label: {
-                    Text("Not Now").font(.allo(.subheadline, .medium)).foregroundStyle(Color(.label).opacity(0.72))
-                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(.rect)
-                }
-                .accessibilityIdentifier("firstRun.later")
-            }
-        }
-        .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 8)
-        .frame(maxWidth: 520)
-        .frame(maxWidth: .infinity)
-    }
-
-    private var primaryWord: LocalizedStringKey {
-        switch page {
-        case .hello: "Get Started"
-        case .phone:
-            if let nextStep { "Continue with Step \(nextStep.number)" } else { "Continue" }
-        case .model: hasModel ? "Continue" : "Add an Account"
-        case .voice: voiceAllowed ? "Continue" : "Allow Microphone"
-        case .ready: "Start"
-        }
-    }
-
-    private var showsLater: Bool {
-        switch page {
-        case .phone: nextStep != nil
-        case .model: !hasModel
-        case .voice: !voiceAllowed
-        case .hello, .ready: false
-        }
-    }
-
-    private var next: Page { Page(rawValue: page.rawValue + 1) ?? .ready }
-
-    private func primary() {
-        switch page {
-        case .hello: go(next)
-        case .phone:
-            if let nextStep { path.append(nextStep.step) } else { go(next) }
-        case .model:
-            if hasModel { go(next) } else { addingAccount = true }
-        case .voice:
-            guard !voiceAllowed else { return go(next) }
-            Task {
-                voiceAllowed = await Dictation.allowed()
-                go(next)
-            }
-        case .ready:
-            FirstRun.finish()
-            done()
-        }
-    }
-
-    private func open(_ provider: ModelProvider) {
-        if provider.signsIn { signingIn = true } else { keyFor = provider }
-    }
-
-    private func go(_ to: Page) {
-        withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.1)) { page = to }
-    }
-
-    private func refresh() {
-        hasModel = ModelKeys.hasUsableKey
-        voiceAllowed = Self.voiceAllowedNow
+    private func finish() {
+        FirstRun.finish()
+        withAnimation(.easeInOut(duration: 0.3)) { done() }
     }
 }
 
-/// Settings' way back into the first run: a blue text button that opens the pages over everything.
+/// The hello: "Poki" and the bear where the launch screen has them, then the word lifts, the bear sinks
+/// as far as the words need, and the words and the button come in between them.
+struct WelcomeHello: View {
+    enum Stage { case launch, hello, leaving, gone }
+
+    var kind: FirstRun.Kind
+    var stage: Stage
+    var setUp: () -> Void
+    var later: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            let screen = CGSize(width: geometry.size.width + geometry.safeAreaInsets.leading + geometry.safeAreaInsets.trailing,
+                                height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
+            let art = LaunchArt.on(screen, dark: scheme == .dark)
+            let lifted = max(geometry.safeAreaInsets.top + art.word.height, art.word.midY - screen.height * 0.08)
+            let wordY = stage == .launch ? art.word.midY : lifted
+            let contentTop = lifted + art.word.height / 2 + 20
+            let drop = bearDrop(room: contentTop + contentHeight + 28 - art.bear.minY, height: art.bear.height)
+            let showsWords = stage == .hello
+
+            ZStack(alignment: .topLeading) {
+                if let bear = art.bearPicture {
+                    Image(uiImage: bear)
+                        .resizable()
+                        .frame(width: art.bear.width, height: art.bear.height)
+                        .position(x: art.bear.midX, y: art.bear.midY + drop)
+                        .accessibilityHidden(true)
+                }
+                Group {
+                    if let word = art.wordPicture { Image(uiImage: word).resizable() } else { Color.clear }
+                }
+                .frame(width: art.word.width, height: art.word.height)
+                .position(x: art.word.midX, y: wordY)
+                .opacity(stage == .leaving || stage == .gone ? 0 : 1)
+                .accessibilityElement()
+                .accessibilityLabel(Text(verbatim: "Poki"))
+                .accessibilityAddTraits(.isHeader)
+                words
+                    .frame(width: min(screen.width - 48, 440))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                    .position(x: screen.width / 2, y: contentTop + contentHeight / 2)
+                    .opacity(showsWords ? 1 : 0)
+                    .offset(y: showsWords ? 0 : 14)
+                    .allowsHitTesting(showsWords)
+            }
+            .frame(width: screen.width, height: screen.height)
+            .offset(x: -geometry.safeAreaInsets.leading, y: -geometry.safeAreaInsets.top)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    /// How far the bear goes down: as far as the words need, and out of sight when they need most of
+    /// the page or the hello goes.
+    private func bearDrop(room: CGFloat, height: CGFloat) -> CGFloat {
+        switch stage {
+        case .launch: return 0
+        case .hello: return room <= 0 ? 0 : room < height * 0.55 ? room : height + 8
+        case .leaving, .gone: return height + 8
+        }
+    }
+
+    private var words: some View {
+        VStack(spacing: 22) {
+            VStack(spacing: 8) {
+                Text(verbatim: headline)
+                    .font(Prominent.font(size: 22, relativeTo: .title2, .semibold))
+                    .foregroundStyle(Color(.label))
+                Text(verbatim: line)
+                    .font(.body)
+                    .foregroundStyle(Tint.homeSecondary)
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 6) {
+                Button(action: setUp) {
+                    Text(kind == .firstRun ? LocalizedStringKey("Set Up Poki") : LocalizedStringKey("Check Setup"))
+                        .font(.headline)
+                        .padding(.horizontal, 26)
+                        .frame(minHeight: 34)
+                }
+                .controlSize(.large)
+                .glassButton()
+                .accessibilityIdentifier("firstRun.primary")
+                if kind != .firstRun {
+                    Button(action: later) {
+                        Text("Not Now").font(.subheadline.weight(.medium)).foregroundStyle(Color(.label).opacity(0.72))
+                            .frame(minWidth: 120, minHeight: 44).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("firstRun.later")
+                }
+            }
+        }
+    }
+
+    private var headline: String {
+        switch kind {
+        case .firstRun: AppLocalization.text(LocalizedStringResource("Hello, I’m Poki"))
+        case .update(let version): AppLocalization.text(LocalizedStringResource("Poki \(version) Is Here"))
+        }
+    }
+
+    private var line: String {
+        switch kind {
+        case .firstRun: AppLocalization.text(LocalizedStringResource("Tell me what you need, by text or by voice, and I do it on your iPhone while you watch."))
+        case .update: AppLocalization.text(LocalizedStringResource("See what is set up and turn on what is new, all on one page."))
+        }
+    }
+}
+
+/// The launch screen's word and bear as LaunchScreen.storyboard lays them out on a screen of this size:
+/// read from the storyboard's own view, so the hello's first frame is the launch screen's to the point
+/// whatever the storyboard's constraints become, with its own pictures in this appearance.
+@MainActor
+struct LaunchArt {
+    var word = CGRect.zero
+    var bear = CGRect.zero
+    var wordPicture: UIImage?
+    var bearPicture: UIImage?
+
+    private static var laidOut: [String: LaunchArt] = [:]
+
+    static func on(_ screen: CGSize, dark: Bool) -> LaunchArt {
+        let key = "\(screen.width)x\(screen.height)-\(dark)"
+        if let known = laidOut[key] { return known }
+        var art = LaunchArt()
+        if screen.width > 0, screen.height > 0,
+           let view = UIStoryboard(name: "LaunchScreen", bundle: .main).instantiateInitialViewController()?.view {
+            view.frame = CGRect(origin: .zero, size: screen)
+            view.layoutIfNeeded()
+            let traits = UITraitCollection(userInterfaceStyle: dark ? .dark : .light)
+            func picture(_ part: LaunchCurtain.Part) -> (CGRect, UIImage?) {
+                guard let image = view.viewWithTag(part.rawValue) as? UIImageView else { return (.zero, nil) }
+                let drawn = image.image.map { $0.imageAsset?.image(with: traits) ?? $0 }
+                return (image.frame, drawn)
+            }
+            (art.word, art.wordPicture) = picture(.word)
+            (art.bear, art.bearPicture) = picture(.bear)
+        }
+        laidOut[key] = art
+        return art
+    }
+}
+
+/// Settings' way back into the welcome: a blue text button that opens it over everything.
 /// It carries its own cover, so whichever settings page lists the setup items places it with one line.
 /// `wide` stretches it to the page width with a 44-point row, for pages that are not a List; `row`
 /// draws it as a settings row, with the icon the rows beside it have.
@@ -365,32 +339,5 @@ struct FirstRunAgain: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("setup.firstRun")
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: .constant(nil), done: { welcoming = false }) }
-    }
-}
-
-/// Poki's round picture at the top of each page, in the white ring the home page gives it.
-private struct FirstRunPortrait: View {
-    var mood: PokiMood
-    @Environment(\.colorScheme) private var scheme
-    @ScaledMetric(relativeTo: .title) private var side: CGFloat = 104
-
-    var body: some View {
-        let dark = scheme == .dark
-        // Grows with the text, up to half as large again: at the accessibility sizes the words need the room.
-        PokiPortrait(mood: mood, side: min(side, 156))
-            .overlay(Circle().strokeBorder(Color.white.opacity(dark ? 0.85 : 1), lineWidth: 2.5))
-            .shadow(color: dark ? Color(hex: 0x3C8DFF).opacity(0.35) : Color(hex: 0x0177FD).opacity(0.18), radius: dark ? 10 : 9, y: 5)
-    }
-}
-
-/// The rows of a page on one card, as Settings groups them.
-private struct FirstRunCard<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(spacing: 0) { content }
-            .multilineTextAlignment(.leading)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Tint.line, lineWidth: 1))
     }
 }

@@ -7,14 +7,18 @@ import UIKit
 /// the first frame is the launch screen to the pixel, on every screen size.
 ///
 /// With Reduce Motion everything fades together and nothing moves.
+///
+/// When a welcome comes next (`LaunchLayers`), the welcome under it already draws the light, the word and
+/// the bear in the same places, so the curtain only fades and the welcome moves them from there.
 struct LaunchCurtain: UIViewRepresentable {
+    var handsOver = false
     var done: () -> Void
 
     /// The storyboard's pictures, by their tags in LaunchScreen.storyboard.
     enum Part: Int { case backdrop = 1, word, bear }
 
     func makeUIView(context: Context) -> Stage {
-        let stage = Stage(done: done)
+        let stage = Stage(handsOver: handsOver, done: done)
         if let scene = UIStoryboard(name: "LaunchScreen", bundle: .main).instantiateInitialViewController()?.view {
             scene.frame = stage.bounds
             scene.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -27,10 +31,12 @@ struct LaunchCurtain: UIViewRepresentable {
 
     final class Stage: UIView {
         private let done: () -> Void
+        private let handsOver: Bool
         private var started = false
 
-        init(done: @escaping () -> Void) {
+        init(handsOver: Bool, done: @escaping () -> Void) {
             self.done = done
+            self.handsOver = handsOver
             super.init(frame: UIScreen.main.bounds)
             isUserInteractionEnabled = false
             accessibilityElementsHidden = true
@@ -52,8 +58,8 @@ struct LaunchCurtain: UIViewRepresentable {
         private func open() {
             layoutIfNeeded()
             let finish: (UIViewAnimatingPosition) -> Void = { [done] _ in done() }
-            if UIAccessibility.isReduceMotionEnabled {
-                let fade = UIViewPropertyAnimator(duration: LaunchMotion.fade, curve: .easeInOut) { self.alpha = 0 }
+            if handsOver || UIAccessibility.isReduceMotionEnabled {
+                let fade = UIViewPropertyAnimator(duration: handsOver ? LaunchMotion.handOver : LaunchMotion.fade, curve: .easeInOut) { self.alpha = 0 }
                 fade.addCompletion(finish)
                 fade.startAnimation(afterDelay: LaunchMotion.hold)
                 return
@@ -93,4 +99,6 @@ enum LaunchMotion {
     static let reveal = 0.4
     /// With Reduce Motion, the whole launch screen fades out.
     static let fade = 0.3
+    /// Onto a welcome that draws the same picture: the launch screen fades into it, then the welcome moves.
+    static let handOver = 0.2
 }
