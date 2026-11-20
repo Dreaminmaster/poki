@@ -6,7 +6,9 @@ Versions are taken from `package-lock.json`, `native/bridge/Cargo.lock`, `native
 
 ## npm packages
 
-Includes every entry in `package-lock.json`. Optional and platform-specific entries are installed only when selected by npm for that environment. The npm column is the package metadata’s declared license; for the MCP SDK, also read the retained [upstream licensing transition terms](../third_party/LICENSE.typescript-sdk).
+The table lists the dependencies in `package-lock.json`. The `packages[""]` entry describes Poki MCP itself. The root `package.json` pins the direct dependencies, and `npm ci` uses the lockfile to install the recorded versions for your platform.
+
+The table shows each package's declared license. For the MCP SDK, see the retained [upstream licensing transition terms](../third_party/LICENSE.typescript-sdk).
 
 | Package | Version | Declared license | Source repository | Selection |
 | --- | --- | --- | --- | --- |
