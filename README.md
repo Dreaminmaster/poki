@@ -68,6 +68,8 @@ Poki is an open-source iPhone agent that operates your entire iPhone for you. Th
 
    Open Notes afterward to confirm "Poki Demo" exists with those three lines.
 
+To build and sign the iPhone app with Xcode, use the [source install prompt for coding agents](docs/install-from-source-agent-prompt.md).
+
 <details>
 <summary>Requirements, updating, common questions, and guides</summary>
 
