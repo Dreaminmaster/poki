@@ -22,7 +22,9 @@ enum Harness {
         // Screen History reaches Poki's chat through personal_context only (SensesContext): a model on
         // this iPhone answers and checks the answer first. The raw screen_history query, which hands
         // screen text straight to the model, stays for outside agents only.
-        [PokiCore.toolInstructions(includeScreenHistory: false), system, WebTools.instructions].joined(separator: "\n\n")
+        // Who Poki is comes first, then the phone's tool rules, then the browser's (#479). The
+        // Senses merge (6600edd8) had put the tool rules ahead of the identity.
+        [system, PokiCore.toolInstructions(includeScreenHistory: false), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """

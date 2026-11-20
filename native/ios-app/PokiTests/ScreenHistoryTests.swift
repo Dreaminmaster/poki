@@ -465,7 +465,10 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(locked.text.contains(canary))
 
         XCTAssertTrue(lock.unlock(pin: fixturePIN))
-        XCTAssertTrue(Harness.tools.map(\.name).contains("screen_history"))
+        // Poki's own chat reads Screen History through personal_context only (Senses, 6600edd8): the
+        // raw query stays for outside agents, whatever the lock says.
+        XCTAssertFalse(Harness.tools.map(\.name).contains("screen_history"))
+        XCTAssertTrue(Harness.tools.map(\.name).contains(SensesContext.name))
         let reopened = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertFalse(reopened.isError, reopened.text)
         XCTAssertTrue(reopened.text.contains(canary))
@@ -543,15 +546,20 @@ final class ScreenHistoryTests: XCTestCase {
         func payload(_ request: [String: Any]) -> String {
             String(decoding: (try? JSONSerialization.data(withJSONObject: request)) ?? Data(), as: UTF8.self)
         }
-        XCTAssertTrue(hasHistoryTool(requests[0]))
-        XCTAssertTrue(hasHistoryTool(requests[1]))
-        XCTAssertTrue(payload(requests[1]).contains(canary), "The legitimate read must reach the model before revocation")
-        XCTAssertFalse(hasHistoryTool(requests[2]), "An active Pi loop must not keep its stale tool list")
-        XCTAssertFalse(FakeCompletions.system(requests[2]).contains(PokiCore.screenHistoryInstructions))
-        XCTAssertFalse(payload(requests[2]).contains(canary), "Do not resend the revoked raw tool result")
-        XCTAssertTrue(hasHistoryTool(requests[3]), "Re-enabling should restore the tool within the same loop")
-        XCTAssertTrue(FakeCompletions.system(requests[3]).contains(PokiCore.screenHistoryInstructions))
-        XCTAssertFalse(payload(requests[3]).contains(canary), "A new grant does not revive old evidence")
+        // Since the Senses work (6600edd8) Poki's own chat never declares the raw screen_history
+        // query, on or off: Screen History reaches it only through personal_context, answered and
+        // checked on this iPhone. So no request offers the raw tool or carries its screen text, and
+        // every one keeps personal_context, through the switch going off and on.
+        func hasContextTool(_ request: [String: Any]) -> Bool {
+            let tools = request["tools"] as? [[String: Any]] ?? []
+            return tools.contains { ($0["function"] as? [String: Any])?["name"] as? String == SensesContext.name }
+        }
+        for (turn, request) in requests.enumerated() {
+            XCTAssertFalse(hasHistoryTool(request), "request \(turn) offers the raw screen_history query")
+            XCTAssertTrue(hasContextTool(request), "request \(turn) lost personal_context")
+            XCTAssertFalse(FakeCompletions.system(request).contains(PokiCore.screenHistoryInstructions), "request \(turn)")
+            XCTAssertFalse(payload(request).contains(canary), "request \(turn) carries raw screen text")
+        }
     }
 
     private enum PendingPrivacyChange {

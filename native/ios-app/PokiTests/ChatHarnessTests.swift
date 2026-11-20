@@ -1089,7 +1089,8 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(prompt.contains("two visible iPhone Split View apps"))
         XCTAssertFalse(prompt.contains("web_open"))
         let offered = (request["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
-        XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
+        // personal_context is the chat's way into Screen History since the Senses work (6600edd8).
+        XCTAssertEqual(Set(offered), ["look", "do", "status", "personal_context", "report_plan", "finish_task"])
     }
 
     func testStoppedConversationReachesModelAfterReload() async throws {
