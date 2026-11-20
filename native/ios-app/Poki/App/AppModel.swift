@@ -2314,8 +2314,21 @@ final class AppModel {
     }
 
     private static func checkPairingFileFormat(_ data: Data) throws {
-        // Lockdown and RPPairing files are both property lists.
-        _ = try PropertyListSerialization.propertyList(from: data, format: nil)
+        guard let record = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              isRemotePairingRecord(record) || isLockdownPairingRecord(record) else {
+            throw CocoaError(.propertyListReadCorrupt)
+        }
+    }
+
+    private static func isRemotePairingRecord(_ record: [String: Any]) -> Bool {
+        record["identifier"] is String && (record["public_key"] as? Data)?.count == 32 && (record["private_key"] as? Data)?.count == 32
+    }
+
+    private static func isLockdownPairingRecord(_ record: [String: Any]) -> Bool {
+        // Required fields in the launcher's lockdown pairing format. EscrowBag and UDID are optional.
+        let identifiers = ["HostID", "SystemBUID", "WiFiMACAddress"]
+        let credentials = ["DeviceCertificate", "HostCertificate", "HostPrivateKey", "RootCertificate", "RootPrivateKey"]
+        return identifiers.allSatisfy { record[$0] is String } && credentials.allSatisfy { record[$0] is Data }
     }
 
     /// What the last pairing link or file did, for the pairing page.
@@ -2389,26 +2402,32 @@ final class AppModel {
         }
     }
 
+    enum LinkOpening: Equatable {
+        case ignored
+        case continueRouting
+        case showSetup(SetupStep)
+    }
+
     /// A link Poki was opened with. `poki://pairing?url=…&sha256=…` fetches a pairing file (Poki
     /// Setup serves it on the local network and shows the link as a code); `poki://pairing?data=…`
     /// carries one in base64url; `poki://setup?relay=…` sets the relay. A file URL is a pairing file
-    /// opened from AirDrop or Files. Returns the setup step to show, or nil when no step should open.
+    /// opened from AirDrop or Files. Ignored links leave the current page in place.
     ///
     /// A pairing or relay link from outside Poki only asks (`linkAsk`): nothing changes until the owner
     /// allows it. `scanned` is Poki's own scanner on the pairing page, which the owner pointed at the
     /// code: that is their answer already. The other links (`chat`, `log`, `voice`, a setup step) only
     /// show a screen and need no answer.
-    func open(link url: URL, scanned: Bool = false) -> SetupStep? {
+    func open(link url: URL, scanned: Bool = false) -> LinkOpening {
         if url.isFileURL {
             do { try importPairingFile(from: url) } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
             try? FileManager.default.removeItem(at: url)
-            return .pairing
+            return .showSetup(.pairing)
         }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host() {
         case "pairing":
-            guard scanned || canAskAboutLink() else { return nil }
+            guard scanned || canAskAboutLink() else { return .ignored }
             if let text = item("data"), let data = Data(base64URL: text) {
                 do {
                     if scanned {
@@ -2432,18 +2451,23 @@ final class AppModel {
             } else {
                 pairingNote = AppLocalization.text(LocalizedStringResource("The pairing link carried no file."))
             }
-            return .pairing
+            return .showSetup(.pairing)
         case "setup" where item("step") != nil:
             // The Live Activity's link to a setup step (pairing).
-            return item("step").flatMap(SetupStep.init(rawValue:))
+            guard let step = item("step").flatMap(SetupStep.init(rawValue:)) else { return .continueRouting }
+            return .showSetup(step)
         case "setup":
             // Poki Setup hands over the relay it configured (the Cloudflare proxy). The relay can see the
             // screen and act on the phone, so the link only asks. The relay already in use needs no answer.
-            guard let text = item("relay") else { return nil }
-            guard let address = RelayAddress(text) else { log.add("relay", "link carried no relay address"); return nil }
-            if address != relayAddress, canAskAboutLink() { ask(.relay(address), host: address.origin.absoluteString) }
-            return nil
-        default: return nil
+            guard let text = item("relay") else { return .continueRouting }
+            guard canAskAboutLink() else { return .ignored }
+            guard let address = RelayAddress(text) else {
+                log.add("relay", "link carried no relay address")
+                return .continueRouting
+            }
+            if address != relayAddress { ask(.relay(address), host: address.origin.absoluteString) }
+            return .continueRouting
+        default: return .continueRouting
         }
     }
 
@@ -2605,7 +2629,7 @@ final class AppModel {
     /// The pairing is an RPPairing record made on this iPhone, the only kind the launcher can hand to the mounted image.
     private var hasPhonePairing: Bool {
         guard let pairingPath, let record = Self.pairingRecord(at: pairingPath) else { return false }
-        return record["identifier"] is String && (record["public_key"] as? Data)?.count == 32 && (record["private_key"] as? Data)?.count == 32
+        return Self.isRemotePairingRecord(record)
     }
     var setupReadyForUse: Bool { SetupStep.shown.allSatisfy(stepReadyForUse) }
 

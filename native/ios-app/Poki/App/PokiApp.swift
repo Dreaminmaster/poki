@@ -380,18 +380,18 @@ struct RootView: View {
         AppLog.shared.add("app", "opened by link poki://\(url.host() ?? "")")
         // Pairing is not interrupted: it stays on the pairing step, where the PIN is.
         guard !model.pairingUnderWay else { return }
-        let step = model.open(link: url)
-        if step == nil, url.host() == "pairing" { return }
+        let opening = model.open(link: url)
+        guard opening != .ignored else { return }
         // During the first run a pairing file or a setup link opens its step there; nothing else moves.
         if welcoming {
-            if let step { welcomeLink = step }
+            if case .showSetup(let step) = opening { welcomeLink = step }
             return
         }
         // A pairing file or a setup link (from Poki Setup on a computer, AirDrop or Files) opens
         // setup at that step, where the result is shown.
         // Settings covers the screen on iPhone and would hide the question a link raised.
         if model.linkAsk != nil { detailsOpen = false }
-        if let step {
+        if case .showSetup(let step) = opening {
             detailsOpen = false
             threadsOpen = false
             if showsSidebar { openDetails([DetailsRoute.connection, step]) } else { home = NavigationPath([step]) }

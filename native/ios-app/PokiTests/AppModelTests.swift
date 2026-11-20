@@ -1802,7 +1802,7 @@ final class FrontendSubtractionTests: XCTestCase {
     func testARelayLinkAsksAndDoesNotSetTheRelay() throws {
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         let before = model.relayAddress
-        XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))))
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))), .continueRouting)
         XCTAssertEqual(model.relayAddress, before, "not set by the link alone")
         XCTAssertEqual(model.linkAsk?.host, "https://evil.example")
         model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
@@ -1822,16 +1822,16 @@ final class FrontendSubtractionTests: XCTestCase {
             let missingChecksum = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist"))
             _ = model.open(link: missingChecksum)
             let previousNote = try XCTUnwrap(model.pairingNote)
-            XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fmine.example"))))
+            XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fmine.example"))), .continueRouting)
             let shown = try XCTUnwrap(model.linkAsk)
             XCTAssertEqual(shown.host, "https://mine.example")
-            XCTAssertNil(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))))
+            XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))), .ignored)
             XCTAssertEqual(model.linkAsk?.id, shown.id, "the second link does not replace the one on screen")
             let sum = String(repeating: "ab", count: 32)
             let download = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist&sha256=\(sum)"))
             let inline = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
             for link in [download, inline, missingChecksum] {
-                XCTAssertNil(model.open(link: link), "discarded pairing links do not open the pairing page")
+                XCTAssertEqual(model.open(link: link), .ignored, "discarded pairing links do not open the pairing page")
                 XCTAssertEqual(model.pairingNote, previousNote, "discarded pairing links leave the previous message alone")
                 XCTAssertEqual(model.linkAsk?.id, shown.id, "discarded pairing links do not replace the request")
             }
@@ -1852,19 +1852,34 @@ final class FrontendSubtractionTests: XCTestCase {
     func testInvalidInlinePairingDataShowsAnErrorWithoutAsking() throws {
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         let invalid = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
-        XCTAssertEqual(model.open(link: invalid), .pairing)
+        XCTAssertEqual(model.open(link: invalid), .showSetup(.pairing))
         XCTAssertNil(model.linkAsk, "invalid property-list bytes cannot be approved")
         XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
+    }
+
+    func testIncompleteInlinePairingRecordsShowAnErrorWithoutAsking() throws {
+        let records: [[String: Any]] = [["identifier": "example"], ["HostID": "example"]]
+        for record in records {
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            let data = try PropertyListSerialization.data(fromPropertyList: record, format: .binary, options: 0)
+            var link = URLComponents()
+            link.scheme = "poki"
+            link.host = "pairing"
+            link.queryItems = [URLQueryItem(name: "data", value: data.base64URL)]
+            XCTAssertEqual(model.open(link: try XCTUnwrap(link.url)), .showSetup(.pairing))
+            XCTAssertNil(model.linkAsk, "an incomplete pairing record cannot be approved")
+            XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
+        }
     }
 
     /// A pairing link from outside asks before it replaces the pairing file, and one that fetches a
     /// file must say which file (its checksum), or Poki would fetch and keep whatever the address serves.
     func testAPairingLinkAsksAndNeedsItsChecksum() throws {
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
-        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist"))), .pairing)
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist"))), .showSetup(.pairing))
         XCTAssertNil(model.linkAsk, "no checksum, nothing to ask")
         let sum = String(repeating: "ab", count: 32)
-        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist&sha256=\(sum)"))), .pairing)
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist&sha256=\(sum)"))), .showSetup(.pairing))
         XCTAssertEqual(model.linkAsk?.host, "192.168.1.5")
         model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
         XCTAssertNil(model.linkAsk)
