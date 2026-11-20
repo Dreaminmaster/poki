@@ -23,10 +23,15 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
     out[@"front"] = [PKInProcess.shared frontApp];
     NSString *code = nil;
     NSString *before = [PKInProcess.shared sourceXML:NULL code:&code];
-    if (coverCompat && !before) {
-        out[@"first_source_code"] = code ?: @"";
-        code = nil;
-        before = [PKInProcess.shared sourceXML:NULL code:&code];
+    if (coverCompat && !before && [code hasSuffix:@"kAXErrorServerNotFound"]) {
+        out[@"first_source_code"] = code;
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 15;
+        while (!before && [code hasSuffix:@"kAXErrorServerNotFound"] &&
+               NSProcessInfo.processInfo.systemUptime < deadline) {
+            [NSThread sleepForTimeInterval:0.25];
+            code = nil;
+            before = [PKInProcess.shared sourceXML:NULL code:&code];
+        }
     }
     if (code) out[@"source_code"] = code;
     Write([tag stringByAppendingString:@".xml"], before ?: @"");
