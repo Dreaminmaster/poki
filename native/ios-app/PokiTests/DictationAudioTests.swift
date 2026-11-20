@@ -5,22 +5,25 @@ import XCTest
 final class DictationAudioTests: XCTestCase {
     @MainActor
     func testFinishingDictationDeactivatesTheRecordingSession() async throws {
-        #if compiler(>=6.4)
-        guard #available(iOS 27.0, *) else { throw XCTSkip("Audio session lifecycle notifications require iOS 27") }
+        #if targetEnvironment(simulator)
         guard AVAudioApplication.shared.recordPermission == .granted else {
             throw XCTSkip("Grant microphone access on the simulator to run this test")
         }
         let audio = AVAudioSession.sharedInstance()
+        // The simulator can change the active state without posting lifecycle notifications.
+        guard audio.responds(to: NSSelectorFromString("isActive")) else {
+            throw XCTSkip("The simulator does not expose the active audio session state")
+        }
         let dictation = Dictation()
         try dictation.listen()
         defer { try? audio.setActive(false, options: .notifyOthersOnDeactivation) }
         XCTAssertEqual(audio.category, .playAndRecord)
+        XCTAssertEqual(audio.value(forKey: "active") as? Bool, true)
 
-        let inactive = expectation(forNotification: AVAudioSession.didBecomeInactiveNotification, object: audio)
         _ = await dictation.finish()
-        await fulfillment(of: [inactive], timeout: 2)
+        XCTAssertEqual(audio.value(forKey: "active") as? Bool, false)
         #else
-        throw XCTSkip("Audio session lifecycle notifications require the iOS 27 SDK")
+        throw XCTSkip("The audio session state probe is simulator-only")
         #endif
     }
 }
