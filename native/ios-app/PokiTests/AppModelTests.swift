@@ -568,9 +568,9 @@ final class InProcessPasscodeTests: XCTestCase {
     }
 
     /// A fresh model on an iPhone running this iOS major version, with Poki on.
-    private func useSystem(_ major: Int) {
+    private func useSystem(_ major: Int, transport: HTTPTransport? = nil) {
         model?.stopSession()
-        model = AppModel(launcher: launcher, pairer: FakePairing(), automation: session,
+        model = AppModel(launcher: launcher, pairer: FakePairing(), automation: session, transport: transport,
                          systemVersion: OperatingSystemVersion(majorVersion: major, minorVersion: 6, patchVersion: 1))
         model.loopback.simulate(.working(ms: 9))
         model.setup.loopback = .proxy
@@ -1037,6 +1037,66 @@ final class InProcessPasscodeTests: XCTestCase {
         session.answer(["ok": false, "code": "missing_framework"])
         await waitFor("the second local failure is reported") { self.model.host.currentRunner.describe.contains("missing_framework") }
         XCTAssertEqual(launcher.restarts, restarts + 1, "one retry while the loopback stays up")
+    }
+
+    func testLocalPhoneReadContinuesAfterTheOwnerAllowsAutomation() async throws {
+        let transport = SessionScreenTransport(session: session)
+        useSystem(27, transport: transport)
+        await prepareWithoutPhoneTask()
+        session.holdNextOpen()
+
+        let reading = Task { await model.runTool("look", arguments: "{}") }
+        await waitFor("the local phone step is opening automation") { self.session.isHoldingOpen }
+        session.setAuthorizationWait(4)
+        model.checkIdle()
+
+        XCTAssertTrue(model.passcodeHint)
+        XCTAssertEqual(transport.screenReads, 0)
+        try await captureSessionState("owner-authorization-waiting")
+
+        session.answer(nil)
+        let screen = await reading.value
+
+        XCTAssertFalse(model.passcodeHint)
+        XCTAssertFalse(screen.isError, screen.text)
+        XCTAssertTrue(screen.text.contains("General"), screen.text)
+        XCTAssertEqual(transport.screenReads, 1, "the original read gets the screen after authorization")
+        try await captureSessionState("owner-authorization-ready")
+    }
+
+    func testOwnerCancellationEndsTheChatBeforeTheModelCanRequestAnotherTool() async throws {
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("look", [:]),
+            FakeCompletions.tool("look", [:]),
+            FakeCompletions.text("The model continued after cancellation."),
+        ])
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fake-model"
+        ModelKeys.selectedProvider = .custom
+        let transport = SessionScreenTransport(session: session)
+        useSystem(27, transport: transport)
+        await prepareWithoutPhoneTask()
+        session.holdNextOpen()
+
+        let chat = ChatModel(app: model)
+        chat.restore(SavedSession(id: UUID().uuidString, kind: .poki, title: "Settings", started: .now,
+                                  updated: .now, live: false,
+                                  entries: [ChatEntry(.you("Earlier conversation", delivered: true))], calls: []))
+        defer { if chat.running { chat.stop() } }
+        chat.send("Read the General settings page.", attachments: [])
+        await waitFor("the chat is opening automation") { self.session.isHoldingOpen }
+        session.setAuthorizationWait(4)
+        model.checkIdle()
+        XCTAssertTrue(model.passcodeHint)
+        session.answer(["ok": false, "code": "automation_cancelled", "detail": "Timed out while enabling automation mode."])
+        await waitFor("the original chat task ended") { !chat.running }
+
+        XCTAssertTrue(chat.entries.contains { if case .poki("Stopped.") = $0.kind { return true }; return false })
+        XCTAssertEqual(server.requests.count, 1, "After the owner cancels, the original chat sends no more model requests")
+        XCTAssertEqual(transport.screenReads, 0)
     }
 
     func testAPasscodeWaitAsksTheOwnerAndTellsTheAgentWhoMustEnterIt() async throws {
