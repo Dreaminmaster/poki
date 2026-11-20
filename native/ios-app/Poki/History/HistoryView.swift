@@ -138,7 +138,7 @@ struct ScreenHistorySettingsView: View {
                 }
                 .accessibilityIdentifier("screenHistory.enabled")
             } footer: {
-                Text("When on, Poki can answer questions from text kept on this iPhone. Excluded apps and password fields are left out, and nothing leaves this iPhone.")
+                Text("Screen History stores text on this iPhone and leaves out excluded apps and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent.")
             }
 
             Section {

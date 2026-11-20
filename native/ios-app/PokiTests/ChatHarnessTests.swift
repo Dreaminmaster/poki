@@ -24,7 +24,7 @@ final class ChatHarnessTests: XCTestCase {
 
     override func tearDown() async throws {
         for key in Self.settings { UserDefaults.standard.set(saved[key] ?? nil, forKey: key) }
-        for text in notes { _ = await app?.runTool("routines", arguments: Self.json(["action": "forget_note", "id": text])) }
+        for text in notes { _ = await app?.runTool("skills", arguments: Self.json(["action": "forget_note", "id": text])) }
         ChatModel.afterTask = nil
     }
 
@@ -403,7 +403,7 @@ final class ChatHarnessTests: XCTestCase {
         notes.append(note)
         let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]])
         let server = try FakeCompletions(replies: [
-            FakeCompletions.tool("routines", ["action": "remember", "text": note]), done, FakeCompletions.text("Noted."),
+            FakeCompletions.tool("skills", ["action": "remember", "text": note]), done, FakeCompletions.text("Noted."),
             done, FakeCompletions.text("Read the identifier."),
         ])
         let chat = chat(on: server)
@@ -1038,6 +1038,262 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(text.isEmpty, "agent-system.md is in the app")
         let named = Set(regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range, in: text).map { String(text[$0]) } })
         XCTAssertEqual(named.subtracting(tools), [], "named in agent-system.md but not offered to the model")
+    }
+
+    func testChineseAppTaskOffersMatchingSkillInPromptAndOmitsUnrelatedSkills() async throws {
+        let skillName = "查电池健康"
+        let session = FakeAutomation()
+        _ = session.prepare()
+        let transport = SessionScreenTransport(session: session, screenLabel: { "最大容量 96%" })
+
+        let replayStep = FakeCompletions.tool("do", ["actions": [["run": skillName]]])
+        let batteryFinish = FakeCompletions.tool("finish_task", [
+            "success": true,
+            "summary": "电池最大容量为 96%。",
+            "details": [["label": "最大容量", "value": "最大容量 96%"]],
+            "answer": ["kind": "field", "items": [["ref": "1", "field": "label", "prefix": "最大容量 "]]],
+        ])
+        let calendarLaunch = FakeCompletions.tool("do", ["actions": [["launch": "com.apple.mobilecal"]]])
+        let calendarLook = FakeCompletions.tool("look", [:])
+        let calendarFinish = FakeCompletions.tool("finish_task", [
+            "success": true,
+            "summary": "今天没有日程安排。",
+            "details": [],
+            "answer": ["kind": "action"],
+        ])
+
+        let server = try FakeCompletions(replies: [
+            replayStep,
+            batteryFinish,
+            FakeCompletions.text("电池最大容量目前是 96%。"),
+            calendarLaunch,
+            calendarLook,
+            calendarFinish,
+            FakeCompletions.text("今天没有日程安排。"),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let app = try XCTUnwrap(self.app)
+
+        for old in ["查电池健康", "查看本机版本", "查看今日日程", "返回主屏幕"] {
+            _ = await app.runTool("skills", arguments: Self.json(["action": "forget", "name": old]))
+        }
+        for noteID in ["n101", "n102"] {
+            _ = await app.runTool("skills", arguments: Self.json(["action": "forget_note", "text": noteID]))
+        }
+
+        // Scenario (d): Legacy v1 (`poki.agent-backup/1`) routines migration & Settings > Memory UI rendering
+        let legacyV1Backup = """
+        {
+          "schema": "poki.agent-backup/1",
+          "exported": "2026-11-18T10:00:00Z",
+          "routines": [
+            {
+              "name": "查电池健康",
+              "description": "在设置里查看电池最大容量",
+              "app": "com.apple.Preferences",
+              "steps": [
+                {
+                  "action": {"tap": "@"},
+                  "target": {"type": "Button", "label": "最大容量 96%", "x": 195, "y": 122},
+                  "app": "com.apple.Preferences"
+                }
+              ],
+              "params": {},
+              "expect": ["最大容量 96%"],
+              "read": ["最大容量"],
+              "runs": 4,
+              "ok": 4,
+              "failuresInARow": 0,
+              "lastMs": 1400,
+              "savedBy": "Poki",
+              "created": "2026-11-15T08:00:00Z",
+              "updated": "2026-11-18T09:30:00Z"
+            },
+            {
+              "name": "查看本机版本",
+              "description": "无顶层 app，从控件步骤回填设置",
+              "steps": [
+                {
+                  "action": {"tap": "@"},
+                  "target": {"type": "Cell", "label": "关于本机", "x": 180, "y": 180},
+                  "app": "com.apple.Preferences"
+                }
+              ],
+              "params": {},
+              "expect": ["iOS 版本"],
+              "read": ["iOS 版本"],
+              "runs": 2,
+              "ok": 2,
+              "failuresInARow": 0,
+              "lastMs": 1100,
+              "savedBy": "Poki",
+              "created": "2026-11-14T08:00:00Z",
+              "updated": "2026-11-18T08:30:00Z"
+            },
+            {
+              "name": "查看今日日程",
+              "description": "无顶层 app，从启动步骤回填日历",
+              "steps": [
+                {
+                  "action": {"launch": "com.apple.mobilecal"}
+                }
+              ],
+              "params": {},
+              "expect": [],
+              "read": [],
+              "runs": 1,
+              "ok": 1,
+              "failuresInARow": 0,
+              "lastMs": 800,
+              "savedBy": "Claude Code",
+              "created": "2026-11-13T08:00:00Z",
+              "updated": "2026-11-18T07:30:00Z"
+            },
+            {
+              "name": "返回主屏幕",
+              "description": "无具体 App，归入其他",
+              "steps": [
+                {
+                  "action": {"button": "home"},
+                  "app": "com.apple.springboard"
+                }
+              ],
+              "params": {},
+              "expect": [],
+              "read": [],
+              "runs": 3,
+              "ok": 3,
+              "failuresInARow": 0,
+              "lastMs": 300,
+              "savedBy": "Poki",
+              "created": "2026-11-12T08:00:00Z",
+              "updated": "2026-11-18T06:30:00Z"
+            }
+          ],
+          "notes": [
+            {
+              "id": "n101",
+              "text": "美团外卖饮品默认少冰三分糖",
+              "by": "owner",
+              "at": "2026-11-16T12:00:00Z"
+            },
+            {
+              "id": "n102",
+              "text": "妈妈在通讯录里存的名字是 Mama",
+              "by": "Poki",
+              "at": "2026-11-17T15:20:00Z"
+            }
+          ],
+          "runs": [
+            {
+              "routine": "查电池健康",
+              "at": "2026-11-18T09:30:00Z",
+              "ms": 1400,
+              "outcome": "ok",
+              "steps": ["1 tap"]
+            }
+          ]
+        }
+        """
+        let importedLegacy = await app.runTool("skills", arguments: Self.json(["action": "import", "data": legacyV1Backup]))
+        XCTAssertFalse(importedLegacy.isError, importedLegacy.text)
+        XCTAssertTrue(importedLegacy.text.contains("4 skills added"), importedLegacy.text)
+
+        let exportedV2 = await app.runTool("skills", arguments: Self.json(["action": "export"]))
+        XCTAssertFalse(exportedV2.isError, exportedV2.text)
+        XCTAssertTrue(exportedV2.text.contains("\"schema\" : \"poki.agent-backup/2\""), exportedV2.text)
+        XCTAssertTrue(exportedV2.text.contains("\"skills\""), exportedV2.text)
+
+        let evidenceDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MemoryMigrationEvidence")
+        try FileManager.default.createDirectory(at: evidenceDir, withIntermediateDirectories: true)
+        try Data(exportedV2.text.utf8).write(to: evidenceDir.appendingPathComponent("migrated-v2-poki-agent-backup.json"))
+
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            let savedLang = AppLocalization.shared.preference
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.screen.bounds
+            window.overrideUserInterfaceStyle = .light
+            defer {
+                window.isHidden = true
+                AppLocalization.shared.preference = savedLang
+            }
+            for (pref, fileName) in [("zh-Hans", "memory-migrated-skills-zh.png"), ("en", "memory-migrated-skills-en.png")] {
+                AppLocalization.shared.preference = pref
+                let root = NavigationStack {
+                    MemoryView(back: {})
+                }
+                .environment(\.locale, AppLocalization.locale)
+                window.rootViewController = UIHostingController(rootView: root)
+                window.makeKeyAndVisible()
+                window.layoutIfNeeded()
+                CATransaction.flush()
+                try await Task.sleep(for: .milliseconds(600))
+                window.layoutIfNeeded()
+                CATransaction.flush()
+                let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+                let png = renderer.pngData { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                try png.write(to: evidenceDir.appendingPathComponent(fileName))
+            }
+        }
+
+        // Remove the 3 extra migrated skills so only "查电池健康" remains for scenarios (a) and (c)
+        for extra in ["查看本机版本", "查看今日日程", "返回主屏幕"] {
+            _ = await app.runTool("skills", arguments: Self.json(["action": "forget", "name": extra]))
+        }
+        defer {
+            Task {
+                for name in ["查电池健康", "查看本机版本", "查看今日日程", "返回主屏幕"] {
+                    _ = await app.runTool("skills", arguments: Self.json(["action": "forget", "name": name]))
+                }
+                for noteText in ["美团外卖饮品默认少冰三分糖", "妈妈在通讯录里存的名字是 Mama"] {
+                    _ = await app.runTool("skills", arguments: Self.json(["action": "forget_note", "text": noteText]))
+                }
+            }
+        }
+
+        // Scenario (a): Chinese skill selection & first-step replay
+        let batteryReply = await chat.runDelegated("帮我看看手机电池现在健康度还有多少")
+        XCTAssertEqual(batteryReply.success, true)
+        XCTAssertTrue(batteryReply.text.contains("电池最大容量目前是 96%。"), batteryReply.text)
+        XCTAssertEqual(server.requests.count, 3)
+
+        let firstPrompt = FakeCompletions.system(server.requests[0])
+        XCTAssertTrue(firstPrompt.contains("Saved skills:"), firstPrompt)
+        XCTAssertTrue(firstPrompt.contains(skillName), firstPrompt)
+        XCTAssertTrue(firstPrompt.contains("com.apple.Preferences"), firstPrompt)
+        let offered = (server.requests[0]["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
+        XCTAssertTrue(offered.contains("skills"))
+        XCTAssertFalse(offered.contains("routines"))
+        XCTAssertEqual(chat.savedCalls.first?.name, "do")
+        XCTAssertTrue(chat.savedCalls.first?.answer.contains("run \"\(skillName)\": 1 steps") == true, chat.savedCalls.first?.answer ?? "")
+        XCTAssertTrue(chat.savedCalls.first?.answer.contains("read: 最大容量 = 96%") == true, chat.savedCalls.first?.answer ?? "")
+
+        // Scenario (c): Unrelated request failure scenario (omits Saved skills, executes normal step-by-step actions)
+        let callCountBeforeCalendar = chat.savedCalls.count
+        let calendarReply = await chat.runDelegated("打开日历看看今天有什么安排")
+        XCTAssertEqual(calendarReply.success, true)
+        XCTAssertTrue(calendarReply.text.contains("今天没有日程安排。"), calendarReply.text)
+        XCTAssertEqual(server.requests.count, 7)
+
+        let unrelatedPrompt = FakeCompletions.system(server.requests[3])
+        XCTAssertFalse(unrelatedPrompt.contains("Saved skills:"), unrelatedPrompt)
+        XCTAssertFalse(unrelatedPrompt.contains(skillName), unrelatedPrompt)
+        let calendarCalls = Array(chat.savedCalls.dropFirst(callCountBeforeCalendar))
+        XCTAssertEqual(calendarCalls.map(\.name), ["do", "look", "finish_task"])
+        XCTAssertTrue(calendarCalls.allSatisfy { !$0.answer.contains("run \"\(skillName)\"") })
+
+        print("""
+        MCP_ALIAS_VERIFY:
+        [1] Scenario (a) Chinese phrasing: "帮我看看手机电池现在健康度还有多少"
+            prompt includes Saved skills: \(firstPrompt.contains("Saved skills:"))
+            step 1 do {run: "\(skillName)"} -> \(chat.savedCalls.first?.answer.split(separator: "\n").first ?? "")
+        [2] Scenario (c) Unrelated request: "打开日历看看今天有什么安排"
+            prompt includes Saved skills: \(unrelatedPrompt.contains("Saved skills:"))
+            step-by-step calls: \(calendarCalls.map(\.name).joined(separator: " -> "))
+        """)
     }
 }
 

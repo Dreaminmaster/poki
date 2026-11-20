@@ -24,6 +24,10 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
+        // Apps by name, from the apps Poki knows; the two speed-ups read their Testing Options switch.
+        config.resolveApp = { KnownApps.find($0)?.id }
+        config.appNames = { SpeedOptions.appNames }
+        config.quickRead = { SpeedOptions.quickRead }
         config.screenHistory = HistoryStore.agentSource
         core = PokiCore(config: config, host: host, transport: transport)
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
@@ -52,7 +56,7 @@ final class LiveCore: CoreSession {
     func setHostTools(_ tools: [HostTool]) { core.setHostTools(tools) }
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
-    /// `conversation`: the chat a `routines` call comes from, kept with a note as where it was heard.
+    /// `conversation`: the chat a `skills` call comes from, kept with a note as where it was heard.
     func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> PokiCore.ToolAnswer {
         await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation)
     }

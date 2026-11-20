@@ -70,6 +70,15 @@ bears() {
 }
 bears "$APP"
 
+# SplashBoard can retain an older asset catalogue after an update. The launch storyboard reads
+# standalone PNGs so its pictures are available before the app loads its own catalogue.
+LAUNCH="$HERE/Poki/LaunchArt"
+LAUNCH_IMAGES="$HERE/Poki/LaunchImages"
+mkdir -p "$LAUNCH_IMAGES"
+cp "$LAUNCH/LaunchBackdrop.png" "$LAUNCH_IMAGES/LaunchBackdrop.png"
+swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/Geist-SemiBold.ttf" "$LAUNCH/LaunchBear.png" \
+  "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@3x.png"
+
 WIDGET="$HERE/PokiWidgets/Assets.xcassets"
 catalog "$WIDGET"
 bear "$WIDGET"

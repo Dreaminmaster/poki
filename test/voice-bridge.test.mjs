@@ -3,10 +3,41 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { copyFile, readFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fixture } from './fixture.mjs';
 import { root } from '../src/config.mjs';
+
+test('voice token requests hint Chinese transcription for each interface language', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'poki-voice-token-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const preload = `
+    import { writeFile } from 'node:fs/promises';
+    import { join } from 'node:path';
+    globalThis.fetch = async (url, options) => {
+      if (url !== 'https://api.openai.com/v1/realtime/client_secrets') throw new Error('Unexpected upstream URL');
+      await writeFile(join(process.env.POKI_MCP_STATE_DIR, 'request.json'), options.body);
+      return Response.json({ value: 'ek_test' });
+    };
+  `;
+  const child = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, join(root, 'bin/voice-bridge.mjs'), '--port', '0', '--host', '127.0.0.1'], {
+    env: { ...process.env, POKI_MCP_STATE_DIR: dir, OPENAI_API_KEY: 'unused' }, stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const exited = once(child, 'exit');
+  t.after(async () => { child.kill(); await exited; });
+  const lines = createInterface({ input: child.stdout });
+  const [line] = await Promise.race([once(lines, 'line'), exited.then(() => { throw new Error('Voice bridge exited before it was ready'); })]);
+  const { port } = JSON.parse(line);
+  const { secret } = JSON.parse(await readFile(join(dir, 'voice-bridge.json'), 'utf8'));
+  for (const language of ['', 'zh-Hans', 'en']) {
+    const response = await fetch(`http://127.0.0.1:${port}/voice/${secret}/token?language=${language}`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).value, 'ek_test');
+    const { session } = JSON.parse(await readFile(join(dir, 'request.json'), 'utf8'));
+    assert.equal(session.audio.input.transcription.language, 'zh');
+  }
+});
 
 // The voice bridge in front of a fixture daemon and phone, as the Poki app reaches it.
 async function bridge(t, f) {

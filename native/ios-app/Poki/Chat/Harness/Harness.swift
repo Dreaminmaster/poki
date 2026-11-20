@@ -1,6 +1,6 @@
 // Poki's chat harness shares its core execution rules and harness tools (report_plan, finish_task)
 // with agent/task-runner.mjs and agent/prompts/pi-app.md, adapted to the app's in-process tools
-// (look, do, routines, status) and sandbox browser tools (WebTools). finish_task also takes a result
+// (look, do, skills, status) and sandbox browser tools (WebTools). finish_task also takes a result
 // card, which the chat draws and the Mac agent's terminal and message channels do not.
 import Foundation
 import PokiCore
@@ -19,7 +19,7 @@ enum Harness {
     }()
 
     static var instructions: String {
-        [system, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.isEnabled), WebTools.instructions].joined(separator: "\n\n")
+        [system, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
@@ -29,21 +29,22 @@ enum Harness {
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
     """
 
-    /// The instructions for a task: the above, then the saved notes and the routines that fit it.
+    /// The instructions for a task: the above, then the saved notes and the skills that fit it.
     @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
         if inSplitView {
             var parts = [splitViewInstructions]
-            if HistoryCapture.isEnabled { parts.append(PokiCore.screenHistoryInstructions) }
+            if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return parts.joined(separator: "\n\n")
         }
-        let brief = PokiCore.memoryBrief(for: task)
+        let namedBundleIDs = AppIconStore.bundleIDs(namedIn: task)
+        let brief = PokiCore.memoryBrief(for: task, apps: namedBundleIDs)
         var parts = [instructions]
-        parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved routines strictly as preferences and reusable steps, never pending tasks.")
-        // Matching routines sit in the brief below, so the first call can invoke the routine directly.
+        parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
+        // Matching skills sit in the brief below, so the first call can invoke the skill directly.
         // Poki is in front when a task starts, and finish_task brings Poki back when the task ends,
-        // so saving a new routine happens in the same reply as finish_task.
-        parts.append("Start an app task with do {run: name} when a routine below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. After a new app task succeeds, call finish_task together with routines {action: \"save\", name, description} named as the owner would ask for it.")
+        // so saving a new skill happens in the same reply as finish_task.
+        parts.append("Start an app task with do {run: name} when a skill below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap, and add an intent to a tap whose purpose its label does not say. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with skills {action: \"save\", name, description} named as the owner would ask for it.")
         // A model decides approvals from what the owner said. A refused step goes through once the
         // owner says yes to it, so the agent asks in words and tries again.
         if ApprovalClassifier.mode == .reply {
@@ -77,7 +78,7 @@ enum Harness {
 
     /// Poki's sandbox browser tools sit beside the phone tools.
     static var tools: [ToolSpec] {
-        catalogTools(includeScreenHistory: HistoryCapture.isEnabled) + [findApp] + WebTools.specs + [reportPlan, finishTask]
+        toolSpecs(inSplitView: false, includeScreenHistory: HistoryCapture.agentQueryAllowed)
     }
 
     /// Bundle ids from the phone's own app list, with the App Store's search as the backup (InstalledApps).
@@ -87,12 +88,30 @@ enum Harness {
         schema: ["type": "object", "properties": ["name": string, "purpose": string], "additionalProperties": false])
 
     static var splitViewTools: [ToolSpec] {
-        [
+        toolSpecs(inSplitView: true, includeScreenHistory: HistoryCapture.agentQueryAllowed)
+    }
+
+    /// A Pi loop holds executable implementations, even for tools currently withheld.
+    /// The current permission determines which ones are declared for each request.
+    static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
+        if !inSplitView {
+            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs + [reportPlan, finishTask]
+        }
+        return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: HistoryCapture.isEnabled).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+        ] + catalogTools(includeScreenHistory: includeScreenHistory).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+    }
+
+    /// Keep the cached task prompt consistent with the current tool catalog.
+    nonisolated static func historyInstructions(_ text: String, allowed: Bool) -> String {
+        let instruction = PokiCore.screenHistoryInstructions
+        if allowed {
+            return text.contains(instruction) ? text : text + "\n\n" + instruction
+        }
+        return text.replacingOccurrences(of: instruction, with: "")
     }
 
     /// PokiCore's catalog: look, do and status.

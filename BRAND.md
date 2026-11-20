@@ -12,7 +12,7 @@ The Poki bear is the character at the center of Poki, and the main thing this fi
 
 | What | Where |
 | --- | --- |
-| Illustrations, poses and expressions | The `.png` files in [`native/ios-app/Poki/Bear/`](native/ios-app/Poki/Bear) and its `Model/` folder, the `.png` files in [`native/ios-app/Poki/ActivityBears/`](native/ios-app/Poki/ActivityBears), and [`native/ios-app/Poki/Chat/PokiFace.png`](native/ios-app/Poki/Chat/PokiFace.png) |
+| Illustrations, poses and expressions | The `.png` files in [`native/ios-app/Poki/Bear/`](native/ios-app/Poki/Bear) and its `Model/` folder, the `.png` files in [`native/ios-app/Poki/ActivityBears/`](native/ios-app/Poki/ActivityBears), [`native/ios-app/Poki/LaunchArt/LaunchBear.png`](native/ios-app/Poki/LaunchArt/LaunchBear.png), and [`native/ios-app/Poki/Chat/PokiFace.png`](native/ios-app/Poki/Chat/PokiFace.png) |
 | 3D model | [`native/ios-app/Poki/Bear/Model/PokiBear.usdz`](native/ios-app/Poki/Bear/Model/PokiBear.usdz) |
 | Artwork, animations and videos of the bear on the Poki website and in Poki's release posts | Outside this repository |
 

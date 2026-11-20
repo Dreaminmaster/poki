@@ -136,6 +136,25 @@ final class SelfSigner {
     /// Apple took a code but never opened the session: nothing signs in until the person does.
     var needsReauth: Bool { status?.needs_reauth == true }
     static let reauthMessage = "Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session."
+    /// Apple turned the saved sign-in away and Poki could not open a new one by itself (no kept
+    /// password). The signing page offers Sign In Again until a sign-in goes through.
+    private(set) var sessionExpired = false
+    static let sessionExpiredCode = "session_expired"
+    /// The core's sentence for it (gsa::SESSION_EXPIRED).
+    static let sessionExpiredMessage = "Your Apple session has expired. Sign in again."
+
+    private func noteFailure(_ error: Error) {
+        if (error as? SignerError)?.code == Self.sessionExpiredCode { sessionExpired = true }
+    }
+
+    /// The failure the pages show. While Sign In Again is up, Apple's expired sentence would only
+    /// repeat it, so that one stays off; any other, such as a Sign In Again that did not go through
+    /// (a wrong password, too many tries, no network), still shows.
+    var shownError: String? {
+        guard let lastError else { return nil }
+        if sessionExpired, lastError == Self.sessionExpiredMessage || lastError == Self.localizedErrorText(Self.sessionExpiredMessage) { return nil }
+        return lastError
+    }
     var rateLimited: Bool { rateLimitRemainingSeconds() > 0 }
     var needsCodeSheet = false
     static let resendCooldown: TimeInterval = 60
@@ -228,6 +247,13 @@ final class SelfSigner {
     }
 
     func reload() async {
+        if let sample = Self.screenshotAccount() {
+            status = sample.status
+            teams = sample.teams
+            lastError = sample.error
+            sessionExpired = sample.expired
+            return
+        }
         do { status = try await decode(Status.self, ["op": "status"]) } catch { lastError = error.localizedDescription }
     }
 
@@ -235,16 +261,27 @@ final class SelfSigner {
 
     func signIn(appleID: String, password: String, keepPassword: Bool) async {
         lastPrepareFailure = nil
+        // A teams check still out (the Apple Account page runs one when it opens) answers for the old
+        // sign-in. It lands first, so it cannot mark this sign-in expired or leave its error behind.
+        if let teamsTask { await teamsTask.value }
+        var signedInNow = false
         await run("Signing in") {
             _ = try await self.call(["op": "sign_in", "apple_id": appleID, "password": password, "keep_password": keepPassword])
+            self.sessionExpired = false
+            signedInNow = true
         }
         await reload()
-        if signedIn, !needsCode, !rateLimited { await loadTeams() }
+        // Only after a sign-in that went through: a stored account still reads as signed in after a
+        // failed one, and its teams would only ask Apple again and put their error over the sign-in's.
+        if signedInNow, signedIn, !needsCode, !rateLimited { await loadTeams() }
     }
 
     func finishSignIn(code: String) async {
         lastPrepareFailure = nil
-        await run("Checking the code") { _ = try await self.call(["op": "finish_sign_in", "code": code]) }
+        await run("Checking the code") {
+            _ = try await self.call(["op": "finish_sign_in", "code": code])
+            self.sessionExpired = false
+        }
         await reload()
         if !needsCode { needsCodeSheet = false }
         if signedIn, !needsCode, !rateLimited { await loadTeams() }
@@ -316,8 +353,10 @@ final class SelfSigner {
     func signOut() async {
         needsCodeSheet = false
         localResendAvailableAt = nil
+        if let teamsTask { await teamsTask.value }
         await run("Signing out") { _ = try await self.call(["op": "sign_out"]) }
         teams = []
+        sessionExpired = false
         await reload()
     }
 
@@ -326,12 +365,14 @@ final class SelfSigner {
             await teamsTask.value
             return
         }
-        guard !needsCode, !rateLimited, !needsReauth else { return }
+        guard !needsCode, !rateLimited, !needsReauth, Self.screenshotAccount() == nil else { return }
         let task = Task { @MainActor in
             do {
                 teams = try await decode([Team].self, ["op": "teams"])
+                sessionExpired = false
             } catch {
                 lastError = error.localizedDescription
+                noteFailure(error)
                 if (error as? SignerError)?.code == "needs_code" {
                     await reload()
                     if needsCode { needsCodeSheet = true }
@@ -501,6 +542,8 @@ final class SelfSigner {
                 throw SignerError(message: AppLocalization.text(LocalizedStringResource("Poki couldn’t download the update. Check your internet connection and try again.")), code: (error as? SignerError)?.code ?? "")
             }
             self.lastPrepareFailure = nil
+            // Preparing went through Apple's developer portal, so the sign-in works again.
+            self.sessionExpired = false
             self.ready[kind] = p
             self.log.add("signing", "prepared \(kind): \(p.version) (\(p.build)), profile until \(p.expires)")
             self.notify(title: kind == "update" ? AppLocalization.text(LocalizedStringResource("Poki Update Ready")) : AppLocalization.text(LocalizedStringResource("Poki Renewal Ready")),
@@ -604,6 +647,7 @@ final class SelfSigner {
                 lastError = said
             }
             log.add("signing", "\(title ?? "signer"): \(said)")
+            noteFailure(error)
             if code == "needs_code" {
                 await reload()
                 if needsCode { needsCodeSheet = true }
@@ -766,6 +810,35 @@ final class SelfSigner {
         UserDefaults.standard.bool(forKey: "pokiSignedIn")
         #else
         false
+        #endif
+    }
+
+    /// `-pokiAppleID name@example.com`: a simulator's screenshots show the Signing pages with that Apple Account,
+    /// with no sign-in to Apple. `-pokiAppleName` is its name, `-pokiAppleTeams 0|1|2` how many teams it has
+    /// (none, a free one, or two) and `-pokiAppleState code|reauth|expired|error` the account waiting for a code,
+    /// needing a fresh sign-in, with Apple's saved sign-in expired (Sign In Again), or with a failed renewal.
+    nonisolated private static func screenshotAccount() -> (status: Status, teams: [Team], error: String?, expired: Bool)? {
+        #if targetEnvironment(simulator)
+        let defaults = UserDefaults.standard
+        guard let id = defaults.string(forKey: "pokiAppleID"), !id.isEmpty else { return nil }
+        let state = defaults.string(forKey: "pokiAppleState")
+        let name = defaults.string(forKey: "pokiAppleName")
+        let free = Team(team_id: "T1", name: name ?? id, kind: "individual", is_free: true)
+        let studio = Team(team_id: "T2", name: "Poki Studio LLC", kind: "company", is_free: false)
+        let teams = switch defaults.integer(forKey: "pokiAppleTeams") {
+        case 0: [Team]()
+        case 1: [free]
+        default: [free, studio]
+        }
+        let status = Status(signed_in: state != "reauth", needs_reauth: state == "reauth", needs_code: state == "code",
+                            rate_limited: nil, rate_limited_until: nil, resend_available_at: nil,
+                            apple_id: id, name: name, team_id: teams.first?.team_id,
+                            keeps_password: true, anisette: "", channel: "stable", channels: [])
+        let error = state == "error" ? "Apple did not accept the renewal. Try again in a few minutes."
+            : state == "expired" ? SelfSigner.sessionExpiredMessage : nil
+        return (status, teams, error, state == "expired")
+        #else
+        nil
         #endif
     }
 

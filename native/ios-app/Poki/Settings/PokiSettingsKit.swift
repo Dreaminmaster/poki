@@ -53,6 +53,8 @@ struct SettingsIcon: View {
 struct SettingsRow: View {
     var title: LocalizedStringKey
     var caption: LocalizedStringKey? = nil
+    /// A line under the name that is data, not words: an address, shown as it is and cut in the middle.
+    var dataCaption: String? = nil
     var symbol: String
     var value: String? = nil
     var warns = false
@@ -75,6 +77,10 @@ struct SettingsRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.body).foregroundStyle(Color(.label))
                 if let caption { Text(caption).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                if let dataCaption {
+                    Text(verbatim: dataCaption).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
+                }
                 // At the accessibility sizes the value goes under the caption, as in Settings.
                 if typeSize.isAccessibilitySize, let value { valueView(value) }
             }

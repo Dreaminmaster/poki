@@ -9,9 +9,14 @@ pub enum Error {
     /// A plain sentence for the person.
     #[error("{0}")]
     Message(String),
-    /// The phone or usbmuxd said no.
+    /// The phone said no.
     #[error("{0}")]
     Device(String),
+    /// The computer's iPhone service is missing or not running: usbmuxd on macOS and Linux,
+    /// Apple Mobile Device Service (from Apple Devices or iTunes) on Windows. The UI shows how to
+    /// install it instead of an empty device list.
+    #[error("{0}")]
+    DeviceService(String),
     /// Apple's servers said no (GSA or the developer portal), with Apple's code when it gave one.
     #[error("{message}")]
     Apple { code: i64, message: String },
@@ -64,6 +69,7 @@ impl Error {
             Error::ReleaseUnavailable(_) => "release_unavailable",
             Error::UpdateCheck(_) => "update_preflight",
             Error::Device(_) => "device",
+            Error::DeviceService(_) => "usbmuxd",
             Error::Apple { .. } => "apple",
             Error::NeedsPerson(_) => "needs_person",
             Error::Keychain(_) => "keychain",
@@ -89,8 +95,8 @@ impl From<idevice::IdeviceError> for Error {
             E::PasswordProtected | E::DeviceLocked => Error::NeedsPerson("Unlock the iPhone and try again.".into()),
             E::DeviceNotFound => Error::Device("The iPhone is no longer connected.".into()),
             E::InvalidHostID => Error::Device("This computer is not paired with the iPhone any more. Pair it again.".into()),
-            E::Usbmuxd(_) => Error::Device(usbmuxd_missing()),
-            E::Socket(ref io) if matches!(io.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::PermissionDenied) => Error::Device(usbmuxd_missing()),
+            E::Usbmuxd(_) => Error::DeviceService(usbmuxd_missing()),
+            E::Socket(ref io) if matches!(io.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::PermissionDenied) => Error::DeviceService(usbmuxd_missing()),
             other => Error::Device(other.to_string()),
         }
     }
