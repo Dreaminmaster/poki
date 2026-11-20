@@ -81,13 +81,16 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     private(set) var liveAnswer: String?
     private(set) var remoteVolume = 1.0
     @MainActor var remoteSpeech = false
+    @MainActor var microphoneActive = false
     func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {}
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
         liveAnswer = try await exchange("sdp-offer")
     }
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
     func setRemoteVolume(_ value: Double) { remoteVolume = value }
-    func hasRemoteSpeech() async -> Bool { await MainActor.run { remoteSpeech } }
+    func audioActivity() async -> (microphone: Bool, speaker: Bool) {
+        await MainActor.run { (microphoneActive, remoteSpeech) }
+    }
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
     func close() { closed = true }
     @MainActor func play(_ events: [String: Any]...) { for event in events { onEvent?(event) } }
@@ -336,9 +339,12 @@ final class VoiceModelTests: XCTestCase {
             await h.time.settle()
             XCTAssertEqual(operations, ["first"])
 
-            await h.time.advance(scenario.sinceTranscript - 0.5)
             if scenario.newAudio {
-                h.link.play(["type": "input_audio_buffer.committed"])
+                await h.time.advance(scenario.sinceTranscript - 0.7)
+                h.link.microphoneActive = true
+                await h.time.advance(0.2)
+            } else {
+                await h.time.advance(scenario.sinceTranscript - 0.5)
             }
             h.link.play(["type": "session.input_transcript.delta", "delta": " 向下滚动！ ",
                          "start_ms": scenario.start, "end_ms": scenario.end],

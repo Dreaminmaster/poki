@@ -6,7 +6,7 @@ import WebRTC
 protocol VoiceConnection: AnyObject, Sendable {
     @MainActor func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws
     @MainActor func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws
-    func hasRemoteSpeech() async -> Bool
+    func audioActivity() async -> (microphone: Bool, speaker: Bool)
     @discardableResult func send(_ event: [String: Any]) -> Bool
     func setRemoteVolume(_ value: Double)
     func diagnose(_ write: @escaping @MainActor (String) -> Void)
@@ -15,7 +15,7 @@ protocol VoiceConnection: AnyObject, Sendable {
 
 extension VoiceConnection {
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws { throw VoiceError.noWebRTC }
-    func hasRemoteSpeech() async -> Bool { false }
+    func audioActivity() async -> (microphone: Bool, speaker: Bool) { (false, false) }
 }
 
 /// The microphone and speaker are WebRTC tracks. The `oai-events` data channel carries JSON events.
@@ -151,14 +151,18 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         lock.withLock { opened = true }
     }
 
-    func hasRemoteSpeech() async -> Bool {
-        guard let peer else { return false }
+    func audioActivity() async -> (microphone: Bool, speaker: Bool) {
+        guard let peer else { return (false, false) }
         return await withCheckedContinuation { done in
             peer.statistics { report in
-                done.resume(returning: report.statistics.values.contains { stat in
-                    stat.type == "inbound-rtp" && (stat.values["kind"] as? String) == "audio"
-                        && (stat.values["audioLevel"] as? Double ?? 0) > 0.005
-                })
+                var microphone = false
+                var speaker = false
+                for stat in report.statistics.values where (stat.values["kind"] as? String) == "audio"
+                    && (stat.values["audioLevel"] as? Double ?? 0) > 0.005 {
+                    if stat.type == "media-source" { microphone = true }
+                    if stat.type == "inbound-rtp" { speaker = true }
+                }
+                done.resume(returning: (microphone, speaker))
             }
         }
     }

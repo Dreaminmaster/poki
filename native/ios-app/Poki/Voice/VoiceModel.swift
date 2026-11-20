@@ -330,6 +330,17 @@ final class VoiceModel {
     private var liveDelegations: [String: LiveDelegationState] = [:]
     private var liveHasCancellation = false
     private struct LiveCallerSpeech {
+        struct Transcript {
+            let audio: Range<Int>?
+            let received: Date
+            let inputRevision: Int
+        }
+
+        struct HandledText {
+            var intervals: Set<Range<Int>> = []
+            var latest: Transcript
+        }
+
         var text = ""
         var end = 0
         var itemID: String?
@@ -337,10 +348,14 @@ final class VoiceModel {
         var hasSpeechStartEvents = false
         var handledItems: Set<String> = []
         var handledTexts: Set<String> = []
+        var inputRevision = 0
+        var pending: Transcript?
+        var handledTranscripts: [String: HandledText] = [:]
 
         mutating func begin(itemID: String?) {
             self.itemID = itemID
             text = ""
+            pending = nil
             handledTexts.removeAll()
         }
 
@@ -352,7 +367,22 @@ final class VoiceModel {
 
         var alreadyHandled: Bool {
             if let itemID { return handledItems.contains(itemID) }
-            return handledTexts.contains(normalizedText)
+            let normalized = normalizedText
+            if hasSpeechStartEvents { return handledTexts.contains(normalized) }
+            guard let pending, let previous = handledTranscripts[normalized] else { return false }
+            if let audio = pending.audio, previous.intervals.contains(where: audio.overlaps) { return true }
+            return pending.inputRevision == previous.latest.inputRevision
+                && (0...3).contains(pending.received.timeIntervalSince(previous.latest.received))
+        }
+
+        mutating func append(_ delta: String, start: Int, end: Int, received: Date) {
+            text += delta
+            self.end = max(self.end, end)
+            var audio = pending?.audio
+            if start >= 0, end > start {
+                audio = min(start, audio?.lowerBound ?? start)..<max(end, audio?.upperBound ?? end)
+            }
+            pending = Transcript(audio: audio, received: received, inputRevision: inputRevision)
         }
 
         mutating func markHandled() {
@@ -360,9 +390,20 @@ final class VoiceModel {
                 handledItems.insert(itemID)
             } else {
                 let normalized = normalizedText
-                if !normalized.isEmpty { handledTexts.insert(normalized) }
+                if !normalized.isEmpty {
+                    if hasSpeechStartEvents {
+                        handledTexts.insert(normalized)
+                    } else if let pending {
+                        var previous = handledTranscripts[normalized] ?? HandledText(latest: pending)
+                        if let audio = pending.audio { previous.intervals.insert(audio) }
+                        previous.latest = pending
+                        handledTranscripts[normalized] = previous
+                    }
+                }
             }
             text = ""
+            pending = nil
+            if !hasSpeechStartEvents { itemID = nil }
         }
     }
     private var liveCallerSpeech = LiveCallerSpeech()
@@ -865,10 +906,13 @@ final class VoiceModel {
     private func watchLivePlayback(_ link: VoiceConnection, session number: Int) {
         livePlayback = Task { [weak self] in
             var quiet = 0
+            var microphoneWasActive = false
             while !Task.isCancelled {
-                let playing = await link.hasRemoteSpeech()
+                let activity = await link.audioActivity()
                 guard let self, number == session, !Task.isCancelled else { return }
-                if ready && playing && !liveSpeechStopped {
+                if activity.microphone && !microphoneWasActive { liveCallerSpeech.inputRevision += 1 }
+                microphoneWasActive = activity.microphone
+                if ready && activity.speaker && !liveSpeechStopped {
                     quiet = 0
                     keepOpen()
                     lastActivity = time.now()
@@ -1270,7 +1314,6 @@ final class VoiceModel {
             liveCallerSpeech.begin(itemID: itemID)
         } else if !liveCallerSpeech.hasSpeechStartEvents, liveCallerSpeech.itemID == nil,
                   liveCallerSpeech.end > 0, start >= liveCallerSpeech.end, end > liveCallerSpeech.end {
-            // GPT-Live only supplies transcript intervals. Disjoint audio after delegation is new speech.
             let preceding = Self.liveSpeechParts(liveCallerSpeech.text)
             let joined = Self.liveSpeechParts(liveCallerSpeech.text + text)
             let afterAcknowledgment = preceding.allSatisfy(Self.liveBackchannels.contains) && !joined.allSatisfy(Self.liveBackchannels.contains)
@@ -1279,8 +1322,7 @@ final class VoiceModel {
                 liveCallerSpeech.begin(itemID: nil)
             }
         }
-        liveCallerSpeech.text += text
-        liveCallerSpeech.end = max(liveCallerSpeech.end, end)
+        liveCallerSpeech.append(text, start: start, end: end, received: lastActivity)
     }
 
     /// Match whole clauses of the caller's speech since delegation, independent of subtitle grouping.
