@@ -6,12 +6,15 @@ import XCTest
 final class AppNamesTests: XCTestCase {
     static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer",
                         "com.example.alias": "com.example.other"]
+    static let installedApps = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer",
+                                "com.apple.mobiletimer": "com.apple.mobiletimer", "com.example.shop": "com.example.shop"]
 
     func core(names: Bool = true, quick: Bool = true) -> (PokiCore, FakeWDA) {
         let wda = FakeWDA()
         wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
         let (core, _, _) = makeCore(wda) {
             $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
             $0.appNames = { names }
             $0.quickRead = { quick }
         }
@@ -166,20 +169,6 @@ final class AppNamesTests: XCTestCase {
         }
     }
 
-    func testANameWithADotIsANameUnlessItIsShapedLikeABundleID() async {
-        for id in ["com.apple.mobiletimer", "tv.twitch", "com.example.new-app", "net.whatsapp.WhatsApp"] {
-            XCTAssertTrue(Computer.looksLikeBundleID(id), id)
-        }
-        for name in ["Booking.com", "Twitch.tv", "Mail.ru", "A.B.C", "Clock", "Hotels .com", "com..x", "时钟.app"] {
-            XCTAssertFalse(Computer.looksLikeBundleID(name), name)
-        }
-        let (core, wda) = core()
-        _ = await core.call("look", [:])
-        let result = await core.call("do", ["actions": [["launch": "Booking.com"]]])
-        XCTAssertTrue(result.text.contains("no app named \"Booking.com\" is known"), result.text)
-        XCTAssertEqual(launched(wda), [], "a name the host does not know is not sent to the runner as a bundle id")
-    }
-
     func testWithNamesOffTheSessionsAppIsRefusedNotIgnored() async {
         let (core, wda) = core(names: false)
         _ = await core.call("look", [:])
@@ -240,7 +229,7 @@ final class AppNamesTests: XCTestCase {
         let wda = FakeWDA()
         wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
         let (core, _, _) = makeCore(wda) {
-            $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
             $0.toolDeadline = 25
             $0.readTimeout = 4
         }

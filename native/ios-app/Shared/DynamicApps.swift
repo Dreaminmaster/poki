@@ -75,14 +75,34 @@ extension KnownApps {
         return DynamicApps.id(forName: given)
     }
 
+    static func installedLaunchID(_ given: String) -> String? {
+        let identifier = NSSelectorFromString("bundleIdentifier")
+        if let proxy = installedAppProxy(given), proxy.responds(to: identifier),
+           let installedID = proxy.perform(identifier)?.takeUnretainedValue() as? String, installedID == given {
+            return installedID
+        }
+
+        let name = given.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = byName[name.lowercased()], let app = byID[id.lowercased()],
+           let installed = app.ids.first(where: isInstalledOnPhone) {
+            return installed
+        }
+        guard let id = DynamicApps.id(forName: name), isInstalledOnPhone(id) else { return nil }
+        return id
+    }
+
     private static func isInstalledOnPhone(_ id: String) -> Bool {
+        installedAppProxy(id) != nil
+    }
+
+    private static func installedAppProxy(_ id: String) -> NSObject? {
         let lookup = NSSelectorFromString("applicationProxyForIdentifier:")
         let installed = NSSelectorFromString("isInstalled")
         guard let proxyClass = NSClassFromString("LSApplicationProxy") as? NSObject.Type,
               proxyClass.responds(to: lookup),
               let proxy = proxyClass.perform(lookup, with: id)?.takeUnretainedValue() as? NSObject,
-              proxy.responds(to: installed), let getter = proxy.method(for: installed) else { return false }
+              proxy.responds(to: installed), let getter = proxy.method(for: installed) else { return nil }
         typealias IsInstalled = @convention(c) (NSObject, Selector) -> ObjCBool
-        return unsafeBitCast(getter, to: IsInstalled.self)(proxy, installed).boolValue
+        return unsafeBitCast(getter, to: IsInstalled.self)(proxy, installed).boolValue ? proxy : nil
     }
 }

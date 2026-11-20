@@ -218,10 +218,17 @@ func eventually(_ seconds: Double = 2, _ condition: () -> Bool) async -> Bool {
 
 let testRelay = RelayAddress("https://relay.example.com")!
 
+private let fixtureBundleIDs: Set<String> = [
+    "com.apple.Preferences", "com.apple.MobileSMS", "com.apple.Passbook", "com.apple.mobilephone",
+    "com.apple.mobilenotes", "com.apple.mobileslideshow", "com.apple.mobilemail", "com.apple.weather",
+    "com.tencent.xin", "com.xingin.discover", "com.example.shop", "com.example.other", "nz.zheha.poki",
+]
+
 func makeCore(_ wda: FakeWDA = FakeWDA(), host: FakeHost = FakeHost(), configure: (inout CoreConfig) -> Void = { _ in }) -> (PokiCore, FakeWDA, FakeHost) {
     // The fake speaks JSON. Touches go unshaped (the legacy endpoints, exact points and times) so the
     // tests can assert on them; HumanizeTests turn shaping on.
     var config = CoreConfig(approvalWait: 0.3, toolDeadline: 6, actionCap: 3, readTimeout: 1, busyWait: 0.2, treeFormat: "json", humanize: false)
+    config.resolveInstalledApp = { fixtureBundleIDs.contains($0) ? $0 : nil }
     configure(&config)
     return (PokiCore(config: config, host: host, transport: wda), wda, host)
 }

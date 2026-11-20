@@ -62,7 +62,7 @@ enum VoiceApps {
         }
         var answer: PhoneAnswer = ("", true, nil)
         for id in ids {
-            answer = await tool("do", #"{"actions":[{"launch":"\#(id)"}]}"#)
+            answer = await tool("do", #"{"actions":[{"launch":{"bundle":"\#(id)"}}]}"#)
             guard answer.failed, answer.text.contains(notInstalled) else { break }
         }
         if answer.failed, answer.text.contains(notInstalled) {

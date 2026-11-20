@@ -27,6 +27,7 @@ final class LiveCore: CoreSession {
         // Apps by name, from the apps Poki knows and the phone's own app list; the two speed-ups read
         // their Testing Options switch.
         config.resolveApp = { KnownApps.launchID($0) }
+        config.resolveInstalledApp = { KnownApps.installedLaunchID($0) }
         config.appNames = { SpeedOptions.appNames }
         config.quickRead = { SpeedOptions.quickRead }
         config.screenHistory = HistoryStore.agentSource

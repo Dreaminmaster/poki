@@ -971,9 +971,10 @@ final class Computer: @unchecked Sendable {
             if let app {
                 if app == .bool(false) || app == .null {
                     sessionApp = nil
-                } else if let given = app.string?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
-                    guard let bundle = config.resolveApp(given) ?? (Self.looksLikeBundleID(given) ? given : nil) else {
-                        return ToolResult(text: "do: no app named \"\(given)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
+                } else if let text = app.string,
+                          case let given = text.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
+                    guard let bundle = config.resolveInstalledApp(text) else {
+                        return ToolResult(text: unknownApp(given).message, jpeg: nil, isError: true)
                     }
                     sessionApp = (bundle, given, session)
                     if actions.first?["launch"] == nil, actions.count < 20, await !isInFront(bundle) { actions.insert(["launch": .string(bundle)], at: 0) }
@@ -1009,36 +1010,31 @@ final class Computer: @unchecked Sendable {
         return front == bundle
     }
 
-    /// The web suffixes an app's name can end in ("Booking.com", "Twitch.tv", "Mail.ru"), where a
-    /// bundle id of two parts has its maker's domain the other way round ("tv.twitch").
-    static let webSuffixes: Set<String> = ["com", "net", "org", "io", "co", "ai", "app", "me", "tv", "fm", "gg", "so", "ly", "ru", "cn", "jp", "de", "fr", "uk", "us", "info", "xyz"]
-
-    /// Whether a launch's text is a bundle id ("com.apple.mobiletimer", "tv.twitch") rather than an
-    /// app's name: two parts or more, each of ASCII letters, digits or hyphens, one of them longer than
-    /// a letter (initials such as "A.B.C" are a name), and not a web address ("Booking.com").
-    static func looksLikeBundleID(_ text: String) -> Bool {
-        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count >= 2, text.count <= 155, parts.contains(where: { $0.count > 1 }),
-              parts.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" } }) else { return false }
-        return !(parts.count == 2 && webSuffixes.contains(parts[1].lowercased()))
+    private func unknownApp(_ name: String) -> ActionFailure {
+        ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
     }
 
-    private func launchBundle(_ given: String, inferBundleID: Bool) throws -> String {
-        let name = given.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let bundle = config.resolveApp(name) { return bundle }
-        if inferBundleID, name.isEmpty || Self.looksLikeBundleID(name) { return given }
-        throw ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+    private func installedLaunchBundle(_ given: String) throws -> String {
+        guard let bundle = config.resolveInstalledApp(given) else {
+            throw unknownApp(given.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return bundle
     }
 
     private func resolvingLaunchNames(_ action: JSON) throws -> JSON {
         guard case .object(var fields) = action else { return action }
         if let spec = fields["launch"] {
             if let given = spec.string {
-                fields["launch"] = .string(try launchBundle(given, inferBundleID: true))
+                fields["launch"] = .string(try installedLaunchBundle(given))
             } else if case .object(var launch) = spec, launch["bundle"]?.string == nil {
-                let name = launch["name"]?.string
-                guard let given = name ?? launch["app"]?.string else { return action }
-                launch["bundle"] = .string(try launchBundle(given, inferBundleID: name == nil))
+                if let name = launch["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    guard let bundle = config.resolveApp(name) else { throw unknownApp(name) }
+                    launch["bundle"] = .string(bundle)
+                } else if let given = launch["app"]?.string {
+                    launch["bundle"] = .string(try installedLaunchBundle(given))
+                } else {
+                    return action
+                }
                 launch["name"] = nil
                 launch["app"] = nil
                 fields["launch"] = .object(launch)

@@ -252,7 +252,7 @@ final class PathTests: XCTestCase {
             ([["launch": "nz.zheha.poki"], ["tap": [200, 122]]], [], false, false),
             ([["launch": "nz.zheha.poki"], ["tap": "Continue"]], ["Never Ask"], true, false),
             // A launch that did not open its app leaves Poki in front.
-            ([["launch": "com.example.gone"], ["tap": [200, 122]]], [], false, true),
+            ([["launch": ["bundle": "com.example.gone"]], ["tap": [200, 122]]], [], false, true),
         ]
         for c in cases {
             let wda = FakeWDA()
