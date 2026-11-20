@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class AutoUnlockTests: XCTestCase {
-    func testRunnerOffersAutomaticUnlockAndLeavesThePhoneUnlocked() async throws {
+    func testRunnerLocalUnlockUsesAndClosesTheTemporaryAutomationSession() async throws {
         let native = UnlockSession()
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: native)
         try XCTSkipUnless(model.automationPath == .runner, "Launch the test host with -automationPath runner")
@@ -27,7 +27,7 @@ final class AutoUnlockTests: XCTestCase {
         try model.autoUnlock.save("046215")
 
         let unlocked = await model.host.unlockForLocalTask(timeout: 8)
-        XCTAssertTrue(unlocked, "A local task running through Poki Runner can unlock the phone")
+        XCTAssertTrue(unlocked, "A Runner task should return the temporary session's successful unlock result")
         XCTAssertFalse(native.isOpen, "The unlock-only session must be stopped afterwards")
     }
 

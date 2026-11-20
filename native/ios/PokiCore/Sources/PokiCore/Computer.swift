@@ -1328,7 +1328,10 @@ final class Computer: @unchecked Sendable {
         if total >= 8 || total - parts > 2 {
             result.text += "\ntook: \(Self.seconds(total)) s in all: \(Self.seconds(prepared - callStarted)) s before the actions (runner start, busy wait, lock check), \(Self.seconds(actionsTook)) s actions, \(Self.seconds(readTook)) s read\(approvalWaited > 0 ? ", \(Self.seconds(approvalWaited)) s the owner's approval" : "")\(total - parts > 2 ? ", \(Self.seconds(total - parts)) s elsewhere" : "")"
         }
-        if local, !finish, let revision, !result.isError, let launched, lastForeground?.bundleID == launched,
+        let openedApp = launched.map { lastForeground?.bundleID == $0 } ?? false
+        // Voice can open a Settings link before asking the runner to wait for its screen.
+        let settledVoiceScreen = byOwnersVoice && actions.count == 1 && actions.first?["wait_until"]?["settled"]?.bool == true
+        if local, !finish, let revision, !result.isError, openedApp || settledVoiceScreen,
            let evidence = result.screenEvidence, host.currentRunner.automationRevision == revision {
             authorizationRead = (revision, localTask, evidence)
         }
