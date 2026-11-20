@@ -497,7 +497,7 @@ final class ScreenHistoryTests: XCTestCase {
         capture.enabled = true
         let canary = "SYNTHETIC_MODEL_REQUEST_CANARY"
         HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
-        let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let settings = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let saved = settings.map { UserDefaults.standard.object(forKey: $0) }
         defer {
             for (key, value) in zip(settings, saved) { UserDefaults.standard.set(value, forKey: key) }

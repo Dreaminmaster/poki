@@ -698,7 +698,7 @@ final class InProcessPasscodeTests: XCTestCase {
     private enum ChatEntryPoint: String { case focus, dictation, shortcut, send }
 
     private func exerciseChatEntry(_ entry: ChatEntryPoint) async throws {
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiDraft", "pokiDictationButton"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom", "pokiDraft", "pokiDictationButton"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
         let server = try FakeCompletions(replies: Array(repeating: FakeCompletions.text("The answer is four."), count: 3))
@@ -878,7 +878,7 @@ final class InProcessPasscodeTests: XCTestCase {
     /// reply comes in, staying on the chat. The late reply must not bring it back, and the chat moves on
     /// to a new conversation. (Archiving waits: a conversation whose task runs is not archived.)
     func testAConversationDeletedBeforeItsFirstReplyStaysDeleted() async throws {
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
         let server = try FakeCompletions(replies: [FakeCompletions.text("Four.")], holdAfter: 0)
@@ -916,7 +916,7 @@ final class InProcessPasscodeTests: XCTestCase {
     }
 
     private func chatWithoutAutomation(on server: FakeCompletions, request: String) async throws -> ChatModel {
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
@@ -1471,7 +1471,7 @@ final class InProcessPasscodeTests: XCTestCase {
         try XCTSkipUnless(UserDefaults.standard.bool(forKey: "sessionTiming"), "explicit simulator timing run only")
         let entry = try XCTUnwrap(ChatEntryPoint(rawValue: UserDefaults.standard.string(forKey: "sessionTimingEntry") ?? "focus"))
         let baseline = UserDefaults.standard.bool(forKey: "sessionTimingBaseline")
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiDraft", "pokiDictationButton"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom", "pokiDraft", "pokiDictationButton"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
         let server = try FakeCompletions(replies: [FakeCompletions.tool("look", [:]), FakeCompletions.text("The screen was read.")])
@@ -1799,7 +1799,7 @@ final class FrontendSubtractionTests: XCTestCase {
 
     /// Every setup step done and a connection chosen, with the loopback not yet checked.
     private func modelWithLoopbackChosen(launcher: FakeLauncher, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) throws -> (model: AppModel, restore: () -> Void) {
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "relayAddress", "relayEnabled", "wantsOn"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom", "relayAddress", "relayEnabled", "wantsOn"]
         let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
 
         let pairing = AppFiles.phonePairingFile

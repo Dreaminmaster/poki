@@ -769,7 +769,8 @@ final class ChatModel {
     private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool) -> PiLoop {
         let changedWorkspace = loop.map { $0.inSplitView != inSplitView } ?? false
         if let loop, loop.provider == provider, loop.model.id == model.id,
-           loop.model.baseUrl == model.baseUrl, !changedWorkspace { return loop }
+           loop.model.baseUrl == model.baseUrl, loop.model.provider == model.provider, loop.model.api == model.api,
+           loop.model.reasoning == model.reasoning, loop.hasCurrentCustomBackups, !changedWorkspace { return loop }
         // A different workspace starts without old screen evidence.
         let next = PiLoop(provider: provider, model: model,
                           tools: Harness.toolSpecs(inSplitView: inSplitView, includeScreenHistory: true),
