@@ -254,6 +254,34 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Message 01"), result.text)
     }
 
+    func testCountedScrollRetakesOneShorterStepAfterAmbiguousOverlap() async throws {
+        let transport = MessageListTransport(
+            messages: ["X", "Y", "Got it", "OK", "Got it", "OK", "Got it", "OK", "Got it", "OK", "C", "D"],
+            visibleCount: 6, dragSteps: [6, -6, 1]
+        )
+        func drag(_ from: Int, _ to: Int) -> String {
+            FakeCompletions.tool("do", ["actions": [["drag": [200, from, 200, to]]], "full": true])
+        }
+        func count(_ refs: [Int]) -> String {
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": refs])
+        }
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]), count([1, 2, 3, 4, 5, 6]),
+            drag(160, 360), count([7, 8, 3, 4, 1, 2]),
+            drag(360, 160), count([1, 2, 3, 4, 9, 10]),
+            drag(160, 260), count([2, 1, 4, 3, 11, 9]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+
+        XCTAssertEqual(transport.topMessage, 6, "Only the shorter retry advances the confirmed position")
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("“OK”"), result.text)
+    }
+
     func testExplicitCountWordingRequiresVerification() async throws {
         let requests: [(String, Int?)] = [
             ("往上翻一百条消息", 100),
@@ -2079,18 +2107,20 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
     private let spacing: Int
     private let failsDrag: Bool
     private let identifiesMessages: Bool
+    private var dragSteps: ArraySlice<Int>
     private var top: Int
     var topMessage: Int { lock.withLock { top } }
 
     init(messages: [String] = (1...8).map { String(format: "Message %02d", $0) },
          visibleCount: Int = 4, step: Int = 2, spacing: Int = 100, failsDrag: Bool = false,
-         identifiesMessages: Bool = false) {
+         identifiesMessages: Bool = false, dragSteps: [Int] = []) {
         self.messages = messages
         self.visibleCount = visibleCount
         self.step = step
         self.spacing = spacing
         self.failsDrag = failsDrag
         self.identifiesMessages = identifiesMessages
+        self.dragSteps = dragSteps[...]
         top = messages.count - visibleCount + 1
     }
 
@@ -2114,7 +2144,10 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
             value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
         case "/wda/pressAndDragWithVelocity", "/actions":
             if failsDrag { throw TransportError.other("Fixture rejected the scroll input") }
-            lock.withLock { top = max(1, top - step) }
+            lock.withLock {
+                let delta = dragSteps.popFirst() ?? step
+                top = min(messages.count - visibleCount + 1, max(1, top - delta))
+            }
             value = .null
         default: value = .null
         }
