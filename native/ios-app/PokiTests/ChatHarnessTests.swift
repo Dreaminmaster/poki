@@ -648,6 +648,52 @@ final class ChatHarnessTests: XCTestCase {
         }
     }
 
+    func testFailedTaskCardNamesTheSkillWhenItsEndCheckFails() async throws {
+        let name = "Read the Settings version"
+        let expectedLabel = "Previous version label"
+        let fixture = SkillStore(url: nil)
+        let skill = Skill(name: name, description: "", app: "com.apple.Preferences",
+                          steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
+                          params: [:], expect: [expectedLabel], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "iOS Version" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings and verify its version"], "currentStep": 1]),
+            FakeCompletions.tool("do", ["actions": [["run": name]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The expected version label did not appear.",
+                "details": [], "answer": ["kind": "field"],
+            ]),
+            FakeCompletions.text("I couldn't verify the version."),
+        ])
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer { library.forget(item.id) }
+
+        let result = await chat.runDelegated("Verify the version in Settings.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        let replay = try XCTUnwrap(server.requests.dropFirst(2).first)
+        let replayAnswer = Self.toolAnswer(replay)
+        XCTAssertTrue(replayAnswer.contains("1 steps in"), replayAnswer)
+        XCTAssertTrue(replayAnswer.contains("end check did not pass: \"\(expectedLabel)\" not on screen"), replayAnswer)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        guard case .plan(let steps) = card.kind else { return XCTFail("Missing task card") }
+        XCTAssertEqual(TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
+                                     stopped: card.stopped == true, saveFailed: card.saveFailed == true || card.failed == true), .failed)
+        XCTAssertEqual(card.memoryUse?.skills, [name])
+    }
+
     func testRejectedRequiredSaveLeavesTheTaskMemoryBatchUnchanged() async throws {
         let name = "Required locked workflow \(UUID().uuidString)"
         let newSkill = "New recovery workflow \(UUID().uuidString)"
