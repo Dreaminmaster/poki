@@ -564,8 +564,7 @@ final class VoiceModel {
     /// Ends the conversation. Calls already running keep running; the next session hears how they ended.
     func stop() {
         if let dictation {
-            dictation.stopSpeaking()
-            Task { _ = await dictation.finish() }
+            dictation.cancel()
             self.dictation = nil
         }
         endSession()
@@ -689,7 +688,11 @@ final class VoiceModel {
     func press() async {
         if let dictation {
             guard phase != .hearing, phase != .thinking else { return }
-            do { try dictation.listen(); phase = .hearing } catch { phase = .lost(VoiceError.reason(for: error)) }
+            holdingMicrophone = true
+            do { try dictation.listen(); phase = .hearing } catch {
+                holdingMicrophone = false
+                phase = .lost(VoiceError.reason(for: error))
+            }
             return
         }
         if !isOn, canTalk { await start() }
@@ -701,6 +704,8 @@ final class VoiceModel {
         phase = .thinking
         Task {
             let text = await dictation.finish()
+            guard self.dictation === dictation else { return }
+            holdingMicrophone = false
             if lines.last?.role == .you, lines.last?.text != text { lines.removeLast() }
             guard !text.isEmpty else { phase = .listening; return }
             if lines.last?.text != text { lines.append(VoiceLine(role: .you, text: text)) }
