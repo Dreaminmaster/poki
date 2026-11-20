@@ -125,7 +125,7 @@ public typealias RoutineStop = SkillStop
 public struct Skill: Codable, Equatable, Sendable {
     public var name: String
     public var description: String
-    /// The app the skill works in (it is launched first when another app is in front).
+    /// The last app operated by the skill, used to group it in Memory.
     public var app: String?
     public var steps: [SkillStep]
     /// Parameters and the values they were recorded with: `{{text_1}}` in a type.
@@ -202,28 +202,39 @@ public struct Skill: Codable, Equatable, Sendable {
 
     func migrated() -> Skill {
         var copy = self
-        copy.app = Self.normalizedApp(app) ?? Self.inferredApp(from: steps)
+        copy.app = Self.inferredApp(from: steps) ?? Self.normalizedApp(app)
         return copy
     }
+
+    public var otherApps: [String] {
+        var seen = Set<String>()
+        return steps.compactMap(Self.operatedApp).filter { $0 != app && seen.insert($0).inserted }
+    }
+
+    var startingApp: String? { Self.normalizedApp(steps.first?.app) ?? app }
 
     private static func normalizedApp(_ raw: String?) -> String? {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty,
-              trimmed.caseInsensitiveCompare("com.apple.springboard") != .orderedSame else {
+              trimmed.caseInsensitiveCompare("com.apple.springboard") != .orderedSame,
+              !CoreConfig().isPoki(Foreground(bundleID: trimmed, name: nil)) else {
             return nil
         }
         return trimmed
     }
 
     static func inferredApp(from steps: [SkillStep]) -> String? {
-        if let hit = steps.lazy.compactMap({ $0.target != nil ? normalizedApp($0.app) : nil }).first {
-            return hit
-        }
-        for step in steps {
+        steps.reversed().lazy.compactMap(operatedApp).first
+    }
+
+    private static func operatedApp(_ step: SkillStep) -> String? {
+        if step.action["launch"] != nil {
             let launched = step.action["launch"]?.string ?? step.action["launch"]?["bundle"]?.string
-            if let hit = normalizedApp(launched) { return hit }
+            return normalizedApp(launched)
         }
-        return steps.lazy.compactMap { normalizedApp($0.app) }.first
+        guard step.action["wait"] == nil, step.action["wait_until"] == nil,
+              step.action["button"]?.string != "home" else { return nil }
+        return normalizedApp(step.app)
     }
 }
 
@@ -659,7 +670,7 @@ public final class SkillStore: @unchecked Sendable {
             case (MemoryChangeRecord.forgot, nil, var routine?):
                 guard routineIndex(routine.name) == nil else { return false }
                 if let locks { routine.locked = locks }
-                f.skills.append(routine)
+                f.skills.append(routine.migrated())
             case (MemoryChangeRecord.added, let note?, _):
                 guard let i = f.notes.firstIndex(where: { $0.id == note.id }) else { return false }
                 f.notes.remove(at: i)
@@ -680,7 +691,7 @@ public final class SkillStore: @unchecked Sendable {
             case (MemoryChangeRecord.edited, nil, var routine?):
                 guard let i = routineIndex(change.routineName) else { return false }
                 routine.locked = locks ?? f.skills[i].locked
-                f.skills[i] = routine
+                f.skills[i] = routine.migrated()
             default:
                 return false
             }
@@ -1140,7 +1151,7 @@ extension Computer {
         }
 
         var front = lastForeground
-        if let app = skill.app, lastForeground?.bundleID != app, skill.steps.first?.action["launch"] == nil, !config.isPoki(Foreground(bundleID: app, name: nil)) {
+        if let app = skill.startingApp, lastForeground?.bundleID != app, skill.steps.first?.action["launch"] == nil, !config.isPoki(Foreground(bundleID: app, name: nil)) {
             do {
                 _ = try await perform(["launch": .string(app)], until: until)
                 log.append("launched \(app)")
@@ -1522,7 +1533,7 @@ extension PokiCore {
                 if let e = args["read"]?.array { r.read = e.compactMap(\.string) }
                 if let steps = newSteps {
                     r.steps = steps
-                    if r.app == nil { r.app = Skill.inferredApp(from: steps) }
+                    r.app = Skill.inferredApp(from: steps) ?? r.app
                     r.failuresInARow = 0
                     r.lastStop = nil
                 }

@@ -63,6 +63,56 @@ final class RoutineTests: XCTestCase {
         XCTAssertTrue(routine.expect.contains("About") || routine.expect.contains("iOS Version"), "\(routine.expect)")
     }
 
+    /// A phone that holds WeChat and Little Red Book: `launch` brings the app in front and the read shows its screen.
+    final class TwoApps: @unchecked Sendable {
+        static let wechat = "com.tencent.xin", redbook = "com.xingin.discover"
+        static let screens: [String: (name: String, nodes: [Node])] = [
+            wechat: ("微信", [Node("Button", "Discover", [16, 100, 358, 44]), Node("Button", "Me", [16, 144, 358, 44])]),
+            redbook: ("小红书", [Node("Button", "Search", [16, 100, 358, 44]), Node("Button", "Notes", [16, 144, 358, 44])]),
+        ]
+        let wda: FakeWDA
+        init(_ wda: FakeWDA) {
+            self.wda = wda
+            show(Self.wechat)
+            wda.set("POST /wda/apps/activate") { [self] body in
+                self.show(body?["bundleId"]?.string ?? "")
+                return (200, ["value": .null])
+            }
+        }
+        func show(_ bundle: String) {
+            guard let screen = Self.screens[bundle] else { return }
+            wda.tree(screen.nodes, app: screen.name)
+            wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": .string(bundle), "name": .string(screen.name)]]) }
+        }
+    }
+
+    /// The Memory page lists a skill under its app: "Search a topic" was done in Little Red Book,
+    /// after WeChat was used first in the same task.
+    func testASkillBelongsToTheAppItWorkedInNotTheFirstOneOpenedInTheTask() async throws {
+        let store = RoutineStore(url: nil)
+        let wda = FakeWDA()
+        let phone = TwoApps(wda)
+        let (core, _, _) = makeCore(wda) { $0.memory = store }
+        let wechat = await core.call("look", [:])
+        let discover = try XCTUnwrap(number(of: "Discover", in: wechat.text), wechat.text)
+        _ = await core.call("do", ["actions": [["tap": .number(Double(discover))]]])
+        let redbook = await core.call("do", ["actions": [["launch": .string(TwoApps.redbook)]]])
+        let search = try XCTUnwrap(number(of: "Search", in: redbook.text), redbook.text)
+        _ = await core.call("do", ["actions": [["tap": .number(Double(search))]]])
+        let saved = await core.call("routines", ["action": "save", "name": "Search a topic", "description": "search a topic in Little Red Book"])
+        XCTAssertTrue(saved.text.contains("saved \"Search a topic\""), saved.text)
+        XCTAssertEqual(store.routine(named: "Search a topic")?.app, TwoApps.redbook)
+        XCTAssertEqual(store.routine(named: "Search a topic")?.otherApps, [TwoApps.wechat])
+        XCTAssertEqual(store.skills.filter { $0.app == TwoApps.wechat }.map(\.name), [], "it must not be listed under WeChat")
+
+        // Run from WeChat again: the run still starts where its first step is, not in the app it ends in.
+        phone.show(TwoApps.wechat)
+        _ = await core.call("look", [:])
+        let run = await core.call("do", ["actions": [["run": "Search a topic"]]])
+        XCTAssertTrue(run.text.contains("run \"Search a topic\": 3 steps"), run.text)
+        XCTAssertFalse(run.isError, run.text)
+    }
+
     func testARunRepeatsTheRoutineInOneCallAndReadsTheValue() async {
         let (core, wda, pages) = core()
         _ = await recordAbout(core)
@@ -269,10 +319,15 @@ final class RoutineTests: XCTestCase {
             },
             {
               "name": "步骤里带设置",
-              "description": "顶层没有记录 App",
+              "description": "A legacy skill attributed to the first app",
+              "app": "com.tencent.xin",
               "steps": [
                 {"action": {"tap": "@"}, "app": "com.apple.springboard"},
-                {"action": {"tap": "@"}, "target": {"type": "Button", "label": "通用", "x": 100, "y": 120}, "app": "com.apple.Preferences"}
+                {"action": {"tap": "@"}, "target": {"type": "Button", "label": "Discover", "x": 100, "y": 120}, "app": "com.tencent.xin"},
+                {"action": {"launch": "com.apple.Preferences"}, "app": "com.tencent.xin"},
+                {"action": {"tap": "@"}, "target": {"type": "Button", "label": "通用", "x": 100, "y": 120}, "app": "com.apple.Preferences"},
+                {"action": {"wait": 100}, "app": "com.tencent.xin"},
+                {"action": {"button": "home"}, "app": "com.tencent.xin"}
               ],
               "params": {},
               "expect": [],
@@ -325,6 +380,18 @@ final class RoutineTests: XCTestCase {
         let exported = String(decoding: exportedData, as: UTF8.self)
         XCTAssertTrue(exported.contains("\"schema\" : \"poki.agent-backup/2\""), exported)
         XCTAssertTrue(exported.contains("\"skills\""), exported)
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(legacyJSON.utf8)) as? [String: Any])
+        let migrated = try XCTUnwrap(JSONSerialization.jsonObject(with: exportedData) as? [String: Any])
+        let originalSkills = try XCTUnwrap(original["routines"] as? [[String: Any]])
+        let migratedSkills = try XCTUnwrap(migrated["skills"] as? [[String: Any]])
+        for old in originalSkills {
+            let name = try XCTUnwrap(old["name"] as? String)
+            var before = old
+            var after = try XCTUnwrap(migratedSkills.first { $0["name"] as? String == name })
+            before.removeValue(forKey: "app")
+            after.removeValue(forKey: "app")
+            XCTAssertEqual(before as NSDictionary, after as NSDictionary, "Migration must preserve the skill content and run history")
+        }
         let roundTripped = RoutineStore(url: nil)
         _ = try roundTripped.importData(exportedData, by: "test")
         XCTAssertEqual(roundTripped.skills.map(\.name).sorted(), imported.skills.map(\.name).sorted())
@@ -522,6 +589,63 @@ final class RoutineTests: XCTestCase {
         XCTAssertTrue(store.forgetNote(note.id, by: "Poki"))
         XCTAssertTrue(store.undo(store.changes.first!.id))
         XCTAssertEqual(store.note(note.id)?.isLocked, true)
+    }
+
+    func testUndoingLegacySkillChangesRestoresTheCorrectAppWithoutLosingContent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("poki-undo-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("agent-memory.json")
+        for (action, by, oldLocked, expectedLocked) in [
+            ("forgot", "owner", true, true),
+            ("forgot", "Poki", false, true),
+            ("edited", "owner", true, false),
+            ("edited", "Poki", false, true),
+        ] {
+            let legacy = """
+            {
+              "name": "Search a topic",
+              "description": "Search Little Red Book after using WeChat",
+              "app": "com.tencent.xin",
+              "steps": [
+                {"action": {"tap": "@"}, "target": {"type": "Button", "label": "Discover", "x": 100, "y": 120}, "app": "com.tencent.xin"},
+                {"action": {"launch": "com.xingin.discover"}, "app": "com.tencent.xin"},
+                {"action": {"type": "{{topic}}"}, "app": "com.xingin.discover"}
+              ],
+              "params": {"topic": "coffee"}, "expect": ["Results"], "read": ["Title"],
+              "runs": 9, "ok": 7, "failuresInARow": 1, "lastMs": 420,
+              "savedBy": "Poki", "locked": \(oldLocked),
+              "created": "2026-11-01T00:00:00Z", "updated": "2026-11-02T00:00:00Z"
+            }
+            """
+            let old = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(legacy.utf8)) as? [String: Any])
+            var current = old
+            current["name"] = "Renamed search"
+            current["description"] = "Edited description"
+            current["locked"] = false
+            let history: [String: Any] = [
+                "schema": "poki.agent-backup/1",
+                "routines": action == "edited" ? [current] : [],
+                "notes": [], "runs": [],
+                "changes": [["id": "legacy-change", "action": action, "by": by,
+                             "at": "2026-11-03T00:00:00Z", "routineName": "Renamed search",
+                             "routineApp": "com.tencent.xin", "routine": old]],
+            ]
+            try JSONSerialization.data(withJSONObject: history).write(to: file)
+            let store = RoutineStore(url: file)
+            XCTAssertTrue(store.undo("legacy-change"), "\(action) by \(by)")
+            let restored = try XCTUnwrap(store.skill(named: "Search a topic"))
+            XCTAssertEqual(restored.app, "com.xingin.discover", "\(action) by \(by)")
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            var expected = try decoder.decode(Skill.self, from: Data(legacy.utf8))
+            expected.app = "com.xingin.discover"
+            expected.locked = expectedLocked
+            XCTAssertEqual(restored, expected, "Undo must preserve content, run history, and its existing lock semantics")
+            XCTAssertNil(store.skill(named: "Renamed search"))
+            XCTAssertFalse(store.undo("legacy-change"), "a history entry can only be undone once")
+            XCTAssertEqual(RoutineStore(url: file).skill(named: "Search a topic"), expected)
+        }
     }
 
     func testAnExportCarriesNoForgottenText() throws {

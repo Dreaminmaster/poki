@@ -129,7 +129,7 @@ struct MemoryItemDetail: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(facts.enumerated()), id: \.offset) { _, fact in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(fact.0).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).frame(width: 44, alignment: .leading)
+                        Text(fact.0).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).frame(width: 64, alignment: .leading)
                         fact.1.frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -172,6 +172,9 @@ struct MemoryItemDetail: View {
             return rows
         case .skill:
             var rows: [(LocalizedStringKey, AnyView)] = []
+            if !item.otherApps.isEmpty {
+                rows.append(("Also uses", value(item.otherApps.map(MemoryFormat.appName).joined(separator: AppLocalization.text("List separator")))))
+            }
             if item.stale, let stop = item.stop { rows.append(("Stopped at", value(stop))) }
             rows.append(("Steps", AnyView(Text("\(item.steps) steps").font(.subheadline).foregroundStyle(Color(.label)))))
             if item.runs > 0 {
