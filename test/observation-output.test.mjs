@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import sharp from 'sharp';
 import { fixture, value } from './fixture.mjs';
 
 test('observe_device omits PNG only when requested', async t => {
@@ -66,4 +68,21 @@ test('only a phone with a second built-in panel takes its screenshot through the
   };
   assert.deepEqual(await shots({}), { command: 1, helper: 0 });
   assert.deepEqual(await shots({ secondPanel: true }), { command: 0, helper: 1 });
+});
+
+test('a two-panel phone returns the active frame when the default display is black', async t => {
+  const f = await fixture(t);
+  const blackCover = join(f.dir, 'cover.png');
+  await sharp({ create: { width: 466, height: 678, channels: 3, background: 'black' } }).png().toFile(blackCover);
+  await f.set({ secondPanel: true, defaultScreenshot: blackCover });
+
+  const screenshot = await f.call('observe_device', { source: 'ocr' });
+
+  assert.ok(!screenshot.isError, screenshot.content[0]?.text);
+  const { observation } = value(screenshot);
+  assert.deepEqual([observation.width, observation.height], [100, 200]);
+  const picture = screenshot.content.find(item => item.type === 'image');
+  assert.ok(picture);
+  const { channels } = await sharp(Buffer.from(picture.data, 'base64')).stats();
+  assert.ok(channels.slice(0, 3).every(channel => channel.min >= 250));
 });

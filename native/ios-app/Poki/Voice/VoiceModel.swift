@@ -31,6 +31,7 @@ struct VoiceBridge: Equatable {
         let model: String
         let local_tools: [String]
         var live: Bool? = nil
+        var base: String? = nil
     }
     private struct SDPAnswer: Decodable { let sdp: String }
     private struct ScreenDescription: Decodable { let text: String }
@@ -476,6 +477,7 @@ final class VoiceModel {
 
     /// How voice runs now, for the settings screen.
     var route: String {
+        if case .custom = VoiceDirect.account { return AppLocalization.text(LocalizedStringResource("\(VoiceDirect.settingsAccount.name), straight from this iPhone")) }
         if VoiceDirect.apiKey != nil { return AppLocalization.text(LocalizedStringResource("Your OpenAI key, straight from this iPhone")) }
         if let bridge { return AppLocalization.text(LocalizedStringResource("Voice bridge at \(bridge.display)")) }
         if VoiceDirect.canDictate { return AppLocalization.text(LocalizedStringResource("Dictation to \(ModelKeys.selectedModelName); Poki reads the answer aloud")) }
@@ -539,8 +541,8 @@ final class VoiceModel {
 
     func start(microphone: Bool = true) async {
         guard link == nil, dictation == nil, !isConnecting else { return }
-        // The OpenAI key on this iPhone first (no Mac needed), then the bridge, then dictation.
-        let key = VoiceDirect.apiKey
+        let account = VoiceDirect.account
+        let key = VoiceDirect.apiKey(for: account)
         if key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.words) }
             return
@@ -551,11 +553,12 @@ final class VoiceModel {
         let bridge = self.bridge
         func configuration() async throws -> VoiceBridge.Token {
             if rehearsing { return Self.rehearsalToken }
-            if let key {
-                if microphone && VoiceDirect.usesLive {
-                    return VoiceBridge.Token(value: nil, model: VoiceDirect.model, local_tools: VoiceDirect.localTools, live: true)
+            if let key, let account {
+                let model = ModelCatalog.voiceModelID(for: account)
+                if microphone, account == .openai, model.hasPrefix("gpt-live-") {
+                    return VoiceBridge.Token(value: nil, model: model, local_tools: VoiceDirect.localTools, live: true)
                 }
-                return try await VoiceDirect.token(apiKey: key)
+                return try await VoiceDirect.token(apiKey: key, account: account)
             }
             guard let bridge else { throw VoiceError.noBridge }
             return try await bridge.token(preferLive: microphone)
@@ -573,7 +576,7 @@ final class VoiceModel {
                 }
             } else {
                 guard let secret = token.value else { throw VoiceError.noBridge }
-                try await link.connect(secret: secret, microphone: microphone, direct: direct)
+                try await link.connect(secret: secret, base: token.base.flatMap { URL(string: $0) }, microphone: microphone, direct: direct)
             }
         }
         do {

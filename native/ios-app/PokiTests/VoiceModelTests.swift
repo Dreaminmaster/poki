@@ -81,7 +81,7 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     private(set) var liveAnswer: String?
     private(set) var remoteVolume = 1.0
     @MainActor var remoteSpeech = false
-    func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
+    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {}
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
         liveAnswer = try await exchange("sdp-offer")
     }

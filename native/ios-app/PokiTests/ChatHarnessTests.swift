@@ -15,7 +15,7 @@ final class ChatHarnessTests: XCTestCase {
     private var saved: [String: Any?] = [:]
     private var app: AppModel?
     private var notes: [String] = []
-    private static let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+    private static let settings = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
 
     override func setUp() async throws {
         for key in Self.settings { saved[key] = UserDefaults.standard.object(forKey: key) }
@@ -57,6 +57,52 @@ final class ChatHarnessTests: XCTestCase {
         _ = await chat.runDelegated("Second request")
         XCTAssertEqual(first.requests.count, 2)
         XCTAssertEqual(second.requests.count, 2)
+    }
+
+    func testStoppingATaskShowsStoppedInChatAndLiveActivity() async throws {
+        let plan = FakeCompletions.tool("report_plan", ["steps": ["Review the sample checklist"], "currentStep": 1])
+        let server = try FakeCompletions(replies: [plan, FakeCompletions.text("The checklist is ready.")], holdAfter: 1)
+        let chat = chat(on: server, automation: FakeAutomation(), kind: .poki)
+        let app = try XCTUnwrap(app)
+        let savedSetup = SetupState.load()
+        let defaults = UserDefaults.standard
+        let savedWantsOn = defaults.object(forKey: "wantsOn")
+        let savedRelayEnabled = defaults.object(forKey: "relayEnabled")
+        let existingActivities = Set(Activity<PokiActivityAttributes>.activities.map(\.id))
+        defer {
+            server.release()
+            if chat.running { chat.stop() }
+            app.stopSession()
+            savedSetup.save()
+            defaults.set(savedWantsOn, forKey: "wantsOn")
+            defaults.set(savedRelayEnabled, forKey: "relayEnabled")
+        }
+        app.loopback.simulate(.working(ms: 9))
+        app.setup.loopback = .proxy
+        app.setRelayEnabled(false)
+        app.startSession()
+        XCTAssertTrue(app.sessionOn)
+        chat.newConversation()
+        chat.send("Review the sample checklist")
+
+        let runningBy = ContinuousClock.now + .seconds(8)
+        while server.requests.count < 2, ContinuousClock.now < runningBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(server.requests.count, 2, "Stop must interrupt the task after it publishes the plan")
+        XCTAssertTrue(chat.running)
+        let activity = try XCTUnwrap(Activity<PokiActivityAttributes>.activities.first { !existingActivities.contains($0.id) })
+        chat.stop()
+
+        let stoppedBy = ContinuousClock.now + .seconds(4)
+        while activity.content.state.face.content != "Stopped", ContinuousClock.now < stoppedBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let entry = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        guard case .plan(let steps) = entry.kind else { return XCTFail("The task card disappeared") }
+        XCTAssertFalse(steps.contains { $0.state == .done }, "Stopping must leave the unfinished step unchecked")
+        XCTAssertTrue(chat.entries.contains { if case .poki("Stopped.") = $0.kind { true } else { false } })
+        XCTAssertEqual(activity.content.state.face.content, "Stopped")
     }
 
     func testSplitViewTaskWaitsForOriginalPairAndResumesFromFreshReads() async throws {
@@ -180,12 +226,54 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(server.requests.count, 2, "A cancelled read must never return to the model")
         XCTAssertTrue(transport.restoredSides.isEmpty, "Stop must cancel the recovery polls")
         XCTAssertEqual(transport.taps, 0)
-        while Activity<PokiActivityAttributes>.activities.contains(where: { $0.id == activity.id }),
-              ContinuousClock.now < stoppedBy {
+        while activity.content.state.phase != .stopped, ContinuousClock.now < stoppedBy {
             try await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertFalse(Activity<PokiActivityAttributes>.activities.contains { $0.id == activity.id },
-                       "Stop must end the Live Activity started by this session")
+        XCTAssertEqual(activity.content.state.phase, .stopped, "Stop must replace the active Split View task with its outcome")
+    }
+
+    func testSplitViewPreparationStopsWhenActivationReportsAuthorizationCancellation() async throws {
+        try await assertSplitViewPreparationStops(cancelDuringConfirmation: false)
+    }
+
+    func testSplitViewPreparationStopsWhenConfirmationReportsAuthorizationCancellation() async throws {
+        try await assertSplitViewPreparationStops(cancelDuringConfirmation: true)
+    }
+
+    private func assertSplitViewPreparationStops(cancelDuringConfirmation: Bool) async throws {
+        let transport = RotatingWorkspace(startingLayout: .otherPair)
+        let server = try FakeCompletions(replies: [FakeCompletions.text("SPLIT 1 2"), FakeCompletions.text("The task continued.")])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        let host = try XCTUnwrap(app).host
+        let declined = RunnerState.automationAuthorizationDeclined("the owner cancelled automation authorization", fix: nil)
+        if cancelDuringConfirmation {
+            transport.onNotesActivated = { host.update(runner: declined) }
+        } else {
+            host.update(runner: declined)
+        }
+        chat.restore(SavedSession(id: UUID().uuidString, kind: .poki, title: "Duo test", started: .now,
+                                  updated: .now, live: false,
+                                  entries: [ChatEntry(.you("Earlier message", delivered: true))], calls: []))
+        let marker = UUID().uuidString
+        AppLog.shared.add("test", marker)
+        func confirmationReads() -> Int {
+            AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).filter { $0.contains("[agent] started: Look at the screen") }.count
+        }
+        let allowedReads = cancelDuringConfirmation ? 1 : 0
+        defer { if chat.running { chat.stop() } }
+        chat.send("Compare Safari and Notes in Split View.", attachments: [])
+
+        let endedOrContinued = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated { !chat.running || confirmationReads() > allowedReads }
+        }, object: nil)
+        await fulfillment(of: [endedOrContinued], timeout: 8)
+
+        XCTAssertFalse(chat.running)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Stopped.") = $0.kind { return true }; return false })
+        XCTAssertEqual(confirmationReads(), allowedReads)
+        XCTAssertEqual(transport.launchEvents, cancelDuringConfirmation ? ["activate Notes"] : [])
+        if !cancelDuringConfirmation { XCTAssertEqual(transport.requests, 0, "Cleanup must not probe the device after cancellation") }
+        XCTAssertEqual(server.requests.count, 1)
     }
 
     func testSplitViewStartupReplacesADifferentExistingPair() async throws {
@@ -1457,6 +1545,8 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
     private var inputs = 0
     private var drops = 0
     private var launchLog: [String] = []
+    private var requestCount = 0
+    var onNotesActivated: (@Sendable () -> Void)?
 
     @MainActor init(rotateAt: RotateAt = .paneRead, startingLayout: Layout = .original) {
         self.rotateAt = rotateAt
@@ -1475,6 +1565,7 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
     var taps: Int { lock.withLock { inputs } }
     var drags: Int { lock.withLock { drops } }
     var launchEvents: [String] { lock.withLock { launchLog } }
+    var requests: Int { lock.withLock { requestCount } }
 
     private var app: String { side == "left" ? "com.apple.mobilesafari" : "com.apple.mobilenotes" }
     private var other: String { side == "left" ? "com.apple.mobilenotes" : "com.apple.mobilesafari" }
@@ -1483,6 +1574,7 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
         let raw = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
         let path = raw.isEmpty ? "/session" : raw
         return try lock.withLock {
+            requestCount += 1
             func reply(_ value: JSON = .null, status: Int = 200) -> (Int, Data) {
                 (status, (["value": value] as JSON).data())
             }
@@ -1532,7 +1624,9 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
                 throw TransportError.other("sent, no confirmation: split_view_changed_after_dispatch")
             case ("POST", "/wda/apps/activate"):
                 switch body.flatMap({ try? JSON.parse($0)["bundleId"]?.string }) {
-                case "com.apple.mobilenotes": launchLog.append("activate Notes")
+                case "com.apple.mobilenotes":
+                    launchLog.append("activate Notes")
+                    onNotesActivated?()
                 case "com.apple.springboard": launchLog.append("activate Home")
                 case "com.apple.mobilesafari": launchLog.append("activate Safari"); layout = .restored
                 default: return reply(["error": "unexpected app"], status: 400)

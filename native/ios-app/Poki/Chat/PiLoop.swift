@@ -13,7 +13,7 @@ import PokiCore
 /// carries the messages over; pi converts them between providers.
 @MainActor
 final class PiLoop {
-    enum Outcome: Equatable { case done, stopped, overTurns, stuck, failed(String) }
+    enum Outcome: Equatable { case done, stopped, authorizationDeclined, overTurns, stuck, failed(String) }
 
     /// This many steps in a row with the same call and the same screen end the task as stuck.
     nonisolated static let stallSteps = 6
@@ -32,6 +32,10 @@ final class PiLoop {
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
+    var hasCurrentCustomBackups: Bool {
+        guard let endpoint else { return true }
+        return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
+    }
 
     init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
@@ -39,7 +43,7 @@ final class PiLoop {
         self.model = model
         self.inSplitView = inSplitView
         let gate = self.gate
-        let endpoint = provider == .custom ? CustomEndpointClient() : nil
+        let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
         self.endpoint = endpoint
         let stall = self.stall
         let grants = HistoryDeliveryGrants()
@@ -61,7 +65,9 @@ final class PiLoop {
                     ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: revision) : rawAnswer
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
-                if answer.waitingForOwner {
+                if answer.automationAuthorizationDeclined {
+                    gate.end(.authorizationDeclined)
+                } else if answer.waitingForOwner {
                     stall.reset()
                 } else if stall.record(call: "\(spec.name)\n\(arguments)", screen: answer.screen ?? answer.text) {
                     gate.end(.stuck)
@@ -96,7 +102,7 @@ final class PiLoop {
                 if let endpoint { options.httpClient = endpoint }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
-            getApiKey: { _ in await ModelCredential.apiKey(for: provider) },
+            getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
             toolExecution: .sequential,
             prepareToolResultMessage: { result in
                 grants.validated(result, revision: HistoryCapture.agentQueryRevision)
@@ -165,6 +171,7 @@ final class PiLoop {
         }
         if gate.stopped {
             switch gate.ending {
+            case .authorizationDeclined: return .authorizationDeclined
             case .overTurns: return .overTurns
             case .stuck: return .stuck
             default: return .stopped
@@ -172,7 +179,7 @@ final class PiLoop {
         }
         if let message = failure.value {
             if let seen = endpoint?.seen {
-                let key = ModelKeys.key(provider)
+                let key = provider == .custom ? CustomProviders.provider(piProvider: model.provider).flatMap { CustomProviders.key($0.id) } : ModelKeys.key(provider)
                 AppLog.shared.add("model", seen.summary(key: key) + ", failed: " + CustomEndpointClient.redacted(message, key: key))
             }
             // The owner's message goes again with the next one, as with the direct clients.
@@ -255,7 +262,7 @@ final class HistoryDeliveryGrants: @unchecked Sendable {
 
 /// Set by stop(), the turn limit or the stall watch, read by the tools on pi's tasks.
 private final class StopGate: @unchecked Sendable {
-    enum Ending { case stopped, overTurns, stuck }
+    enum Ending { case stopped, authorizationDeclined, overTurns, stuck }
     private let lock = NSLock()
     private var first: Ending?
     func reset() { lock.withLock { first = nil } }

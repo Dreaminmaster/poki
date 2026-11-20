@@ -94,15 +94,44 @@ public struct CoreConfig: Sendable {
 /// The launcher's view of the runner, as the app shell reports it (from PokiLauncher's events).
 public enum RunnerState: Sendable, Equatable {
     case running
+    case automationReady(revision: UInt64)
     case starting(String)
+    case openingAutomationSession(String)
+    case awaitingAutomationAuthorization(String)
+    case automationAuthorizationDeclined(String, fix: String?)
     case failed(String, fix: String?)
 
-    public var isRunning: Bool { self == .running }
+    public var isRunning: Bool {
+        switch self {
+        case .running, .automationReady: true
+        default: false
+        }
+    }
+
+    var isStarting: Bool {
+        switch self {
+        case .starting, .openingAutomationSession, .awaitingAutomationAuthorization: true
+        case .running, .automationReady, .automationAuthorizationDeclined, .failed: false
+        }
+    }
+
+    var automationRevision: UInt64? {
+        if case .automationReady(let revision) = self { return revision }
+        return nil
+    }
+
+    var isOpeningInProcessAutomation: Bool {
+        switch self {
+        case .openingAutomationSession, .awaitingAutomationAuthorization: true
+        default: false
+        }
+    }
+
     public var describe: String {
         switch self {
-        case .running: return "running"
-        case .starting(let detail): return "starting (\(detail))"
-        case .failed(let detail, let fix): return "failed: \(detail)" + (fix.map { ". Fix on the phone: \($0)" } ?? "")
+        case .running, .automationReady: return "running"
+        case .starting(let detail), .openingAutomationSession(let detail), .awaitingAutomationAuthorization(let detail): return "starting (\(detail))"
+        case .failed(let detail, let fix), .automationAuthorizationDeclined(let detail, let fix): return "failed: \(detail)" + (fix.map { ". Fix on the phone: \($0)" } ?? "")
         }
     }
 }
@@ -567,9 +596,11 @@ public final class PokiCore: @unchecked Sendable {
         public let screen: String?
         /// Handoff, a locked phone, or runner startup requires waiting rather than model progress.
         public let waitingForOwner: Bool
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false) {
+        public let automationAuthorizationDeclined: Bool
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
+            self.automationAuthorizationDeclined = automationAuthorizationDeclined
         }
     }
 
@@ -578,11 +609,12 @@ public final class PokiCore: @unchecked Sendable {
     /// object the model sent.
     /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
     /// where it was heard.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> ToolAnswer {
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
-                          splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner)
+                          splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
+                          automationAuthorizationDeclined: output.automationAuthorizationDeclined)
     }
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the
@@ -613,11 +645,26 @@ public final class PokiCore: @unchecked Sendable {
         return computer.reserveWorkspace(session: session)
     }
 
+    /// Release the local workspace after iOS declined automation, without calling the runner.
+    public func discardWorkspace(session: String) async {
+        guard await gate.enter(waiting: config.busyWait) else { return }
+        defer { gate.leave() }
+        guard computer.ownsTask(session: session) else { return }
+        computer.forgetTask(discardingPane: true)
+    }
+
     public func clearWorkspacePaneForSetup(session: String) async -> Bool {
         guard await gate.enter(waiting: config.busyWait) else { return false }
         defer { gate.leave() }
         guard !Task.isCancelled else { return false }
         return await computer.clearWorkspacePaneForSetup(session: session)
+    }
+
+    public func bindCompanionTarget() async -> Bool {
+        guard runner.transport.supportsPaneSelection, await gate.enter(waiting: config.busyWait) else { return false }
+        defer { gate.leave() }
+        guard !computer.hasLocalWorkspace else { return false }
+        return await computer.bindCompanionTarget()
     }
 
     public func workspaceLauncherStep(session: String, request: JSON) async throws -> JSON {
@@ -628,7 +675,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -654,6 +701,9 @@ public final class PokiCore: @unchecked Sendable {
         let activity = ToolActivity(id: UUID().uuidString, name: name, summary: name == "do" ? computer.labels(actions) : "Look at the screen", started: Date(), session: local ? nil : session)
         // One tool call at a time per phone; a second waits briefly, then says what the first is doing.
         guard await gate.enter(waiting: config.busyWait) else {
+            if host?.currentRunner.isOpeningInProcessAutomation == true {
+                return ToolResult(text: "Poki is waiting for automation to be ready. Nothing was sent.", jpeg: nil, waitingForOwner: true)
+            }
             if computer.hasLocalWorkspace {
                 return ToolResult(text: "busy: Poki is still working in Split View; nothing was sent.", jpeg: nil, isError: true)
             }
@@ -670,6 +720,7 @@ public final class PokiCore: @unchecked Sendable {
         emit(.toolStarted(activity))
         // The owner's time on an approval, and the runner's start, come on top of the tool's own time.
         let deadline = config.toolDeadline + (name == "do" ? config.approvalWait : 0) + config.runnerWait + 1
+            + (local ? Computer.authorizationWait : 0)
         var output: ToolResult
         computer.failureLog.value = nil
         do {
@@ -678,9 +729,9 @@ public final class PokiCore: @unchecked Sendable {
                     if let pane = args["pane"], pane.string == nil {
                         return ToolResult(text: "pane must be left, right, or auto", jpeg: nil, isError: true)
                     }
-                    return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps)
+                    return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps, localTask: localTask)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice)
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask)
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
@@ -721,7 +772,7 @@ public final class PokiCore: @unchecked Sendable {
     func status() -> ToolResult {
         let state = host?.currentRunner
         var waitingForOwner = computer.handoffWaiting
-        if case .starting? = state { waitingForOwner = true }
+        if state?.isStarting == true { waitingForOwner = true }
         var lines = ["runner: \(state?.describe ?? "unknown")"]
         if let relay { lines.append("relay: \(relay.stateDescription)") }
         if let p = approvals.pending { lines.append("approval waiting on the phone: \(p.summary) (\(p.reason), id \(p.id))") }

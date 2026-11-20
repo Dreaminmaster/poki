@@ -4,7 +4,7 @@ import WebRTC
 
 /// What VoiceModel talks through: a VoiceLink in the app, a recorded conversation in tests.
 protocol VoiceConnection: AnyObject, Sendable {
-    func connect(secret: String, microphone: Bool, direct: Bool) async throws
+    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws
     func hasRemoteSpeech() async -> Bool
     @discardableResult func send(_ event: [String: Any]) -> Bool
@@ -68,9 +68,10 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
     /// `microphone: false` (test runs) sends no audio track and needs no microphone permission; the
     /// model's voice still comes back.
     /// `direct: true` keeps the connection off VPN interfaces (the retry after a try that never opened).
-    func connect(secret: String, microphone: Bool = true, direct: Bool = false) async throws {
+    /// `base`: the Realtime API address the secret is for, OpenAI's when nil.
+    func connect(secret: String, base: URL? = nil, microphone: Bool = true, direct: Bool = false) async throws {
         try await connectLive(microphone: microphone, direct: direct) { sdp in
-            var request = URLRequest(url: URL(string: "https://api.openai.com/v1/realtime/calls")!, timeoutInterval: 20)
+            var request = URLRequest(url: (base ?? URL(string: "https://api.openai.com/v1")!).appending(path: "realtime/calls"), timeoutInterval: 20)
             request.httpMethod = "POST"
             request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
             request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")

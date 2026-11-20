@@ -2,28 +2,98 @@ import AVFoundation
 import Foundation
 import Speech
 
+/// An account live voice can run on: an OpenAI API key, or a custom provider whose service has the
+/// Realtime API (at its first address).
+enum VoiceAccount: Hashable, Sendable {
+    case openai
+    case custom(UUID)
+
+    /// Where this account's voice settings are kept: OpenAI's under the original names.
+    var storeSuffix: String {
+        switch self {
+        case .openai: ""
+        case .custom(let id): ".custom.\(id.uuidString)"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .openai: "OpenAI"
+        case .custom(let id): CustomProviders.provider(id)?.displayName ?? AppLocalization.text(LocalizedStringResource("Custom Endpoint"))
+        }
+    }
+
+    /// The Realtime API's base address.
+    var base: URL? {
+        switch self {
+        case .openai: URL(string: "https://api.openai.com/v1")
+        case .custom(let id): CustomProviders.provider(id)?.primary.flatMap { URL(string: $0.normalized) }
+        }
+    }
+}
+
 /// Voice without the Mac's voice bridge.
 ///
-/// - With the owner's OpenAI API key on this iPhone, Poki asks OpenAI for a one-minute Realtime key
+/// - With the owner's OpenAI API key on this iPhone, or a custom provider with live voice on, Poki asks that service for a one-minute Realtime key
 ///   itself (what `bin/voice-bridge.mjs` does on the Mac: the same model, instructions and tools), and
 ///   look and do run here, through PokiCore, as with the bridge's phone tools.
 /// - With any other model (a ChatGPT plan, Anthropic, OpenRouter…), whose sign-in has no Realtime
 ///   audio, holding the button dictates on this iPhone (Apple's speech recognition, on the device when
 ///   it can) and lets go to send it to Poki's chat; Poki reads the answer out loud.
 enum VoiceDirect {
-    /// The voice model the owner picked in Accounts › OpenAI › Live Voice.
+    /// The voice model the owner picked under their account's Live Voice settings.
     static var model: String { ModelCatalog.voiceModel }
-    static var usesLive: Bool { model.hasPrefix("gpt-live-") }
     static let localTools = ["get_ios_version", "look", "open_app", "do"]
     private static let liveBackend = "gpt-6-luna"
 
-    /// The OpenAI API key on this iPhone, when there is one.
-    static var apiKey: String? { enabled ? ModelKeys.key(.openai) : nil }
+    /// The account live voice runs on now: a custom provider with live voice on and an address, else
+    /// the OpenAI key with live voice on, else none.
+    static var account: VoiceAccount? {
+        if let custom = CustomProviders.all.first(where: { $0.liveVoice && $0.primary != nil }) { return .custom(custom.id) }
+        return enabled && ModelKeys.hasKey(.openai) ? .openai : nil
+    }
+
+    /// The account whose voice models the settings show and the session uses: the live one, else OpenAI.
+    static var settingsAccount: VoiceAccount { account ?? .openai }
+
+    /// The live voice account's key, when live voice can run: the OpenAI key, or the custom service's
+    /// (empty when it needs none).
+    static var apiKey: String? { apiKey(for: account) }
+
+    static func apiKey(for account: VoiceAccount?) -> String? {
+        switch account {
+        case .openai: ModelKeys.key(.openai)
+        case .custom(let id): CustomProviders.key(id) ?? ""
+        case nil: nil
+        }
+    }
 
     /// The owner's switch in Accounts › OpenAI › Live Voice (on unless turned off).
     static var enabled: Bool {
         get { UserDefaults.standard.object(forKey: "voice.openai.enabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "voice.openai.enabled"); ModelKeys.saved += 1 }
+    }
+
+    /// Live voice on one account. One account runs it at a time: switching one on switches the others off.
+    static func isOn(_ account: VoiceAccount) -> Bool {
+        switch account {
+        case .openai: enabled && !CustomProviders.all.contains(where: { $0.liveVoice })
+        case .custom(let id): CustomProviders.provider(id)?.liveVoice == true
+        }
+    }
+
+    static func set(_ account: VoiceAccount, on: Bool) {
+        var providers = CustomProviders.all
+        for index in providers.indices {
+            if case .custom(let id) = account, providers[index].id == id { providers[index].liveVoice = on }
+            else if on { providers[index].liveVoice = false }
+        }
+        CustomProviders.all = providers
+        switch account {
+        case .openai: enabled = on
+        case .custom: if on { UserDefaults.standard.set(false, forKey: "voice.openai.enabled") }
+        }
+        ModelKeys.saved += 1
     }
 
     /// Dictation into the chat works with any model the chat can use.
@@ -93,9 +163,13 @@ enum VoiceDirect {
         ?? "Run actions on the iPhone in order, then read the screen once. Actions: {launch: \"bundle id\"} (any installed app); {tap: n} or {tap: [x, y]}; {type: \"text\", ref?: n} (taps n first, then types); {key: \"return\"}; {scroll_to: \"text\"}; {swipe: \"up\"|\"down\"|\"left\"|\"right\"}; {button: \"home\"}; {wait_until: \"text\"}; {wait: ms}; {back: true}. The answer says what each action did and what is new on screen."
 
     /// The Realtime session Poki opens: model, instructions, voice, turn detection and tools.
-    static var session: [String: Any] {
-        [
-            "type": "realtime", "model": usesLive ? ModelCatalog.voiceRealtime : model, "instructions": instructions(), "output_modalities": ["audio"],
+    static var session: [String: Any] { realtimeSession(for: settingsAccount) }
+
+    private static func realtimeSession(for account: VoiceAccount) -> [String: Any] {
+        let selected = ModelCatalog.voiceModelID(for: account)
+        return [
+            "type": "realtime", "model": account == .openai && selected.hasPrefix("gpt-live-") ? ModelCatalog.voiceRealtime : selected,
+            "instructions": instructions(), "output_modalities": ["audio"],
             "audio": [
                 "input": ["turn_detection": ["type": "server_vad", "silence_duration_ms": 450, "prefix_padding_ms": 300, "threshold": 0.5, "create_response": true, "interrupt_response": true],
                           "noise_reduction": ["type": "near_field"], "transcription": ["model": "gpt-4o-mini-transcribe", "language": "zh"]],
@@ -166,11 +240,13 @@ enum VoiceDirect {
         return text
     }
 
-    /// A one-minute Realtime key from OpenAI, made with the owner's API key (sent only to OpenAI).
-    static func token(apiKey: String) async throws -> VoiceBridge.Token {
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/realtime/client_secrets")!, timeoutInterval: 20)
+    /// A one-minute Realtime key from the voice account's service, using that account's key.
+    static func token(apiKey: String, account: VoiceAccount = settingsAccount) async throws -> VoiceBridge.Token {
+        guard let base = account.base else { throw VoiceError.noBridge }
+        let session = realtimeSession(for: account)
+        var request = URLRequest(url: base.appending(path: "realtime/client_secrets"), timeoutInterval: 20)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if !apiKey.isEmpty, apiKey != "none" { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["expires_after": ["anchor": "created_at", "seconds": 60], "session": session])
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -179,7 +255,8 @@ enum VoiceDirect {
         guard (200..<300).contains(status), let value = json?["value"] as? String else {
             throw VoiceError.realtime(status, openAIError(json, fallback: "client_secrets \(status)"))
         }
-        return VoiceBridge.Token(value: value, model: usesLive ? ModelCatalog.voiceRealtime : model, local_tools: localTools)
+        return VoiceBridge.Token(value: value, model: session["model"] as? String ?? ModelCatalog.voiceRealtime,
+                                 local_tools: localTools, base: base.absoluteString)
     }
 
     private static func openAIError(_ json: [String: Any]?, fallback: String) -> String {

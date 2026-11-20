@@ -334,6 +334,14 @@ extension PokiState {
                 bottom: .none,
                 thumbnail: hasThumbnail ? .large : .none,
                 compact: .symbol("checkmark", .accent))
+        case .stopped:
+            return ActivityFace(
+                symbol: "stop.circle.fill",
+                bear: .paused, size: .low,
+                meta: .none,
+                content: StatusWord.stopped.text,
+                bottom: .none,
+                compact: .text(StatusWord.stopped.text, .quiet))
         case .problem:
             let (problemTitle, problemSubtitle) = Self.problemPresentation(for: headline)
             return ActivityFace(

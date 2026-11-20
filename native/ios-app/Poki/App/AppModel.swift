@@ -190,9 +190,15 @@ final class AppModel {
         startSession(reconnectLocal: passcodeHeadsUpReconnect)
     }
     func cancelPasscodeHeadsUp() {
+        let wasHoldingAnOpen = passcodeHeldOpen != nil
         passcodeConfirmationPending = false
         passcodeHeadsUp = false
         passcodeHeldOpen = nil
+        if wasHoldingAnOpen {
+            InProcessWDA.gate.withLock { $0.declined = true }
+            inProcessSession = .failed(code: "passcode_declined", detail: "the owner cancelled automation authorization")
+            host.update(runner: coreState(of: runner))
+        }
     }
     /// The in-process open waiting for Continue on the passcode note: its reason.
     private var passcodeHeldOpen: String?
@@ -523,6 +529,7 @@ final class AppModel {
     /// Counts closes, so an open that began before one is not taken as the state after it.
     private var inProcessEpoch = 0
     private var inProcessWarmToken = 0
+    private var automationRevision: UInt64 = 0
     /// Standing by kept the session with Automation Mode off: the
     /// next open resumes it instead of making a new one, and a resume that fails is closed and opened again.
     private var sessionKept = false
@@ -635,6 +642,7 @@ final class AppModel {
             passcodeHeldOpen = why
             passcodeConfirmationPending = true
             passcodeHeadsUp = true
+            host.update(runner: coreState(of: runner))
             log.add("runner", "first automation since this iPhone restarted: requested notice that iOS will ask for the passcode")
             return
         }
@@ -651,8 +659,8 @@ final class AppModel {
         let resuming = sessionKept
         if inProcessSession != .open, inProcessSession != .opening, inProcessSession != .waitingForPasscode {
             inProcessSession = .opening
-            host.update(runner: coreState(of: runner))
         }
+        host.update(runner: coreState(of: runner))
         DispatchQueue.global(qos: .userInitiated).async { [automation] in
             var result = InProcessWDA.openThroughGate { automation.prepare() }
             var resumeFailure: String?
@@ -700,6 +708,7 @@ final class AppModel {
                 self.log.add("runner", ok ? "in-process session ready for \(why) (generation \(result["generation"] ?? 0), \((result["reused"] as? Bool) == true ? "already open" : "opened"), \(seconds) s\(warm))"
                                           : "in-process session not ready for \(why): \(result["code"] ?? "unknown") after \(seconds) s")
                 if ok {
+                    self.automationRevision += 1
                     self.log.add("session-timing", String(format: "session_ready uptime=%.6f", ProcessInfo.processInfo.systemUptime))
                     self.automationStarted()
                     // An open session proves both, also when the launcher only found the image mounted.
@@ -841,14 +850,13 @@ final class AppModel {
         }
     }
 
-    /// In the background the loopback is still watched while Poki is on (the agent's runner depends on
-    /// it): every 6 s, light enough for the location-kept background time.
+    /// The agent runner and Screen History need to hear when the local connection changes.
     func wentToBackground() {
         inFront = false
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
-        sessionOn ? loopback.resume(every: 6) : loopback.pause()
+        sessionOn || HistoryCapture.isEnabled ? loopback.resume(every: 6) : loopback.pause()
         if pairingUnderWay { log.add("pairing", "Poki in the background while pairing; keep-alive \(pairingKeepAlive.isOn ? "playing" : "off")") }
     }
     private var inFront = true
@@ -1235,6 +1243,8 @@ final class AppModel {
     }
 
     func stopSession() {
+        let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode
+        cancelPasscodeHeadsUp()
         sessionStartTask?.cancel()
         pendingPrepareForTask = false
         preparingCellularImage = false
@@ -1244,7 +1254,7 @@ final class AppModel {
             if setup.loopback == .builtIn { tunnel.disconnect() }
             return
         }
-        if !inFront { loopback.pause() }
+        if !inFront, !HistoryCapture.isEnabled { loopback.pause() }
         log.add("session", automationPath == .inProcess ? "turned off: closing the in-process session" : "turned off: ending the runner")
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }
@@ -1261,6 +1271,7 @@ final class AppModel {
         background.stop()
         activity.end()
         sessionOn = false
+        if awaitingAuthorization { host.update(runner: .failed("Poki was turned off", fix: nil)) }
         chatTaskActive = false
         stepUnderWay = nil
         runner = .idle
@@ -1306,7 +1317,7 @@ final class AppModel {
 
     /// The owner's Stop from outside Poki: Stop or End on the Live Activity, or Poki Anytime run again.
     /// The talk, the chat's task, a waiting approval and the agent's steps all stop at once, and the
-    /// Live Activity shows Poki standing by. End with nothing under way only ends the talk: the automation
+    /// Live Activity shows Stopped. End with nothing under way only ends the talk: the automation
     /// then closes as after a task (`closeAfterTalk`), so on iOS 18–26 the next talk needs no passcode.
     /// While Poki is on, its Live Activity stays (as when a talk ends, `TalkActivity`): an outside agent
     /// can start again from the background, where iOS starts no Live Activity, and its steps and Stop
@@ -1326,9 +1337,10 @@ final class AppModel {
         }
         log.add("session", "\(reason): the talk and the task stop")
         if let chat, chat.running { chat.stop() }
+        else { activity.stopRun() }
         for approval in approvals { resolve(approval, approved: false) }
         pauseRunner(reason: reason, fromOutside: true)
-        if !sessionOn { activity.end() }
+        if !sessionOn, activity.state.phase != .stopped { activity.end() }
     }
 
     /// `fromOutside`: `stopFromOutside` has stopped the chat's task, checked the Stop is no echo of an
@@ -1346,16 +1358,22 @@ final class AppModel {
             return
         }
         guard approvals.isEmpty || splitChat != nil || fromOutside else { return }
+        if byOwner { activity.stopRun() }
         ownerPaused = byOwner
         if runnerPaused {
             if automationPath == .inProcess { closeInProcess("stopped by the owner") }
             return
         }
         if automationPath == .inProcess {
+            let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode
+            if awaitingAuthorization { cancelPasscodeHeadsUp() }
             Task { [core] in _ = await core.finishTask(switching: false) }
             // The owner's own Stop ends the session; standing by on its own keeps it where the policy says so.
             closeInProcess("standing by", keepingSession: !byOwner && idleSessionPolicy == .pauseAutomation)
             standBy(reason: reason)
+            if awaitingAuthorization {
+                host.update(runner: .failed("Poki was stopped while waiting for automation authorization", fix: nil))
+            }
             return
         }
         log.add("runner", "stopping: \(reason)")
@@ -1426,6 +1444,7 @@ final class AppModel {
         activityText = "Idle"
         activity.update { state in
             state.runnerPaused = true
+            if state.phase == .stopped { return }
             // A task that just ended keeps its finished Live Activity, and one waiting on the owner
             // keeps what it asks.
             if keepingDone, state.phase == .done || state.handoff != nil || state.approval != nil { return }
@@ -1648,7 +1667,14 @@ final class AppModel {
     /// is the same thing: waiting for the tunnel, said with the time it went and what to do.
     func coreState(of status: RunnerStatus) -> RunnerState {
         // In-process, a running launcher only mounted the disk image; tools wait for the session.
-        if automationPath == .inProcess, status.state == "running", inProcessSession != .open {
+        if automationPath == .inProcess, status.isRunning {
+            if inProcessSession == .open { return .automationReady(revision: automationRevision) }
+            if passcodeConfirmationPending {
+                return .awaitingAutomationAuthorization(AppLocalization.text(Self.passcodeConfirmationMessage))
+            }
+            if inProcessWarming, inProcessSession == .opening {
+                return .openingAutomationSession("opening the in-process session")
+            }
             return inProcessSession.agentState
         }
         if status.code == "passcode" {
@@ -1897,33 +1923,41 @@ final class AppModel {
     /// A tool call from the chat's model loop. Poki turns on first when it is off (the runner then starts
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
-    func finishTask(then: (@MainActor () -> Void)? = nil) {
+    func finishTask(switching: Bool = true, then: (@MainActor () -> Void)? = nil) {
         chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
         lastShot = nil
+        let companion = duoCompanionTask
         // The phone goes back to where the task began first: that still needs the session.
         endingTasks += 1
         Task { [weak self, core, log] in
-            if let line = await core.finishTask() { log.add("runner", line) }
+            if let line = await core.finishTask(switching: switching && companion == nil) { log.add("runner", line) }
+            if let companion, self?.duoCompanionTask == companion {
+                PKInProcess.shared().endDuoCompanionTask()
+                self?.duoCompanionTask = nil
+            }
             self?.endingTasks -= 1
             self?.closeAfterTask("the task ended")
             then?()
         }
     }
 
-    func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, cancelled: () -> Bool = { false }) async {
-        _ = await core.settle(timeout: 30)
-        if let line = await core.finishTask(switching: pairConfirmed, localSession: localSession) { log.add("runner", line) }
-        // The Split View task is over: as at the end of any task, the automation session closes.
+    func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, authorizationDeclined: Bool = false, cancelled: () -> Bool = { false }) async {
+        if authorizationDeclined {
+            await core.discardWorkspace(session: localSession)
+        } else {
+            _ = await core.settle(timeout: 30)
+            if let line = await core.finishTask(switching: pairConfirmed, localSession: localSession) { log.add("runner", line) }
+        }
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
-        closeAfterTask("the Split View task ended")
+        if !authorizationDeclined { closeAfterTask("the Split View task ended") }
         guard activitySplitViewSession == localSession else { return }
         activitySplitViewSession = nil
         lastAgentActivity = Date()
+        if authorizationDeclined || cancelled() { activity.stopRun() }
         activity.setChatOwnsCompletion(false)
-        if cancelled() { activity.endStoppedRun() }
     }
 
     func reserveSplitViewWorkspace(session: String) async -> Bool {
@@ -1942,26 +1976,47 @@ final class AppModel {
 
     // MARK: The chat's task
 
-    /// The chat no longer says when its run ends (stopped, or ended without a word): the Live
+    private var duoCompanionTask: UUID?
+    var drivesDuoCompanion: Bool { duoCompanionTask != nil }
+    var hasVisibleDuoCompanion: Bool {
+        guard automationPath == .inProcess, let placement = PKInProcess.shared().duoPlacement() else { return false }
+        return placement != "fullscreen"
+    }
+
+    /// The chat ended without reporting a result: the Live
     /// Activity's quiet wait finishes the run, as it does an outside agent's.
     func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
+
+    func chatTaskStopped() { activity.stopRun() }
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
     /// The chat says when the task ends (chatTaskEnded), so until then a pause between steps, while the
     /// model thinks, never reads as the end of the run (ESP-954).
-    func chatTaskBegan(splitViewSession: String? = nil) {
+    func chatTaskBegan(splitViewSession: String? = nil) async {
         log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         chatTaskActive = automationPath == .inProcess
         if chatTaskActive { lastAgentActivity = Date() }
+        if automationPath == .inProcess {
+            let native = PKInProcess.shared()
+            if duoCompanionTask != nil { native.endDuoCompanionTask() }
+            duoCompanionTask = splitViewSession == nil && native.beginDuoCompanionTask() ? UUID() : nil
+        }
         lastShot = nil
         activitySplitViewSession = splitViewSession
         activity.setChatOwnsCompletion(true)
-        // The owner sees at once that Poki took the task: the Live Activity (started here, while
+        if drivesDuoCompanion {
+            prepareForTask()
+            if let sessionStartTask { await sessionStartTask.value }
+            let bound = sessionOn && !Task.isCancelled ? await core.bindCompanionTarget() : false
+            log.add("runner", bound ? "Duo companion bound before the model started" : "Duo companion could not be bound at task start")
+        }
+        guard !Task.isCancelled else { return }
+        // The owner sees that Poki took the task: the Live Activity (started here, while
         // Poki is in front) and iOS's background line say so before the model's first answer.
         if sessionOn {
             activity.update { state in
                 state.plan = nil
-                guard state.approval == nil, state.handoff == nil, state.phase == .idle || state.phase == .done else { return }
+                guard state.approval == nil, state.handoff == nil, state.phase == .idle || state.phase.isRunOutcome else { return }
                 state.phase = .working
                 state.headline = "Thinking"
                 state.since = Date()
@@ -2041,14 +2096,14 @@ final class AppModel {
     }
 
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
-    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil) async -> PokiCore.ToolAnswer {
+    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
         if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps) }
         if !sessionOn {
             if !sessionStarting { startSession() }
             if let task = sessionStartTask { await task.value }
         }
-        if passcodeConfirmationPending {
+        if passcodeConfirmationPending, automationPath != .inProcess || !sessionOn {
             return PokiCore.ToolAnswer(text: "not_sent: \(AppLocalization.text(Self.passcodeConfirmationMessage)) Nothing was sent.", jpeg: nil, isError: true)
         }
         guard sessionOn else {
@@ -2056,7 +2111,7 @@ final class AppModel {
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)
         }
         lastAgentActivity = Date(); lastStepAt = Date()
-        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps)
+        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask)
     }
 
     /// After Stop: waits until the phone has finished the action a stopped call had already sent.

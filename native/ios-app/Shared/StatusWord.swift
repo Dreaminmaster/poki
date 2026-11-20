@@ -8,7 +8,7 @@ import Foundation
 enum StatusWord: CaseIterable {
     case ready, thinking, running, checking
     case needsApproval, needsYourAction
-    case done, error, paused, off
+    case done, stopped, error, paused, off
     case disconnected, starting, notStarted, notSetUp
     case listening, speaking
 
@@ -23,6 +23,7 @@ enum StatusWord: CaseIterable {
         case .needsApproval: AppLocalization.text(LocalizedStringResource("Needs approval", table: "Status"))
         case .needsYourAction: AppLocalization.text(LocalizedStringResource("Needs your action", table: "Status"))
         case .done: AppLocalization.text(LocalizedStringResource("Done", table: "Status"))
+        case .stopped: AppLocalization.text(LocalizedStringResource("Stopped", table: "Status"))
         case .error: AppLocalization.text(LocalizedStringResource("Error", table: "Status"))
         case .paused: AppLocalization.text(LocalizedStringResource("Paused", table: "Status"))
         case .off: AppLocalization.text(LocalizedStringResource("Off", table: "Status"))
