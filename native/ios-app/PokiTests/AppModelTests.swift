@@ -1192,7 +1192,7 @@ final class InProcessPasscodeTests: XCTestCase {
         await prepareWithoutPhoneTask()
         model.wakeRunner()
         await waitFor("automation is open") { self.session.isOpen && self.model.hasOpenInProcessSession }
-        model.chatTaskBegan()
+        await model.chatTaskBegan()
 
         model.checkIdle(now: Date().addingTimeInterval(120))
         XCTAssertTrue(session.isOpen, "thinking between phone steps must keep the same session")
@@ -1391,7 +1391,7 @@ final class InProcessPasscodeTests: XCTestCase {
     func testOnIOS26TheEndOfATaskKeepsTheSession() async {
         useSystem(26)
         await openSessionForATask()
-        model.chatTaskBegan()
+        await model.chatTaskBegan()
         model.chatTaskEnded(reply: nil, session: "test", acted: true)
         await waitFor("the end of the task stood by") { self.model.runnerPaused && self.model.lastInProcessClose != nil }
         XCTAssertTrue(session.isOpen)
