@@ -520,8 +520,8 @@ final class HistoryCapture: ObservableObject {
         }
         let wait = once ? Self.waitSeconds : 0
         set(once ? .waiting : .reading)
-        // A run with no end asks the launcher for an hour at a time.
-        // A day at a time for an always run: every new launcher call needs a new tunnel.
+        // A run with no end asks the launcher to read until it is canceled (`continuous`): every
+        // new launcher call needs a new tunnel.
         let duration = always ? 86_400 : max(10, (minutes ?? 0) * 60)
         let until = always ? Date.distantFuture : Date().addingTimeInterval(Double(wait + (once ? 0 : duration)))
         ends = always ? nil : until
@@ -571,6 +571,7 @@ final class HistoryCapture: ObservableObject {
                     // After a restart the image is gone and the audit service with it: the run mounts it again.
                     "ddi_dir": AppFiles.ddiDirectory.path,
                     "direct_points": points, "interval_ms": Self.interval * 1000, "duration_s": max(10, left),
+                    "continuous": self.always,
                     "include_text": true, "include_tree": true,
                     // The phone's own notices of the app in front and of the screen moving say
                     // when to read. They ask nothing of the apps.
@@ -583,7 +584,7 @@ final class HistoryCapture: ObservableObject {
                     guard self.run == me else { return }
                     if self.interrupted { self.interrupted = false; continue }
                     if self.always {
-                        // The launcher's hour is up, or it answered early: ask again, never in a tight loop.
+                        // The launcher answered though nothing ended the run: ask again, never in a tight loop.
                         tries = 0
                         try? await Task.sleep(for: .seconds(2))
                         continue

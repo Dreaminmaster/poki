@@ -750,7 +750,13 @@ fn no_tree(attempts: &[ax::Attempt]) -> Failure {
 /// Runs one request. `emit` gets a line for every read of a run. A run is the run in progress
 /// from this call on, not from the first poll of its future.
 pub fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> impl Future<Output = Result<Value, Failure>> {
-    let me = (request["op"] == "run").then(|| RUN.fetch_add(1, Ordering::SeqCst) + 1);
+    let me = (request["op"] == "run").then(|| {
+        // A run may start held (the iPhone is locked, or an agent's task has the screen): it opens
+        // its tunnel and reads nothing until it is let go. Set here, so a hold asked for between
+        // this call and the run's first poll is kept.
+        PAUSED.store(request["paused"].as_bool().unwrap_or(false), Ordering::SeqCst);
+        RUN.fetch_add(1, Ordering::SeqCst) + 1
+    });
     async move {
         if let Some(me) = me {
             return run(&request, emit, me).await;
@@ -847,9 +853,6 @@ async fn run(request: &Value, emit: impl Fn(Value), me: u64) -> Result<Value, Fa
         Some(_) => windows(request),
         None => vec![DEFAULT_READ_WITHIN],
     };
-    // A run may start held (the iPhone is locked, or an agent's task has the screen): it opens its
-    // tunnel and reads nothing until it is let go.
-    PAUSED.store(request["paused"].as_bool().unwrap_or(false), Ordering::SeqCst);
     let mut stats = RunStats::default();
     let mut device: Option<Device> = None;
     // Wall time, not the runtime's clock: a suspended app's time must show up as a gap.
@@ -1849,6 +1852,25 @@ mod tests {
         cancel();
         tokio::time::timeout(Duration::from_secs(2), run).await.expect("the run ends when stopped").unwrap().unwrap();
         assert!(answered.is_ok(), "the check got no answer: {:?}", lines.lock().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_hold_asked_for_before_the_first_poll_is_kept() {
+        let _turn = ONE_RUN.lock().await;
+        let (first, reported) = tokio::sync::oneshot::channel();
+        let first = std::sync::Mutex::new(Some(first));
+        let pending = handle(json!({"op": "run", "continuous": true, "pairing_file": "/nonexistent/pairing.plist"}), move |line| {
+            if let Some(first) = first.lock().unwrap().take() {
+                let _ = first.send(line);
+            }
+        });
+        pause(true);
+        let run = tokio::spawn(pending);
+        let line = reported.await.expect("the run reports its first round");
+        cancel();
+        pause(false);
+        tokio::time::timeout(Duration::from_secs(2), run).await.expect("the run ends when stopped").unwrap().unwrap();
+        assert_eq!(line["paused"], true, "the first round read while held: {line}");
     }
 
     #[tokio::test]

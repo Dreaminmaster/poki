@@ -147,7 +147,10 @@ struct ScreenHistorySettingsView: View {
 
     private var recordingStatus: LocalizedStringKey {
         if !capture.enabled { return "Off" }
-        return capture.status == .reading ? "Recording" : "Paused, Waiting to Resume"
+        if capture.status == .reading { return "Recording" }
+        // A run that waits says why: the iPhone is locked, an agent's task, or no local connection.
+        if capture.isRunning, let held = capture.held { return LocalizedStringKey(HistoryNames.status(held)) }
+        return "Paused, Waiting to Resume"
     }
 
     var body: some View {
