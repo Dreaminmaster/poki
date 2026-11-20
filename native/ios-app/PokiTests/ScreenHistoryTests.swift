@@ -466,6 +466,60 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(HistoryCapture.validateAgentAnswer(permitted, revision: revision).isError)
     }
 
+    func testInFlightTimedGrantDiscardsReadAtExpiry() async throws {
+        try await assertTimedGrantExpiresDuringRead(regrant: false)
+    }
+
+    func testAReauthenticatedGrantCannotRestoreAnExpiredPendingRead() async throws {
+        try await assertTimedGrantExpiresDuringRead(regrant: true)
+    }
+
+    /// Use the production SQLite reader and filtering, the production lease implementation,
+    /// and the real core query. Substitute only an isolated lease with a deterministic clock
+    /// and a latch after the read, avoiding changes to the process-wide clock or sleeping.
+    private func assertTimedGrantExpiresDuringRead(regrant: Bool) async throws {
+        try unlockHistoryForFixture()
+        let clock = GrantTestClock()
+        let lease = HistoryQueryPermissionLease(enabled: true, duration: .seconds(300), now: { clock.now })
+        lease.setUnlocked(true)
+        let revision = lease.grant
+        XCTAssertNotNil(revision)
+        let canary = "SYNTHETIC_TIMED_EXPIRY_CANARY"
+        HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
+        let delayed = SuspendedScreenHistoryRead()
+        var source = HistoryStore.agentSource
+        source.isEnabled = { lease.grant != nil }
+        source.accessRevision = { lease.revision }
+        let read = source.entries
+        source.entries = { start, end in
+            let snapshot = await read(start, end)
+            return await delayed.hold(snapshot)
+        }
+        let core = PokiCore(config: CoreConfig(screenHistory: source), host: AppCoreHost())
+        let query = Task { await core.callTool("screen_history", arguments: #"{"period":"last_hour"}"#) }
+        guard let snapshot = await delayed.waitForSnapshot() else {
+            await delayed.release()
+            query.cancel()
+            _ = await query.value
+            return XCTFail("The real reader did not reach the latch")
+        }
+        XCTAssertTrue(snapshot.contains { $0.text.contains(canary) })
+        clock.advance(.seconds(299))
+        XCTAssertEqual(lease.grant, revision)
+        clock.advance(.seconds(1))
+        // No intermediate grant read in the regrant case: an old snapshot cannot
+        // survive expiry even if the owner authenticates before the old query resumes.
+        if regrant { lease.setUnlocked(true) }
+        await delayed.release()
+        let answer = await query.value
+        XCTAssertTrue(answer.isError)
+        XCTAssertEqual(answer.text, PokiCore.screenHistoryRevokedMessage)
+        XCTAssertFalse(answer.text.contains(canary))
+        let fresh = await core.callTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertEqual(fresh.isError, !regrant)
+        XCTAssertEqual(fresh.text.contains(canary), regrant)
+    }
+
     /// The chat uses this same validation after its core await and before persisting a call.
     func testCompletedHistoryAnswerCannotCrossARevokedChatDeliveryBoundary() async throws {
         try unlockHistoryForFixture()

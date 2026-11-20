@@ -120,7 +120,7 @@ jobs:
           python3 - <<'PY'
           import json
           d = json.load(open("out/summary.json"))
-          assert d["totalTestCount"] >= 20, d
+          assert d["totalTestCount"] >= 22, d
           assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
           PY
       - name: Run broader ChatHarnessTests on the same build
