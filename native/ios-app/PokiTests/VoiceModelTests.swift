@@ -5,15 +5,55 @@ import XCTest
 /// The voice bridge's token answer, served to URLSession.shared without a Mac.
 final class BridgeStub: URLProtocol {
     static let address = "http://voice-bridge.test/voice/0123456789abcdef"
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == "voice-bridge.test" }
+    static let liveAddress = "http://voice-live-bridge.test/voice/0123456789abcdef"
+    static let secureLiveAddress = "https://voice-live-bridge.test/voice/0123456789abcdef"
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var screenshots: [String] = []
+    static var screenshotSchemes: [String] { lock.withLock { screenshots } }
+    static func resetScreenshots() { lock.withLock { screenshots.removeAll() } }
+    override class func canInit(with request: URLRequest) -> Bool {
+        ["voice-bridge.test", "voice-live-bridge.test"].contains(request.url?.host())
+    }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let body = #"{"value":"ek_test","model":"gpt-realtime","local_tools":["get_ios_version","look","do"]}"#
+        let body: String
+        if request.url?.host() == "voice-live-bridge.test" {
+            switch request.url?.lastPathComponent {
+            case "session": body = #"{"sdp":"sdp-answer"}"#
+            case "screen":
+                Self.lock.withLock { Self.screenshots.append(request.url?.scheme ?? "") }
+                let data = requestBody(request)
+                let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                let image = json?["image"] as? String
+                let first = "data:image/jpeg;base64," + Data("first synthetic screenshot".utf8).base64EncodedString()
+                let second = "data:image/jpeg;base64," + Data("second synthetic screenshot".utf8).base64EncodedString()
+                body = image == first ? #"{"text":"First screen description"}"# : image == second
+                    ? #"{"text":"Second screen description"}"# : #"{"text":"Unrecognized screenshot"}"#
+            default: body = #"{"live":true,"model":"gpt-live-1.1","local_tools":["get_ios_version","look","open_app","do"]}"#
+            }
+        } else {
+            body = #"{"value":"ek_test","model":"gpt-realtime","local_tools":["get_ios_version","look","do"]}"#
+        }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+private func requestBody(_ request: URLRequest) -> Data {
+    if let body = request.httpBody, !body.isEmpty { return body }
+    guard let stream = request.httpBodyStream else { return Data() }
+    stream.open()
+    defer { stream.close() }
+    var body = Data()
+    var buffer = [UInt8](repeating: 0, count: 65_536)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        if count <= 0 { break }
+        body.append(buffer, count: count)
+    }
+    return body
 }
 
 /// A voice bridge in trouble: one host no longer knows the address, the other never answers in time.
@@ -38,12 +78,25 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onClosed: (@MainActor (String) -> Void)?
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
+    private(set) var liveAnswer: String?
+    private(set) var remoteVolume = 1.0
+    @MainActor var remoteSpeech = false
     func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {}
+    func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
+        liveAnswer = try await exchange("sdp-offer")
+    }
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
-    func setRemoteVolume(_ value: Double) {}
+    func setRemoteVolume(_ value: Double) { remoteVolume = value }
+    func hasRemoteSpeech() async -> Bool { await MainActor.run { remoteSpeech } }
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
     func close() { closed = true }
     @MainActor func play(_ events: [String: Any]...) { for event in events { onEvent?(event) } }
+    @MainActor func backend(_ type: String, _ fields: [String: Any] = [:], delegation: String? = "d1") {
+        play(["type": "response.event", "delegation_id": delegation as Any? ?? NSNull(), "event": fields.merging(["type": type]) { _, type in type }])
+    }
+    @MainActor func call(_ id: String, _ name: String, arguments: String = "{}", delegation: String? = "d1") {
+        backend("response.output_item.done", ["item": ["type": "function_call", "call_id": id, "name": name, "arguments": arguments]], delegation: delegation)
+    }
     /// The text of every system note sent on this connection.
     var notes: [String] {
         sent.compactMap { event in
@@ -80,6 +133,26 @@ final class FakeTime {
     func settle() async { for _ in 0..<50 { await Task.yield() } }
 }
 
+private actor VoiceRunnerTransport: HTTPTransport {
+    let firstStarted: XCTestExpectation
+    let firstMayFinish: AsyncStream<Void>
+    private(set) var operations: [String] = []
+
+    init(firstStarted: XCTestExpectation, firstMayFinish: AsyncStream<Void>) {
+        self.firstStarted = firstStarted
+        self.firstMayFinish = firstMayFinish
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        operations.append(url.path)
+        if url.path == "/first" {
+            firstStarted.fulfill()
+            for await _ in firstMayFinish { break }
+        }
+        return (200, Data(#"{"value":{}}"#.utf8))
+    }
+}
+
 @MainActor
 final class VoiceModelTests: XCTestCase {
     func testAConnectionWhoseSessionNeverStartsEndsAfterSixtySeconds() async {
@@ -94,6 +167,529 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(h.microphone, [true, false])
     }
 
+    func testLiveCancelToolStopsRunningDelegationAndAllowsTheNextTask() async {
+        let time = FakeTime()
+        var executed: [String] = []
+        let h = Harness(time: time, phoneTool: { name, _ in
+            executed.append(name)
+            if name == "look" { await time.clock.sleep(.seconds(1)) }
+            return ("mock result", false, nil)
+        })
+        await h.liveTalk()
+        XCTAssertEqual(h.link.liveAnswer, "sdp-answer")
+        h.link.play(["type": "session.input_transcript.delta", "delta": "打开微信", "start_ms": 0, "end_ms": 400],
+                    ["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        h.link.call("read", "look")
+        await time.settle()
+        XCTAssertEqual(executed, ["look"])
+        h.link.play(["type": "session.input_transcript.delta", "delta": "请先别把这条消息发出去", "start_ms": 500, "end_ms": 800],
+                    ["type": "session.delegation.created", "delegation": ["id": "cancel"]])
+        h.link.call("queued", "do")
+        h.link.call("stop", "cancel_current_task", delegation: "cancel")
+        h.link.call("later", "do")
+        h.link.call("unscoped", "do", delegation: nil)
+        await time.advance(1)
+        XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text).joined(), "打开微信请先别把这条消息发出去")
+        XCTAssertEqual(executed, ["look"], "Only the phone step already executing may finish.")
+        let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
+            .compactMap { ($0["item"] as? [String: String])?["call_id"] }
+        XCTAssertEqual(Set(results), ["read", "stop", "queued", "later", "unscoped"])
+        XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
+
+        h.link.play(["type": "session.input_transcript.delta", "delta": "打开设置", "start_ms": 1500, "end_ms": 1900],
+                    ["type": "session.delegation.created", "delegation": ["id": "d2"]])
+        h.link.call("stop", "cancel_current_task", delegation: "cancel")
+        h.link.call("old-task", "do")
+        h.link.call("new-task", "open_app", delegation: "d2")
+        await time.settle()
+        XCTAssertEqual(executed, ["look", "open_app"])
+        h.voice.stop()
+    }
+
+    func testLiveShortStopQuietsPlaybackAndRejectsLaterPhoneWork() async {
+        for stop in [["停"], ["停止"], ["别动"], [" stop. "], [" 停", ",别", "做了"], ["停，别做了"]] {
+            var executed: [String] = []
+            let h = Harness(phoneTool: { name, _ in
+                executed.append(name)
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.input_transcript.delta", "delta": "给文件传输助手发个hello", "start_ms": 0, "end_ms": 400],
+                        ["type": "session.delegation.created", "offset_ms": 400, "delegation": ["id": "d1"]])
+            h.link.call("started", "open_app")
+            await h.time.settle()
+            h.link.remoteSpeech = true
+            await h.time.advance(0.2)
+            XCTAssertEqual(h.link.remoteVolume, 1)
+            for (index, text) in stop.enumerated() {
+                let start = 500 + index * 200
+                h.link.play(["type": "session.input_transcript.delta", "delta": text, "start_ms": start, "end_ms": start + 200])
+            }
+            XCTAssertEqual(h.link.remoteVolume, 0, "\(stop.joined()) must immediately mute the current reply.")
+            h.link.play(["type": "session.input_transcript.delta", "delta": "好的。", "start_ms": 1200, "end_ms": 1400])
+            XCTAssertEqual(h.link.remoteVolume, 0, "An acknowledgment must not bring the stopped reply back.")
+            h.link.call("next-step", "do")
+            await h.time.settle()
+            XCTAssertEqual(executed, ["open_app"], "A spoken stop must reject the remaining phone steps.")
+            h.voice.stop()
+        }
+    }
+
+    func testAStoppedLiveReplyStaysMutedWhenTheRunningStepReturns() async {
+        let time = FakeTime()
+        let h = Harness(time: time, phoneTool: { _, _ in
+            await time.clock.sleep(.seconds(1))
+            return ("Settings is open", false, nil)
+        })
+        await h.liveTalk()
+        h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        h.link.call("open-settings", "open_app")
+        await time.settle()
+        h.link.play(["type": "session.input_transcript.delta", "delta": "停", "start_ms": 200, "end_ms": 400])
+        XCTAssertEqual(h.link.remoteVolume, 0)
+        await time.advance(1)
+
+        XCTAssertEqual(h.voice.calls.first(where: { $0.id == "open-settings" })?.output, "Settings is open")
+        XCTAssertEqual(h.link.remoteVolume, 0, "A late result must not reopen the speaker.")
+        XCTAssertFalse(h.link.sent.contains { event in
+            event["type"] as? String == "response.create" || event["type"] as? String == "session.commentary.append"
+        }, "A stopped result must not request speech.")
+        h.voice.stop()
+    }
+
+    func testLiveBackchannelsKeepPlaybackAndDoNotStartOrCancelPhoneWork() async {
+        for acknowledgment in ["嗯。", "好的。"] {
+            var executed: [String] = []
+            let h = Harness(phoneTool: { name, _ in
+                executed.append(name)
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            h.link.call("already-started", "look")
+            await h.time.settle()
+            h.link.remoteSpeech = true
+            await h.time.advance(0.2)
+            h.link.play(["type": "session.input_transcript.delta", "delta": acknowledgment, "start_ms": 500, "end_ms": 750],
+                        ["type": "session.delegation.created", "delegation": ["id": "ack"]])
+            h.link.call("unrequested", "open_app", delegation: "ack")
+            h.link.call("unrequested-cancel", "cancel_current_task", delegation: "ack")
+            h.link.call("continue", "do")
+            await h.time.settle()
+            XCTAssertEqual(h.link.remoteVolume, 1)
+            XCTAssertEqual(executed, ["look", "do"], "An acknowledgment must leave the existing task intact.")
+            h.voice.stop()
+        }
+    }
+
+    func testLiveDeduplicatesByItemOrOverlappingAudio() async {
+        var operations: [String] = []
+        let h = Harness(phoneTool: { _, arguments in
+            operations.append(arguments)
+            return ("verified result", false, nil)
+        })
+        await h.liveTalk()
+        func turn(_ request: String, text: String, end: Int, item: String? = nil) async {
+            var caption: [String: Any] = ["type": "session.input_transcript.delta", "delta": text, "start_ms": end - 200, "end_ms": end]
+            caption["item_id"] = item
+            h.link.play(caption, ["type": "session.delegation.created", "offset_ms": end, "delegation": ["id": request]])
+            h.link.call(request, "do", arguments: request, delegation: request)
+            await h.time.settle()
+        }
+        h.link.play(["type": "input_audio_buffer.speech_started"])
+        await turn("original", text: "打开微信", end: 500)
+        await turn("duplicate", text: " 打开微信！ ", end: 550)
+        h.link.play(["type": "input_audio_buffer.speech_started"],
+                    ["type": "session.input_transcript.delta", "delta": "好的。", "start_ms": 780, "end_ms": 950],
+                    ["type": "input_audio_buffer.speech_started"])
+        await turn("said-again", text: "打开微信", end: 1_300)
+        await turn("similar", text: "打开微信设置", end: 1_600)
+        h.link.play(["type": "input_audio_buffer.speech_started", "item_id": "user-1"])
+        await turn("with-id", text: "向下滚动", end: 1_900, item: "user-1")
+        h.link.play(["type": "input_audio_buffer.speech_started", "item_id": "user-1"])
+        await turn("same-id", text: "往下滚动", end: 2_200, item: "user-1")
+        h.link.play(["type": "input_audio_buffer.speech_started", "item_id": "user-2"])
+        await turn("different-id", text: "向下滚动", end: 2_500, item: "user-2")
+
+        XCTAssertEqual(operations, ["original", "said-again", "similar", "with-id", "different-id"])
+        h.voice.stop()
+    }
+
+    func testLiveDeduplicatesWithoutItemIDByAudioIntervalWhenAvailable() async {
+        let scenarios: [(name: String, audio: Range<Int>?, delay: Double, intervening: String?, expected: [String])] = [
+            ("disjoint within three seconds", 600..<900, 1, nil, ["first", "second"]),
+            ("overlap after three seconds", 350..<550, 4, nil, ["first"]),
+            ("untimed within three seconds", nil, 3, nil, ["first"]),
+            ("untimed after three seconds", nil, 3.1, nil, ["first", "second"]),
+            ("untimed after an audio commit", nil, 1, "input_audio_buffer.committed", ["first", "second"]),
+            ("untimed after speech starts", nil, 1, "input_audio_buffer.speech_started", ["first", "second"]),
+        ]
+        for scenario in scenarios {
+            var operations: [String] = []
+            let h = Harness(phoneTool: { _, arguments in
+                operations.append(arguments)
+                return ("verified result", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.input_transcript.delta", "delta": "向下滚动", "start_ms": 200, "end_ms": 400])
+            await h.time.advance(0.5)
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "first"]])
+            h.link.call("first", "do", arguments: "first", delegation: "first")
+            await h.time.settle()
+            XCTAssertEqual(operations, ["first"])
+
+            await h.time.advance(scenario.delay - 0.5)
+            if let intervening = scenario.intervening {
+                h.link.play(["type": intervening, "event_id": "next-input"])
+            }
+            var caption: [String: Any] = ["type": "session.input_transcript.delta", "delta": " 向下滚动！ "]
+            if let audio = scenario.audio {
+                caption["start_ms"] = audio.lowerBound
+                caption["end_ms"] = audio.upperBound
+            }
+            h.link.play(caption,
+                        ["type": "session.delegation.created", "delegation": ["id": "second"]])
+            h.link.call("second", "do", arguments: "second", delegation: "second")
+            await h.time.settle()
+            XCTAssertEqual(operations, scenario.expected, scenario.name)
+            h.voice.stop()
+        }
+    }
+
+    func testLiveRevisedTranscriptDoesNotReplayExecutedAudio() async {
+        var operations: [String] = []
+        let h = Harness(phoneTool: { _, arguments in
+            operations.append(arguments)
+            return ("verified result", false, nil)
+        })
+        await h.liveTalk()
+
+        func delegate(_ id: String, text: String, audio: Range<Int>) {
+            h.link.play(["type": "session.input_transcript.delta", "delta": text,
+                         "start_ms": audio.lowerBound, "end_ms": audio.upperBound],
+                        ["type": "session.delegation.created", "delegation": ["id": id]])
+        }
+
+        delegate("first", text: "向下滚动", audio: 200..<400)
+        h.link.call("first", "do", arguments: "first", delegation: "first")
+        await h.time.settle()
+        XCTAssertEqual(operations, ["first"])
+
+        delegate("revised", text: "往下滚动", audio: 200..<500)
+        h.link.call("revised", "do", arguments: "revised", delegation: "revised")
+        await h.time.settle()
+        XCTAssertEqual(operations, ["first"], "Revised text must not replay previously executed audio.")
+
+        delegate("no-tool", text: "往下滚动", audio: 400..<600)
+        delegate("fresh", text: "往下滚动", audio: 400..<600)
+        h.link.call("fresh", "do", arguments: "fresh", delegation: "fresh")
+        await h.time.settle()
+        XCTAssertEqual(operations, ["first", "fresh"], "Replays and delegations without a tool must not consume unused audio.")
+        h.voice.stop()
+    }
+
+    func testLiveDiscardedReplayDoesNotChangeTheNextTurn() async {
+        var operations: [String] = []
+        let h = Harness(phoneTool: { _, arguments in
+            operations.append(arguments)
+            return ("verified result", false, nil)
+        })
+        await h.liveTalk()
+
+        func transcript(_ text: String, audio: Range<Int>? = nil) {
+            var event: [String: Any] = ["type": "session.input_transcript.delta", "delta": text]
+            if let audio {
+                event["start_ms"] = audio.lowerBound
+                event["end_ms"] = audio.upperBound
+            }
+            h.link.play(event)
+        }
+
+        func request(_ id: String) async {
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": id]])
+            h.link.call(id, "do", arguments: id, delegation: id)
+            await h.time.settle()
+        }
+
+        transcript("向下滚动", audio: 200..<400)
+        await request("first")
+        XCTAssertEqual(operations, ["first"])
+
+        transcript("往下滚动", audio: 200..<400)
+        transcript("向下滚动", audio: 600..<900)
+        await request("fresh")
+        XCTAssertEqual(operations, ["first", "fresh"], "A replay without its own delegation must not contaminate new audio.")
+
+        await h.time.advance(2)
+        transcript("向下滚动")
+        await request("untimed-replay")
+        XCTAssertFalse(operations.contains("untimed-replay"), "A replay without timings still obeys the three-second rule.")
+
+        await h.time.advance(1.1)
+        transcript("向下滚动")
+        await request("untimed-fresh")
+        XCTAssertEqual(operations.last, "untimed-fresh", "A discarded replay must not restart the three-second window.")
+        h.voice.stop()
+    }
+
+    func testLiveEndWaitsForServerConfirmationOrReleasesAfterTimeout() async {
+        let confirmed = Harness()
+        await confirmed.liveTalk()
+        confirmed.voice.stop()
+        confirmed.voice.stop()
+        XCTAssertFalse(confirmed.voice.isOn)
+        XCTAssertEqual(confirmed.link.sent.compactMap { $0["type"] as? String }.filter { $0 == "session.close" }, ["session.close"])
+        XCTAssertFalse(confirmed.link.closed)
+        XCTAssertEqual(confirmed.microphone, [true])
+        confirmed.link.call("after-end", "open_app")
+        XCTAssertTrue(confirmed.voice.calls.isEmpty)
+        confirmed.link.play(["type": "session.closed", "reason": "close_requested", "usage": ["seconds": 2]])
+        XCTAssertTrue(confirmed.link.closed)
+        XCTAssertEqual(confirmed.microphone, [true, false])
+        XCTAssertEqual(confirmed.voice.phase, .off)
+
+        let unconfirmed = Harness()
+        await unconfirmed.liveTalk()
+        await unconfirmed.time.advance(8)
+        XCTAssertFalse(unconfirmed.voice.isOn, "The idle timer must also request a graceful close.")
+        XCTAssertFalse(unconfirmed.link.closed)
+        XCTAssertEqual(unconfirmed.microphone, [true])
+        await unconfirmed.time.advance(10)
+        XCTAssertTrue(unconfirmed.link.closed, "The microphone must be released if the server never confirms.")
+        XCTAssertEqual(unconfirmed.microphone, [true, false])
+    }
+
+    func testRealtimeOnlyRequestsOneResponsePerCommittedUserItem() async {
+        let h = Harness()
+        await h.connect()
+        h.link.play(["type": "session.created", "session": ["audio": ["input": ["turn_detection": ["create_response": false]]]]])
+        func commit(_ item: String) {
+            h.link.play(["type": "input_audio_buffer.speech_started", "item_id": item],
+                        ["type": "input_audio_buffer.speech_stopped", "item_id": item],
+                        ["type": "input_audio_buffer.committed", "item_id": item])
+        }
+        func responseCount() -> Int { h.link.sent.filter { $0["type"] as? String == "response.create" }.count }
+
+        commit("item-1")
+        XCTAssertEqual(responseCount(), 1)
+        h.link.play(["type": "response.created", "response": ["id": "r1"]],
+                    ["type": "response.done", "response": ["id": "r1"]])
+        h.link.play(["type": "input_audio_buffer.committed", "item_id": "item-1"])
+        XCTAssertEqual(responseCount(), 1)
+
+        commit("item-2")
+        XCTAssertEqual(responseCount(), 2)
+        h.voice.stop()
+    }
+
+    func testLiveStopPreventsTheNextRunnerRequestInAnActiveBatch() async {
+        let firstStarted = expectation(description: "the first phone request entered the runner")
+        let batchFinished = expectation(description: "the batch reported its result")
+        let (firstMayFinish, releaseFirst) = AsyncStream<Void>.makeStream()
+        let transport = VoiceRunnerTransport(firstStarted: firstStarted, firstMayFinish: firstMayFinish)
+        let runner = Runner(url: URL(string: "http://voice-runner.test")!, transport: transport)
+        let h = Harness(phoneTool: { _, _ in
+            defer { batchFinished.fulfill() }
+            do {
+                _ = try await runner.raw("POST", "/first")
+                _ = try await runner.raw("POST", "/second")
+                return ("both requests sent", false, nil)
+            } catch {
+                return ("the batch stopped before the second request", true, nil)
+            }
+        })
+        await h.liveTalk()
+        h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        h.link.call("batch", "do")
+        await fulfillment(of: [firstStarted], timeout: 2)
+        h.link.play(["type": "session.input_transcript.delta", "delta": "停", "start_ms": 100, "end_ms": 300])
+        releaseFirst.finish()
+        await fulfillment(of: [batchFinished], timeout: 2)
+        let operations = await transport.operations
+        XCTAssertEqual(operations, ["/first"])
+        h.voice.stop()
+    }
+
+    func testLiveCancellationWithRecordedServerEvents() async throws {
+        guard let replay = ProcessInfo.processInfo.environment["POKI_VOICE_STOP_REPLAY"] else {
+            throw XCTSkip("This check replays events from the Live service captured by the desktop speech check.")
+        }
+        let scenarios = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(replay.utf8)) as? [String: [[String: Any]]])
+        for scenario in ["stop", "stop_explicit", "literal"] {
+            let events = try XCTUnwrap(scenarios[scenario])
+            var executed: [(name: String, arguments: String)] = []
+            let h = Harness(phoneTool: { name, arguments in
+                executed.append((name, arguments))
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            var muteAfterStopCaption: Double?
+            var toolsBeforeStop: Int?
+            for event in events {
+                h.link.play(event)
+                if event["type"] as? String == "session.input_transcript.delta",
+                   (event["delta"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == "停" {
+                    muteAfterStopCaption = h.link.remoteVolume
+                    toolsBeforeStop = executed.count
+                }
+                await h.time.settle()
+            }
+            if scenario == "literal" {
+                XCTAssertTrue(executed.contains { $0.name == "do" && $0.arguments.contains("停") })
+                XCTAssertEqual(muteAfterStopCaption, 1)
+            } else {
+                XCTAssertEqual(muteAfterStopCaption, 0, "Playback must stop on the recorded \(scenario).")
+                let beforeStop = try XCTUnwrap(toolsBeforeStop)
+                XCTAssertGreaterThan(beforeStop, 0, "The recording must reach a running phone task.")
+                XCTAssertEqual(executed.count, beforeStop, "No recorded phone step may start after the stop transcript.")
+            }
+            h.voice.stop()
+        }
+    }
+
+    func testLiveDictatesTheWordStopWhenItCompletesTheSameUtterance() async {
+        for (prefix, suffix) in [("在备忘录输入", ""), ("把", "字发过去")] {
+            var written: [String] = []
+            let h = Harness(phoneTool: { _, arguments in
+                written.append(arguments)
+                return ("Text entered in Notes", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.input_transcript.delta", "delta": prefix, "start_ms": 0, "end_ms": 700],
+                        ["type": "session.input_transcript.delta", "delta": "停", "start_ms": 950, "end_ms": 1200],
+                        ["type": "session.input_transcript.delta", "delta": suffix, "start_ms": 1200, "end_ms": 1500],
+                        ["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            let arguments = #"{"actions":[{"type":"停"}]}"#
+            h.link.call("write-stop", "do", arguments: arguments)
+            await h.time.settle()
+            XCTAssertEqual(written, [arguments], "The tool must receive the requested text for \(prefix)停\(suffix).")
+            h.voice.stop()
+        }
+    }
+
+    func testLiveCarryOverKeepsTheLatestCorrectionWithinTheNoteLimit() async throws {
+        let h = Harness()
+        await h.liveTalk()
+        let messages: [(String, String)] = [
+            ("input", String(repeating: "计划第一站到车站，买一张回程的车票。", count: 7)),
+            ("output", String(repeating: "好的，我已记下车站和回程车票的安排。", count: 7)),
+            ("input", "第二站去书店，最后一站去邮局。"),
+            ("output", "最后一站记为邮局。"),
+            ("input", "把最后一站改成花店。"),
+            ("output", "好的，最后一站改成花店。" + String(repeating: "前面的安排保持原样。", count: 26)),
+        ]
+        for (i, message) in messages.enumerated() {
+            h.link.play(["type": "session.\(message.0)_transcript.delta", "delta": message.1,
+                         "start_ms": i * 1000, "end_ms": i * 1000 + 300])
+        }
+        h.voice.stop()
+        await h.time.advance(4 * 60)
+        await h.liveTalk()
+        let event = try XCTUnwrap(h.link.sent.first { $0["type"] as? String == "session.instructions.append" })
+        let context = try XCTUnwrap(event["content"] as? String)
+        XCTAssertLessThanOrEqual(context.utf8.count, 480)
+        let user = try XCTUnwrap(context.range(of: "User: 把最后一站改成花店。"))
+        let poki = try XCTUnwrap(context.range(of: "Poki: 好的，最后一站改成花店。"))
+        XCTAssertLessThan(user.lowerBound, poki.lowerBound)
+        XCTAssertFalse(context.contains("计划第一站到车站"))
+        h.voice.stop()
+    }
+
+    func testLiveCarryOverKeepsTheWholeRequestWhenItFitsWithTheReply() async throws {
+        let h = Harness()
+        await h.liveTalk()
+        let request = "请更新明天的行程，上午的车次、取件时间和中午见面的地点都保持原样。把最后一站改成花店，回程仍然坐之前订好的那班车，回家以后提醒我把当天的收据整理好。"
+        h.link.play(["type": "session.input_transcript.delta", "delta": request, "start_ms": 0, "end_ms": 6000],
+                    ["type": "session.output_transcript.delta", "delta": "好的。", "start_ms": 6100, "end_ms": 6300])
+        h.voice.stop()
+        await h.time.advance(4 * 60)
+        await h.liveTalk()
+        let event = try XCTUnwrap(h.link.sent.first { $0["type"] as? String == "session.instructions.append" })
+        let context = try XCTUnwrap(event["content"] as? String)
+        XCTAssertLessThanOrEqual(context.utf8.count, 480)
+        XCTAssertTrue(context.contains("User: \(request)\nPoki: 好的。"), "The latest request and reply fit with the correction intact.")
+        h.voice.stop()
+    }
+
+    func testLiveReconnectReportsTheCompletedResultUntilAcknowledged() async throws {
+        var executed = 0
+        let result = "操作已完成。草稿已保存。"
+        let h = Harness(phoneTool: { _, _ in
+            executed += 1
+            return (result, false, nil)
+        })
+        await h.liveTalk()
+        let payload = String(repeating: "甲", count: 1400)
+        h.link.call("saved-draft", "do", arguments: #"{"actions":[{"type":"\#(payload)"}]}"#)
+        h.link.onClosed?("connection dropped while the action ran")
+        await h.time.settle()
+        await h.liveTalk()
+        func report() -> [String: Any]? { h.link.sent.first { $0["type"] as? String == "session.commentary.append" } }
+        let content = try XCTUnwrap(report()?["content"] as? String)
+        XCTAssertTrue(content.contains(result))
+        XCTAssertLessThanOrEqual(content.utf8.count, 500)
+        h.link.play(["type": "session.commentary.appended", "client_event_id": "unrelated"])
+        h.link.onClosed?("connection dropped before acknowledgment")
+        await h.liveTalk()
+        XCTAssertTrue((report()?["content"] as? String)?.contains(result) == true)
+        if let eventID = report()?["event_id"] as? String {
+            h.link.play(["type": "session.commentary.appended", "client_event_id": eventID])
+            h.link.onClosed?("connection dropped after acknowledgment")
+            await h.liveTalk()
+            XCTAssertNil(report())
+        } else {
+            XCTFail("Reconnect result has no ID to match an acknowledgment.")
+        }
+        XCTAssertEqual(executed, 1)
+        h.voice.stop()
+    }
+
+    func testLiveConsecutiveScreensUseIndependentVisionRequests() async {
+        let h = Harness(phoneTool: { _, arguments in
+            let screenshot = arguments.contains("first") ? "first synthetic screenshot" : "second synthetic screenshot"
+            return ("Screen elements", false, Data(screenshot.utf8))
+        })
+        await h.liveTalk(address: BridgeStub.secureLiveAddress)
+        for name in ["First", "Second"] {
+            let id = name.lowercased()
+            h.link.call(id, "look", arguments: #"{"page":"\#(id)"}"#)
+            if h.link.sent.contains(where: { (($0["item"] as? [String: String])?["call_id"]) == id }) == false {
+                let sent = expectation(for: NSPredicate { _, _ in
+                    h.link.sent.contains { (($0["item"] as? [String: String])?["call_id"]) == id }
+                }, evaluatedWith: nil)
+                await fulfillment(of: [sent], timeout: 2)
+            }
+            let output = h.link.sent.compactMap { $0["item"] as? [String: String] }.first { $0["call_id"] == id }?["output"] ?? ""
+            XCTAssertTrue(output.contains("\(name) screen description"))
+            let other = name == "First" ? "Second" : "First"
+            XCTAssertFalse(output.contains("\(other) screen description"))
+        }
+        XCTAssertFalse(h.link.sent.contains { event in
+            let item = event["item"] as? [String: Any]
+            return (item?["content"] as? [[String: String]])?.contains { $0["type"] == "input_image" } == true
+        }, "No screenshot may stay in the Live backend conversation.")
+        XCTAssertEqual(BridgeStub.screenshotSchemes, ["https", "https"])
+        h.voice.stop()
+    }
+
+    func testLiveHTTPBridgeReturnsScreenElementsWithoutUploadingTheScreenshot() async {
+        let h = Harness(phoneTool: { _, _ in
+            ("Screen elements: 1. Notes title", false, Data("first synthetic screenshot".utf8))
+        })
+        await h.liveTalk()
+        h.link.call("plain-http-screen", "look")
+        let sent = expectation(for: NSPredicate { _, _ in
+            h.link.sent.contains { ($0["item"] as? [String: String])?["call_id"] == "plain-http-screen" }
+        }, evaluatedWith: nil)
+        await fulfillment(of: [sent], timeout: 2)
+        let output = h.link.sent.compactMap { $0["item"] as? [String: String] }
+            .first { $0["call_id"] == "plain-http-screen" }?["output"] ?? ""
+        XCTAssertTrue(output.contains("Screen elements: 1. Notes title"))
+        XCTAssertTrue(output.contains("Use the screen elements"))
+        XCTAssertTrue(BridgeStub.screenshotSchemes.isEmpty, "The phone must never make a screenshot request to an HTTP bridge.")
+        h.voice.stop()
+    }
+
     private var savedBridge: String?
     private var savedDirect: Any?
 
@@ -102,6 +698,7 @@ final class VoiceModelTests: XCTestCase {
         savedDirect = UserDefaults.standard.object(forKey: "voice.openai.enabled")
         // The token comes from the stubbed bridge, never from an OpenAI key this simulator may hold.
         VoiceDirect.enabled = false
+        BridgeStub.resetScreenshots()
         URLProtocol.registerClass(BridgeStub.self)
     }
 
@@ -120,12 +717,14 @@ final class VoiceModelTests: XCTestCase {
         private(set) var microphone: [Bool] = []
         var link: FakeConnection { links.last! }
 
-        @MainActor init(phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
-            let time = FakeTime()
+        @MainActor init(time: FakeTime? = nil, phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
+            let time = time ?? FakeTime()
             self.time = time
             var made: (() -> FakeConnection)!
             var held: ((Bool) -> Void)!
-            voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: phoneTool, holdMicrophone: { held($0) },
+            voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: { name, arguments, cancellation in
+                await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
+            }, holdMicrophone: { held($0) },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link }, time: time.clock)
             made = { [unowned self] in let link = FakeConnection(); self.links.append(link); return link }
             held = { [unowned self] in self.microphone.append($0) }
@@ -136,6 +735,12 @@ final class VoiceModelTests: XCTestCase {
 
         /// Connected, before the server's session.created.
         @MainActor func connect() async { await voice.start() }
+
+        @MainActor func liveTalk(address: String = BridgeStub.liveAddress) async {
+            _ = voice.setBridge(address)
+            await connect()
+            link.play(["type": "session.started"])
+        }
 
         /// Connected and listening.
         @MainActor func talk() async {
@@ -405,22 +1010,46 @@ final class OpenAIStub: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == "api.openai.com" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        var body = request.httpBody ?? Data()
-        if body.isEmpty, let stream = request.httpBodyStream {
-            stream.open()
-            var buffer = [UInt8](repeating: 0, count: 65_536)
-            while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; body.append(buffer, count: n) }
-            stream.close()
-        }
+        let body = requestBody(request)
         Self.session = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["session"] as? [String: Any]
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"value":"ek_test"}"#.utf8))
+        let reply = request.url?.path() == "/v1/live/sessions" ? #"{"transport":{"sdp":"sdp-answer"}}"# : #"{"value":"ek_test"}"#
+        client?.urlProtocol(self, didLoad: Data(reply.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
 }
 
 final class VoiceLanguageTests: XCTestCase {
+    func testDirectLiveVoiceInstructionsAskForTheResultOnly() async throws {
+        URLProtocol.registerClass(OpenAIStub.self)
+        defer { URLProtocol.unregisterClass(OpenAIStub.self) }
+        let answer = try await VoiceDirect.exchangeLiveOffer("offer", model: "gpt-live-1.1", apiKey: "sk-test")
+        XCTAssertEqual(answer, "sdp-answer")
+        let prompt = try XCTUnwrap(OpenAIStub.session?["instructions"] as? String)
+        for rule in ["Act first, then talk.", "Say nothing before or between tool calls.", "Give the verified result in one short sentence."] {
+            XCTAssertTrue(prompt.contains(rule), rule)
+        }
+    }
+
+    func testDirectLiveOfferExposesCancellationOnlyInLive() async throws {
+        URLProtocol.registerClass(OpenAIStub.self)
+        defer { URLProtocol.unregisterClass(OpenAIStub.self) }
+        _ = try await VoiceDirect.exchangeLiveOffer("offer", model: "gpt-live-1.1", apiKey: "sk-test")
+        let session = try XCTUnwrap(OpenAIStub.session)
+        let delegation = try XCTUnwrap(session["delegation"] as? [String: Any])
+        let backend = try XCTUnwrap(delegation["responses"] as? [String: Any])
+        let tools = try XCTUnwrap(backend["tools"] as? [[String: Any]])
+        XCTAssertNotNil(tools.first { $0["name"] as? String == "cancel_current_task" })
+        for owner in [session, backend] {
+            let prompt = try XCTUnwrap(owner["instructions"] as? String)
+            XCTAssertTrue(prompt.contains("cancel_current_task"))
+            XCTAssertTrue(prompt.contains("把停字发过去"))
+        }
+        let realtime = try XCTUnwrap(VoiceDirect.session["tools"] as? [[String: Any]])
+        XCTAssertFalse(realtime.contains { $0["name"] as? String == "cancel_current_task" })
+    }
+
     func testTheLiveSessionHintsChineseTranscriptionWithoutChangingReplyLanguageRules() async throws {
         URLProtocol.registerClass(OpenAIStub.self)
         defer { URLProtocol.unregisterClass(OpenAIStub.self) }
@@ -441,6 +1070,41 @@ extension VoiceModelTests {
     private func following(_ h: Harness) -> (ActivityController, TalkActivity) {
         let activity = ActivityController()
         return (activity, TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false }))
+    }
+
+    func testLiveActivityWaitsForTheNextResponseAndMeasuresThePlayedAnswer() async {
+        let h = Harness(phoneTool: { _, _ in ("Screen is open", false, nil) })
+        let (activity, watcher) = following(h)
+        activity.finishAfter = .seconds(60)
+        await h.liveTalk()
+        h.link.play(["type": "session.input_transcript.delta", "delta": "打开微信。", "start_ms": 0, "end_ms": 400],
+                    ["type": "session.delegation.created", "delegation": ["id": "d1", "response_id": "r1"]])
+        h.link.backend("response.created", ["response": ["id": "r1"]])
+        h.link.call("open", "do")
+        await h.time.settle()
+        activity.update { $0.phase = .working; $0.headline = "Open WeChat" }
+        activity.record(step: "Open WeChat", ok: true)
+        XCTAssertTrue(h.link.sent.contains { $0["type"] as? String == "response.create" })
+        h.link.backend("response.completed", ["response": ["id": "r1"]])
+        await h.time.settle()
+        XCTAssertEqual(activity.state.phase, .working, "The first response finished, but the continuation is still queued.")
+
+        h.link.backend("response.created", ["response": ["id": "r2"]])
+        h.link.backend("response.completed", ["response": ["id": "r2"]])
+        h.link.play(["type": "session.output_transcript.delta", "delta": "微信已打开。", "start_ms": 1400, "end_ms": 1600])
+        await h.time.settle()
+        XCTAssertNil(h.voice.lastTurnMS, "A transcript is not proof that the answer started playing.")
+        XCTAssertEqual(activity.state.phase, .working)
+        h.link.remoteSpeech = true
+        await h.time.advance(1.5)
+        XCTAssertGreaterThanOrEqual(h.voice.lastTurnMS ?? 0, 1400)
+        h.link.remoteSpeech = false
+        for _ in 0..<3 { await h.time.advance(0.2) }
+        XCTAssertEqual(activity.state.phase, .done)
+        XCTAssertEqual(activity.state.face.content, "微信已打开。")
+        h.voice.stop()
+        withExtendedLifetime(watcher) {}
+        activity.end()
     }
 
     /// ESP-954: a talk's run of steps finishes when the talk's turn is over, not by the quiet wait while
