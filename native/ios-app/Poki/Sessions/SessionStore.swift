@@ -83,7 +83,7 @@ struct SavedSession: Codable, Identifiable, Equatable {
         Conversation: \(String(title.prefix(240)))
         Latest task: \(String((continuationTask ?? title).prefix(1200)))
         Last outcome: \(outcome?.rawValue ?? (live ? "interrupted" : "unknown")).
-        The following is a size-limited excerpt of the saved conversation and tool results. Earlier text or long tool outputs may be abbreviated; an omitted result is unknown, not success. Recheck the current screen before continuing; do not repeat completed sends, submissions or purchases. Previously attached images are not restored; ask for them again if needed. Resume only the task the owner identifies here. If it is unclear, ask which task they mean. Long-term notes and saved routines are not unfinished tasks or authorization to execute them.
+        The following is a size-limited excerpt of the saved conversation and tool results. Earlier text or long tool outputs may be abbreviated; an omitted result is unknown, not success. Recheck the current screen before continuing; do not repeat completed sends, submissions or purchases. Previously attached images are not restored; ask for them again if needed. Resume only the task the owner identifies here. If it is unclear, ask which task they mean. Long-term notes and saved skills are not unfinished tasks or authorization to execute them.
         \(transcript)
         Recent tool results:
         \(results)

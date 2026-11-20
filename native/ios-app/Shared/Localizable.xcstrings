@@ -37201,6 +37201,182 @@
         }
       }
     },
+    "%@ skills" : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "%@ skills"
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "%@ 个技能"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "%@ 個技能"
+                }
+            }
+        }
+    },
+    "Clear all skills and notes on this iPhone?" : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Clear all skills and notes on this iPhone?"
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "要清除此 iPhone 上的所有技能和备忘吗？"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "要清除此 iPhone 上的所有技能和備忘嗎？"
+                }
+            }
+        }
+    },
+    "Exports all skills and notes into a single file. Importing merges entries and keeps newer versions. You can also back up and restore data using Poki Setup on your computer." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Exports all skills and notes into a single file. Importing merges entries and keeps newer versions. You can also back up and restore data using Poki Setup on your computer."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "将全部技能和备忘导出为单个文件。导入时会合并条目，同名技能保留较新版本。你也可以通过电脑上的 Poki Setup 备份和恢复此文件。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "將全部技能和備忘匯出為單一檔案。匯入時會合併項目，同名技能保留較新版本。你也可以透過電腦上的 Poki Setup 備份與還原此檔案。"
+                }
+            }
+        }
+    },
+    "Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "记录每次技能的运行结果、停止位置和耗时，不包含输入文本，用于帮助维护者提升技能稳定性。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "記錄每次技能的執行結果、停止位置與耗時，不包含輸入文字，用於協助維護者提升技能穩定性。"
+                }
+            }
+        }
+    },
+    "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "“记忆”会保存供所有外部智能体共享的技能和备忘。诊断包含日志、检查、后台保持、地址与实时活动预览。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "「記憶」會儲存供所有外部智慧體共享的技能和備忘。診斷包含日誌、檢查、背景保持、位址與即時動態預覽。"
+                }
+            }
+        }
+    },
+    "The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Poki 在此 iPhone 上用于对话和语音的模型。“记忆”会保存供所有外部智能体共享的技能和备忘。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Poki 在此 iPhone 上用於對話和語音的模型。「記憶」會儲存供所有外部智慧體共享的技能和備忘。"
+                }
+            }
+        }
+    },
+    "When a task succeeds, an agent saves a skill to repeat it in one step next time, and stops if the screen changes. Swipe to forget." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "When a task succeeds, an agent saves a skill to repeat it in one step next time, and stops if the screen changes. Swipe to forget."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "任务完成后，Poki 会将其保存为技能，方便下次一步重放，并在界面变化时自动停下。向左轻扫可忘记技能。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "任務完成後，Poki 會將其儲存為技能，方便下次一步重放，並在畫面變化時自動停下。向左輕掃可忘記技能。"
+                }
+            }
+        }
+    },
+    "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents." : {
+        "localizations" : {
+            "en" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "iOS shows the automation banner only during an active session. Poki opens it on agent request and closes it when idle. Memory stores skills and notes shared across agents."
+                }
+            },
+            "zh-Hans" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "仅在自动操作状态开启时显示系统横幅，智能体请求时开启、闲置时关闭。“记忆”会保存供所有外部智能体共享的技能和备忘。"
+                }
+            },
+            "zh-Hant" : {
+                "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "僅在自動操作狀態開啟時顯示系統橫幅，智慧體請求時開啟、閒置時關閉。「記憶」會儲存供所有外部智慧體共享的技能和備忘。"
+                }
+            }
+        }
+    },
     "Apps by Name" : {
       "localizations" : {
         "zh-Hans" : {

@@ -1299,7 +1299,7 @@ final class MCPTests: XCTestCase {
         let note = await post(core, ["jsonrpc": "2.0", "method": "notifications/initialized"], session: session)
         XCTAssertEqual(note.status, 202)
         let list = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/list"], session: session).body)
-        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "routines", "status"])
+        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "skills", "status"])
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "look", "arguments": .object([:])]], session: session).body)
         XCTAssertEqual(call["result"]?["content"]?[1]?["type"], "image")
         XCTAssertEqual(call["result"]?["isError"], false)
@@ -1344,7 +1344,7 @@ final class MCPTests: XCTestCase {
         let session = try XCTUnwrap(initialized.headers["mcp-session-id"])
         XCTAssertEqual(signals.value, [.started(id: session, client: "claude-ai", version: "1.2")])
         let list = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 2, "method": "tools/list"], session: session).body)
-        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "routines", "status", "ask_poki"])
+        XCTAssertEqual(list["result"]?["tools"]?.array?.compactMap { $0["name"]?.string }, ["look", "do", "skills", "status", "ask_poki"])
         XCTAssertEqual(list["result"]?["tools"]?[4]?["inputSchema"]?["required"]?[0], "task")
         let call = try JSON.parse(await post(core, ["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": "ask_poki", "arguments": ["task": "read the time"]]], session: session).body)
         let text = call["result"]?["content"]?[0]?["text"]?.string ?? ""

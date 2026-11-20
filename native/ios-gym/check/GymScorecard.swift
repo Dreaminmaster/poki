@@ -112,8 +112,8 @@ public final class GymScorecard {
         let first = text.split(separator: "\n").first.map(String.init) ?? ""
         var notes: [String] = []
         if Double(ms) / 1000 > budget { notes.append("slow: over \(Int(budget)) s") }
-        // The routines tool reads and writes the phone's memory only: it never sends a picture.
-        if pictures.isEmpty, name != "routines" { notes.append("no picture") }
+        // The skills tool reads and writes the phone's memory only: it never sends a picture.
+        if pictures.isEmpty, name != "skills", name != "routines" { notes.append("no picture") }
         log("=== \(scenario) / \(step): \(ms) ms, \(pictures.count) image(s)\n\(text)\n")
         rows.append(GymRow(scenario: scenario, step: step, ms: ms, ok: notes.isEmpty, note: notes.isEmpty ? first.prefix(70).description : notes.joined(separator: "; ")))
         for n in notes { failures.append("\(scenario) / \(step): \(n)") }

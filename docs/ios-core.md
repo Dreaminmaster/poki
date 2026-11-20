@@ -202,7 +202,7 @@ The computer-use profile, ported from `src/cua.mjs` and `src/cua-wda.mjs`:
 
 - `look {full?}`: read the screen now.
 - `do {actions: [...], full?, finish?}`: run actions in order, then read the screen.
-- `routines {action, ...}`: the phone's saved routines and the owner's notes (see below), without touching the device.
+- `skills {action, ...}`: the phone's saved skills and the owner's notes (see below), without touching the device. `routines` still works as an alias for older clients, but it is no longer listed.
 - `status`: the relay, the runner and pending approvals, without touching the device.
 
 Each answer is facts only: the app in front, numbered elements, what each action did (`sent`,
@@ -342,11 +342,11 @@ Each answer is facts only: the app in front, numbered elements, what each action
   two reads match (default 3 s, at most 10 s, within the action time). Not seeing it is reported, not
   an error. There is no "paused" line after a wait.
 
-### Routines and notes (memory shared by every agent)
+### Skills and notes (memory shared by every agent)
 
 Every `do` action of a task is recorded by what it touched (role, label, identifier and the point),
-never by its number. `routines {action: "save", name, description, read?, expect?}` keeps that path
-on the phone; the next first `look` of a task in that app names the saved routines, and
+never by its number. `skills {action: "save", name, description, read?, expect?}` keeps that path
+on the phone; the next first `look` of a task in that app names the saved skills, and
 `do {actions: [{run: "name"}]}` (or `{run: {name, with: {text_1: "…"}}}`) repeats it in one call.
 
 - **A run waits for each target and never guesses.** Each step reads the tree until exactly one
@@ -356,15 +356,15 @@ on the phone; the next first `look` of a task in that app names the saved routin
 - **The end check** is up to three labels new on the last screen (or `expect`); `read: ["label"]`
   answers `label = value` from the last screen, so a lookup is one call.
 - **Typed text becomes a parameter** (`{{text_1}}`); text typed into a secure field is never kept.
-- **Self-learning**: runs, successes and the last stop are counted; two stops in a row mark a routine
+- **Self-learning**: runs, successes and the last stop are counted; two stops in a row mark a skill
   stale and it is no longer offered until it is saved again. `finish` offers to save a task of two or
-  more steps that no routine ran. Any MCP client can list, show, save, edit, rename, forget, export and
-  import routines, and `remember`/`forget_note` the owner's notes (`PokiCore.memoryBrief(for:)` gives
+  more steps that no skill ran. Any MCP client can list, show, save, edit, rename, forget, export and
+  import skills, and `remember`/`forget_note` the owner's notes (`PokiCore.memoryBrief(for:)` gives
   the on-device chat the same brief).
-- **A path is a routine sent once.** `do {actions: [{path: {goal, steps: [{tap: "Compose"}, {type: "…",
+- **A path is a skill sent once.** `do {actions: [{path: {goal, steps: [{tap: "Compose"}, {type: "…",
   into: "Search"}, …]}}]}` runs up to 20 steps across screens in one call, each target named by the
   text it shows (or `{label, type}`, or a point), never by a number from an earlier read. Each step
-  waits for its target as a routine's does and is held by the same approval rules. Nothing is saved.
+  waits for its target as a skill's does and is held by the same approval rules. Nothing is saved.
   With no model at all: a step's `expect: "text"` must be on screen after it (read from the tree, up
   to 3 s) or the path stops there; `optional: true` leaves a step out when its target is not on a
   screen that holds still; the path's `dismiss: ["Not Now", "Later"]` names controls that are closed
@@ -386,8 +386,8 @@ on the phone; the next first `look` of a task in that app names the saved routin
   since two tree reads cost about as much.
 - **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
   is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
-  The owner locks a note or a routine: no agent forgets, edits, renames or saves over a locked one
-  (the answer says so), a newer import does not replace it, and the 50-note and 200-routine caps drop
+  The owner locks a note or a skill: no agent forgets, edits, renames or saves over a locked one
+  (the answer says so), a newer import does not replace it, and the 50-note and 200-skill caps drop
   the oldest unlocked items instead. An agent's import brings nothing locked and nothing marked as the
   owner's, and a client named `owner`, `import`, `restore` or `Dream` is still an agent (its changes show
   as "an MCP client"). Every addition, change and forget is logged (`changes`, the latest
@@ -396,7 +396,7 @@ on the phone; the next first `look` of a task in that app names the saved routin
   after the first release and are all optional, so an older file opens with everything in it; a file
   that cannot be read at all is copied aside (`agent-memory.unreadable-<time>.json`), not written over.
 - **Moving and backing up**: `export` answers the whole memory as JSON (schema
-  `poki.agent-backup/1`); `import {data}` merges one in (newer wins). The app keeps a copy at
+  `poki.agent-backup/2`; `import` still reads `/1` files, whose `routines` list becomes the skills); `import {data}` merges one in (newer wins). The app keeps a copy at
   `Documents/AgentBackup/poki-agent-backup.json`, which Poki Setup copies off and puts back; a copy put
   back is merged in at launch. Maintainers get `debugBundle()` (schema `poki.agent-debug/1`, with the
   run log) from Settings › Advanced.
@@ -824,11 +824,11 @@ PR #11 for HID input; this is its counterpart for the phone's own XCTest path.
 | Tapping an element whose label starts with a payment word, or is a short label (four words or fewer) holding one (Pay, Buy, Purchase, Subscribe, Transfer, Send money, 支付, 付款, 购买, 转账, …); a name inside a longer text is not an action (`Contact photo for Best Buy`) | approval |
 | Deleting (Delete, Remove, Erase, Reset, 删除, 移除, 抹掉, …) | approval |
 | Sending a message or mail (Send, 发送 in Messages, Mail, WeChat, WhatsApp, Telegram, …) | approval |
-| Apps on a list (banking, wallets; by bundle id) | approval for every tap, long press, typing, key, drag, pinch and `back`, and for running a routine there; waiting, handing the screen to the owner, swipes, `scroll_to`, the hardware buttons, Home and launches go without asking |
+| Apps on a list (banking, wallets; by bundle id) | approval for every tap, long press, typing, key, drag, pinch and `back`, and for running a skill there; waiting, handing the screen to the owner, swipes, `scroll_to`, the hardware buttons, Home and launches go without asking |
 | Any tap in Phone or FaceTime, also on a point with nothing readable under it | approval |
 | Return in a messaging app, as a key or a newline in typed text (WeChat, WhatsApp and Telegram send on it), except in a search field (the one tapped, or typed into by its number, in that `do` before any action in it may have changed the screen) | approval |
 
-The app each action lands in is followed through the `launch`, Home and `run` actions before it in the same `do`, as for the Poki check, and the actions after one of them are checked against that app. After a `launch` or `run` its screen has not been read, so any tap there asks (a tap on the home screen after Home does not). After a tap, key, swipe or drag in the same `do` the screen may have changed: a press at a point (a tap, long press, drag or pinch given as [x, y]) is sent back for a fresh read, and in a messaging app any tap asks. Every other press after such an action, or after a `launch`, Home or `run` (a numbered tap, typing into a numbered field, `back`, a swipe or `scroll_to`), is judged again just before it goes, on a fresh read of what lies where it touches: the read comes no sooner after the action that changed the screen than the pause the final read waits after it (a short wait between them does not shorten it), and it is taken once two reads in a row agree, or after 2 s on a screen that never holds still: one that needs approval there is not sent, nor anything after it, and the answer says to send it again in a new `do`. A press the owner approved goes on while it is still the step they approved. A routine run checks each step it sends by the same rules, on the screen read just before the step (for a step on an element, the read that found it), and stops there so the agent sends that step as an ordinary `do` and the owner is asked. An unanswered request ends by itself when its 120 s are up (`approvalEnded` with no answer), whether or not another call comes.
+The app each action lands in is followed through the `launch`, Home and `run` actions before it in the same `do`, as for the Poki check, and the actions after one of them are checked against that app. After a `launch` or `run` its screen has not been read, so any tap there asks (a tap on the home screen after Home does not). After a tap, key, swipe or drag in the same `do` the screen may have changed: a press at a point (a tap, long press, drag or pinch given as [x, y]) is sent back for a fresh read, and in a messaging app any tap asks. Every other press after such an action, or after a `launch`, Home or `run` (a numbered tap, typing into a numbered field, `back`, a swipe or `scroll_to`), is judged again just before it goes, on a fresh read of what lies where it touches: the read comes no sooner after the action that changed the screen than the pause the final read waits after it (a short wait between them does not shorten it), and it is taken once two reads in a row agree, or after 2 s on a screen that never holds still: one that needs approval there is not sent, nor anything after it, and the answer says to send it again in a new `do`. A press the owner approved goes on while it is still the step they approved. A skill run checks each step it sends by the same rules, on the screen read just before the step (for a step on an element, the read that found it), and stops there so the agent sends that step as an ordinary `do` and the owner is asked. An unanswered request ends by itself when its 120 s are up (`approvalEnded` with no answer), whether or not another call comes.
 
 The app turns these rules on unless the owner has Agents › Safety › Approvals on Never, which is what a phone that saved no approval setting reads as (a new install, from 0.4.3; before that Ask Me was on by default, and alpha builds had it off). Approvals and the Activity Log sit together in the Agents page's Safety section. Approvals has a selector and a four-stop slider. Ask Me: With Message Reply (the step is refused, the agent asks in the chat, and the owner's yes there or in the notification's reply field lets the next try through), With Confirmation (Allow / Don't Allow on the Live Activity, a notification or the chat), or Never. Sensitivity (the slider, from asks least to asks most): Permissive, Balanced and Strict let the chat model approve steps in Poki's own chat and live call that fit what the owner asked for (auto-approval), and only the rest reach the owner; Ask for Everything approves nothing automatically. An owner who never chose, with none of the approval keys saved, gets Never (new in 0.4.3; before that With Confirmation at Ask for Everything, as 0.3.1 (752) asked for every step), and an owner who saved any one of them is read as before. One who had turned Ask Me off in 752 gets Never, and one who had turned the Auto-Classifier on gets With Message Reply at their sensitivity (Balanced if they never moved it). A choice kept by 0.3.0 or by the test build after 752 (`approvals.mode`, which 752 ignored) counts only where it asks more than that: such an owner gets the stricter of the two, and a choice that cannot be read gets With Confirmation at Ask for Everything. A card for a step that Never does not reach (a message, a call, a password) has Don't ask again, which allows that step and turns approvals off: a hold in the chat, Face ID or the passcode on the Live Activity and the notification. Payments, deletions and Wallet cards do not have it. An outside agent's step is always a confirmation. One answer from the owner covers the sensitive steps that follow within 45 s in the same app. Every decision is on a card in the chat and in the Activity Log, which keeps its latest 5,000 entries and filters by approvals, failures and agent.
 
