@@ -36,12 +36,45 @@ runs:
     # Duo. Its own UIScreen is then the letterbox, the picture XCTest takes is the whole panel, and
     # every screen read ends in screenshot_does_not_match_active_display (#419). So the IPA is
     # built with the newest released Xcode of the runner, and never with an SDK before 27.1.
+    # A runner image can carry a new Xcode before that Xcode's Metal Toolchain (image 20261119:
+    # Xcode 27.3 without it, and the build ended in "cannot execute tool 'metal' due to missing
+    # Metal Toolchain"). The newest Xcode that has the toolchain is used, and only when none has
+    # it is the toolchain downloaded for the newest one.
     - name: Use the newest Xcode
       shell: bash
       run: |
         set -euo pipefail
-        XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
-        sudo xcode-select -s "$XCODE/Contents/Developer"
+        # Read from what xcrun says, not from its exit code: only these two answers mean no toolchain.
+        has_metal() {
+          local said
+          said="$(xcrun metal --version 2>&1 || true)"
+          case "$said" in
+            *"missing Metal Toolchain"*|*"unable to find utility"*) return 1 ;;
+          esac
+          return 0
+        }
+        NEWEST=""
+        XCODE=""
+        for candidate in $(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V -r); do
+          [ -n "$NEWEST" ] || NEWEST="$candidate"
+          sudo xcode-select -s "$candidate/Contents/Developer"
+          # An older Xcode is no way out once its SDK is before 27.1 (see above).
+          [ "$(printf '%s\n' 27.1 "$(xcrun --sdk iphoneos --show-sdk-version)" | sort -V | head -1)" = 27.1 ] || break
+          if has_metal; then XCODE="$candidate"; break; fi
+          echo "$candidate has no Metal Toolchain"
+        done
+        if [ -z "$XCODE" ]; then
+          XCODE="$NEWEST"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          echo "No Xcode on this runner has the Metal Toolchain: downloading it for $XCODE"
+          xcodebuild -downloadComponent MetalToolchain
+          if ! has_metal; then
+            echo "::error::The Metal Toolchain is missing for $XCODE and could not be downloaded."
+            exit 1
+          fi
+        elif [ "$XCODE" != "$NEWEST" ]; then
+          echo "::warning::$NEWEST has no Metal Toolchain on this runner. Building with $XCODE."
+        fi
         xcodebuild -version
         SDK="$(xcrun --sdk iphoneos --show-sdk-version)"
         echo "iOS SDK $SDK"
