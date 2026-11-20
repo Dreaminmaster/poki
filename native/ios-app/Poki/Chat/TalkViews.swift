@@ -17,7 +17,7 @@ struct VoiceKeyNotice: View {
     var close: () -> Void
 
     var body: some View {
-        let off = ModelKeys.hasKey(.openai) && !VoiceDirect.enabled
+        let off = ModelKeys.hasKey(.openai) && VoiceDirect.account == nil
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "key.fill").font(.body.weight(.semibold)).foregroundStyle(.white)

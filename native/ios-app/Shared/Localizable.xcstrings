@@ -35022,22 +35022,6 @@
         }
       }
     },
-    "Read in 10 Seconds" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10 秒后读取"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "10 秒後讀取"
-          }
-        }
-      }
-    },
     "1 Week" : {
       "localizations" : {
         "zh-Hans" : {
@@ -36222,22 +36206,6 @@
         }
       }
     },
-    "An experiment. Poki reads the text of the app in front only after you start here, and keeps it on this iPhone. Leave Poki after starting. A run ends when its time is up, when the iPhone locks, or when iOS ends Poki's time in the background. Password fields are left out, and nothing is sent anywhere." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "实验功能。只有在这里开始后，Poki 才会读取前台应用的文字，并只保存在这台 iPhone 上。开始后请离开 Poki。时间到、iPhone 锁定，或 iOS 结束 Poki 的后台时间时，读取就会停止。密码栏不会被读取，也不会发送到任何地方。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "實驗功能。只有在這裡開始後，Poki 才會讀取前景 App 的文字，並只保存在這台 iPhone 上。開始後請離開 Poki。時間到、iPhone 鎖定，或 iOS 結束 Poki 的背景時間時，讀取就會停止。密碼欄不會被讀取，也不會傳送到任何地方。"
-          }
-        }
-      }
-    },
     "Enter the Screen History PIN to forget this. It cannot be brought back." : {
       "localizations" : {
         "zh-Hans" : {
@@ -36302,6 +36270,70 @@
         }
       }
     },
+    "Experimental Feature" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实验性功能"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "實驗性功能"
+          }
+        }
+      }
+    },
+    "Recording" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在记录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在記錄"
+          }
+        }
+      }
+    },
+    "Paused, Waiting to Resume" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停，等待恢复"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暫停，等待恢復"
+          }
+        }
+      }
+    },
+    "While on, Poki records screen text whenever iOS lets it run. It pauses when the iPhone locks or iOS suspends Poki, and resumes when Poki can run again. Text is stored on this iPhone, excluding apps you leave out and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开后，只要 iOS 允许 Poki 运行，Poki 就会记录屏幕文字。iPhone 锁定或 iOS 暂停 Poki 时会暂停记录，Poki 恢复运行后会继续。文字保存在这台 iPhone 上。排除的 App 和密码栏不会被记录。Poki 或已连接的智能体查询屏幕记录时，相关文字可能会发送给所选的 AI 服务商或已连接的智能体。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟後，只要 iOS 允許 Poki 執行，Poki 就會記錄螢幕文字。iPhone 鎖定或 iOS 暫停 Poki 時會暫停記錄，Poki 恢復執行後會繼續。文字儲存在這部 iPhone 上。排除的 App 和密碼欄不會被記錄。Poki 或已連線的代理程式查詢螢幕記錄時，相關文字可能會傳送給所選的 AI 服務供應商或已連線的代理程式。"
+          }
+        }
+      }
+    },
     "Screen History" : {
       "localizations" : {
         "zh-Hans" : {
@@ -36362,38 +36394,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "螢幕記錄設定"
-          }
-        }
-      }
-    },
-    "Short Run" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "限时读取"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "限時讀取"
-          }
-        }
-      }
-    },
-    "Start Short Run" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开始限时读取"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開始限時讀取"
           }
         }
       }
@@ -36978,22 +36978,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看記錄"
-          }
-        }
-      }
-    },
-    "Screen History stores text on this iPhone and leaves out excluded apps and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "屏幕记录将文字保存在这台 iPhone 上，不记录已排除的应用和密码栏。当 Poki 或已连接的代理查询屏幕记录时，相关文字可能会发送给所选 AI 服务提供商或已连接的代理。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "螢幕記錄將文字保存在這台 iPhone 上，不記錄已排除的應用程式和密碼欄。當 Poki 或已連線的代理程式查詢螢幕記錄時，相關文字可能會傳送給所選 AI 服務提供者或已連線的代理程式。"
           }
         }
       }
@@ -38348,6 +38332,414 @@
           "stringUnit": {
             "state": "translated",
             "value": "甜心開衫"
+          }
+        }
+      }
+    },
+    "Responses" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Responses"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Responses"
+          }
+        }
+      }
+    },
+    "Chat Completions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat Completions"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat Completions"
+          }
+        }
+      }
+    },
+    "Any server that speaks the OpenAI Responses API or chat completions API. Poki sends the key, if any, only to this service’s addresses." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任何支持 OpenAI Responses API 或 Chat Completions API 的服务器。如有密钥，Poki 只会把它发送到这个服务的地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任何支援 OpenAI Responses API 或 Chat Completions API 的伺服器。如有金鑰，Poki 只會把它傳送到這個服務的位址。"
+          }
+        }
+      }
+    },
+    "%@, straight from this iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，直接从这台 iPhone 连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，直接從這台 iPhone 連線"
+          }
+        }
+      }
+    },
+    "Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open. Dictation in the message field works with this account." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音需要 Realtime API，OpenAI API 密钥或自定义地址可以提供。消息栏中的听写可以使用此账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時語音需要 Realtime API，OpenAI API 金鑰或自訂位址可以提供。訊息欄中的聽寫可以使用此帳戶。"
+          }
+        }
+      }
+    },
+    "Live voice is a spoken conversation with the Realtime API at this service’s first address. It listens, taps and types, and answers out loud. Turn it on only if the service offers the Realtime API." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音通过这个服务第一个地址上的 Realtime API 进行语音对话，支持边听边点按和输入，并朗读回答。仅当该服务提供 Realtime API 时才开启。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時語音透過這個服務第一個位址上的 Realtime API 進行語音對話，支援邊聽邊點按和輸入，並朗讀回答。僅當該服務提供 Realtime API 時才開啟。"
+          }
+        }
+      }
+    },
+    "Text chat works with every account. Live voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有账户都可用于文字聊天。实时语音需要 OpenAI API 密钥或提供 Realtime API 的自定义地址。自定义地址可以添加任意多个。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有帳戶都可用於文字聊天。即時語音需要 OpenAI API 金鑰或提供 Realtime API 的自訂位址。自訂位址可以新增任意多個。"
+          }
+        }
+      }
+    },
+    "Key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密钥"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "金鑰"
+          }
+        }
+      }
+    },
+    "Saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存"
+          }
+        }
+      }
+    },
+    "Edit Service" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑服务"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編輯服務"
+          }
+        }
+      }
+    },
+    "Poki uses the first address. When it can’t be reached, Poki tries the next ones that speak the same API, in order." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用第一个地址。无法连接时，Poki 会依次尝试使用相同 API 的其他地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用第一個位址。無法連線時，Poki 會依序嘗試使用相同 API 的其他位址。"
+          }
+        }
+      }
+    },
+    "Live voice needs the Realtime API at the first address." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时语音需要第一个地址提供 Realtime API。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時語音需要第一個位址提供 Realtime API。"
+          }
+        }
+      }
+    },
+    "Delete Service" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除服务"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除服務"
+          }
+        }
+      }
+    },
+    "Automatic, uses %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动，使用 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動，使用 %@"
+          }
+        }
+      }
+    },
+    "Backup, %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备用，%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備用，%@"
+          }
+        }
+      }
+    },
+    "Name, such as Company Gateway" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称，例如公司网关"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名稱，例如公司閘道"
+          }
+        }
+      }
+    },
+    "API" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API"
+          }
+        }
+      }
+    },
+    "Add Address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增位址"
+          }
+        }
+      }
+    },
+    "Poki uses the first address and tries the others in order when it can’t be reached. Automatic tries the Responses API first and uses chat completions where an address has none." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用第一个地址，无法连接时依次尝试其他地址。“自动”会先尝试 Responses API，地址不支持时改用 Chat Completions。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用第一個位址，無法連線時依序嘗試其他位址。「自動」會先嘗試 Responses API，位址不支援時改用 Chat Completions。"
+          }
+        }
+      }
+    },
+    "Reasoning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推理"
+          }
+        }
+      }
+    },
+    "Choose a model from the service, or enter its ID manually. Automatic reasoning is on for models Poki knows as reasoning models, such as GPT-6.1 Sol." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从服务中选择模型，或手动输入模型 ID。对于 Poki 认识的推理模型（例如 GPT-6.1 Sol），“自动”会开启推理。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從服務中選擇模型，或手動輸入模型 ID。對於 Poki 認識的推理模型（例如 GPT-6.1 Sol），「自動」會開啟推理。"
+          }
+        }
+      }
+    },
+    "The saved key is only sent to the addresses it was saved for. Enter it again to use it with the new address." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存的密钥只会发送到保存时的地址。如需用于新地址，请重新输入。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已儲存的金鑰只會傳送到儲存時的位址。如需用於新位址，請重新輸入。"
+          }
+        }
+      }
+    },
+    "Add Custom Endpoint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加自定义地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增自訂位址"
+          }
+        }
+      }
+    },
+    "Answered in the %@ API" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过 %@ API 应答"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "透過 %@ API 回應"
           }
         }
       }

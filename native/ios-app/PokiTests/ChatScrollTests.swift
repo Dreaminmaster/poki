@@ -111,7 +111,14 @@ final class ChatScrollTests: XCTestCase {
             SelectedSearchChatHost(feed: feed)
         }.environment(app).environment(chat))
         func visible(_ entry: ChatEntry) -> Bool {
-            Self.accessible(in: window, matching: { $0 == "chat.entry.\(entry.id)" }) != nil
+            let words: String
+            switch entry.kind {
+            case .poki(let text), .you(let text, _): words = text
+            default: return false
+            }
+            return Self.accessible(in: window, matching: {
+                $0 == "chat.entry.\(entry.id)" || $0 == words
+            }) != nil
         }
         func select(_ entry: ChatEntry, query: String) {
             let snapshot = ConversationSearchIndex.snapshot(in: [saved])
@@ -120,6 +127,7 @@ final class ChatScrollTests: XCTestCase {
             feed.navigation.open(ConversationSearchJump(sessionID: saved.id, entryID: entry.id), preview: false)
             settle { feed.navigation.pending == nil && visible(entry) }
             XCTAssertNil(feed.navigation.pending, "The transcript must acknowledge the one-shot scroll")
+            captureNavigationEvidence(window, name: "Search hit - " + query)
             XCTAssertTrue(visible(entry), "Selected row vanished after scroll acknowledgement")
             XCTAssertFalse(visible(unrelated))
         }
@@ -157,8 +165,9 @@ final class ChatScrollTests: XCTestCase {
     /// Recent Updates, and activate its Source button (not the routing predicate).
     /// All history and memory records are synthetic and stored in a disposable directory.
     private func assertMemorySourceNavigation(wide: Bool, running: Bool) throws {
-        let keys = ["pokiScreen", "pokiChat", "pokiDraft", "memory.recentSeen",
-                    "chat.provider", "chat.customURL", "chat.customModel"]
+        let keys = ["pokiScreen", "pokiChat", "pokiHome", "pokiDraft", "memory.recentSeen",
+                    "chat.provider", "chat.customURL", "chat.customModel",
+                    CustomProviders.storeKey, CustomProviders.selectedKey, "chat.model.custom", "models.enabled.custom"]
         let original = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let chats = folder.appendingPathComponent("chats", isDirectory: true)
@@ -171,7 +180,8 @@ final class ChatScrollTests: XCTestCase {
             defaults.removePersistentDomain(forName: suite)
         }
         UserDefaults.standard.removeObject(forKey: "pokiChat")
-        UserDefaults.standard.set("memoryRecent", forKey: "pokiScreen")
+        UserDefaults.standard.removeObject(forKey: "pokiScreen")
+        UserDefaults.standard.removeObject(forKey: "pokiHome")
         let draft = "Synthetic unsent composer draft"
         UserDefaults.standard.set(draft, forKey: "pokiDraft")
         let marker = "Synthetic saved source transcript"
@@ -195,9 +205,11 @@ final class ChatScrollTests: XCTestCase {
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         app.inProcessReadyForProbe()
         let server = try FakeCompletions(replies: [FakeCompletions.text("Held synthetic answer")], holdFirstReply: {})
+        let provider = CustomProviders.upsert(CustomProvider(endpoints: [
+            CustomEndpoint(url: "http://127.0.0.1:\(server.port)/v1", api: .chatCompletions)
+        ], model: "fixture"))
         ModelKeys.selectedProvider = .custom
-        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
-        ModelKeys.customModel = "fixture"
+        ModelKeys.selectedModel = CustomProviders.choiceID(provider.id, provider.model)
         let chat = ChatModel(app: app, store: store)
         chat.restore(active)
         defer { chat.stop() }
@@ -216,19 +228,28 @@ final class ChatScrollTests: XCTestCase {
         root.view.frame = CGRect(origin: .zero, size: size)
         container.view.addSubview(root.view)
         root.didMove(toParent: container)
-        let window = try show(Color.clear)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = DuoPaneWindow(windowScene: scene)
+        self.window = window
         window.frame = CGRect(origin: .zero, size: size)
         window.rootViewController = container
+        window.makeKeyAndVisible()
         defer { container.dismiss(animated: false) }
-        let changeID = "memory.openChange.\(change.id)"
-        settle(for: 5) { Self.accessible(in: window, matching: { $0 == changeID }) != nil }
-        let memory = try XCTUnwrap(Self.accessible(in: window, matching: { $0 == changeID }))
-        XCTAssertTrue(memory.accessibilityActivate(), "Open actual Memory Recent Updates row")
-        settle(for: 5) { Self.accessible(in: window, matching: { $0 == "memory.source.conversation" }) != nil }
-        let link = try XCTUnwrap(Self.accessible(in: window, matching: { $0 == "memory.source.conversation" }))
-        XCTAssertTrue(link.accessibilityActivate(), "Activate actual Memory Source button")
-        settle(for: 5) { Self.accessible(in: window, matching: { $0 == targetID }) != nil }
-        XCTAssertNotNil(Self.accessible(in: window, matching: { $0 == targetID }), "The actual source message, not merely its page title, must be visible")
+        settle(for: 5) { Self.find(LaunchCurtain.Stage.self, in: root.view) == nil
+            && Self.find(CapsuleTextView.self, in: root.view)?.plainText == draft }
+        XCTAssertEqual(root.view.bounds.width, size.width, accuracy: 1)
+        XCTAssertEqual(Self.find(CapsuleTextView.self, in: root.view)?.plainText, draft)
+        // Enter Settings only after layout has settled, rather than presenting a narrow cover
+        // on launch while the wide layout has not yet been measured.
+        if !wide { try activate("chat.threads", in: window) }
+        try activate("threads.settings", in: window)
+        try activate("moreSettings.memory", in: window, scroll: true)
+        try activate("memory.recent", in: window)
+        try activate("memory.openChange.\(change.id)", in: window)
+        try activate("memory.source.conversation", in: window)
+        settle(for: 5) { Self.accessible(in: window, matching: { $0 == targetID || $0 == marker }) != nil }
+        captureNavigationEvidence(window, name: wide ? "Wide Memory source transcript" : "Narrow live Memory source transcript")
+        XCTAssertNotNil(Self.accessible(in: window, matching: { $0 == targetID || $0 == marker }), "The actual source message, not merely its page title, must be visible")
         XCTAssertEqual(chat.sessionID, active.id)
         XCTAssertEqual(chat.entries, originalEntries)
         XCTAssertEqual(chat.running, running)
@@ -240,8 +261,59 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(chat.sessionID, active.id)
     }
 
+    private func activate(_ id: String, in window: UIWindow, scroll: Bool = false) throws {
+        // UIKit presents the Settings sheet/cover with its own hosting controller;
+        // inspect its presented tree, not just subviews of the original chat.
+        settle(for: 3) { Self.accessible(in: window, matching: { $0 == id }) != nil }
+        if scroll && Self.accessible(in: window, matching: { $0 == id }) == nil {
+            if let content = Self.frontController(window.rootViewController)?.view,
+               let list = Self.transcriptScroll(in: content) {
+                let end = max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                for offset in stride(from: CGFloat(0), through: end + 1, by: max(100, list.bounds.height / 2)) {
+                    list.setContentOffset(CGPoint(x: 0, y: min(offset, end)), animated: false)
+                    pump(0.2)
+                    if Self.accessible(in: window, matching: { $0 == id }) != nil { break }
+                }
+            }
+        }
+        if Self.accessible(in: window, matching: { $0 == id }) == nil {
+            captureNavigationEvidence(window, name: "Missing " + id)
+        }
+        let item = try XCTUnwrap(Self.accessible(in: window, matching: { $0 == id }), "Missing actual control " + id)
+        XCTAssertTrue(item.accessibilityActivate(), "Activate actual control " + id)
+        pump(0.5)
+    }
+
+    private func captureNavigationEvidence(_ window: UIWindow, name: String) {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private static func frontController(_ root: UIViewController?) -> UIViewController? {
+        guard let root else { return nil }
+        if let presented = root.presentedViewController, !presented.isBeingDismissed {
+            return frontController(presented)
+        }
+        for child in root.children.reversed() {
+            if let front = frontController(child), front !== child { return front }
+        }
+        return root
+    }
+
     private static func accessible(in root: UIView, matching matches: (String) -> Bool) -> NSObject? {
-        var pending: [NSObject] = [root]
+        let front = (root as? UIWindow).flatMap { frontController($0.rootViewController)?.view }
+        let searchRoot = front ?? root
+        // UIKit sometimes exposes hosted elements through the controller, and
+        // sometimes through the window's accessibility containers.
+        var pending: [NSObject] = [searchRoot]
+        if let controller = (root as? UIWindow).flatMap({ frontController($0.rootViewController) }) {
+            pending.append(controller)
+        }
         var visited = Set<ObjectIdentifier>()
         while let item = pending.popLast() {
             guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
@@ -249,7 +321,7 @@ final class ChatScrollTests: XCTestCase {
             let id = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
             if id.map(matches) == true || item.accessibilityLabel.map(matches) == true {
                 let frame = item.accessibilityFrame
-                if !frame.isEmpty, root.convert(root.bounds, to: nil).intersects(frame) { return item }
+                if !frame.isEmpty, (root.accessibilityFrame.isEmpty ? root.convert(root.bounds, to: nil) : root.accessibilityFrame).intersects(frame) { return item }
             }
             if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
             if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
@@ -261,6 +333,111 @@ final class ChatScrollTests: XCTestCase {
             }
         }
         return nil
+    }
+
+    func testHomeComposerKeepsItsMarginsInTheDuoLeftPane() throws {
+        let (reference, actual) = try duoHomeComposerFrames(size: CGSize(width: 469, height: 669), inDuoSplitView: true)
+        XCTAssertEqual(actual.minX, reference.minX, accuracy: 1, "The left safe area moved the composer")
+        XCTAssertEqual(actual.maxX, reference.maxX, accuracy: 1, "The right side of the composer moved")
+    }
+
+    func testFoldedDuoHomeRespectsItsLeadingSafeArea() throws {
+        try XCTSkipUnless(PKInProcess.canUseDuoSplitView(), "Run on the iPhone Duo simulator.")
+        XCTAssertFalse(PKInProcess.shared().hasDuoCompanion)
+        let (reference, actual) = try duoHomeComposerFrames()
+        XCTAssertGreaterThan(actual.minX, reference.minX, "The folded home must respond to the leading safe area")
+        XCTAssertGreaterThanOrEqual(actual.minX, 84, "The folded home must keep the composer inside the safe area")
+    }
+
+    func testDuoHomeRestoresItsLeadingSafeAreaWhenFoldedDuringACompanionTask() throws {
+        try XCTSkipUnless(PKInProcess.canUseDuoSplitView(), "Run on the iPhone Duo simulator.")
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let appWindow = try XCTUnwrap(scene.keyWindow)
+        let root = try XCTUnwrap(appWindow.rootViewController)
+        let fullFrame = appWindow.frame
+        let savedInsets = root.additionalSafeAreaInsets
+        let native = PKInProcess.shared()
+        defer {
+            native.endDuoCompanionTask()
+            root.additionalSafeAreaInsets = savedInsets
+            appWindow.frame = fullFrame
+        }
+
+        func composerFrame() -> CGRect? {
+            guard let field = Self.find(CapsuleTextView.self, in: root.view), field.bounds.width > 100 else { return nil }
+            return field.convert(field.bounds, to: root.view)
+        }
+
+        let leadingInset: CGFloat = 84
+        // Simulate the system resizing the app window while its scene stays visible.
+        appWindow.frame.size.width = (fullFrame.width * 0.75).rounded(.down)
+        root.additionalSafeAreaInsets.left = leadingInset
+        settle {
+            Self.find(LaunchCurtain.Stage.self, in: root.view) == nil &&
+                (composerFrame()?.minX ?? leadingInset) < leadingInset
+        }
+        XCTAssertLessThan(try XCTUnwrap(composerFrame()).minX, leadingInset, "Split View must reclaim the leading inset")
+        guard native.beginDuoCompanionTask() else { return XCTFail("The task must start in Split View") }
+
+        appWindow.frame = fullFrame
+        settle { (composerFrame()?.minX ?? 0) >= leadingInset }
+        XCTAssertEqual(root.view.bounds.width, fullFrame.width, accuracy: 1)
+        XCTAssertEqual(native.duoPlacement(), "fullscreen")
+        XCTAssertTrue(native.hasDuoCompanionTask)
+        let foldedHome = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: foldedHome)
+        attachment.name = "Folded Duo home during a companion task"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(composerFrame()).minX, leadingInset,
+                                   "The folded home must keep the composer inside the safe area during the task")
+    }
+
+    private func duoHomeComposerFrames(size: CGSize? = nil, inDuoSplitView: Bool = false) throws -> (CGRect, CGRect) {
+        try XCTSkipUnless(PKInProcess.canUseDuoSplitView(), "Run on the iPhone Duo simulator.")
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let root = UIHostingController(rootView: RootView().environment(app).environment(chat)
+            .environment(\.inDuoSplitView, inDuoSplitView))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let size = size ?? scene.screen.bounds.size
+        let pane = DuoPaneWindow(windowScene: scene)
+        pane.frame = CGRect(origin: .zero, size: size)
+        pane.rootViewController = root
+        pane.makeKeyAndVisible()
+        window = pane
+
+        func composerFrame() throws -> CGRect {
+            settle {
+                Self.find(LaunchCurtain.Stage.self, in: root.view) == nil
+                    && (Self.find(CapsuleTextView.self, in: root.view)?.bounds.width ?? 0) > 100
+            }
+            XCTAssertNil(Self.find(LaunchCurtain.Stage.self, in: root.view))
+            let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: root.view))
+            return field.convert(field.bounds, to: root.view)
+        }
+
+        let reference = try composerFrame()
+        XCTAssertEqual(root.view.bounds.width, size.width, accuracy: 1)
+        XCTAssertEqual(root.view.bounds.height, size.height, accuracy: 1)
+        XCTAssertEqual(root.view.safeAreaInsets.left, 0, accuracy: 1)
+        XCTAssertEqual(root.view.safeAreaInsets.right, 0, accuracy: 1)
+        root.additionalSafeAreaInsets.left = 84
+        settle { root.view.safeAreaInsets.left == 84 }
+        XCTAssertEqual(root.view.safeAreaInsets.left, 84, accuracy: 1)
+        root.view.layoutIfNeeded()
+        let actual = try composerFrame()
+
+        let screenshot = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: screenshot)
+        attachment.name = "Duo home with a leading safe area"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        return (reference, actual)
     }
 
     func testResizingTheRootKeepsAnUnsentDraftInTheSameConversation() throws {
@@ -408,4 +585,8 @@ final class ChatScrollTests: XCTestCase {
                 .bottomBar { Color.clear.frame(height: 80) }
         }
     }
+}
+
+private final class DuoPaneWindow: UIWindow {
+    override var safeAreaInsets: UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 34, right: 0) }
 }
