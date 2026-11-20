@@ -192,9 +192,13 @@ sessions on your OpenAI key and move the phone through your Mac. Run it only on 
 and pass `--host <this Mac's LAN address>` to keep it off other interfaces (for example a VPN).
 
 Enter `http://<Mac>:47830/voice/<secret>` in Voice (the secret is in `voice-bridge.json` in the
-state directory). `get_ios_version` is answered on the phone;
-the bridge runs the tools that move the phone (`open_settings`, `read_screen`, `open_app`, `tap_text`,
-`go_home`) through the Mac's Poki MCP.
+state directory). By default, Poki runs phone tools on the phone. With `--mac-tools`, the bridge
+runs `open_settings`, `read_screen`, `open_app`, `tap_text`, and `go_home` through the Mac's Poki MCP.
+`get_ios_version` is answered on the phone in both modes.
+
+With the default HTTP bridge, Live voice reads visible text and numbered screen elements.
+Screenshot descriptions are available with a direct OpenAI connection or an HTTPS bridge URL
+with a trusted certificate. Screenshot requests to the bridge do not follow redirects.
 
 - Each function call runs once, keyed by its `call_id`, in the app and again in the bridge.
 - `tap_text` is held by Poki's approvals, like an agent's `do`: the bridge first says what it would tap

@@ -5,14 +5,15 @@
 //   OPENAI_API_KEY=... POKI_MCP_STATE_DIR=... node bin/voice-bridge.mjs [--port 47830] [--host 0.0.0.0] [--device <id>] [--mac-tools]
 //
 // By default the phone moves itself: look and do run in Poki on the phone (PokiCore and its runner, the
-// relay's tools), and the bridge only hands out credentials. --mac-tools instead offers the tools below
-// that move the phone through this Mac's Poki MCP (it must be running).
+// relay's tools), and the bridge negotiates the voice connection. --mac-tools instead offers the
+// tools below that move the phone through this Mac's Poki MCP (it must be running).
 //
 // The phone opens http://<this Mac>:<port>/voice/<secret>/ ; the secret is in voice-bridge.json in the
 // state directory. Endpoints under that prefix:
 //   GET  token   Live session metadata for transport=live, or a short-lived Realtime client secret
 //   POST session {sdp}: exchanges a WebRTC offer for a Live SDP answer
-//   POST screen  {image}: describes one screenshot without adding it to the Live conversation
+//   POST screen  {image}: describes one screenshot without adding it to the Live conversation.
+//                The phone only sends screenshots to a bridge configured with an HTTPS URL.
 //   POST tool    {call_id, name, arguments}: runs one voice tool once; the same call_id never runs twice.
 //                tap_text first comes without `checked` and taps nothing: the answer is {state: "check", app,
 //                target}, the element it would tap and the app in front. The phone checks that with Poki's

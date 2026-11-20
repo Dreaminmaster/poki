@@ -78,14 +78,24 @@ struct VoiceBridge: Equatable {
         return try JSONDecoder().decode(SDPAnswer.self, from: data).sdp
     }
 
-    func describeLiveScreen(_ image: String) async throws -> String {
+    var liveScreenReader: ((String) async throws -> String)? {
+        guard base.scheme == "https" else { return nil }
+        return describeLiveScreen
+    }
+
+    private func describeLiveScreen(_ image: String) async throws -> String {
         var request = URLRequest(url: base.appending(path: "screen"), timeoutInterval: 25)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["image": image])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request, delegate: NoScreenRedirect())
         try Self.check(response, data)
         return try JSONDecoder().decode(ScreenDescription.self, from: data).text
+    }
+
+    private final class NoScreenRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? { nil }
     }
 
     /// `checked`: for tap_text, the app and element text the phone cleared; without it tap_text only answers "check".
@@ -302,7 +312,7 @@ final class VoiceModel {
     private var usesLive = false
     private var liveSpeechStopped = false
     private var liveStopRequested = false
-    private var liveStopPrefix: (text: String, end: Int)?
+    private var liveStopUtterance: (candidate: String?, end: Int, ended: Bool)?
     private var liveDelegation: String?
     private var stoppedDelegations: Set<String> = []
     private var liveScreenDescription: ((String) async throws -> String)?
@@ -341,6 +351,7 @@ final class VoiceModel {
     /// A conversation opened this soon after the last one ended is told the last turns.
     static let carryOver: TimeInterval = 5 * 60
     static let carriedLines = 6
+    private static let liveNoteByteLimit = 480
     /// How long the conversation waits for something it is owed (the end of the person's speech, an answer,
     /// the end of the audio) while the server says nothing, before it ends. Shorter in the background, where
     /// the microphone should not stay on for an event that never comes.
@@ -552,7 +563,7 @@ final class VoiceModel {
             localTools = Set(token.local_tools)
             if usesLive {
                 if let key { liveScreenDescription = { try await VoiceDirect.describeLiveScreen($0, apiKey: key) } }
-                else { liveScreenDescription = bridge?.describeLiveScreen }
+                else { liveScreenDescription = bridge?.liveScreenReader }
                 try await link.connectLive(microphone: microphone, direct: direct) { sdp in
                     if let key { return try await VoiceDirect.exchangeLiveOffer(sdp, model: token.model, apiKey: key) }
                     guard let bridge else { throw VoiceError.noBridge }
@@ -651,7 +662,7 @@ final class VoiceModel {
         liveCaptions.removeAll()
         liveSpeechStopped = false
         liveStopRequested = false
-        liveStopPrefix = nil
+        liveStopUtterance = nil
         liveDelegation = nil
         liveScreenDescription = nil
         liveResultReceipts.removeAll()
@@ -788,8 +799,35 @@ final class VoiceModel {
     private func carryOver(_ link: VoiceConnection) {
         guard let lastEnd, time.now().timeIntervalSince(lastEnd) < Self.carryOver else { return }
         let turns = lastLines.suffix(Self.carriedLines)
+        if usesLive {
+            link.send(note(liveCarryOver(turns)))
+            return
+        }
         let said = turns.map { "\($0.role == .you ? "User" : "Poki"): \($0.text)" }.joined(separator: "\n")
         link.send(note("This continues a conversation from a few minutes ago. What was said, oldest first. Use it only as context for what the user says next; do not answer or repeat it.\n" + said))
+    }
+
+    private func liveCarryOver(_ turns: ArraySlice<VoiceLine>) -> String {
+        let header = "Recent conversation for context only. Do not repeat prior actions or answers."
+        var available = Self.liveNoteByteLimit - header.utf8.count
+        // Preserve the latest request even when Poki's reply is long.
+        var priority = [turns.lastIndex { $0.role == .you }, turns.indices.last].compactMap { $0 }
+        if priority.count == 2 && priority[0] == priority[1] { priority.removeLast() }
+        var kept: [Int: String] = [:]
+        for (position, index) in priority.enumerated() {
+            let label = turns[index].role == .you ? "\nUser: " : "\nPoki: "
+            let limit = available / (priority.count - position) - label.utf8.count
+            let line = label + Self.liveExcerpt(turns[index].text, bytes: limit)
+            kept[index] = line
+            available -= line.utf8.count
+        }
+        for index in turns.indices.reversed() where kept[index] == nil {
+            let line = "\n\(turns[index].role == .you ? "User" : "Poki"): \(turns[index].text)"
+            guard line.utf8.count <= available else { continue }
+            kept[index] = line
+            available -= line.utf8.count
+        }
+        return header + turns.indices.compactMap { kept[$0] }.joined()
     }
 
     // MARK: Dictation
@@ -1045,16 +1083,27 @@ final class VoiceModel {
         }
     }
 
-    /// Only possible stop prefixes join across fragments. Subtitle lines have their own grouping.
+    /// An ASR fragment can finish a dictation instead of starting a stop command.
     private func updateLiveStop(_ fragment: String, start: Int, end: Int) -> Bool {
         let trim = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
         let command = fragment.trimmingCharacters(in: trim).lowercased()
-        guard !command.isEmpty else { return false }
-        let stops = ["停", "停止", "停一下", "别说了", "stop", "stop talking"]
-        let joined = liveStopPrefix.flatMap { start - $0.end <= 250 ? $0.text + command : nil } ?? command
-        let prefix = [joined, command].first { partial in stops.contains { $0.hasPrefix(partial) } }
-        liveStopPrefix = prefix.map { ($0, end) }
-        if stops.contains(command) || stops.contains(joined) {
+        let ended = fragment.trimmingCharacters(in: .whitespacesAndNewlines).last.map { ".?!。？！".contains($0) } ?? false
+        let previous = liveStopUtterance
+        guard !command.isEmpty else {
+            if ended, let previous { liveStopUtterance = (previous.candidate, max(end, previous.end), true) }
+            return false
+        }
+        let stops = ["停", "停止", "停一下", "别说了", "stop", "stoptalking"]
+        let compact = command.filter { !$0.isWhitespace }
+        let candidate: String?
+        if let previous, !previous.ended, start - previous.end < 200 {
+            candidate = previous.candidate.map { $0 + compact }
+        } else {
+            candidate = compact
+        }
+        let prefix = candidate.flatMap { part in stops.contains { $0.hasPrefix(part) } ? part : nil }
+        liveStopUtterance = (prefix, max(end, previous?.end ?? end), ended)
+        if let prefix, stops.contains(prefix) {
             liveStopRequested = true
             wantsResponse = false
             if let liveDelegation { stoppedDelegations.insert(liveDelegation) }
@@ -1096,6 +1145,7 @@ final class VoiceModel {
         log.add("voice", "tool \(call.name) \(call.arguments)")
         let local = localTools.contains(call.name)
         let bridge = bridge
+        let live = usesLive
         let describeScreen = liveScreenDescription
         Task {
             var state = VoiceCall.State.done
@@ -1137,11 +1187,17 @@ final class VoiceModel {
                 output = "error: no voice bridge"
                 state = .failed
             }
-            if let describeScreen, let screen, call.session == session, ready, !stopped(call),
-               let image = VoiceScreen.dataURL(screen), let description = try? await describeScreen(image) {
-                output += "\nCurrent screen description: " + description
+            if live, let screen {
+                if let describeScreen {
+                    if call.session == session, ready, !stopped(call), let image = VoiceScreen.dataURL(screen),
+                       let description = try? await describeScreen(image) {
+                        output += "\nCurrent screen description: " + description
+                    }
+                } else {
+                    output += "\nScreenshot descriptions require an HTTPS voice bridge. Use the screen elements."
+                }
             }
-            finish(call.id, state: state, output: output, screen: describeScreen == nil ? screen : nil)
+            finish(call.id, state: state, output: output, screen: live ? nil : screen)
         }
     }
 
@@ -1310,11 +1366,30 @@ final class VoiceModel {
 
     private func note(_ text: String, spoken: Bool = false) -> [String: Any] {
         if usesLive {
-            // Every token consumes at least one byte. Leave room for a partial UTF-8 character.
+            // Every token consumes at least one byte.
             return ["type": spoken ? "session.commentary.append" : "session.instructions.append",
-                    "delegation_id": NSNull(), "content": String(decoding: text.utf8.prefix(480), as: UTF8.self)]
+                    "delegation_id": NSNull(), "content": Self.utf8Prefix(text, bytes: Self.liveNoteByteLimit)]
         }
         return ["type": "conversation.item.create", "item": ["type": "message", "role": "system", "content": [["type": "input_text", "text": text]]]]
+    }
+
+    private static func liveExcerpt(_ text: String, bytes limit: Int) -> String {
+        guard text.utf8.count > limit else { return text }
+        let separator = " … "
+        let budget = limit - separator.utf8.count
+        let head = utf8Prefix(text, bytes: budget / 2)
+        let tail = text.utf8.suffix(budget - budget / 2).drop { $0 & 0xC0 == 0x80 }
+        return head + separator + String(decoding: tail, as: UTF8.self)
+    }
+
+    private static func utf8Prefix(_ text: String, bytes limit: Int) -> String {
+        let bytes = text.utf8
+        guard let end = bytes.index(bytes.startIndex, offsetBy: limit, limitedBy: bytes.endIndex) else { return text }
+        var boundary = end
+        while boundary != bytes.endIndex, bytes[boundary] & 0xC0 == 0x80 {
+            bytes.formIndex(before: &boundary)
+        }
+        return String(decoding: bytes[..<boundary], as: UTF8.self)
     }
 
     private static func describe(_ call: VoiceCall) -> String {
