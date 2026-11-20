@@ -6,7 +6,7 @@ import SwiftUI
 /// (its own look and do calls), or a task an outside agent handed to Poki (`ask_poki`).
 struct SavedSession: Codable, Identifiable, Equatable {
     enum Kind: String, Codable { case poki, agent, handoff, voice }
-    enum Outcome: String, Codable { case done, failed, stopped }
+    enum Outcome: String, Codable { case done, failed, stopped, interrupted }
 
     var id: String
     var kind: Kind
@@ -33,21 +33,28 @@ struct SavedSession: Codable, Identifiable, Equatable {
     /// Its age for the limit: the later of its last change and its return from the archive.
     var keptSince: Date { max(updated, unarchived ?? .distantPast) }
 
-    mutating func stopInterruptedTask() {
+    mutating func markInterruptedTask() {
         guard live else { return }
         live = false
-        outcome = .stopped
+        outcome = .interrupted
         guard kind == .poki || kind == .handoff,
               let request = entries.lastIndex(where: {
                   switch $0.kind { case .you, .request: return true; default: return false }
-              }),
-              let card = entries[(request + 1)...].lastIndex(where: {
-                  if case .plan = $0.kind { return true }
-                  return false
-              }),
-              entries[card].ended == nil else { return }
-        entries[card].ended = updated
-        entries[card].stopped = true
+              }) else { return }
+        let cards = entries[(request + 1)...].indices.filter {
+            if case .plan = entries[$0].kind { return true }
+            return false
+        }
+        if let card = cards.last(where: { entries[$0].ended == nil }) {
+            entries[card].ended = updated
+            entries[card].interrupted = true
+        } else if cards.isEmpty {
+            var card = ChatEntry(.plan([]))
+            card.at = entries[request].at
+            card.ended = updated
+            card.interrupted = true
+            entries.insert(card, at: request + 1)
+        }
     }
 
     var continuationTask: String? {
@@ -189,7 +196,7 @@ enum ChatContinuation {
             if named.count == 1 { return .resume(named[0]) }
         }
         guard isRequest(text) else { return .newTask }
-        let stopped = recent.filter { $0.outcome == .stopped || $0.live }
+        let stopped = recent.filter { $0.outcome == .stopped || $0.outcome == .interrupted || $0.live }
         let generic: Set<String> = [
             "继续", "繼續", "接着做", "接著做", "继续任务", "繼續任務", "继续刚才的任务", "繼續剛才的任務",
             "继续上次的任务",
@@ -372,7 +379,7 @@ final class SessionStore {
                     for url in slice {
                         guard let data = try? Data(contentsOf: url) else { batchComplete = false; continue }
                         if var session = try? decoder.decode(SavedSession.self, from: data) {
-                            session.stopInterruptedTask()
+                            session.markInterruptedTask()
                             loaded.append(session)
                         }
                     }
@@ -473,7 +480,7 @@ final class SessionStore {
             if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
         }
         // Nothing is live after a relaunch.
-        for i in loaded.indices { loaded[i].stopInterruptedTask() }
+        for i in loaded.indices { loaded[i].markInterruptedTask() }
         sessions = loaded.sorted { $0.updated > $1.updated }
         trim()
         return complete

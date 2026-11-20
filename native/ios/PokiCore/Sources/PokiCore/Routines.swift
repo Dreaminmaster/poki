@@ -1124,7 +1124,7 @@ extension Computer {
 
     /// `{run: "name"}` or `{run: {name, with: {text_1: "…"}}}`: replays a saved skill's steps in order,
     /// waiting for each target on screen and stopping cleanly at the first screen that differs.
-    func runSkill(_ spec: JSON, until: Double, onReplayed: (@Sendable (String) async -> Void)? = nil) async throws -> String {
+    func runSkill(_ spec: JSON, until: Double, onReplayStarted: (@Sendable (String) async -> Void)? = nil) async throws -> String {
         let name = spec.string ?? spec["name"]?.string ?? spec["skill"]?.string ?? ""
         guard let store = memory, let skill = store.skill(named: name), !skill.stale else {
             let known = memory?.usableSkills.prefix(12).map { "\"\($0.name)\"" }.joined(separator: ", ") ?? ""
@@ -1132,7 +1132,10 @@ extension Computer {
         }
         var params = skill.params
         if case .object(let given) = spec["with"] { for (k, v) in given { if let t = v.text { params[k] = t } } }
-        return try await replay(skill, params: params, store: store, until: until, onReplayed: onReplayed)
+        try Task.checkCancellation()
+        await onReplayStarted?(skill.name)
+        try Task.checkCancellation()
+        return try await replay(skill, params: params, store: store, until: until)
     }
 
     /// `{path: {goal, steps: [...]}}`: steps the agent wrote ahead for screens it has not read yet, each
@@ -1199,7 +1202,7 @@ extension Computer {
     /// The steps of a saved routine (`store` given) or of a path, in order. Each step waits for its
     /// target and acts only on a single match. A step whose target is missing stops the run, with
     /// nothing sent for it; a path may first close what it said may be closed (its `dismiss`).
-    func replay(_ skill: Skill, params: [String: String], store: SkillStore?, until: Double, onReplayed: (@Sendable (String) async -> Void)? = nil) async throws -> String {
+    func replay(_ skill: Skill, params: [String: String], store: SkillStore?, until: Double) async throws -> String {
         let saved = store != nil
         let title = saved ? "run \"\(skill.name)\"" : "path"
         let started = now()
@@ -1439,7 +1442,6 @@ extension Computer {
             }
         }
 
-        if saved { await onReplayed?(skill.name) }
         if skill.steps.last?.expect?.isEmpty == false { runEndedOnARead = true }
         // The end check and the readout.
         var outcome = "\(skill.steps.count) steps in \(Self.seconds(now() - started)) s"

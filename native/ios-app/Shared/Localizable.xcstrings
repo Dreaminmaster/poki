@@ -7456,6 +7456,22 @@
         }
       }
     },
+    "Task interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中斷"
+          }
+        }
+      }
+    },
     "IPv6 present, %@" : {
       "localizations" : {
         "zh-Hans" : {

@@ -291,7 +291,9 @@ struct ChatView: View {
         for entry in chat.entries.reversed() {
             switch entry.kind {
             case .note(.problem): return false
-            case .plan(let steps): return entry.stopped != true && !steps.contains { $0.state == .failed }
+            case .plan(let steps):
+                return entry.stopped != true && entry.interrupted != true && entry.failed != true && entry.saveFailed != true
+                    && !steps.contains { $0.state == .failed }
             case .you, .request: return false
             default: continue
             }
@@ -766,7 +768,8 @@ struct ChatTranscript<Footer: View>: View {
             let current = live && entry.ended == nil && isLastPlan(i)
             TaskCard(title: entry.title ?? ask.title, steps: steps,
                      state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver,
-                                          stopped: entry.stopped == true, saveFailed: entry.saveFailed == true || entry.failed == true),
+                                          stopped: entry.stopped == true, saveFailed: entry.saveFailed == true || entry.failed == true,
+                                          interrupted: entry.interrupted == true),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
                      asker: ask.from, app: current ? app : entry.app, usedBrowser: ChatEntry.taskUsedBrowser(in: entries, at: i), started: entry.at, shot: current ? shot : nil,

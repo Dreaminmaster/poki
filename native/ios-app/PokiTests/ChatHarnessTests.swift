@@ -934,6 +934,10 @@ final class ChatHarnessTests: XCTestCase {
         let retryCard = try XCTUnwrap(cards.first { $0.id != oldCard.id })
         XCTAssertEqual(retryCard.memoryUse?.notes.map(\.id), [note.id])
         XCTAssertNotNil(retryCard.ended, "Only the active retry card was interrupted")
+        guard case .plan(let steps) = retryCard.kind else { return XCTFail("Missing retry task card") }
+        XCTAssertEqual(TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
+                                     stopped: retryCard.stopped == true, saveFailed: retryCard.failed == true,
+                                     interrupted: retryCard.interrupted == true), .interrupted)
         XCTAssertEqual(reopened.outcome?.rawValue, "interrupted")
     }
 
@@ -1381,7 +1385,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
     }
 
-    func testStoppedConversationReachesModelAfterReload() async throws {
+    func testInterruptedConversationReachesModelAfterReload() async throws {
         let waiting = expectation(description: "model received the published plan")
         let ended = expectation(description: "stopped task ended")
         let firstEnded = expectation(description: "earlier task completed")
@@ -1412,7 +1416,7 @@ final class ChatHarnessTests: XCTestCase {
         ChatModel.afterTask = nil
         SessionStore.shared.flush()
 
-        XCTAssertEqual(saved.outcome, .stopped, "an interrupted live task must replace the earlier task's done outcome")
+        XCTAssertEqual(saved.outcome, .interrupted, "an interrupted live task must replace the earlier task's done outcome")
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")

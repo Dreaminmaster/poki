@@ -61,6 +61,7 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
+        parts.append("When a saved memory changes a phone or browser action, include its ID in used_memory_ids on that action's tool call. Do not wait until finish_task to report it. For a memory used only to answer, report its ID with finish_task. Do not report memories you only read.")
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
@@ -106,7 +107,7 @@ enum Harness {
     /// The current permission determines which ones are declared for each request.
     static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
         if !inSplitView {
-            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs + [reportPlan, finishTask]
+            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs.map(withActionMemoryIDs) + [reportPlan, finishTask]
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
@@ -127,20 +128,25 @@ enum Harness {
 
     /// PokiCore's catalog: look, do and status.
     static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false)
+    static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
+
+    private static func withActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
+        guard memoryUsingActions.contains(tool.name), var properties = tool.schema["properties"] as? [String: Any] else { return tool }
+        var tool = tool
+        properties["used_memory_ids"] = [
+            "type": "array", "items": string, "maxItems": 20,
+            "description": "IDs of supplied saved memories that changed the actions in this call. Omit this field for memories you only read or that did not affect the actions.",
+        ] as [String: Any]
+        tool.schema["properties"] = properties
+        return tool
+    }
 
     private static func catalogTools(includeScreenHistory: Bool) -> [ToolSpec] {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
-            guard let name = tool["name"] as? String, let description = tool["description"] as? String, var schema = tool["inputSchema"] as? [String: Any] else { return nil }
-            if name == "do", var properties = schema["properties"] as? [String: Any] {
-                properties["used_memory_ids"] = [
-                    "type": "array", "items": string, "maxItems": 20,
-                    "description": "IDs of supplied saved memories that changed the actions in this call. Omit this field for memories you only read or that did not affect the actions.",
-                ] as [String: Any]
-                schema["properties"] = properties
-            }
-            return ToolSpec(name: name, description: description, schema: schema)
+            guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
+            return withActionMemoryIDs(ToolSpec(name: name, description: description, schema: schema))
         }
     }
 
