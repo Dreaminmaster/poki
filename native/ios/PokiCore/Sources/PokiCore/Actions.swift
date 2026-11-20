@@ -300,7 +300,7 @@ extension Computer {
         switch kind {
         case .run:
             runEndedOnARead = false
-            let text = try await runSkill(spec, until: until, onCompleted: onSkillReplayed)
+            let text = try await runSkill(spec, until: until, onReplayed: onSkillReplayed)
             // A run whose end check found its texts has read the screen it ends on: no pause before the read.
             return (runEndedOnARead ? "run_read" : "run", text)
         case .path:
