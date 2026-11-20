@@ -691,7 +691,7 @@ public final class GymScorecard {
         }
         let first = await call("look (the task begins here)", "look")
         let originApp = frontApp(first)
-        let away = await call("launch Settings", "do", ["actions": [["launch": "com.apple.Preferences"], ["wait_until": ["settled": true, "ms": 2000]]]], budget: 25)
+        let away = await call("launch Settings by its localized name", "do", ["actions": [["launch": "设置"], ["wait_until": ["settled": true, "ms": 2000]]]], budget: 25)
         check(away.contains("app: Settings"), "Settings is in front before finish (the task began in \(originApp))")
         let finished = await call("do with finish: true", "do", ["actions": [], "finish": true], budget: 20)
         check(finished.contains("finish: back in \(originApp)"), "the finish line says the phone went back to \(originApp)")
