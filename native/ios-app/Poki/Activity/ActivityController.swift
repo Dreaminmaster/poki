@@ -183,7 +183,7 @@ final class ActivityController {
         self.activity = nil
         // A finished run or a problem stays on the Lock Screen with its final content for a while (HIG:
         // end at once, keep the outcome readable); anything else goes at once.
-        let final: ActivityContent<PokiState>? = state.phase == .done || state.phase == .problem
+        let final: ActivityContent<PokiState>? = state.phase.isRunOutcome || state.phase == .problem
             ? ActivityContent(state: state, staleDate: nil, relevanceScore: 0) : nil
         let policy = dismissalPolicy ?? (final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60)))
         state.guide = nil; state.pin = nil; state.since = nil; state.event = nil; state.previous = nil
@@ -286,6 +286,8 @@ final class ActivityController {
             if state.app == old.app { state.app = nil }
             tally = Tally()
             if planFinished { state.plan = nil; planFinished = false }
+            // What the last run came to belongs to it.
+            state.result = nil; state.task = nil
             AppLog.shared.add("activity", "run started from \(old.phase.rawValue)\(activity == nil ? " with no Live Activity" : "")")
             if state.since == nil { state.since = now }
             // The runner's start and the agent's first step are one start.
@@ -294,11 +296,11 @@ final class ActivityController {
                 setEvent(.started, "Started")
             }
         }
-        if state.phase == .done || state.phase == .idle && state.runnerPaused || state.phase == .pairing || state.phase == .setup {
+        if state.phase.isRunOutcome || state.phase == .idle && state.runnerPaused || state.phase == .pairing || state.phase == .setup {
             runAnnounced = false
         }
         if runPhases.contains(old.phase), !runPhases.contains(state.phase) { logRun("left for \(state.phase.rawValue)") }
-        if state.phase != .done { foldTimer?.cancel() }
+        if !state.phase.isRunOutcome { foldTimer?.cancel() }
         // Into another app mid-run.
         if runPhases.contains(state.phase), let app = state.app, let before = old.app, app != before {
             setEvent(.app, app)
@@ -319,7 +321,7 @@ final class ActivityController {
             alert = critical(approval.question, "")
             remindHalfway(approval)
         }
-        if state.approval == nil, let was = old.approval {
+        if state.approval == nil, let was = old.approval, state.phase != .stopped {
             state.decision = nil
             let approved = state.headline == "Continuing"
             let expired = !approved && was.expires <= now.addingTimeInterval(0.5)
@@ -345,7 +347,7 @@ final class ActivityController {
         }
         if state.stepCount != old.stepCount { inStep = false }
         // The finish timer: re-armed by every change during a run; never fires in the middle of a step.
-        if !chatOwnsCompletion, state.phase == .working, state.approval == nil, state.handoff == nil, state.stepCount > 0 { armFinish() } else { finishTimer?.cancel() }
+        if quietEnds { armFinish() } else { finishTimer?.cancel() }
         return alert
     }
 
@@ -369,6 +371,15 @@ final class ActivityController {
         }
     }
 
+    /// A run of steps counts as finished after `finishAfter` without a new one, for an agent that does
+    /// not say when it is done. Not while the chat's task is under way, and not during a talk with Poki:
+    /// both say when they are done (`finishNow`; the talk's TalkActivity at the end of its turn). Between
+    /// two of their steps the model thinks or speaks, often longer than the wait, and the run read as
+    /// finished while it went on (ESP-954).
+    private var quietEnds: Bool {
+        !chatOwnsCompletion && state.voice == nil && state.phase == .working && state.approval == nil && state.handoff == nil && state.stepCount > 0
+    }
+
     private func armFinish() {
         finishTimer?.cancel()
         let count = state.stepCount
@@ -382,35 +393,56 @@ final class ActivityController {
     /// The local chat can be waiting for its model after a phone step has finished.
     func setChatOwnsCompletion(_ ownsCompletion: Bool) {
         chatOwnsCompletion = ownsCompletion
-        if ownsCompletion { finishTimer?.cancel() }
+        // Handed back without a finish (a stopped task): the quiet wait finishes the run, as before.
+        if quietEnds { armFinish() } else { finishTimer?.cancel() }
     }
 
-    func endStoppedRun() {
+    func stopRun() {
+        guard chatOwnsCompletion || Self.runPhases.contains(state.phase) else { return }
+        chatOwnsCompletion = false
+        inStep = false
+        planFinished = true
+        approvalReminder?.cancel()
+        eventTimer?.cancel()
         update { state in
-            state.phase = .idle
-            state.headline = "Waiting for agent"
-            state.plan = nil
+            state.phase = .stopped
+            state.headline = "Stopped"
+            state.approval = nil
+            state.decision = nil
+            state.handoff = nil
+            state.event = nil
+            state.previous = nil
             state.since = nil
         }
-        end(dismissalPolicy: .immediate)
+        armFold()
     }
 
     /// The chat's task ended: the run is finished now, not after the quiet wait. `alert` false when
     /// the chat tells the owner itself (its reply notification). True when the finish pop-up went to a
-    /// Dynamic Island, so no banner is needed on top of it.
+    /// Dynamic Island, so no banner is needed on top of it. `result` is finish_task's summary of a task
+    /// that succeeded (or, in a talk, what Poki said at its end), `task` the task as the owner asked it:
+    /// the finished run says what it came to.
     @discardableResult
-    func finishNow(alert: Bool) -> Bool {
+    func finishNow(alert: Bool, result: String? = nil, task: String? = nil) -> Bool {
         finishTimer?.cancel()
+        chatOwnsCompletion = false
         guard state.phase == .working, state.approval == nil, state.handoff == nil else {
             if Self.runPhases.contains(state.phase) { AppLog.shared.add("activity", "the run was not marked finished: the activity shows \(state.phase.rawValue)") }
             return false
         }
         inStep = false
+        state.result = result.map(Self.oneLine)
+        state.task = task.map(Self.oneLine)
         return finish(alert: alert)
     }
 
+    /// A line for the Live Activity: the first line, cut short. ActivityKit caps the whole state at 4 KB.
+    private static func oneLine(_ text: String) -> String {
+        String((text.split(whereSeparator: \.isNewline).first ?? "").prefix(80))
+    }
+
     private func finishRun(ifCount count: Int) {
-        guard !chatOwnsCompletion, state.phase == .working, state.approval == nil, !inStep, state.stepCount == count, count > 0 else { return }
+        guard quietEnds, !inStep, state.stepCount == count else { return }
         finish(alert: true)
     }
 
@@ -425,7 +457,7 @@ final class ActivityController {
         state.previous = nil
         state.headline = "Finished"
         setEvent(.finished, "Run finished")
-        let summary = state.runSummary ?? state.doneTitle
+        let summary = state.doneLine ?? state.runTime ?? ""
         let popUp = alert ? ordinary(StatusWord.done.text, summary) : nil
         send(alert: popUp, critical: true)
         armFold()
@@ -449,12 +481,13 @@ final class ActivityController {
         foldTimer?.cancel()
         foldTimer = Task { [weak self, foldAfter] in
             try? await Task.sleep(for: foldAfter)
-            guard !Task.isCancelled, let self, self.state.phase == .done else { return }
+            guard !Task.isCancelled, let self, self.state.phase.isRunOutcome else { return }
             self.update { state in
                 state.phase = .idle
                 state.headline = "Waiting for agent"
                 state.previous = nil; state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil
                 state.since = nil; state.endedAt = nil; state.event = nil; state.plan = nil
+                state.result = nil; state.task = nil
             }
         }
     }

@@ -88,13 +88,9 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                     NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.routines.count)")
+                        SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
-                    NavigationLink(value: DetailsRoute.screenHistory) {
-                        SettingsRow(title: "Screen History", symbol: "rectangle.stack", value: screenHistoryValue)
-                    }
-                    .accessibilityIdentifier("details.screenHistory")
                     NavigationLink(value: DetailsRoute.conversations) {
                         SettingsRow(title: "Archived Conversations", symbol: "archivebox", value: isSample ? "3" : archivedValue)
                     }
@@ -131,6 +127,11 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("details.health")
+                    NavigationLink(value: DetailsRoute.screenHistory) {
+                        SettingsRow(title: "Screen History", caption: "Experimental Feature",
+                                    symbol: "rectangle.stack", value: screenHistoryValue)
+                    }
+                    .accessibilityIdentifier("details.screenHistory")
                     .id(Self.lastRow)
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
@@ -178,9 +179,7 @@ struct PokiDetailsView: View {
                 case .agents:
                     AgentsAndRelayView(path: $path)
                 case .updates:
-                    Form { SigningSection() }
-                        .navigationTitle(AppLocalization.text("Signing & Updates"))
-                        .navigationBarTitleDisplayMode(.inline)
+                    SigningUpdatesPage()
                 case .approvals:
                     ApprovalsSettingsView()
                 case .appearance:
@@ -236,9 +235,13 @@ struct PokiDetailsView: View {
         return AppLocalization.text(LocalizedStringResource(on ? "On" : "Off"))
     }
 
-    private var updateWaits: Bool { !isSample && (model.signer.updateNotReady || model.signer.next?.kind == "update") }
-    /// The version is the page's last line, so the row only speaks up when an update waits.
-    private var updatesValue: String? { updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil }
+    private var updateWaits: Bool { !isSample && (model.signer.sessionExpired || model.signer.updateNotReady || model.signer.next?.kind == "update") }
+    /// The version is the page's last line, so the row only speaks up when an update waits, or when
+    /// Apple's sign-in ran out and nothing renews until the owner signs in again.
+    private var updatesValue: String? {
+        if !isSample, model.signer.sessionExpired { return AppLocalization.text(LocalizedStringResource("Sign In Again")) }
+        return updateWaits ? AppLocalization.text(LocalizedStringResource("Update Available")) : nil
+    }
 
     @AppStorage(Appearance.key) private var appearanceChoice = Appearance.automatic.rawValue
     private var appearance: Appearance { Appearance(rawValue: appearanceChoice) ?? .automatic }
@@ -508,7 +511,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 SettingsHeader("Memory")
             } footer: {
-                Text("The run log lists each routine run, where it stopped and how long it took, with no typed text. It helps the Poki maintainers make routines more reliable.")
+                Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
             }
 
             Section {
@@ -535,7 +538,7 @@ struct AdvancedSettingsView: View {
         .onAppear {
             // The run log is written to tmp for the share sheet, as Memory did it.
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("poki-agent-debug.json")
-            if (try? RoutineStore.shared.debugBundle().write(to: file, options: .atomic)) != nil { runLog = file }
+            if (try? ChatDebugLog.exportBundle().write(to: file, options: .atomic)) != nil { runLog = file }
         }
     }
 }

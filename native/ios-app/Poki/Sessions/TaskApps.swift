@@ -5,8 +5,8 @@ import Foundation
 /// reading of the front app could make any app the phone had been in before.
 ///
 /// In order: the app the task opened (a `launch` in its `do` calls); without one, the app most of its
-/// actions ran in. Poki itself and the home screen never count. Between several, the one the request
-/// names (the last opened, if it names more than one). With none, no app: the row shows no icon rather than a wrong one.
+/// actions ran in. For a named app without a recorded launch, use it only once it has been seen.
+/// Poki itself and the home screen never count.
 @MainActor
 struct TaskApps: Equatable {
     /// The apps the task's `do` calls launched, in order, by key.
@@ -50,8 +50,11 @@ struct TaskApps: Equatable {
     func target(request: String) -> String? {
         var candidates: [String] = []
         for key in launched.isEmpty ? seen : launched where !candidates.contains(key) { candidates.append(key) }
-        guard candidates.count > 1 else { return candidates.first }
         let named = AppIconStore.bundleIDs(namedIn: request)
+        if launched.isEmpty, !named.isEmpty {
+            candidates.removeAll { !named.contains($0) }
+        }
+        guard candidates.count > 1 else { return candidates.first }
         // The last one opened that the request names: an app opened first to look something up (Photos
         // for a dish's name) comes before the app the task is for.
         if let pick = candidates.last(where: named.contains) { return pick }

@@ -161,18 +161,18 @@
         }
       }
     },
-    "Press and hold the Action button to open Poki and start talking. To talk without leaving the app you’re in, choose Shortcut there, then Talk Here. To type a task instead, choose Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
+    "Press and hold the Action button to talk with Poki without leaving the app you’re in. Press and hold it again to end the talk. To open Poki and talk there instead, choose Controls, then Talk to Poki. To type a task, choose Shortcut, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按住操作按钮，打开 Poki 并开始说话。想不离开当前 App 就说话，在那里选「快捷指令」，再选「原地说话」。想输入任务，选「发送任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
+            "value" : "按住操作按钮，不离开当前 App 就能和 Poki 说话，再按住一次就结束。想打开 Poki 在里面说话，选「控制」，再选「和 Poki 说话」。想输入任务，选「快捷指令」，再选「发送任务」。控制中心和锁定屏幕也可以放「和 Poki 说话」。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按住動作按鈕，打開 Poki 並開始說話。想不離開目前的 App 就說話，在那裡選「捷徑」，再選「原地說話」。想輸入任務，選「傳送任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
+            "value" : "按住動作按鈕，不離開目前的 App 就能和 Poki 說話，再按住一次就結束。想打開 Poki 在裡面說話，選「控制項目」，再選「和 Poki 說話」。想輸入任務，選「捷徑」，再選「傳送任務」。控制中心和鎖定畫面也可以放「和 Poki 說話」。"
           }
         }
       }
@@ -257,18 +257,18 @@
         }
       }
     },
-    "Settings › Action Button › Controls › Talk to Poki" : {
+    "Settings › Action Button › Shortcut › Poki Anytime" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "设置 › 操作按钮 › 控制 › 和 Poki 说话"
+            "value" : "设置 › 操作按钮 › 快捷指令 › 随时 Poki"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "設定 › 動作按鈕 › 控制項目 › 和 Poki 說話"
+            "value" : "設定 › 動作按鈕 › 捷徑 › 隨時 Poki"
           }
         }
       }
@@ -321,34 +321,18 @@
         }
       }
     },
-    "Talk to Poki Here" : {
+    "Poki Anytime" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "原地和 Poki 说话"
+            "value" : "随时 Poki"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "原地和 Poki 說話"
-          }
-        }
-      }
-    },
-    "Talk Here" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "原地说话"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "原地說話"
+            "value" : "隨時 Poki"
           }
         }
       }

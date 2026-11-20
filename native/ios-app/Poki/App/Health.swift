@@ -89,7 +89,7 @@ struct Issue: Identifiable {
                 if model.cellularNeedsWiFi, !runner.isRunning {
                     out.append(Issue(id: "cellular", title: AppLocalization.text(LocalizedStringResource("Connect to Wi-Fi first")), text: LoopbackMonitor.needsWiFi, fix: .none))
                 }
-            } else if !model.hasOpenInProcessSession, !model.canStartTasks, runner.code != "local_ddi",
+            } else if !model.hasOpenInProcessSession, !model.canStartTasks, !model.mountedImageStandsIn, runner.code != "local_ddi",
                       (runner.state == "waiting_network" && runner.code != "pairing_port" && !model.loopback.isWorking)
                       || (!model.loopback.isWorking && model.loopback.state != .checking) {
                 out.append(Issue(id: "loopback", title: AppLocalization.text(LocalizedStringResource("Loopback is off")),

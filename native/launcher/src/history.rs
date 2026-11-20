@@ -8,10 +8,10 @@
 //! - `read_once`: one read. Answers with the seconds it took, the apps on screen and the number of
 //!   elements. The screen's text is counted, and returned only when `include_text` is set.
 //! - `watch`: one subscription kept open for `seconds`. Answers with every tree dump as it arrived.
-//! - `run`: a read every `interval_ms` for `duration_s`. Reports each read as it is made, then the
-//!   reads made, the failures and the longest gap between two reads. With `direct_points` and
-//!   `watch` it reads when the phone says that an app came to the front or that the screen moved
-//!   (see `due`), and at the interval only while the phone says nothing.
+//! - `run`: a read every `interval_ms` for `duration_s`, or until canceled with `continuous: true`.
+//!   Reports each read as it is made, then the reads, failures and longest gap. With
+//!   `direct_points` and `watch` it reads when the phone says that an app came to the front or
+//!   that the screen moved (see `due`), and at the interval only while the phone says nothing.
 //!
 //! Nothing is stored. Password fields and keyboard keys are left out of the text before it is counted.
 
@@ -49,7 +49,9 @@ fn lock_screen_only(app: &Value) -> bool {
 /// One subscription of a run's read.
 const DEFAULT_READ_WITHIN: Duration = Duration::from_secs(10);
 
-/// The run in progress. A new run, or `cancel`, moves it on, and the older run ends at its next look.
+/// The run in progress. A new run, or `cancel`, moves it on, and the older run ends at its next
+/// look. A run takes its number in `handle`, before its future is first polled, so a run that is
+/// canceled or replaced before it began ends too.
 static RUN: AtomicU64 = AtomicU64::new(0);
 /// A run that has no tunnel yet tries again every second for its first forty: a run is started
 /// (by the reconnect shortcut) in the few seconds in which a tunnel can be opened, and the proxy
@@ -745,13 +747,19 @@ fn no_tree(attempts: &[ax::Attempt]) -> Failure {
     Failure::new(detail).code("read")
 }
 
-/// Runs one request. `emit` gets a line for every read of a run.
-pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> Result<Value, Failure> {
-    match request["op"].as_str().unwrap_or("") {
-        "read_once" => read_once(&request).await,
-        "watch" => watch(&request).await,
-        "run" => run(&request, emit).await,
-        other => Err(Failure::new(format!("unknown history request \"{other}\"")).code("config")),
+/// Runs one request. `emit` gets a line for every read of a run. A run is the run in progress
+/// from this call on, not from the first poll of its future.
+pub fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> impl Future<Output = Result<Value, Failure>> {
+    let me = (request["op"] == "run").then(|| RUN.fetch_add(1, Ordering::SeqCst) + 1);
+    async move {
+        if let Some(me) = me {
+            return run(&request, emit, me).await;
+        }
+        match request["op"].as_str().unwrap_or("") {
+            "read_once" => read_once(&request).await,
+            "watch" => watch(&request).await,
+            other => Err(Failure::new(format!("unknown history request \"{other}\"")).code("config")),
+        }
     }
 }
 
@@ -829,15 +837,16 @@ enum Round {
     Looked { seen: Option<ax::direct::Seen>, look: Look, tree: Option<Value> },
 }
 
-async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
+/// `me` is the run's number in `RUN`, taken by `handle`.
+async fn run(request: &Value, emit: impl Fn(Value), me: u64) -> Result<Value, Failure> {
     let target = Target::from(request)?;
     let interval = Duration::from_millis(request["interval_ms"].as_u64().unwrap_or(30_000).clamp(1000, 600_000));
-    let duration = Duration::from_secs(request["duration_s"].as_u64().unwrap_or(1800).clamp(10, 86_400));
+    let duration = (request["continuous"].as_bool() != Some(true))
+        .then(|| Duration::from_secs(request["duration_s"].as_u64().unwrap_or(1800).clamp(10, 86_400)));
     let windows = match request["windows_ms"].as_array() {
         Some(_) => windows(request),
         None => vec![DEFAULT_READ_WITHIN],
     };
-    let me = RUN.fetch_add(1, Ordering::SeqCst) + 1;
     // A run may start held (the iPhone is locked, or an agent's task has the screen): it opens its
     // tunnel and reads nothing until it is let go.
     PAUSED.store(request["paused"].as_bool().unwrap_or(false), Ordering::SeqCst);
@@ -900,7 +909,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             break;
         }
         let at = since_start();
-        if at >= duration {
+        if duration.is_some_and(|duration| at >= duration) {
             break;
         }
         let asked = Instant::now();
@@ -1843,8 +1852,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_run_reports_failed_reads_and_ends_when_stopped() {
+    async fn a_run_stops_before_first_poll_or_after_reporting_a_read() {
         let _turn = ONE_RUN.lock().await;
+        let pending = handle(json!({"op": "run", "continuous": true, "pairing_file": "/nonexistent/pairing.plist"}), |_| {
+            panic!("a stopped run must not report a read");
+        });
+        cancel();
+        let stopped = pending.await.unwrap();
+        assert_eq!(stopped["ended"], "stopped");
+        assert_eq!(stopped["failures"], 0);
+
         let lines = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let seen = lines.clone();
         let (first, reported) = tokio::sync::oneshot::channel();

@@ -43,6 +43,10 @@ typedef struct {
 
 /// Finds the pane on the opposite edge of a side-by-side window; CGRectNull for other layouts.
 FOUNDATION_EXPORT CGRect PKPeerPane(CGRect screen, CGRect window);
+/// The upright, full-size AX window, or CGRectNull when its axes cannot be determined.
+FOUNDATION_EXPORT CGRect PKDuoFullWindow(id _Nullable root);
+/// Converts upright points to the physical panel's fixed portrait coordinates.
+FOUNDATION_EXPORT BOOL PKDuoFixedBasis(CGSize size, NSInteger orientation, CGAffineTransform *basis);
 
 /// Returns a launcher touch point only when the visible labels and accessibility frames agree on one target.
 FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> *candidates,
@@ -57,6 +61,15 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// Loads the developer frameworks only. Does not open a session or ask for the passcode.
 - (BOOL)developerFrameworksAvailable;
 + (BOOL)canUseDuoSplitView;
+/// The visible Poki scene on Duo: "left", "right", "fullscreen", or "split-unknown" until a split side is confirmed.
+- (nullable NSString *)duoPlacement;
+@property (nonatomic, readonly) BOOL hasDuoCompanion;
+/// Start tracking a chat task that was submitted from a visible Duo pane.
+- (BOOL)beginDuoCompanionTask;
+/// Bind the companion before the model starts. Call on the runner queue after automation is ready.
+- (BOOL)bindDuoCompanionTarget;
+- (void)endDuoCompanionTask;
+@property (nonatomic, readonly) BOOL hasDuoCompanionTask;
 /// Loads the Developer libraries, opens the daemon session and enables Automation Mode, or reuses an
 /// enable of the same session and generation. Keys: ok, code, detail, generation, reused, seconds.
 - (NSDictionary<NSString *, id> *)prepare;
@@ -89,10 +102,13 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// the viewport (the one noted last stands), as that lookup would wait behind a request testmanagerd is
 /// still serving.
 - (nullable NSData *)screenshot:(NSString *_Nullable *_Nullable)code refreshViewport:(BOOL)refreshViewport;
+/// An explicit companion capture can return its confirmed selection and app with the image.
+- (nullable NSData *)screenshot:(NSString *_Nullable *_Nullable)code refreshViewport:(BOOL)refreshViewport
+                     observation:(NSDictionary *_Nullable *_Nullable)observation;
 /// The latest accessibility request this process gave up on that testmanagerd is still serving: keys
 /// pid (0: the accessibility server, -1: a lookup of the app in front) and seconds. nil when none is.
 - (nullable NSDictionary<NSString *, id> *)unanswered;
-/// The app in front: bundleId, name, pid. Empty when accessibility gives none.
+/// The app in front: bundleId, name, pid, and pokiPane when it is beside Poki.
 - (NSDictionary<NSString *, id> *)frontApp;
 /// Confirms a named app icon or its Split View menu item from the system tree and a fresh local screenshot.
 - (nullable PKOutcome *)openWorkspaceLauncherItem:(NSArray<NSString *> *)labels menu:(BOOL)menu;
@@ -105,8 +121,10 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// The pane used for the latest read, or CGRectNull for a full-screen app. Both the screenshot
 /// and the tree use points relative to the pane. Gestures add its origin back before dispatch.
 @property (nonatomic, readonly) CGRect viewport;
-/// Reads the geometry of Poki's visible scene. Falls back to the main screen when it is hidden.
+/// Current geometry without a new XCTest request, including the last observed full-screen Duo panel.
 - (PKDisplayGeometry)displayGeometry;
+/// Renews the full-screen Duo geometry before reporting the dimensions of a read.
+- (PKDisplayGeometry)readDisplayGeometry;
 /// Sends upright display coordinates using the same display geometry that bounded the gesture.
 - (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry;
 /// The front app's elements in WebDriverAgent's XML source format, and the element with the

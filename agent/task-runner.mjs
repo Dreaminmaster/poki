@@ -221,7 +221,7 @@ export class PhoneTask extends EventEmitter {
   async #startModel(definitions) {
     this.modelStarted = performance.now();
     this.modelToolMilliseconds = this.snapshot.metrics.toolMilliseconds;
-    const instructions = [this.poki.instructions, await readFile(new URL('./skills/iphone-unlock/SKILL.md', import.meta.url), 'utf8'), await readFile(new URL('./prompts/call-draft.md', import.meta.url), 'utf8'), await readFile(new URL('./prompts/pi-app.md', import.meta.url), 'utf8')].join('\n\n');
+    const instructions = [await readFile(new URL('./prompts/pi-app.md', import.meta.url), 'utf8'), this.poki.instructions, await readFile(new URL('./prompts/call-draft.md', import.meta.url), 'utf8'), await readFile(new URL('./skills/iphone-unlock/SKILL.md', import.meta.url), 'utf8')].join('\n\n');
     const dynamicTools = definitions.filter(tool => allowedTools.has(tool.name) && !['poki_mcp_status', 'get_foreground_app'].includes(tool.name)).map(tool => ({
       type: 'function', name: tool.name, description: tool.description + (!observations.has(tool.name) ? '\nA successful action also returns a fresh structured observation, including foreground and element refs. Use it before requesting another observation.' : ''), inputSchema: tool.inputSchema,
     }));
@@ -604,7 +604,7 @@ export class PhoneTask extends EventEmitter {
     const where = this.snapshot.currentStep ? `step ${this.snapshot.currentStep} (${this.snapshot.title}, ${page})` : 'connection setup';
     const attempted = [...new Set(this.calls.filter(call => !observations.has(call.tool)).map(call => call.tool))].join(', ') || 'no device actions';
     let result = error.code === 'device_setup' && /\p{Script=Han}/u.test(this.snapshot.prompt)
-      ? '这台 Mac 的手机读取工具还没准备好，暂时无法操作手机。请先运行 ./bin/setup 安装工具，再重启通道。'
+      ? '这台 Mac 的手机读取工具还没准备好，暂时无法操作手机。请先运行 ./bin/setup 安装工具，再重启渠道。'
       : (/\p{Script=Han}/u.test(this.snapshot.prompt) ? `任务失败。执行到第 ${this.snapshot.currentStep} 步（${this.snapshot.title}，${page}）。${error.code === 'step_timeout' ? `已达到 ${this.stepTimeoutSeconds} 秒时限。` : error.message} 已尝试：${attempted}。结果尚未核实。` : `Failed at ${where}. ${error.message} Tried: ${attempted}. Result remains unverified.`);
     if (error.code === 'verification_timeout') {
       Object.assign(this.verificationAttempt, { status: 'unavailable', reason: error.message, endedAt: new Date().toISOString() });

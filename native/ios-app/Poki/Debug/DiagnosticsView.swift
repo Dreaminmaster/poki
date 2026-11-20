@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Diagnostics, under Setup › Advanced: the proxy's loopback interface, the connection checks and
-/// the phone's addresses. The log has its own page, and switches being tried are in Testing Options.
+/// Diagnostics under Advanced. It shows cellular preparation, connection checks and addresses.
 struct DiagnosticsView: View {
     @Binding var path: [SettingsRoute]
     @State private var results: [ProbeResult] = []
@@ -11,6 +10,9 @@ struct DiagnosticsView: View {
 
     var body: some View {
         Form {
+            if model.automationPath == .inProcess {
+                cellularStartup
+            }
             Section {
                 if let loop = loopbackInterface(addresses) {
                     Text(verbatim: "\(loop.interface)  \(loop.address)").font(.body.monospaced().weight(.semibold))
@@ -48,6 +50,31 @@ struct DiagnosticsView: View {
         .navigationTitle(AppLocalization.text("Diagnostics"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await run() }
+    }
+
+    private var cellularStartup: some View {
+        let preparation = model.cellularPreparation
+        let imageStatus: LocalizedStringResource = preparation == .mounted ? "Mounted" : "Not Mounted"
+        let detail: LocalizedStringResource = switch preparation {
+        case .mounted: "Switch to cellular and run a new task to verify automation."
+        case .automationOff: "Turn on Automation in Connection to prepare for cellular."
+        case .needsLocalConnection: "Connect to Wi-Fi and check the local connection in Connection."
+        case .busy: "Wait for the current task to finish before preparing for cellular."
+        case .ready: "Prepare the developer disk image before switching to cellular."
+        case .preparing: "Poki is preparing the developer disk image."
+        case .retry: "The image is still not mounted. Check the local connection and try again."
+        }
+        return Section {
+            LabeledContent("Developer Disk Image") {
+                Text(AppLocalization.text(imageStatus))
+            }
+            Button("Prepare for Cellular", action: model.prepareForCellular)
+                .disabled(!preparation.canPrepare)
+        } header: {
+            Text("Cellular Startup")
+        } footer: {
+            Text(AppLocalization.text(detail))
+        }
     }
 
     /// "Reflected lockdown: Connected", the probe's own words with the address left to the line below.
@@ -110,6 +137,8 @@ struct TestingOptionsView: View {
             } footer: {
                 Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals.")
             }
+            // Apps by name and the read that comes when the screen settles: on unless turned off here.
+            SpeedTestingSection()
             // The in-process path's switch and probes (ESP-173, ESP-175).
             InProcessSection()
             Section {
@@ -137,9 +166,6 @@ struct TestingOptionsView: View {
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }
             }
-            // Screen History, an experiment that reads only when started here (issue 356). Last, so
-            // the sections above keep their place.
-            HistoryTestingSection()
             // Whether a connection opened with no cellular stays open on cellular (issue 484).
             CellularTrickSection()
         }

@@ -45,7 +45,7 @@ enum ActivityMetrics {
     static let compactClip: CGFloat = 4.33
     /// The compact island's left block, and the side of the bear's whole picture in it.
     static let compactBlock: CGFloat = 51
-    static let compactBear: CGFloat = 27.2
+    static let compactBear: CGFloat = 27
     /// The compact island's right block during a run: one width from step to step, so the island
     /// keeps its size while the words change.
     static let compactWords: CGFloat = 52
@@ -56,7 +56,7 @@ enum ActivityMetrics {
     static let narrowCircle: CGFloat = 28
     /// The bear's whole picture in that circle and in the minimal circle: one side for every pose, so
     /// the bear does not grow or shrink when the state changes.
-    static let circleBear: CGFloat = 22.6
+    static let circleBear: CGFloat = 22
     static let button: CGFloat = 38
     /// The Don’t Ask Again row under the two answers, and the space between. iOS cuts a Live Activity
     /// off at about 160 points, so the row sits in the card's own height.
@@ -77,13 +77,18 @@ enum ActivityMetrics {
     static func sizes(_ face: ActivityFace) -> Sizes {
         switch face.size {
         case .low:
-            Sizes(island: 106, islandBear: 96, islandLeft: 104, lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
+            // A line over the title (Done over what a run came to, an event's word) takes a run's
+            // height on the island: in 106 the system's clip cut the third line (ESP-954).
+            Sizes(island: face.hasKicker ? 124 : 106, islandBear: face.hasKicker ? 96 : 86, islandLeft: 104,
+                  lock: 112, lockBear: 104, lockLeft: 122, lockBearInset: 4)
         case .working:
             // Before the run is in an app it has no line yet (the runner waking): the lower island.
-            Sizes(island: (face.bottom.hasLine ? 118 : 106) + 18, islandBear: 96, islandLeft: 104,
+            Sizes(island: face.bottom.hasLine ? 136 : face.endsTalk ? (face.hasKicker ? 154 : 142) : 124,
+                  islandBear: 96, islandLeft: 104,
                   lock: face.bottom.hasLine ? 134 : 124, lockBear: 116, lockLeft: 122, lockBearInset: 4)
         case .asking:
-            Sizes(island: 150, islandBear: 128, islandLeft: 130, lock: 154, lockBear: 134, lockLeft: 138, lockBearInset: 0)
+            Sizes(island: face.offersStopAsking ? 160 : 150, islandBear: 128, islandLeft: 130,
+                  lock: face.offersStopAsking ? 160 : 154, lockBear: 134, lockLeft: 138, lockBearInset: 0)
         case .tall:
             Sizes(island: 160, islandBear: 134, islandLeft: 134, lock: 160, lockBear: 136, lockLeft: 138, lockBearInset: 0)
         }
@@ -110,6 +115,9 @@ extension ActivityFace.Bottom {
 }
 
 extension ActivityFace {
+    /// A small line over the title: the app, a step of the setup, Done, or an event's word.
+    var hasKicker: Bool { kicker != nil || event != nil }
+
     /// Where the outside agent's badge goes (ESP-344 定稿规格, section 14): after the app's name while
     /// Poki works; after the reason while it waits for an answer on the island (on the card the reason
     /// may take two lines, so there it stays left of the countdown); beside the small value otherwise.
@@ -161,7 +169,7 @@ struct LockScreenCard: View {
     private func words(_ palette: ActivityPalette) -> some View {
         let top: CGFloat = switch face.size { case .low: 30; case .working, .asking: 22; case .tall: 20 }
         let bottom: CGFloat = switch face.size { case .low: 0; case .working: 12; case .asking, .tall: 16 }
-        let hasKicker = face.kicker != nil || face.event != nil
+        let hasKicker = face.hasKicker
         // The screenshot stands in the top right corner, over the words' column and outside its
         // flow: the words keep clear of it, and it never pushes the control off the card.
         let shot = Thumbnail.picture
@@ -309,7 +317,7 @@ struct IslandBottom: View {
     }
 
     @ViewBuilder private func words(_ palette: ActivityPalette) -> some View {
-        let hasKicker = face.kicker != nil || face.event != nil
+        let hasKicker = face.hasKicker
         if case .progress(let line, let stop) = face.bottom {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -332,12 +340,14 @@ struct IslandBottom: View {
         } else {
             let top: CGFloat = face.size == .tall ? 3 : 5
             // A capsule 14 up and 24 in clears the corner of the system's clip.
-            let bottom: CGFloat = switch face.size { case .low, .working: 0; case .asking, .tall: 14 }
+            let bottom: CGFloat = switch face.size { case .low: 0; case .working: face.endsTalk ? 14 : 0; case .asking, .tall: 14 }
             VStack(alignment: .leading, spacing: 0) {
                 if hasKicker { Kicker(face: face, palette: palette).frame(height: 16).padding(.top, 1) }
                 Title(face: face, palette: palette).padding(.top, hasKicker ? 2 : top)
                 HStack(spacing: 6) {
-                    Subtitle(face: face, palette: palette)
+                    // Over a button the island has room for one line under an event's word: two put the
+                    // button under the system's clip (ESP-954). The word goes after a few seconds.
+                    Subtitle(face: face, palette: palette, most: hasKicker && (face.size == .tall || face.endsTalk) ? 1 : nil)
                     if face.badgePlace(.island) == .afterReason, let caller = face.caller { CallerBadge(name: caller, size: 18).frame(height: 16) }
                 }
                 .padding(.top, face.size == .tall ? 2 : 3)
@@ -366,7 +376,7 @@ struct CompactLeading: View {
                 NarrowBear(bear: face.bear)
             } else {
                 ZStack {
-                    Image(face.bear.image).resizable().interpolation(.high)
+                    Image(face.bear.compactImage).resizable().interpolation(.high)
                         .frame(width: side, height: side)
                         .overlay(alignment: .bottom) { Rim(colour: .black.opacity(0.45), height: 6) }
                         .offset(x: origin.x, y: origin.y)
@@ -477,7 +487,7 @@ private struct NarrowBear: View {
         let origin = bear.circleOrigin
         let circle = ActivityMetrics.narrowCircle
         ZStack {
-            Image(bear.image).resizable().interpolation(.high)
+            Image(bear.smallImage).resizable().interpolation(.high)
                 .frame(width: side, height: side)
                 .offset(x: origin.x, y: origin.y)
                 .frame(width: circle, height: circle, alignment: .topLeading)
@@ -504,7 +514,7 @@ struct MinimalView: View {
                 NarrowBear(bear: face.bear)
             } else {
                 ZStack {
-                    Image(face.bear.image).resizable().interpolation(.high)
+                    Image(face.bear.smallImage).resizable().interpolation(.high)
                         .frame(width: side, height: side)
                         .offset(x: inset + origin.x, y: inset + origin.y)
                         .frame(width: circle, height: circle, alignment: .topLeading)
@@ -528,7 +538,7 @@ private struct RisingBear: View {
     var bear: ActivityBear
     var side: CGFloat
     var rim: CGFloat
-    /// How far above the bottom edge the shade ends: where the surface's clip cuts the bear.
+    /// How far above the bottom edge the bear stands: where the surface's clip cuts the card.
     var lift: CGFloat = 0
     var colour: Color
     var body: some View {
@@ -541,9 +551,10 @@ private struct RisingBear: View {
         // The shade covers the bear alone: over a gradient a whole strip would show as a rectangle
         // beside it. While one pose fades into the next, it follows the next one's outline.
         .overlay(alignment: .bottom) {
-            Rim(colour: colour, height: rim).padding(.bottom, lift)
+            Rim(colour: colour, height: rim)
                 .mask(alignment: .bottom) { Image(bear.image).resizable().interpolation(.high).frame(width: side, height: side) }
         }
+        .padding(.bottom, lift)
         .accessibilityHidden(true)
     }
 }
@@ -616,10 +627,12 @@ private struct Subtitle: View {
     var palette: ActivityPalette
     /// More lines than the state asks for, where the column is narrow.
     var lines: Int?
+    /// Fewer, where the surface is short.
+    var most: Int?
     private let theme = ActivityTheme.current
     var body: some View {
         if let subtitle = face.subtitle {
-            let lines = max(lines ?? 1, face.subtitleLines)
+            let lines = min(max(lines ?? 1, face.subtitleLines), most ?? .max)
             Text(subtitle)
                 .font(theme.subtitle)
                 .foregroundStyle(palette.reason)

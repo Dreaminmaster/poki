@@ -1,6 +1,6 @@
 use crate::Shared;
 use poki_setup_core::apple::anisette::Source;
-use poki_setup_core::{Progress, Reporter, device, keeper, mcp, pairshare, relay, release, setup, support};
+use poki_setup_core::{Progress, Reporter, devbuilds, device, keeper, mcp, pairshare, relay, release, setup, support};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
@@ -77,11 +77,7 @@ pub struct PhoneRow {
 
 #[tauri::command]
 pub async fn phones() -> R<Vec<PhoneRow>> {
-    let list = match device::Phone::list().await {
-        Ok(l) => l,
-        Err(poki_setup_core::Error::Device(m)) if m.contains("usbmuxd") => return Err(Failure { kind: "usbmuxd", message: m }),
-        Err(e) => return Err(e.into()),
-    };
+    let list = device::Phone::list().await?;
     let mut rows = vec![];
     for p in list {
         let (facts, error) = match device::info::read(&p).await {
@@ -218,7 +214,7 @@ pub struct InstallResult {
 }
 
 #[tauri::command]
-pub async fn install(app: AppHandle, state: State<'_, Shared>, udid: Option<String>, ipa: Option<String>, hand_off: bool) -> R<InstallResult> {
+pub async fn install(app: AppHandle, state: State<'_, Shared>, udid: Option<String>, ipa: Option<String>, hand_off: bool, test_build: Option<devbuilds::BuildRef>, close_poki: Option<bool>) -> R<InstallResult> {
     {
         let mut busy = state.busy.lock().await;
         if *busy {
@@ -227,7 +223,7 @@ pub async fn install(app: AppHandle, state: State<'_, Shared>, udid: Option<Stri
         *busy = true;
     }
     let r = reporter(&app, "install");
-    let opts = setup::Options { udid, ipa: ipa.map(Into::into), signing_zip: None, wait: None, hand_off, seed_ddi: true };
+    let opts = setup::Options { udid, ipa: ipa.map(Into::into), signing_zip: None, wait: None, hand_off, seed_ddi: true, test_build, close_poki: close_poki.unwrap_or(false) };
     let result = with_signer(&state, async |s| setup::run(s, opts, &r).await).await;
     *state.busy.lock().await = false;
     let done = result?;
@@ -405,3 +401,56 @@ pub async fn set_channel(channel: String) -> R<Vec<release::ChannelInfo>> {
 
 #[tauri::command]
 pub fn qr_svg(text: String) -> R<String> { Ok(pairshare::qr_svg(&text)?) }
+
+// Developer: the GitHub sign-in and test builds from GitHub Actions (core devbuilds).
+
+#[tauri::command]
+pub fn dev_state() -> devbuilds::State { devbuilds::state() }
+
+#[tauri::command]
+pub async fn dev_set_prefs(prefs: devbuilds::Prefs) -> R<devbuilds::State> { Ok(devbuilds::set_prefs(prefs).await?) }
+
+#[tauri::command]
+pub async fn github_sign_in_start() -> R<devbuilds::SignIn> { Ok(devbuilds::sign_in_start().await?) }
+
+#[tauri::command]
+pub async fn github_sign_in_finish(pending: devbuilds::SignIn) -> R<devbuilds::State> { Ok(devbuilds::sign_in_finish(&pending).await?) }
+
+#[tauri::command]
+pub fn github_sign_in_cancel() -> devbuilds::State {
+    devbuilds::sign_in_cancel();
+    devbuilds::state()
+}
+
+#[tauri::command]
+pub async fn github_use_cli() -> R<devbuilds::State> { Ok(devbuilds::use_cli().await?) }
+
+#[tauri::command]
+pub async fn github_use_token(token: String) -> R<devbuilds::State> { Ok(devbuilds::use_token(&token).await?) }
+
+#[tauri::command]
+pub fn github_sign_out() -> R<devbuilds::State> { Ok(devbuilds::sign_out()?) }
+
+#[tauri::command]
+pub async fn test_builds(fresh: Option<bool>) -> R<devbuilds::Listing> { Ok(devbuilds::list(fresh.unwrap_or(false)).await?) }
+
+#[tauri::command]
+pub async fn test_build_download(app: AppHandle, artifact_id: u64) -> R<String> {
+    let r = reporter(&app, "download");
+    r.step("release", "Downloading the test build");
+    let (ipa, _) = devbuilds::fetch(artifact_id, &r, "release").await?;
+    r.done("release", None);
+    Ok(ipa.display().to_string())
+}
+
+#[tauri::command]
+pub async fn test_build_next() -> R<Option<devbuilds::TestBuild>> { Ok(devbuilds::next_to_sync().await?) }
+
+#[tauri::command]
+pub fn test_build_synced(run_id: u64) -> R<devbuilds::State> { Ok(devbuilds::mark_synced(run_id)?) }
+
+#[tauri::command]
+pub fn test_builds_delete_downloads() -> R<devbuilds::State> { Ok(devbuilds::delete_downloads()?) }
+
+#[tauri::command]
+pub async fn poki_running(udid: String) -> R<Option<bool>> { Ok(setup::poki_running(&udid).await?) }

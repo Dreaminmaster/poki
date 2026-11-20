@@ -30,15 +30,23 @@ public struct ScreenHistoryEntry: Sendable, Equatable {
 
 public struct ScreenHistorySource: Sendable {
     public var isEnabled: @Sendable () -> Bool
+    public var unavailableMessage: @Sendable () -> String
+    /// Changes whenever the owner revokes or re-grants access, changes the app allowlist,
+    /// or deletes history. A Boolean alone cannot detect an off -> on transition.
+    public var accessRevision: @Sendable () -> UInt64
     public var now: @Sendable () -> Date
     public var entries: @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry]
 
     public init(
         isEnabled: @escaping @Sendable () -> Bool,
+        accessRevision: @escaping @Sendable () -> UInt64,
+        unavailableMessage: @escaping @Sendable () -> String = { "Screen History is not turned on." },
         now: @escaping @Sendable () -> Date = { Date() },
         entries: @escaping @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry]
     ) {
         self.isEnabled = isEnabled
+        self.unavailableMessage = unavailableMessage
+        self.accessRevision = accessRevision
         self.now = now
         self.entries = entries
     }
@@ -387,6 +395,7 @@ private struct ScreenHistoryResponse: Codable, Equatable {
 
 extension PokiCore {
     public static let screenHistoryOffMessage = "Screen History is not turned on."
+    public static let screenHistoryRevokedMessage = "Screen History access changed while this query was running. The old result was discarded."
 
     public static let screenHistoryInstructions = "When the user asks about something they saw, read, or wrote earlier on this iPhone (such as what they looked at before, the thing just now, or something from this morning), query screen_history first instead of launching apps with look or do; finish with finish_task using answer.kind field or list and leave answer.items empty."
 
@@ -430,9 +439,19 @@ extension PokiCore {
     ]
 
     func screenHistoryCall(_ args: JSON) async -> ToolResult {
-        guard let source = config.screenHistory, source.isEnabled() else {
+        guard let source = config.screenHistory else {
             return ToolResult(text: Self.screenHistoryOffMessage, jpeg: nil, isError: true)
         }
+        // Capture a lease before the first await. Checking only isEnabled after an await
+        // would let an off -> on transition incorrectly authorize an older request.
+        let revision = source.accessRevision()
+        guard source.isEnabled(), source.accessRevision() == revision else {
+            return ToolResult(text: source.unavailableMessage(), jpeg: nil, isError: true)
+        }
+        func accessStillValid() -> Bool {
+            !Task.isCancelled && source.isEnabled() && source.accessRevision() == revision
+        }
+
         let now = source.now()
         let parsed: ScreenHistoryQuery
         switch ScreenHistoryQuery.parse(args, now: now) {
@@ -443,9 +462,17 @@ extension PokiCore {
         }
 
         let raw = await source.entries(parsed.start, parsed.end)
+        guard accessStillValid() else {
+            return ToolResult(text: Self.screenHistoryRevokedMessage, jpeg: nil, isError: true)
+        }
         let matched = ScreenHistoryCoalescer.prepare(raw)
             .filter { parsed.matches($0) }
         let text = Self.formatScreenHistory(matched, query: parsed)
+        // Filtering/formatting can also take time for long histories. Do not hand out a
+        // result if the owner changed access while it was being prepared.
+        guard accessStillValid() else {
+            return ToolResult(text: Self.screenHistoryRevokedMessage, jpeg: nil, isError: true)
+        }
         return ToolResult(text: text, jpeg: nil, isError: false)
     }
 

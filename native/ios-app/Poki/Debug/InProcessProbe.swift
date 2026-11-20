@@ -583,7 +583,7 @@ final class InProcessProbe: ObservableObject {
         /// screen read in Settings, then the end of the task, which brings Poki back and closes the
         /// session. The read counts only with a picture and Settings' elements in it.
         func round(_ name: String) async -> UInt64? {
-            model.chatTaskBegan()
+            await model.chatTaskBegan()
             let first = await look()
             let read = await tool("do", #"{"actions":[{"launch":"com.apple.Preferences"}]}"#)
             let now = await generation()
@@ -611,7 +611,7 @@ final class InProcessProbe: ObservableObject {
         // A session that opens but cannot read.
         note("simulated: the next session's readiness check is made to fail through the testing flag", ["step": "lifecycle_simulated_failure"])
         PKInProcess.shared().failNextReadinessCheck = true
-        model.chatTaskBegan()
+        await model.chatTaskBegan()
         let broken = await look()
         let named = broken.text.contains("could not read the screen") || broken.text.contains("session_unreadable")
         check("unreadable session reported", broken.failed && named, "the read \(broken.failed ? "failed" : "did not fail") in \(String(format: "%.2f", broken.seconds)) s: \(broken.text.prefix(240))",

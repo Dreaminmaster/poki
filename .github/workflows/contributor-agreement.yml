@@ -1,0 +1,65 @@
+# One-time contributor sign-off (CONTRIBUTOR_AGREEMENT.md). A pull request's author agrees once by
+# commenting "I agree to the Poki Contributor Agreement"; that is saved to signatures.json on the
+# contributor-signatures branch and covers their later pull requests. Each pull request gets the
+# commit status "Contributor agreement".
+#
+# pull_request_target and issue_comment both run this file and the script from main, with
+# secrets, also for pull requests from forks. So this workflow must never check out or run pull
+# request code: the checkout below takes only .github and the agreement from main, and the script
+# reads event data and the API.
+#
+# Every run decides from the pull request's current author, the saved agreements and its comment
+# history, so a run that GitHub drops from the queue loses nothing. A push to main that changes the
+# agreement (a new version), and a manual run, decide every open pull request again.
+#
+# Comments and the signatures file are written as the Poki Repo Bot GitHub App (secrets
+# POKI_BOT_APP_ID and POKI_BOT_PRIVATE_KEY; it needs Contents and Pull requests write). If its
+# token cannot be made or GitHub rejects it, the workflow's own token is used and they come from
+# github-actions.
+name: Contributor agreement
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+  push:
+    branches: [main]
+    paths: [CONTRIBUTOR_AGREEMENT.md]
+  workflow_dispatch:
+
+permissions:
+  contents: write        # the signatures branch, when Poki Repo Bot's token is missing
+  pull-requests: write   # the comment, same case
+  statuses: write        # the "Contributor agreement" status
+
+concurrency:
+  group: contributor-agreement-${{ github.event.pull_request.number || github.event.issue.number || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  agreement:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && contains(github.event.comment.body, 'Poki Contributor Agreement'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - id: bot
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.POKI_BOT_APP_ID }}
+          private-key: ${{ secrets.POKI_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/
+            /CONTRIBUTOR_AGREEMENT.md
+          persist-credentials: false
+      - run: node .github/scripts/contributor-agreement.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOT_TOKEN: ${{ steps.bot.outputs.token }}

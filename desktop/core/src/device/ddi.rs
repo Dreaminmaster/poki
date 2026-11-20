@@ -135,8 +135,24 @@ pub async fn ensure(reporter: &Reporter, kind: Kind) -> Result<(PathBuf, String)
     Ok((dir, build))
 }
 
-/// Whether a personalized image is mounted right now.
+/// Present only while a developer disk image is mounted, whichever way it went on (the same markers
+/// the launcher on the phone checks).
+const MOUNTED_MARKERS: [&str; 2] = ["com.apple.instruments.dtservicehub", "com.apple.dt.testmanagerd.remote"];
+
+/// Whether a developer disk image is mounted right now: the CoreDevice service list on iOS 17 and
+/// later (a Cryptex1 cryptex is not listed by the image mounter), the image mounter before.
 pub async fn mounted(phone: &Phone) -> Result<bool> {
+    let by_tunnel = super::running::on_own_thread(phone, async |p: &Phone| {
+        let t = super::running::tunnel(p).await.map_err(Error::device)?;
+        Ok(MOUNTED_MARKERS.iter().any(|m| t.rsd.services.contains_key(*m)))
+    })
+    .await;
+    match by_tunnel {
+        Ok(true) => return Ok(true),
+        Ok(false) if kind_of(phone).await == Kind::Cryptex => return Ok(false),
+        Ok(false) => {}
+        Err(e) => tracing::info!(error = %e, "no CoreDevice tunnel for the disk image check; asking the image mounter"),
+    }
     let provider = phone.provider()?;
     let mut mounter = ImageMounter::connect(&*provider).await?;
     let images = mounter.copy_devices().await?;
@@ -155,8 +171,12 @@ pub async fn mount(phone: &Phone, reporter: &Reporter) -> Result<()> {
         reporter.note("mount", "The developer disk image is already mounted.");
         return Ok(());
     }
-    let (dir, _) = ensure(reporter, kind_of(phone).await).await?;
+    let kind = kind_of(phone).await;
+    let (dir, _) = ensure(reporter, kind).await?;
     reporter.step("mount", "Mounting the developer disk image");
+    if kind == Kind::Cryptex {
+        return mount_cryptex(phone, dir, reporter).await;
+    }
     let provider = phone.provider()?;
     let mut lockdown = LockdownClient::connect(&*provider).await?;
     let record = super::pairing::saved(&phone.udid)?.ok_or_else(|| Error::device("Pair the iPhone first."))?;
@@ -177,6 +197,26 @@ pub async fn mount(phone: &Phone, reporter: &Reporter) -> Result<()> {
             idevice::IdeviceError::DeveloperModeNotEnabled => Error::NeedsPerson("Turn on Developer Mode on the iPhone first.".into()),
             other => Error::device(format!("Mounting failed: {other}. Apple's signing service must be reachable, and the phone must be unlocked.")),
         })?;
+    reporter.done("mount", None);
+    Ok(())
+}
+
+/// iOS 26.4 and later: the image goes on as a Cryptex1 cryptex through cryptexd, over the CoreDevice
+/// tunnel. Apple's signing server personalizes it for this phone's chip and nonce, as on the phone.
+async fn mount_cryptex(phone: &Phone, dir: PathBuf, reporter: &Reporter) -> Result<()> {
+    reporter.part("mount", 0.2, Some("Asking Apple to sign the image for this device".into()));
+    super::running::on_own_thread(phone, async move |p: &Phone| {
+        let mut t = super::running::tunnel(p).await.map_err(Error::device)?;
+        if !t.rsd.services.contains_key("com.apple.security.cryptexd.remote") {
+            return Err(Error::NeedsPerson("The device does not offer cryptexd. Turn on Developer Mode (Settings, Privacy and Security, Developer Mode), then try again.".into()));
+        }
+        let assets = idevice::cryptexd::Cryptex1Assets::load(&dir).await.map_err(|e| Error::device(format!("The developer disk image on this computer is unreadable ({e}). Delete it and try again.")))?;
+        idevice::cryptexd::install_ddi(&mut t.adapter, &mut t.rsd, &assets)
+            .await
+            .map_err(|e| Error::device(format!("Mounting failed: {e}. Apple's signing service must be reachable, and the device must be unlocked.")))?;
+        Ok(())
+    })
+    .await?;
     reporter.done("mount", None);
     Ok(())
 }

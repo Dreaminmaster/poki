@@ -54,11 +54,14 @@ enum InProcessSession: Equatable {
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:
-            return .starting("waiting for the owner to enter the iPhone passcode on the phone: iOS asks for it before it allows automation, after Poki restarts and 8 hours after the last time. Only the owner can do this; the Live Activity asks them. Call again in about 10 s")
+            return .awaitingAutomationAuthorization("waiting for the owner to enter the iPhone passcode on the phone: iOS asks for it before it allows automation, after Poki restarts and 8 hours after the last time. Only the owner can do this; the Live Activity asks them. Call again in about 10 s")
         case .passcodeMissed:
-            return .failed("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
+            return .automationAuthorizationDeclined("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
                            fix: "Turn Poki off and on, then enter the iPhone passcode when iOS asks for it to allow automation")
         case .failed(let code, let detail):
+            if code == "passcode_declined" {
+                return .automationAuthorizationDeclined(detail, fix: "Turn Poki off and on to ask again")
+            }
             if code == "session_unreadable" {
                 return .failed("the automation session opened but could not read the screen (\(detail)). Nothing was sent, and that session was closed; the next call opens a new one",
                                fix: "Try the step again. If it keeps failing, turn Poki off and on")
@@ -94,7 +97,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     /// When an open may bring up iOS's passcode screen. It does only before the first automation
     /// of a boot, so until then: one open at a time (two at once each showed a screen), never from
     /// the background (the screen then could not be closed), and none after the owner cancelled one,
-    /// until they turn Poki on again.
+    /// until they turn Poki on again. `startedThisBoot` is also set at launch on iOS 27 while the
+    /// boot's allowance lasts (`AutomationAllowance`): then no screen comes.
     struct OpenGate {
         var declined = false
         var inFront = true
@@ -164,6 +168,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
                 }
                 return try self.touch(fingers, into: other)
             },
+            "POST /poki/companion-target": { [unowned self] _, _ in
+                .bool(self.native.bindDuoCompanionTarget())
+            },
             "POST /poki/workspace-launcher": { [unowned self] body, _ in
                 let labels = body?["labels"]?.array?.compactMap(\.string) ?? []
                 guard !self.native.hasSelectedPane, let menu = body?["menu"]?.bool, !labels.isEmpty else {
@@ -181,7 +188,10 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             },
             // Beside another app, the front app's part of the screen is the screen the agent sees (viewport).
             "GET /wda/screen": { [unowned self] _, _ in
-                let geometry = self.native.displayGeometry()
+                let geometry = self.native.readDisplayGeometry()
+                guard !geometry.routesDisplay.boolValue || !geometry.bounds.isEmpty else {
+                    throw Refusal("unknown error", "target_display_unavailable: read the active screen again")
+                }
                 let viewport = self.native.viewport
                 let size = viewport.isNull ? geometry.bounds.size : viewport.size
                 self.readGeometry.withLock { $0 = (geometry, viewport) }
@@ -190,7 +200,9 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             "GET /wda/locked": { [unowned self] _, _ in .bool(self.native.screenLocked()) },
             "GET /wda/activeAppInfo": { [unowned self] _, _ in
                 let app = self.native.frontApp()
-                return ["bundleId": .string(app["bundleId"] as? String ?? ""), "name": .string(app["name"] as? String ?? ""), "pid": .number(Double(app["pid"] as? Int ?? 0))]
+                var info: [String: JSON] = ["bundleId": .string(app["bundleId"] as? String ?? ""), "name": .string(app["name"] as? String ?? ""), "pid": .number(Double(app["pid"] as? Int ?? 0))]
+                if let side = app["pokiPane"] as? String { info["pokiPane"] = .string(side) }
+                return .object(info)
             },
             "GET /source": { [unowned self] _, _ in
                 var code: NSString?
@@ -316,14 +328,28 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
         if let session, session != "inprocess-\(native.generation())", key != "DELETE /session" {
             return refused(404, "invalid session id", "the automation session \(session) has ended (now generation \(native.generation()))")
         }
-        if native.hasSelectedPane, ["POST /wda/homescreen", "POST /wda/apps/launch", "POST /wda/apps/activate", "POST /wda/apps/terminate"].contains(key) {
+        if native.hasSelectedPane, ["POST /wda/homescreen", "POST /wda/apps/launch", "POST /wda/apps/activate", "POST /wda/apps/terminate"].contains(key),
+           !(key == "POST /wda/apps/activate" && native.hasDuoCompanion) {
             return refused(400, "invalid argument", "this would leave Split View; choose look {pane: \"auto\"} first to return to normal control")
+        }
+        if key == "POST /wda/homescreen", native.hasDuoCompanion {
+            return refused(400, "invalid argument", "not sent: Home would hide the task's Split View app.")
         }
         do {
             if key == "GET /screenshot" {
                 var code: NSString?
-                guard let png = native.screenshot(&code, refreshViewport: refreshViewport) else { throw Refusal("unable to capture screen", "no screenshot: \(code ?? "unknown")") }
-                return (200, (["value": .string(png.base64EncodedString())] as JSON).data())
+                var observation: NSDictionary?
+                guard let png = native.screenshot(&code, refreshViewport: refreshViewport, observation: &observation) else {
+                    throw Refusal("unable to capture screen", "no screenshot: \(code ?? "unknown")")
+                }
+                let image = JSON.string(png.base64EncodedString())
+                let value: JSON
+                if let companion = observation as? [String: String] {
+                    value = ["image": image, "companion": .object(companion.mapValues(JSON.string))]
+                } else {
+                    value = image
+                }
+                return (200, (["value": value] as JSON).data())
             }
             guard let route else { return refused(404, "unknown command", "not answered in-process: \(key)") }
             return (200, (["value": try route(body, element)] as JSON).data())
@@ -359,6 +385,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     /// the front app), a touch or text is refused here, the last place before it would be sent.
     /// Opening an app and the Home button stay: they are how a task leaves Poki.
     private func refuseInPoki() throws {
+        if native.hasDuoCompanionTask { return }
         guard let own = Bundle.main.bundleIdentifier, native.frontApp()["bundleId"] as? String == own else { return }
         throw Refusal("unknown error", "not sent: Poki itself is in front, and nothing is tapped or typed in Poki. Open the task's app first (launch)")
     }

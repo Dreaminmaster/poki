@@ -82,6 +82,9 @@ echo "simulator: $TYPE on $RUNTIME"
 UDID="$(xcrun simctl create poki-inprocess-check "$TYPE" "$RUNTIME")"
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" -b >/dev/null
+if [ "${POKI_CHECK_DUO:-}" = "1" ] && [ "$EXPECT" = "full" ]; then
+  DEVELOPER_DIR="$BUILD_DEV" "$HERE/duo-panel-shot.sh" "$UDID" "$NATIVE"
+fi
 xcrun simctl install "$UDID" "$APP"
 xcrun simctl install "$UDID" "$FIXTURE"
 

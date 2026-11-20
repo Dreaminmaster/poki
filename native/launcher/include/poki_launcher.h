@@ -60,7 +60,7 @@ int32_t poki_signer_call(const char *request_json, poki_event_cb cb, void *conte
 // accessibility audit service, on a tunnel of its own and with no XCTest session.
 // request_json: {"op": "read_once", "device_address": "10.7.0.1", "pairing_file": "...",
 //   "host_name": "Poki", "include_text": false} or {"op": "run", ..., "interval_ms": 30000,
-//   "duration_s": 1800}.
+//   "duration_s": 1800}. Use "continuous": true to read until canceled.
 // Events: {"event": "progress", "progress": {"n", "at_s", "ok", "ms", "elements", "app", "changed"}}
 // for every round of a run (with "look": "same" or "skipped" when the round found the app in
 // front and read no screen, and "cost_ms": what the round asked of the phone), then one {"event": "result", "ok": true, "value": {...}} or

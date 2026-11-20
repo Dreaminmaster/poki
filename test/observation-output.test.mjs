@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import sharp from 'sharp';
 import { fixture, value } from './fixture.mjs';
 
 test('observe_device omits PNG only when requested', async t => {
@@ -54,4 +56,33 @@ test('a tree that names only the top of the screen gets the screenshot text it l
   const looked = (await cua.call('look')).content[0].text;
   assert.match(looked, /, accessibility \+ ocr\)/);
   assert.deepEqual(looked.split('\n').filter(line => /^[ +]\d+ /.test(line)).map(line => line.match(/"(.*)"/)[1]), [...header.map(e => e[1]), ...products.map(e => e[0])]);
+});
+test('only a phone with a second built-in panel takes its screenshot through the helper', async t => {
+  const shots = async state => {
+    const f = await fixture(t);
+    await f.set(state);
+    const result = await f.call('observe_device', { source: 'ocr', include_image: false });
+    assert.ok(!result.isError, JSON.stringify(result.content));
+    const events = await f.events();
+    return { command: events.filter(event => event.args?.includes('screenshot')).length, helper: events.filter(event => event.op === 'screenshot').length };
+  };
+  assert.deepEqual(await shots({}), { command: 1, helper: 0 });
+  assert.deepEqual(await shots({ secondPanel: true }), { command: 0, helper: 1 });
+});
+
+test('a two-panel phone returns the active frame when the default display is black', async t => {
+  const f = await fixture(t);
+  const blackCover = join(f.dir, 'cover.png');
+  await sharp({ create: { width: 466, height: 678, channels: 3, background: 'black' } }).png().toFile(blackCover);
+  await f.set({ secondPanel: true, defaultScreenshot: blackCover });
+
+  const screenshot = await f.call('observe_device', { source: 'ocr' });
+
+  assert.ok(!screenshot.isError, screenshot.content[0]?.text);
+  const { observation } = value(screenshot);
+  assert.deepEqual([observation.width, observation.height], [100, 200]);
+  const picture = screenshot.content.find(item => item.type === 'image');
+  assert.ok(picture);
+  const { channels } = await sharp(Buffer.from(picture.data, 'base64')).stats();
+  assert.ok(channels.slice(0, 3).every(channel => channel.min >= 250));
 });

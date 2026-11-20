@@ -85,7 +85,7 @@ final class BrowserGuardTests: XCTestCase {
             FakeCompletions.tool("do", ["actions": []]),
             FakeCompletions.text("The public history page is ready."),
         ])
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let previous = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(keys, previous) { UserDefaults.standard.set(value, forKey: key) } }
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
@@ -108,7 +108,13 @@ final class BrowserGuardTests: XCTestCase {
         XCTAssertTrue(phone.answer.contains("sandbox browser"), phone.answer)
         let prompt = FakeCompletions.system(try XCTUnwrap(server.requests.first))
         XCTAssertFalse(prompt.contains("Start the task with a do in your first reply"))
-        XCTAssertTrue(prompt.contains("For a website task, start with web_open"))
+        XCTAssertTrue(prompt.contains("Use web_open and web tools alone for public websites"), "the website route reaches the model")
+        XCTAssertTrue(prompt.contains("Website verification codes also go to the owner through web_handoff"), "a website's sign-in code stays with the owner")
+        // Who Poki is comes first, then the phone's tool rules, then the browser's.
+        XCTAssertTrue(prompt.hasPrefix("You are Poki, the user's personal assistant"), String(prompt.prefix(80)))
+        let phoneRules = try XCTUnwrap(prompt.range(of: "look reads the iPhone's screen")).lowerBound
+        let browserRules = try XCTUnwrap(prompt.range(of: "Poki has its own browser for websites")).lowerBound
+        XCTAssertLessThan(phoneRules, browserRules)
     }
 
     /// Poki's browser is for public websites: this iPhone and its local network are not opened, in
@@ -245,7 +251,7 @@ final class BrowserGuardTests: XCTestCase {
             FakeCompletions.tool("web_open", ["url": address + "/filled"]),
             FakeCompletions.text("Local privacy check finished."),
         ])
-        let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let settings = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let previous = settings.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(settings, previous) { UserDefaults.standard.set(value, forKey: key) } }
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"

@@ -67,6 +67,15 @@ struct PillView: View {
     @MainActor
     static func image(_ data: PillTextAttachmentData, scale: CGFloat, dark: Bool) -> UIImage? {
         let key = "\(data.app.id)|\(data.label)|\(data.fontData.pointSize)|\(scale)|\(dark)|\(data.onAccent)"
+        // A capsule drawn with the placeholder is never kept: the icon is asked for (the App Store's,
+        // for an app this iPhone has no icon of), and the capsule is drawn again when it arrives
+        // (AppIconStore.changed).
+        guard AppIconStore.shared.icon(data.app.id, dark: false) != nil else {
+            drawn[key] = nil
+            let id = data.app.id
+            Task { await AppIconStore.shared.load(id) }
+            return draw(data, scale: scale, dark: dark)
+        }
         if let drawn = drawn[key] { return drawn }
         let image = draw(data, scale: scale, dark: dark)
         if drawn.count > 200 { drawn.removeAll() }
