@@ -4,6 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 // Readable reconstruction; address-level provenance is in ../PROVENANCE.json.
 // One context belongs to one logical action. Retain it across retries.
 @interface SRActionContext : NSObject
+@property(nonatomic, copy, nullable) BOOL (^beforeDispatch)(void);
 - (instancetype)initWithOperationID:(NSString *)operationID
                       currentOwner:(BOOL (^)(void))currentOwner;
 - (BOOL)commit:(NSError **)error;

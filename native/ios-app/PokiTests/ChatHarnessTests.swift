@@ -881,6 +881,82 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(cards.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopped card without finish_task")
     }
 
+    func testPathMemoryAppearsOnlyWhenItsOwnStepIsSent() async throws {
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Calculator for the second step of the check.", by: "Poki"))
+        let steps: [[String: Any]] = [
+            ["launch": settings],
+            ["launch": calculator, "used_memory_ids": [memory.id]],
+        ]
+        let replies = [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["path": ["steps": steps], "used_memory_ids": [memory.id]]]]),
+        ]
+
+        let first = try await stopWhenActivating(settings, fixture: fixture, replies: replies,
+                                                 expectedActivations: [settings], offeredMemory: memory.id)
+        XCTAssertTrue(first.active?.memoryUse?.notes.isEmpty ?? true, "The unrelated first path step must not claim memory")
+        XCTAssertTrue(first.stopped.memoryUse?.notes.isEmpty ?? true, "Stopping before the attributed step keeps memory off the card")
+
+        let second = try await stopWhenActivating(calculator, fixture: fixture, replies: replies,
+                                                  expectedActivations: [settings, calculator], offeredMemory: memory.id)
+        XCTAssertEqual(second.active?.memoryUse?.notes.map(\.id), [memory.id], "The attributed path step records memory before it acts")
+        XCTAssertEqual(second.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopping during the attributed step preserves its memory")
+    }
+
+    func testDriverRefusedSkillLaunchLeavesNoSourcesOnTheCard() async throws {
+        let unavailable = "nz.example.removed-settings"
+        let name = "Open the archived device utility"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use the archived device utility for this check.", by: "Poki"))
+        let skill = Skill(name: name, description: "", app: unavailable, steps: [SkillStep(action: ["launch": .string(unavailable)])],
+                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the archived utility"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["run": name, "used_memory_ids": [memory.id]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The app is no longer installed.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("The app is no longer installed."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation, unavailableApp: unavailable),
+                        automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer {
+            library.forget(item.id)
+            library.forget(memory.id)
+            SessionStore.shared.delete(chat.sessionID)
+        }
+
+        let result = await chat.runDelegated("Open the archived device utility.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(memory.id) })
+        let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(4).first))
+        XCTAssertTrue(answer.contains("no app with that bundle id is installed on this device"), answer)
+        XCTAssertTrue(answer.contains("no step was sent"), answer)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        XCTAssertNotNil(card.ended)
+        XCTAssertEqual(card.failed, true)
+        XCTAssertTrue(card.memoryUse?.skills.isEmpty ?? true, "A skill refused by the driver must not leave a source")
+        XCTAssertTrue(card.memoryUse?.notes.isEmpty ?? true, "An operation refused by the driver must not leave a memory source")
+    }
+
     private func stopWhenActivating(_ bundle: String, fixture: SkillStore, replies: [String],
                                     expectedActivations: [String], offeredMemory: String? = nil) async throws -> (active: ChatEntry?, stopped: ChatEntry) {
         let server = try FakeCompletions(replies: [
@@ -2249,6 +2325,7 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let beforeRequest: (@Sendable () async -> Void)?
     private let screenLabel: @Sendable () -> String
     private let beforeActivation: (@Sendable (String) async -> Void)?
+    private let unavailableApp: String?
     private let lock = NSLock()
     private var reads = 0
     private var firstRead: TimeInterval?
@@ -2256,21 +2333,39 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     var screenReads: Int { lock.withLock { reads } }
     /// `screenLabel` is the one button the fake screen shows, read at each look.
     init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
-         beforeActivation: (@Sendable (String) async -> Void)? = nil, screenLabel: @escaping @Sendable () -> String = { "General" }) {
+         beforeActivation: (@Sendable (String) async -> Void)? = nil, unavailableApp: String? = nil,
+         screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
         self.beforeActivation = beforeActivation
+        self.unavailableApp = unavailableApp
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        try await answer(url: url, body: body, beforeDispatch: nil)
+    }
+
+    func sendInput(method: String, url: URL, body: Data?, timeout: Double,
+                   beforeDispatch: @escaping BeforeDriverDispatch) async throws -> (status: Int, body: Data) {
+        try await answer(url: url, body: body, beforeDispatch: beforeDispatch)
+    }
+
+    private func answer(url: URL, body: Data?, beforeDispatch: BeforeDriverDispatch?) async throws -> (status: Int, body: Data) {
         await beforeRequest?()
         guard session.isOpen else { throw URLError(.cannotConnectToHost) }
+        if let beforeDispatch, !beforeDispatch() { throw CancellationError() }
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
         let value: JSON
         switch path {
         case "/wda/apps/activate":
-            if let body, let bundle = (try? JSON.parse(body))?["bundleId"]?.string { await beforeActivation?(bundle) }
+            if let body, let bundle = (try? JSON.parse(body))?["bundleId"]?.string {
+                if bundle == unavailableApp {
+                    let failure: JSON = ["value": ["error": "unknown error", "message": .string("Application \"\(bundle)\" is unknown to FrontBoard.")]]
+                    return (500, failure.data())
+                }
+                await beforeActivation?(bundle)
+            }
             value = .null
         case "/session": value = ["sessionId": "fixture-session"]
         case "/status": value = ["ready": true]

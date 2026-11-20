@@ -575,6 +575,14 @@ final class SessionStore {
         put(session)
     }
 
+    func restoreMemoryUse(_ previous: TaskMemoryUse?, replacing recorded: TaskMemoryUse, card: UUID, in id: String) {
+        guard var session = session(id), let index = session.entries.firstIndex(where: { $0.id == card }),
+              session.entries[index].memoryUse == recorded else { return }
+        session.entries[index].memoryUse = previous
+        put(session)
+        flush(sessionID: id)
+    }
+
     func taskEnded(_ id: String, success: Bool?, stopped: Bool) {
         guard var session = session(id) else { return }
         session.live = false

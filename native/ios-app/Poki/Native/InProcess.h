@@ -93,6 +93,8 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 - (PKOutcome *)type:(NSString *)text timeout:(double)timeout;
 /// The same at `speed` characters a second (PokiCore sends a `frequency` per burst; 120 without one).
 - (PKOutcome *)type:(NSString *)text typingSpeed:(NSUInteger)speed timeout:(double)timeout;
+- (PKOutcome *)type:(NSString *)text typingSpeed:(NSUInteger)speed timeout:(double)timeout
+     beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch;
 /// Whether the screen can be read from here: the front app (accessibility), its element tree, and a
 /// screenshot, each timed. Keys per part: *_ok, *_seconds, *_error, and counts.
 - (NSDictionary<NSString *, id> *)readProbe;
@@ -127,6 +129,8 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 - (PKDisplayGeometry)readDisplayGeometry;
 /// Sends upright display coordinates using the same display geometry that bounded the gesture.
 - (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry;
+- (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry
+      beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch;
 /// The front app's elements in WebDriverAgent's XML source format, and the element with the
 /// keyboard focus (keys value, x, y, width, height) when there is one.
 - (nullable NSString *)sourceXML:(NSDictionary *_Nullable *_Nullable)focused code:(NSString *_Nullable *_Nullable)code;
@@ -135,8 +139,10 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 - (nullable NSString *)sourceXML:(NSDictionary *_Nullable *_Nullable)focused maxDepth:(NSInteger)maxDepth maxChildren:(NSInteger)maxChildren code:(NSString *_Nullable *_Nullable)code;
 /// home, lock, volumeUp or volumeDown. Nil when pressed, else why not.
 - (nullable NSString *)press:(NSString *)name;
+- (nullable NSString *)press:(NSString *)name beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch;
 /// launch, activate or terminate an app by its bundle id. Nil when done, else why not.
 - (nullable NSString *)app:(NSString *)bundle action:(NSString *)action;
+- (nullable NSString *)app:(NSString *)bundle action:(NSString *)action beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch;
 - (BOOL)screenLocked;
 /// The current session's generation: it goes up when the daemon session is replaced.
 - (uint64_t)generation;

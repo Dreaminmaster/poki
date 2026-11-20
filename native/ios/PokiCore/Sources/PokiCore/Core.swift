@@ -319,8 +319,10 @@ public struct RelayResponse: Sendable, Equatable {
 
 /// Poki on the phone: the MCP server behind the relay.
 public final class PokiCore: @unchecked Sendable {
-    /// The original do action index and saved skill, if any, just before an input is sent.
-    public typealias ActionWillSend = @Sendable (Int, String?) async throws -> Void
+    public typealias InputRollback = @MainActor @Sendable () -> Void
+    /// The original do action, its replay step if any, and its saved skill, at driver admission.
+    /// The returned undo runs only when that request is definitively refused.
+    public typealias ActionWillSend = @MainActor @Sendable (Int, Int?, String?) throws -> InputRollback?
 
     public let config: CoreConfig
     weak var host: CoreHost?

@@ -994,8 +994,9 @@ final class Computer: @unchecked Sendable {
         let actionWillSend: PokiCore.ActionWillSend?
         if let onActionWillSend, actions.count > originalActionCount {
             // The app binding prepended a launch, which has no index in the model's batch.
-            actionWillSend = { index, skill in
-                if index > 0 { try await onActionWillSend(index - 1, skill) }
+            actionWillSend = { index, step, skill in
+                guard index > 0 else { return nil }
+                return try onActionWillSend(index - 1, step, skill)
             }
         } else {
             actionWillSend = onActionWillSend
@@ -1507,7 +1508,7 @@ final class Computer: @unchecked Sendable {
             let recorded = recordable(action)
             do {
                 let beforeInput: Runner.BeforeInput? = onActionWillSend.map { notify in
-                    { @Sendable skill in try await notify(index, skill) }
+                    { @MainActor @Sendable step in try notify(index, step?.index, step?.skill) }
                 }
                 let (kind, text) = try await withDeadline(left, "action \(index + 1)") { [self] in
                     try await Runner.$beforeInput.withValue(beforeInput) {

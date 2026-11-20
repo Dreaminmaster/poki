@@ -138,7 +138,9 @@ static BOOL SRABI(id target, SEL selector, const char *result, NSArray<NSString 
     BOOL accepted = current && !_committed;
     if (accepted) _committed = YES;
     [_lock unlock];
-    return accepted || SRFail(error, current ? @"duplicate_native_dispatch" : @"native_action_superseded");
+    if (!accepted) return SRFail(error, current ? @"duplicate_native_dispatch" : @"native_action_superseded");
+    BOOL (^beforeDispatch)(void) = self.beforeDispatch;
+    return !beforeDispatch || beforeDispatch() || SRFail(error, @"native_dispatch_cancelled");
 }
 - (void)beginReply { [_lock lock]; _pending++; [_lock unlock]; }
 - (void)markDispatched { [_lock lock]; _dispatched = YES; [_lock unlock]; }

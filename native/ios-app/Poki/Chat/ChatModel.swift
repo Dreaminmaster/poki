@@ -850,8 +850,8 @@ final class ChatModel {
         return request + 1
     }
 
-    private func recordMemoryUse(notes: [TaskMemoryUse.Note] = [], skill: String? = nil) {
-        guard !notes.isEmpty || skill != nil, let index = taskCardIndex(create: true) else { return }
+    private func recordMemoryUse(notes: [TaskMemoryUse.Note], skill: String?) -> PokiCore.InputRollback? {
+        guard !notes.isEmpty || skill != nil, let index = taskCardIndex(create: true) else { return nil }
         let previous = entries[index].memoryUse
         var use = previous ?? TaskMemoryUse(notes: [], skills: [])
         for note in notes {
@@ -859,19 +859,51 @@ final class ChatModel {
             else { use.notes.append(note) }
         }
         if let skill, !use.skills.contains(skill) { use.skills.append(skill) }
-        guard use != previous else { return }
+        guard use != previous else { return nil }
+        let card = entries[index].id, session = sessionID, recorded = use
         entries[index].memoryUse = use
         store.flush(sessionID: sessionID)
+        return { [weak self, store] in
+            if let self, self.sessionID == session {
+                guard let index = self.entries.firstIndex(where: { $0.id == card }),
+                      self.entries[index].memoryUse == recorded else { return }
+                self.entries[index].memoryUse = previous
+                store.flush(sessionID: session)
+            } else {
+                store.restoreMemoryUse(previous, replacing: recorded, card: card, in: session)
+            }
+        }
     }
 
-    private func recordReportedMemories(_ ids: [String], skill: String? = nil) {
-        guard !ids.isEmpty || skill != nil else { return }
+    @discardableResult
+    private func recordReportedMemories(_ ids: [String], skill: String? = nil) -> PokiCore.InputRollback? {
+        guard !ids.isEmpty || skill != nil else { return nil }
         var reported = Set(ids.prefix(20))
         let notes = offeredMemories.reversed().compactMap { note -> TaskMemoryUse.Note? in
             guard reported.remove(note.id) != nil else { return nil }
             return TaskMemoryUse.Note(id: note.id, updatedAtSeconds: Int64((note.edited ?? note.at).timeIntervalSince1970))
         }
-        recordMemoryUse(notes: notes, skill: skill)
+        return recordMemoryUse(notes: notes, skill: skill)
+    }
+
+    private struct ActionMemory {
+        var direct: [String] = []
+        var path: [[String]] = []
+    }
+
+    private static func takeActionMemory(from action: inout [String: Any], fallback: [String]) -> ActionMemory {
+        let direct = action.removeValue(forKey: "used_memory_ids") as? [String] ?? fallback
+        guard let path = action["path"] else { return ActionMemory(direct: direct) }
+        var options = path as? [String: Any]
+        guard var steps = (options?["steps"] ?? path) as? [[String: Any]] else { return ActionMemory() }
+        let ids = steps.indices.map { steps[$0].removeValue(forKey: "used_memory_ids") as? [String] ?? [] }
+        if options != nil {
+            options?["steps"] = steps
+            action["path"] = options
+        } else {
+            action["path"] = steps
+        }
+        return ActionMemory(path: ids)
     }
 
     private func saveTaskMemory(token: Int) -> Bool {
@@ -1201,11 +1233,11 @@ final class ChatModel {
         case "look", "do":
             if let refusal = selectRoute(.app) { return refusal }
             var phoneArguments = call.arguments
-            var notesByAction: [[String]] = []
+            var notesByAction: [ActionMemory] = []
             if call.name == "do", var actions = args["actions"] as? [[String: Any]] {
                 let singleActionIDs = actions.count == 1 ? args["used_memory_ids"] as? [String] ?? [] : []
                 notesByAction = actions.indices.map { index in
-                    actions[index].removeValue(forKey: "used_memory_ids") as? [String] ?? singleActionIDs
+                    Self.takeActionMemory(from: &actions[index], fallback: singleActionIDs)
                 }
                 var phoneArgs = args
                 phoneArgs.removeValue(forKey: "used_memory_ids")
@@ -1218,13 +1250,17 @@ final class ChatModel {
             defer { phoneStepUnderWay = false }
             let taskToken = runToken
             let response = await app.runTool(call.name, arguments: phoneArguments, localSession: splitViewSession,
-                                             expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)") { [weak self, notesByAction] index, skill in
-                try await MainActor.run {
-                    try Task.checkCancellation()
-                    guard let self, self.runToken == taskToken else { throw CancellationError() }
-                    let ids = notesByAction.indices.contains(index) ? notesByAction[index] : []
-                    self.recordReportedMemories(ids, skill: skill)
+                                             expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)") { [weak self, notesByAction] index, step, skill in
+                guard let self, self.runToken == taskToken, !self.stopAsked else { throw CancellationError() }
+                guard notesByAction.indices.contains(index) else { return nil }
+                let action = notesByAction[index]
+                let ids: [String]
+                if let step, skill == nil {
+                    ids = action.path.indices.contains(step) ? action.path[step] : []
+                } else {
+                    ids = action.direct
                 }
+                return self.recordReportedMemories(ids, skill: skill)
             }
             guard taskToken == runToken, usesSplitView else { return response }
             let changedLayout = call.name == "look" && lastSplitViewLayout != nil &&

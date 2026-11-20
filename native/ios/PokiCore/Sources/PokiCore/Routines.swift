@@ -1350,7 +1350,11 @@ extension Computer {
                         refs[Self.runRef] = nil
                         throw stop(index, "\(why); \(element.type) \"\(element.text.prefix(40))\" is in the way and closing it needs the owner's approval (\(reason))")
                     }
-                    do { _ = try await perform(tap, until: min(until, now() + config.actionCap)) }
+                    do {
+                        _ = try await Runner.$beforeInput.withValue(nil) {
+                            try await perform(tap, until: min(until, now() + config.actionCap))
+                        }
+                    }
                     catch let failure as ActionFailure { refs[Self.runRef] = nil; throw stop(index, "\(why); closing \(element.type) \"\(element.text.prefix(40))\" failed (\(failure.message))", failure.delivery) }
                     catch { refs[Self.runRef] = nil; throw stop(index, "\(why); closing what was in the way failed (\(error))", .unknown) }
                     refs[Self.runRef] = nil
@@ -1401,7 +1405,8 @@ extension Computer {
             let began = now()
             let kind: String, text: String
             do {
-                (kind, text) = try await Runner.$inputSkill.withValue(saved ? skill.name : nil) {
+                let step = Runner.ReplayStep(index: index, skill: saved ? skill.name : nil)
+                (kind, text) = try await Runner.$replayStep.withValue(step) {
                     try await perform(action, until: min(until, now() + actionCap(action)))
                 }
             }

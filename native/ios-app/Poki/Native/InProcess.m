@@ -1599,6 +1599,11 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
 }
 
 - (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry {
+    return [self touch:fingers timeout:timeout geometry:geometry beforeDispatch:nil];
+}
+
+- (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry
+      beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch {
     NSString *workspaceFailure = [self validateSelectedPane];
     if (workspaceFailure) return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:workspaceFailure];
     PKWorkspace *workspace = self.selectedWorkspace;
@@ -1682,6 +1687,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     if (companionTask != self.duoCompanionTask || (geometry.routesDisplay && !PKSameDisplay(geometry, self.displayGeometry)))
         return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the display changed before dispatch"];
     SRActionContext *context = [self contextFor:session generation:generation];
+    context.beforeDispatch = beforeDispatch;
     NSError *error;
     if (![context commit:&error]) return [PKOutcome delivery:PKDeliveryNotSent code:error.localizedDescription detail:nil];
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
@@ -1703,6 +1709,11 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
 }
 
 - (PKOutcome *)type:(NSString *)text typingSpeed:(NSUInteger)speed timeout:(double)timeout {
+    return [self type:text typingSpeed:speed timeout:timeout beforeDispatch:nil];
+}
+
+- (PKOutcome *)type:(NSString *)text typingSpeed:(NSUInteger)speed timeout:(double)timeout
+     beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch {
     PKWorkspace *workspace = self.selectedWorkspace;
     PKDuoCompanionTask *companionTask = self.duoCompanionTask;
     PKDisplayGeometry display = {0};
@@ -1721,6 +1732,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     id session = [self current:&generation outcome:&refused];
     if (!session) return refused;
     SRActionContext *context = [self contextFor:session generation:generation];
+    context.beforeDispatch = beforeDispatch;
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
     NSError *error;
     if (companionTask != self.duoCompanionTask || ((workspace || companionTask) && !PKSameDisplay(display, self.displayGeometry)))
@@ -2780,6 +2792,10 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
 }
 
 - (nullable NSString *)press:(NSString *)name {
+    return [self press:name beforeDispatch:nil];
+}
+
+- (nullable NSString *)press:(NSString *)name beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch {
     if (self.hasDuoCompanionTask) return @"not sent: a hardware button would leave the task's pane";
     [self forgetFront];
     @try {
@@ -2790,6 +2806,7 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
         NSDictionary *buttons = @{@"home": @1, @"volumeUp": @2, @"volumeDown": @3};
         if ([name isEqualToString:@"lock"]) {
             if (![device respondsToSelector:@selector(pressLockButton)]) return @"lock_unavailable";
+            if (beforeDispatch && !beforeDispatch()) return @"native_dispatch_cancelled";
             [device pressLockButton];
             return nil;
         }
@@ -2799,8 +2816,10 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
         // 0xE9/0xEA) is sent here so that a refusal comes back instead of a silent nothing.
         static const uint32_t usages[] = {0, 0x40, 0xE9, 0xEA};
         id event = [NSClassFromString(@"XCDeviceEvent") deviceEventWithPage:0x0C usage:usages[button.intValue] duration:0.1];
+        if (!event || ![device respondsToSelector:@selector(performDeviceEvent:error:)]) return @"button_failed";
+        if (beforeDispatch && !beforeDispatch()) return @"native_dispatch_cancelled";
         NSError *error = nil;
-        if (!event || ![device performDeviceEvent:event error:&error]) return error.localizedDescription ?: @"button_failed";
+        if (![device performDeviceEvent:event error:&error]) return error.localizedDescription ?: @"button_failed";
         return nil;
     } @catch (NSException *e) {
         return [NSString stringWithFormat:@"%@: %@", e.name, e.reason];
@@ -2821,6 +2840,10 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
 /// (or starts it), terminate ends it. XCUIApplication itself refuses to exist outside a UI test bundle.
 /// Launch and activate return once the app is in front.
 - (nullable NSString *)app:(NSString *)bundle action:(NSString *)action {
+    return [self app:bundle action:action beforeDispatch:nil];
+}
+
+- (nullable NSString *)app:(NSString *)bundle action:(NSString *)action beforeDispatch:(BOOL (^ _Nullable)(void))beforeDispatch {
     PKWorkspace *selected = self.selectedWorkspace;
     if (self.hasDuoCompanion || (selected && (selected.leftPID == getpid() || selected.rightPID == getpid()))) {
         NSDictionary *front = nil;
@@ -2841,6 +2864,9 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
         id proxy = [session daemonProxy];
         BOOL launch = [action isEqualToString:@"launch"], activate = [action isEqualToString:@"activate"];
         if (!launch && !activate && ![action isEqualToString:@"terminate"]) return @"unknown_action";
+        if ((launch || activate) && ![proxy respondsToSelector:@selector(_XCT_launchApplicationWithBundleID:arguments:environment:completion:)]) return @"launch_unavailable";
+        if (!activate && ![proxy respondsToSelector:@selector(_XCT_terminateApplicationWithBundleID:completion:)]) return @"terminate_unavailable";
+        if (beforeDispatch && !beforeDispatch()) return @"native_dispatch_cancelled";
         if (!launch && !activate) {
             return PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; });
         }
@@ -2852,7 +2878,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             } while ([by timeIntervalSinceNow] > 0);
             return NO;
         };
-        if (launch && !PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; })) {
+        BOOL sent = launch && !PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; });
+        if (sent) {
             // A launch sent while the old process is still exiting is answered but starts nothing.
             NSDate *by = [NSDate dateWithTimeIntervalSinceNow:5];
             while ([by timeIntervalSinceNow] > 0 && [[self frontApp][@"bundleId"] isEqualToString:bundle]) [NSThread sleepForTimeInterval:0.25];
@@ -2862,7 +2889,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             NSString *code = PKDaemonReply(30, ^(void (^reply)(NSError *)) {
                 [proxy _XCT_launchApplicationWithBundleID:bundle arguments:@[] environment:@{} completion:reply];
             });
-            if (code) return code;
+            if (code) return sent ? @"not_in_front" : code;
+            sent = YES;
             if (inFront(attempt ? 10 : 5)) return nil;
         }
         return @"not_in_front";
