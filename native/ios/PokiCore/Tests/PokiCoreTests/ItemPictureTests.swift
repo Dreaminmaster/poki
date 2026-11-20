@@ -29,6 +29,11 @@ final class ItemPictureTests: XCTestCase {
         let first = await core.callTool("look", arguments: "{}", localTask: "shop")
         show(secondPNG, secondFrame)
         let second = await core.callTool("look", arguments: "{}", localTask: "shop")
+        wda.set("GET /screenshot") { _ in (200, ["value": .null]) }
+        wda.tree([Node("Image", "Another page", [19, 204, 100, 100])])
+        let treeOnly = await core.callTool("look", arguments: "{}", localTask: "shop")
+        XCTAssertTrue(treeOnly.text.contains("the screenshot is the one of the read before"))
+        XCTAssertFalse(treeOnly.text.contains("screenshot_id: "))
 
         let requests = [
             "first": ItemPictureRequest(screenshotID: try screenshotID(first), box: box),
