@@ -213,6 +213,13 @@ static BOOL SRABI(id target, SEL selector, const char *result, NSArray<NSString 
     BOOL value = session == _observed && generation == _generation && !_invalidated && _token != nil;
     [_lifecycleLock unlock]; return value;
 }
+- (id)enabledSessionWithGeneration:(uint64_t *)generation {
+    [_lifecycleLock lock];
+    *generation = _generation;
+    id session = !_invalidated && _token && _enabledGeneration == _generation ? _enabled : nil;
+    [_lifecycleLock unlock];
+    return session;
+}
 /// Ends the current session: its connection to testmanagerd is invalidated, which ends Automation
 /// Mode (and iOS's banner) for this process. The next prepare opens a new session with a new
 /// generation; an action meant for the old one is refused as native_session_invalidated.

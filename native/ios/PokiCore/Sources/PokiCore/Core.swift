@@ -182,6 +182,8 @@ public protocol CoreHost: AnyObject, Sendable {
     func restartRunner()
     /// An agent connected (MCP initialize): get ready for its first look now, not during it.
     func warmUp()
+    /// The app may unlock for an owner-started task. No passcode crosses into the core.
+    func unlockForLocalTask(timeout: Double) async -> Bool
     /// Text read from a PNG screenshot, used for elements an app collapsed. PokiCore answers it with
     /// Vision by default, so a host need not implement it.
     func recognizeText(inPNG png: Data) async -> [RecognizedText]?
@@ -198,6 +200,7 @@ public protocol CoreHost: AnyObject, Sendable {
 
 extension CoreHost {
     public var currentRunner: RunnerState { runnerState() }
+    public func unlockForLocalTask(timeout: Double) async -> Bool { false }
     public func screenshotWithoutRunner() async -> Data? { nil }
     public func approveConnection(client: String, callback: String, connector: String) async -> Bool { false }
 }

@@ -11,6 +11,12 @@ typedef NS_ENUM(NSInteger, PKDelivery) {
     PKDeliveryUnknown = 2,
 };
 
+typedef NS_ENUM(NSInteger, PKUnlockResult) {
+    PKUnlockResultUnavailable,
+    PKUnlockResultUnlocked,
+    PKUnlockResultSubmissionUnconfirmed,
+};
+
 /// One point of a finger's path: where it is `offset` seconds after the gesture starts.
 @interface PKTouchPoint : NSObject
 @property (nonatomic, readonly) CGPoint point;
@@ -132,6 +138,9 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 /// launch, activate or terminate an app by its bundle id. Nil when done, else why not.
 - (nullable NSString *)app:(NSString *)bundle action:(NSString *)action;
 - (BOOL)screenLocked;
+/// Uses an already authorized session. The passcode stays in the app; the daemon receives touch events.
+- (PKUnlockResult)unlockPhoneWithPasscode:(NSString *)passcode timeout:(double)timeout allowed:(BOOL (^)(void))allowed
+    NS_SWIFT_NAME(unlockPhone(withPasscode:timeout:allowed:));
 /// The current session's generation: it goes up when the daemon session is replaced.
 - (uint64_t)generation;
 /// A trial for ending the session: opens a session of its own (not the shared one that XCUIAutomation

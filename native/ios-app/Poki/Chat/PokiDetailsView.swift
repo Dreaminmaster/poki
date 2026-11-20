@@ -368,6 +368,7 @@ struct ConnectionView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @State private var guiding = false
+    @State private var showsAutoUnlockPasscode = false
 
     private var on: Bool { model.sessionOn && !model.ownerPaused }
 
@@ -410,6 +411,11 @@ struct ConnectionView: View {
                 }
             }
 
+            if model.supportsAutoUnlock || model.autoUnlock.enabled {
+                AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                  showsPasscode: $showsAutoUnlockPasscode)
+            }
+
             Section {
                 ForEach(SetupStep.shown) { step in
                     let done = model.stepReadyForUse(step)
@@ -434,6 +440,9 @@ struct ConnectionView: View {
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
         .sheet(isPresented: $guiding) {
             SetupGuide(start: SetupStep.shown.first { !model.stepReadyForUse($0) })
+        }
+        .sheet(isPresented: $showsAutoUnlockPasscode) {
+            AutoUnlockPasscodeForm(setting: model.autoUnlock)
         }
     }
 

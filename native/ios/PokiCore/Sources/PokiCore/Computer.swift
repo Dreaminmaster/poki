@@ -567,8 +567,12 @@ final class Computer: @unchecked Sendable {
                               jpeg: nil, isError: true, splitViewNeedsRead: true)
         }
         let begins = beginsTask() || (pane != nil && origin?.session != session)
-        if begins { beginRecording(); typedText = nil }
         async let locked = isLocked()
+        var unlocked = false
+        if localTask != nil, pane == nil, await locked {
+            unlocked = await unlockForLocalTask(until: until)
+        }
+        if begins { beginRecording(); typedText = nil }
         var result = restartNote(await readAndReply(until: until, full: full))
         if let selectedPane {
             if !result.isError, let size, let paneOffset {
@@ -611,7 +615,8 @@ final class Computer: @unchecked Sendable {
         }
         if begins, let app = lastForeground { origin = (app, session, now()) } else if origin?.session == session { origin?.lastCall = now() }
         if begins, let line = skillsLine() { result.text += "\n" + line }
-        guard await locked else {
+        let wasLocked = await locked
+        guard wasLocked && !unlocked else {
             if local, let revision, !Task.isCancelled, !result.isError, let evidence = result.screenEvidence,
                host.currentRunner.automationRevision == revision {
                 authorizationRead = (revision, localTask, evidence)
@@ -826,6 +831,15 @@ final class Computer: @unchecked Sendable {
     /// WDA's lock state, without a session; unknown counts as unlocked (a failed read must not block).
     func isLocked() async -> Bool {
         (try? await runner.raw("GET", "/wda/locked", timeout: 1, countsAsMiss: false))?.bool ?? false
+    }
+
+    private func unlockForLocalTask(until: Double) async -> Bool {
+        guard selectedPane == nil, approvals.pending == nil, !handoffWaiting, !Task.isCancelled,
+              await host.unlockForLocalTask(timeout: min(8, until - now() - config.readTimeout)) else { return false }
+        clearPaneRead()
+        authorizationRead = nil
+        lastForeground = nil
+        return true
     }
 
     static let authorizationWait: Double = 90
@@ -1082,6 +1096,10 @@ final class Computer: @unchecked Sendable {
         }
         let onlyButtons = actions.allSatisfy { $0["button"] != nil || $0["wait"] != nil }
         if !onlyButtons, await isLocked() {
+            if localTask != nil, !harmless, await unlockForLocalTask(until: until) {
+                return ToolResult(text: "The iPhone unlocked. No requested action was sent. Call look to read the current screen before acting.",
+                                  jpeg: nil, isError: true)
+            }
             return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
         }
 

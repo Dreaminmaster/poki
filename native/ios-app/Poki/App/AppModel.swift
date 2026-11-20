@@ -220,6 +220,10 @@ final class AppModel {
     private var launcherConfig: LauncherConfig?
 
     let host = AppCoreHost()
+    let autoUnlock = AutoUnlock()
+    var supportsAutoUnlock: Bool {
+        automationPath == .inProcess && UIDevice.current.userInterfaceIdiom == .phone && !PKInProcess.canUseDuoSplitView()
+    }
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
@@ -385,6 +389,12 @@ final class AppModel {
         host.onConsent { [weak self] client, callback, connector in
             await self?.askToConnect(client: client, callback: callback, connector: connector) ?? false
         }
+        if transport == nil, supportsAutoUnlock, !Self.onSimulator {
+            host.onAutoUnlock { [weak self] timeout in
+                guard let self, await self.canAutoUnlock else { return false }
+                return await self.autoUnlock.unlock(timeout: timeout)
+            }
+        }
         // PokiCore asks for a restart after two silent requests in a row. A slow gesture can be one of
         // them while the runner is fine, so the runner is asked first; only a runner that does not
         // answer is started again (each restart costs seconds and flashes the automation banner).
@@ -484,6 +494,10 @@ final class AppModel {
             setup.save()
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
+    }
+
+    private var canAutoUnlock: Bool {
+        sessionOn && !ownerPaused && inProcessSession == .open && ChatModel.delegatedBusy == nil
     }
 
     /// The in-process session as prepare last answered it in this process (ESP-152).

@@ -147,8 +147,15 @@ enum Keychain {
     }
 
     static func delete(_ account: String) {
+        try? remove(account)
+    }
+
+    static func remove(_ account: String) throws {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-        SecItemDelete(base as CFDictionary)
+        let status = SecItemDelete(base as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
     }
 }
 
