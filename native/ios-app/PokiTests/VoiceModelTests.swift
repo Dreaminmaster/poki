@@ -388,6 +388,50 @@ final class VoiceModelTests: XCTestCase {
         h.voice.stop()
     }
 
+    func testLiveDiscardedReplayDoesNotChangeTheNextTurn() async {
+        var operations: [String] = []
+        let h = Harness(phoneTool: { _, arguments in
+            operations.append(arguments)
+            return ("verified result", false, nil)
+        })
+        await h.liveTalk()
+
+        func transcript(_ text: String, audio: Range<Int>? = nil) {
+            var event: [String: Any] = ["type": "session.input_transcript.delta", "delta": text]
+            if let audio {
+                event["start_ms"] = audio.lowerBound
+                event["end_ms"] = audio.upperBound
+            }
+            h.link.play(event)
+        }
+
+        func request(_ id: String) async {
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": id]])
+            h.link.call(id, "do", arguments: id, delegation: id)
+            await h.time.settle()
+        }
+
+        transcript("向下滚动", audio: 200..<400)
+        await request("first")
+        XCTAssertEqual(operations, ["first"])
+
+        transcript("往下滚动", audio: 200..<400)
+        transcript("向下滚动", audio: 600..<900)
+        await request("fresh")
+        XCTAssertEqual(operations, ["first", "fresh"], "A replay without its own delegation must not contaminate new audio.")
+
+        await h.time.advance(2)
+        transcript("向下滚动")
+        await request("untimed-replay")
+        XCTAssertFalse(operations.contains("untimed-replay"), "A replay without timings still obeys the three-second rule.")
+
+        await h.time.advance(1.1)
+        transcript("向下滚动")
+        await request("untimed-fresh")
+        XCTAssertEqual(operations.last, "untimed-fresh", "A discarded replay must not restart the three-second window.")
+        h.voice.stop()
+    }
+
     func testLiveEndWaitsForServerConfirmationOrReleasesAfterTimeout() async {
         let confirmed = Harness()
         await confirmed.liveTalk()
