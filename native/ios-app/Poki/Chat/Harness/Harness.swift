@@ -66,7 +66,7 @@ enum Harness {
         }
         parts.append(recipients)
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
-        if let apps = appIDs(for: task) { parts.append(apps) }
+        if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
         return (parts.joined(separator: "\n\n"), brief.notes)
     }
@@ -80,8 +80,8 @@ enum Harness {
     /// (KnownApps). Without them the model guessed: a tester's 淘宝 and 美团 tasks (Nov 13 2026) were
     /// refused as "no app with that bundle id is installed", and the agent told the owner to install
     /// apps they had. nil when the request names no listed app.
-    @MainActor private static func appIDs(for task: String) -> String? {
-        let apps = AppIconStore.bundleIDs(namedIn: task).compactMap { KnownApps.byID[$0.lowercased()] }
+    private static func appIDs(_ bundleIDs: [String]) -> String? {
+        let apps = bundleIDs.compactMap { KnownApps.byID[$0.lowercased()] }
         guard !apps.isEmpty else { return nil }
         let lines = apps.map { app -> String in
             let names = app.names.joined(separator: " / ")

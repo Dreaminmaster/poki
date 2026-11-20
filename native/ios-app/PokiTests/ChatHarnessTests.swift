@@ -535,6 +535,37 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(saved.text.contains(note))
     }
 
+    func testRejectedSkillSaveIsVisibleInChatAndDelegatedResult() async throws {
+        let name = "Locked workflow \(UUID().uuidString)"
+        let store = SkillStore.shared
+        defer { store.forget(name) }
+        let original = Skill(name: name, description: "Owner's workflow", app: "com.apple.Preferences",
+                             steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
+                             params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                             lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date(),
+                             locked: true)
+        XCTAssertTrue(store.save(original))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+            FakeCompletions.tool("skills", ["action": "save", "name": name]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Settings is ready."),
+        ])
+        let chat = chat(on: server, transport: transport, automation: automation)
+
+        let result = await chat.runDelegated("Check Settings and save the procedure over \(name).")
+
+        let notice = "Couldn’t save the skill “\(name)”."
+        XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.ok })
+        XCTAssertEqual(store.skill(named: name)?.steps, original.steps)
+        XCTAssertTrue(chat.entries.contains { if case .poki(let words) = $0.kind { return words.contains(notice) }; return false })
+        XCTAssertTrue(result.text.contains(notice), result.text)
+        XCTAssertEqual(result.success, false)
+    }
+
     /// finish_task's requested facts and the kind of answer go back to the agent that handed the task
     /// over, and the task's record keeps the answer with the element it was read from.
     func testTheFinishedTaskAnswersWithTheRequestedFacts() async throws {

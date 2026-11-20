@@ -197,6 +197,30 @@ final class RoutineTests: XCTestCase {
         XCTAssertFalse(brief.contains("Calculator preference"))
     }
 
+    func testTaskBriefRecallsAnAppMemoryForARephrasedRequestWithoutTheAppName() {
+        let store = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let preference = "报告系统版本时带上构建号。"
+        let unrelated = "计算结果保留两位小数。"
+        store.remember(preference, by: SkillStore.owner, app: settings)
+        store.remember(unrelated, by: SkillStore.owner, app: calculator)
+
+        let request = "这台手机现在跑的系统版本是多少？"
+        let brief = store.brief(for: request)
+
+        XCTAssertTrue(brief.contains(preference), brief)
+        XCTAssertFalse(brief.contains(unrelated), brief)
+        XCTAssertFalse(store.brief(for: "今天天气怎么样？").contains(preference))
+        XCTAssertFalse(store.brief(for: request, app: calculator).contains(preference))
+
+        let competing = "查询系统版本时把报告发给支持人员。"
+        store.remember(competing, by: SkillStore.owner, app: calculator)
+        let ambiguous = store.brief(for: request)
+        XCTAssertFalse(ambiguous.contains(preference))
+        XCTAssertFalse(ambiguous.contains(competing))
+    }
+
     func testAStaleRoutineIsNotOfferedAndASaveOverItStartsItsRecordAgain() async {
         let store = RoutineStore(url: nil)
         let (core, _, pages) = core(store)

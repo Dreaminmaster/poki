@@ -38791,6 +38791,38 @@
           }
         }
       }
+    },
+    "Couldn’t save the skill “%@”." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能保存技能「%@」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存技能「%@」。"
+          }
+        }
+      }
+    },
+    "Couldn’t save that memory." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能保存这条记忆。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存這則記憶。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
