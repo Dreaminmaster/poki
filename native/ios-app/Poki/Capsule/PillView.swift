@@ -15,7 +15,10 @@ struct PillMetrics {
 
     var height: CGFloat { (pointSize * 1.5).rounded() }
     var icon: CGFloat { height - 6 }
-    var labelFont: UIFont { .systemFont(ofSize: (pointSize * 0.88).rounded(), weight: .semibold) }
+    var labelFont: UIFont {
+        let size = (pointSize * 0.88).rounded()
+        return Typeface.uiFont(size: size, .semibold) ?? .systemFont(ofSize: size, weight: .semibold)
+    }
     var leading: CGFloat { 3 }
     var gap: CGFloat { 5 }
     var trailing: CGFloat { 8 }

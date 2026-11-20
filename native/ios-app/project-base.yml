@@ -66,9 +66,10 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
-        # Geist (SIL OFL 1.1, Shared/Fonts) for the Live Activity, in both bundles: the widget
-        # extension draws the island and falls back to SF Pro without its own copy.
-        UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, Geist-Bold.ttf, Geist-Black.ttf]
+        # Allo (SIL OFL 1.1, Shared/Fonts, cut by scripts/make-allo-fonts.py) for the app and the Live
+        # Activity, in both bundles: the widget extension draws the island and falls back to SF Pro
+        # without its own copy.
+        UIAppFonts: [AlloText-Regular.ttf, AlloText-Medium.ttf, AlloText-SemiBold.ttf, AlloText-Bold.ttf, AlloText-ExtraBold.ttf, AlloRounded-Medium.ttf, AlloRounded-SemiBold.ttf, AlloRounded-Bold.ttf, AlloRounded-ExtraBold.ttf, AlloRounded-Black.ttf]
         # While Poki is on, background location (with the blue location pill) keeps the app, and with it
         # the relay connection and the launcher, running; silent audio is the fallback. Poki never reads
         # or sends the location itself.
@@ -165,7 +166,7 @@ targets:
         CFBundleLocalizations: [en, zh-Hans, zh-Hant]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, Geist-Bold.ttf, Geist-Black.ttf]
+        UIAppFonts: [AlloText-Regular.ttf, AlloText-Medium.ttf, AlloText-SemiBold.ttf, AlloText-Bold.ttf, AlloText-ExtraBold.ttf, AlloRounded-Medium.ttf, AlloRounded-SemiBold.ttf, AlloRounded-Bold.ttf, AlloRounded-ExtraBold.ttf, AlloRounded-Black.ttf]
     entitlements:
       path: PokiWidgets/PokiWidgets.entitlements
       properties:

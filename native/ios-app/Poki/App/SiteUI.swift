@@ -4,40 +4,47 @@ import UIKit
 // The pieces every screen is drawn from, in the website's design language (ESP-139 final boards 01,
 // 03 and 04: the blue page, glass cards and white capsule buttons; long lists are white cards on the
 // blue). Colours come from `Site` (Shared/ActivityTheme.swift), the one token table the Live Activity
-// uses too. Type is Geist; Chinese falls back to PingFang by itself.
+// uses too. Type is Allo (Shared/Typeface.swift); Chinese falls back to PingFang by itself.
 
-enum Geist: String {
-    case regular = "Geist-Regular", medium = "Geist-Medium", semibold = "Geist-SemiBold", bold = "Geist-Bold"
+/// A board's weight. The boards were drawn in Geist; Allo stands in for it at the same weights.
+enum SiteWeight {
+    case regular, medium, semibold, bold
     /// Weight 800: the boards' display type.
-    case heavy = "Geist-Black"
+    case heavy
 
-    func font(_ size: CGFloat) -> Font { .custom(rawValue, size: size, relativeTo: .body) }
-    /// The extra space SwiftUI needs to reach the boards' line height.
-    func spacing(_ size: CGFloat, lineHeight: CGFloat) -> CGFloat {
-        max(0, lineHeight - (UIFont(name: rawValue, size: size)?.lineHeight ?? size * 1.2))
+    var weight: Font.Weight {
+        switch self {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        }
     }
 }
 
 extension View {
-    /// Geist at a size and line height from the boards, with letter spacing in em.
-    func site(_ size: CGFloat, _ weight: Geist = .regular, line: CGFloat? = nil, tracking em: CGFloat = 0) -> some View {
+    /// Allo at a size and line height from the boards, with letter spacing in em.
+    func site(_ size: CGFloat, _ weight: SiteWeight = .regular, line: CGFloat? = nil, tracking em: CGFloat = 0) -> some View {
         font(Self.systemFont(size, weight))
     }
 
-    /// The system text style nearest to a board size, so Dynamic Type and the system font apply.
-    static func systemFont(_ size: CGFloat, _ weight: Geist) -> Font {
-        let style: Font = switch size {
-        case 26...: .title.bold()
+    /// The text style nearest to a board size, so Dynamic Type applies; the large lines in Allo
+    /// Rounded, the rest in Allo Text.
+    static func systemFont(_ size: CGFloat, _ weight: SiteWeight) -> Font {
+        let style: Font.TextStyle = switch size {
+        case 26...: .title
         case 20..<26: .title3
         case 16.5..<20: .body
         case 14.5..<16.5: .subheadline
         case 12.5..<14.5: .footnote
         default: .caption
         }
+        if style == .title { return .alloRounded(.title, .bold) }
         switch weight {
-        case .regular: return style
-        case .medium: return style.weight(.medium)
-        case .semibold, .bold, .heavy: return style.weight(.semibold)
+        case .regular: return .allo(style)
+        case .medium: return .allo(style, .medium)
+        case .semibold, .bold, .heavy: return .allo(style, .semibold)
         }
     }
 

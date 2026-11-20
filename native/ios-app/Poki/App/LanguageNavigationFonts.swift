@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Updating the locale must also release the launch-time Geist navigation font for languages whose
-/// glyphs it does not contain. Touch only typography in this window; keep its controllers and routes.
+/// Updating the locale must also refresh the launch-time navigation fonts, whose CJK fallback
+/// follows Poki's language. Touch only typography in this window; keep its controllers and routes.
 struct LanguageNavigationFonts: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
 

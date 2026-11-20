@@ -89,7 +89,7 @@ struct MessageBubble: View {
     private var withCapsules: Text {
         let segments = CapsuleText.segments(text)
         guard segments.contains(where: { if case .app = $0 { true } else { false } }) else { return Text(rendered) }
-        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize)))
+        let font = CapsuleTextView.textFont(compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize)))
         return segments.reduce(Text(verbatim: "")) { line, segment in
             switch segment {
             case .text(let words):
