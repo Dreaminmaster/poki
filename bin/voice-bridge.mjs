@@ -100,10 +100,10 @@ const cancelCurrentTask = 'cancel_current_task';
 const cancellationRule = `Use the whole request and context to distinguish stopping your voice from cancelling phone work. Call ${cancelCurrentTask} immediately as the only tool when the user wants the phone task cancelled, for example “先别发了”. A request to quiet the voice only pauses playback. For “在备忘录输入停” or “把停字发过去”, the word is content to enter or send. Use the normal phone tools for that request.
 Brief acknowledgments such as “嗯” and “好的” leave the current reply and task intact. Report success only after a tool confirms the requested result. Describe pending, uncertain and failed results as they are.`;
 
-function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', language } = {}) {
+function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', language, manualTurns = false } = {}) {
   const turn = vad === 'semantic_vad'
-    ? { type: 'semantic_vad', eagerness: 'high', create_response: true, interrupt_response: true }
-    : { type: 'server_vad', silence_duration_ms: 450, prefix_padding_ms: 300, threshold: 0.5, create_response: true, interrupt_response: true };
+    ? { type: 'semantic_vad', eagerness: 'high', create_response: !manualTurns, interrupt_response: true }
+    : { type: 'server_vad', silence_duration_ms: 450, prefix_padding_ms: 300, threshold: 0.5, create_response: !manualTurns, interrupt_response: true };
   return {
     type: 'realtime',
     model: usesLive ? 'gpt-realtime-2.1' : model,
@@ -334,6 +334,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && action === 'token') {
       if (usesLive && url.searchParams.get('transport') === 'live') return reply(200, { model, live: true, local_tools: localTools });
       const options = Object.fromEntries(['effort', 'vad', 'voice', 'language'].map(k => [k, url.searchParams.get(k) ?? undefined]).filter(([, v]) => v));
+      options.manualTurns = url.searchParams.get('turns') === 'committed';
       const started = Date.now();
       const token = await mintToken(options);
       console.log(JSON.stringify({ event: 'token', ms: Date.now() - started, options }));

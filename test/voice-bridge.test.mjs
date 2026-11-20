@@ -52,6 +52,16 @@ test('legacy voice token requests hint Chinese transcription for each interface 
   }
 });
 
+test('a Realtime client opts in to requesting its own replies after audio is committed', async t => {
+  const { base, request } = await sessionBridge(t);
+  for (const [query, autoRespond] of [['', true], ['?turns=committed', false]]) {
+    assert.equal((await fetch(`${base}/token${query}`)).status, 200);
+    const { body: { session } } = await request();
+    assert.equal(session.audio.input.turn_detection.create_response, autoRespond);
+    assert.equal(session.audio.input.turn_detection.interrupt_response, true);
+  }
+});
+
 test('the voice bridge exchanges a Live offer and returns only the SDP answer', async t => {
   const { base, request } = await sessionBridge(t);
   const token = await fetch(`${base}/token?transport=live`);
