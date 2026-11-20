@@ -9,7 +9,10 @@ struct MentionQuery: Equatable {
     var text: String
     /// The words the picked name replaces, in the plain text (UTF-16).
     var range: NSRange
-    /// The caret, in the window.
+    /// The caret, in the field's own visible coordinates (its scroll taken off). The list is placed
+    /// from the field's frame in the composer's own coordinate space: window and global coordinates
+    /// do not line up inside the iOS 26 safe-area bar the composer sits in, and the list landed in
+    /// the field or under the keyboard (the owner, Nov 20 2026).
     var caret: CGRect
     /// The keyboard is still composing.
     var pending: Bool
@@ -77,12 +80,17 @@ enum MentionSearch {
     /// The apps and connectors for a query, best first.
     static func matches(_ query: String, pending: Bool, explicit: Bool) -> [MentionMatch] {
         let typed = fold(query.replacingOccurrences(of: "'", with: "").replacingOccurrences(of: " ", with: ""))
+        // Latin letters the keyboard is still composing are Pinyin (Zhuyin, Cangjie and kana compose
+        // in their own script): they spell a Chinese name, not a Latin one, so only the Pinyin keys of Chinese
+        // names match until the keyboard commits ("tai" no longer offers Tailscale over 太平洋保险).
+        let spelling = pending && !typed.isEmpty && typed.unicodeScalars.allSatisfy { $0.isASCII && CharacterSet.letters.contains($0) }
         var scored: [(score: Int, match: MentionMatch)] = []
         let connectors = ConnectorCapsules.current
         for capsule in connectors {
             for name in capsule.names {
                 let bare = fold(String(name.dropFirst()))
                 if typed.isEmpty { scored.append((50, MentionMatch(capsule: capsule, insert: name))); break }
+                if spelling, !name.unicodeScalars.contains(where: CapsuleText.isUnspaced) { continue }
                 // After @ a connector comes before an app of the same start.
                 if let score = score(bare, typed) { scored.append((score + (explicit ? 25 : 5), MentionMatch(capsule: capsule, insert: name))); break }
             }
@@ -95,8 +103,10 @@ enum MentionSearch {
         for capsule in AppCapsule.catalog {
             var best: Int?
             for name in capsule.names {
-                var keys = [fold(name)]
-                if name.unicodeScalars.contains(where: CapsuleText.isUnspaced) { keys += Pinyin.keys(name) }
+                let chinese = name.unicodeScalars.contains(where: CapsuleText.isUnspaced)
+                if spelling, !chinese { continue }
+                var keys = spelling ? [] : [fold(name)]
+                if chinese { keys += Pinyin.keys(name) }
                 for key in keys { if let s = score(key, typed) { best = max(best ?? s, s) } }
             }
             if let best {

@@ -34,6 +34,10 @@ struct CapsuleField: UIViewRepresentable {
         view.enablesReturnKeyAutomatically = true
         view.isScrollEnabled = true
         view.showsVerticalScrollIndicator = false
+        // No inline prediction: its grey ghost words sat under the keyboard's marked text (Pinyin
+        // "Tai" over "Tailscale", the owner, Nov 20 2026), and the mention list is the field's own
+        // completion. The keyboard's QuickType bar still predicts.
+        if #available(iOS 17.0, *) { view.inlinePredictionType = .no }
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityIdentifier = "capsule.field"
         view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
@@ -358,7 +362,7 @@ final class CapsuleTextView: UITextView {
         let before = String((plainText as NSString).substring(to: min(caretPlain, (plainText as NSString).length)))
         let pendingStart = markedTextRange.map { plainOffset(offset(from: beginningOfDocument, to: $0.start)) }
         guard let found = MentionSearch.query(before: before, pendingStart: pendingStart) else { return nil }
-        let caret = convert(caretRect(for: caretPosition), to: nil)
+        let caret = caretRect(for: caretPosition).offsetBy(dx: -contentOffset.x, dy: -contentOffset.y)
         return MentionQuery(text: found.text, range: NSRange(location: found.start, length: caretPlain - found.start),
                             caret: caret, pending: pendingStart != nil, explicit: found.explicit)
     }

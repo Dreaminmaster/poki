@@ -1295,6 +1295,9 @@ struct ComposerInputView: View {
     @State private var mentions = MentionBridge()
     /// The composer's glass in the window, where the list is placed over the caret.
     @State private var barFrame: CGRect = .zero
+    /// The message field's frame in the composer's own coordinate space ("composer"), where the
+    /// mention list is placed.
+    @State private var fieldFrame: CGRect = .zero
     /// A file Poki can't read, said for a moment over the message field.
     @State private var problem: String?
     @State private var fieldScroll = CapsuleScroll()
@@ -1336,6 +1339,10 @@ struct ComposerInputView: View {
                     photoAssets = photoAssets.filter { $0.value != item.id }
                 }
             }
+            // The apps and connectors that fit the words at the caret: in the bar's own column above
+            // the field, so it takes its taps (an overlay outside the safe-area bar's frame let them
+            // through to the conversation, which closed the keyboard) and never covers the words.
+            mentionList
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             Group {
@@ -1363,6 +1370,7 @@ struct ComposerInputView: View {
                         CapsuleField(text: $input, focused: $focused, maxLines: 6, maxHeight: min(200, fieldHeight), scroll: fieldScroll,
                                      onSwipe: { up in if up { focused = true } else if focused { focused = false } }, onSubmit: submit,
                                      mentions: mentions)
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("composer")) } action: { fieldFrame = $0 }
                             .overlay(alignment: .topLeading) {
                                 if input.isEmpty {
                                     Text(dictation.on ? "Listening…" : attachments.isEmpty ? "Message Poki" : "Add a message")
@@ -1388,7 +1396,7 @@ struct ComposerInputView: View {
             .glassSurface(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), fallback: .bar)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: expanded)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { barFrame = $0 }
-            .overlay(alignment: .topLeading) { mentionList }
+            .coordinateSpace(.named("composer"))
             .animation(.snappy(duration: 0.22), value: mentions.query == nil)
         }
         .animation(.snappy, value: dictation.on)
@@ -1613,11 +1621,13 @@ struct ComposerInputView: View {
         if focused, let query = mentions.query {
             let matches = MentionSearch.matches(query.text, pending: query.pending, explicit: query.explicit)
             if !matches.isEmpty, query.explicit || !query.pending || query.text.count >= 2 {
-                let caretTop = query.caret.minY - barFrame.minY
-                let x = min(max(0, query.caret.minX - barFrame.minX - 14), max(0, barFrame.width - 260))
+                // Starting under the caret's letter, above the whole field, so it never covers what is
+                // being written and stays clear of the keyboard; the column's spacing (8) and its own
+                // 4 keep it more than the bar's glass group spacing away, so the shapes stay apart.
+                let x = min(max(0, fieldFrame.minX + query.caret.minX - 14), max(0, barFrame.width - 260))
                 MentionPicker(matches: matches, pick: { mentions.pick($0) }, dismiss: { mentions.dismiss() })
-                    .alignmentGuide(.leading) { _ in -x }
-                    .alignmentGuide(.top) { d in d[.bottom] - (caretTop - 8) }
+                    .padding(.leading, x)
+                    .padding(.bottom, 4)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomLeading)))
             }
         }

@@ -31,6 +31,14 @@ final class MentionSearchTests: XCTestCase {
         XCTAssertTrue(ids("tb", pending: true).contains(taobao))
     }
 
+    /// The owner, Nov 20 2026: Pinyin's pending letters spell a Chinese name. "sla" still composing
+    /// is not Slack, and "tao" composing finds 淘宝 by its Pinyin, not Taobao by its Latin name.
+    func testPendingPinyinLettersMatchOnlyChineseNamesByTheirPinyin() {
+        XCTAssertTrue(ids("Sla").contains("com.tinyspeck.chatlyio"))
+        XCTAssertFalse(ids("sla", pending: true).contains("com.tinyspeck.chatlyio"))
+        XCTAssertTrue(ids("tao", pending: true).contains(taobao))
+    }
+
     func testCommittedChineseFindsTheNameFromTheEndOfTheRun() {
         let found = MentionSearch.query(before: "帮我打开淘", pendingStart: nil)
         XCTAssertEqual(found?.text, "淘")
