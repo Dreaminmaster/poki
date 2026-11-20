@@ -21,8 +21,13 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
         if (failure) return out;
     }
     out[@"front"] = [PKInProcess.shared frontApp];
-    NSString *code;
+    NSString *code = nil;
     NSString *before = [PKInProcess.shared sourceXML:NULL code:&code];
+    if (coverCompat && !before) {
+        out[@"first_source_code"] = code ?: @"";
+        code = nil;
+        before = [PKInProcess.shared sourceXML:NULL code:&code];
+    }
     if (code) out[@"source_code"] = code;
     Write([tag stringByAppendingString:@".xml"], before ?: @"");
     const char *model = getenv("SIMULATOR_MODEL_IDENTIFIER");
@@ -31,6 +36,11 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
         // UIScreen says (an app linked before the iOS 27.1 SDK is letterboxed on an iPhone Duo).
         NSString *shotCode = nil;
         NSData *shot = [PKInProcess.shared screenshot:&shotCode];
+        if (coverCompat && [shotCode isEqualToString:@"display_changed_during_screenshot"]) {
+            out[@"first_screenshot_code"] = shotCode;
+            shotCode = nil;
+            shot = [PKInProcess.shared screenshot:&shotCode];
+        }
         UIImage *picture = shot ? [UIImage imageWithData:shot] : nil;
         PKDisplayGeometry geometry = coverCompat ? [PKInProcess.shared readDisplayGeometry] : PKInProcess.shared.displayGeometry;
         out[@"screenshot"] = @{@"bytes": @(shot.length), @"code": shotCode ?: @"",
@@ -79,7 +89,7 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
         out[@"viewport"] = NSStringFromCGRect(viewport);
         c.x += viewport.origin.x; c.y += viewport.origin.y;
     }
-    NSArray *fingers = @[@[[PKTouchPoint at:c offset:0], [PKTouchPoint at:c offset:0.05]]];
+    NSArray<NSArray<PKTouchPoint *> *> *fingers = @[@[[PKTouchPoint at:c offset:0], [PKTouchPoint at:c offset:0.05]]];
     PKOutcome *tap = coverCompat ? [PKInProcess.shared touch:fingers timeout:5 geometry:PKInProcess.shared.displayGeometry]
                                 : [PKInProcess.shared touch:fingers timeout:5];
     out[@"tap"] = @(tap.delivery);
