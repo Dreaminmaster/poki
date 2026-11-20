@@ -1,6 +1,91 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "One thing to remember on each line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每行写一件要记住的事"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每行寫一件要記住的事"
+          }
+        }
+      }
+    },
+    "Each line is one memory. Remove a line to forget it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每一行是一条记忆。删掉一行就会忘记它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每一行是一則記憶。刪掉一行就會忘記它。"
+          }
+        }
+      }
+    },
+    "Poki won’t change this page while it is locked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锁定后，Poki 不会修改这一页。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鎖定後，Poki 不會修改這一頁。"
+          }
+        }
+      }
+    },
+    "Poki can rewrite this page as it learns, but never a line you locked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会随着了解更新这一页，但不会改动你锁定的行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會隨著了解更新這一頁，但不會改動你鎖定的行。"
+          }
+        }
+      }
+    },
+    "Edit Page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑整页"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編輯整頁"
+          }
+        }
+      }
+    },
     "Senses" : {
       "extractionState" : "manual",
       "localizations" : {

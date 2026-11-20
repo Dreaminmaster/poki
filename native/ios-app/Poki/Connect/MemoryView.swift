@@ -64,9 +64,7 @@ struct MemoryView: View {
                 MemorySearchResults(query: query, page: page)
             } else {
                 Section {
-                    ForEach(about.prefix(Self.preview)) { item in
-                        MemoryItemRow(item: item, page: page).memorySwipes(item, page: page, library: library)
-                    }
+                    if !about.isEmpty { MemoryPageCard(app: nil, limit: Self.preview, page: page) }
                     if about.count > Self.preview {
                         NavigationLink(value: SettingsRoute.memoryPage(.about())) { Text("All \(about.count)") }
                             .accessibilityIdentifier("memory.about.all")
@@ -281,13 +279,13 @@ struct MemoryScopeView: View {
         List {
             switch scope {
             case .about:
-                let about = library.about
                 Section {
-                    ForEach(about) { item in MemoryItemRow(item: item, lines: 3, page: page).memorySwipes(item, page: page, library: library) }
+                    if !library.about.isEmpty { MemoryPageCard(app: nil, page: page) }
                     adding(app: nil)
+                    MemoryPageEditRow(app: nil)
                 }
             case .app(let app):
-                if app != nil { group(app, .memory) }
+                if let app { pageGroup(app) }
                 group(app, .habit)
                 group(app, .skill)
             case .all(let app, let kind):
@@ -323,6 +321,18 @@ struct MemoryScopeView: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
         }
+    }
+
+    /// An app's memories as its page, with Add Memory, Tell Poki in Chat and Edit Page under it.
+    @ViewBuilder private func pageGroup(_ app: String) -> some View {
+        Section {
+            if !library.pageLines(app).isEmpty { MemoryPageCard(app: app, page: page) }
+            adding(app: app)
+            MemoryPageEditRow(app: app)
+        } header: {
+            MemoryHeader("Memory")
+        }
+        .accessibilityIdentifier("memory.group.memory")
     }
 
     /// One kind's group: nothing at all when it is empty (no blank block).

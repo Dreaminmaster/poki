@@ -449,6 +449,123 @@ struct MemoryAddRow: View {
     }
 }
 
+/// An area's memories as one page (the owner, Nov 20 2026: not a list of rows): its summary, then
+/// its lines as the page's text, each line opening where it came from with Edit, Lock and Forget.
+struct MemoryPageCard: View {
+    var app: String?
+    /// Lines shown; the rest are behind All N.
+    var limit: Int? = nil
+    var page: MemoryPageState
+    @Environment(MemoryLibrary.self) private var library
+
+    var body: some View {
+        let lines = library.pageLines(app)
+        VStack(alignment: .leading, spacing: 10) {
+            if let summary = library.pageSummary(app) {
+                Text(verbatim: summary).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+            }
+            ForEach(limit.map { Array(lines.prefix($0)) } ?? lines) { item in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(verbatim: item.text).font(.body).foregroundStyle(Color(.label))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if item.locked {
+                            Image(systemName: "lock.fill").font(.caption.weight(.semibold)).foregroundStyle(Color(.secondaryLabel))
+                                .accessibilityLabel(Text("Locked"))
+                        }
+                    }
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = page.open == item.id ? nil : item.id }
+                    }
+                    if page.open == item.id {
+                        MemoryItemDetail(item: item, page: page)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+                .accessibilityIdentifier("memory.item.\(item.id)")
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("memory.page.\(app ?? "about")")
+    }
+}
+
+/// Writing a whole page at once, one fact a line, like opening a memory file: the lines kept keep
+/// where they came from, the new ones are yours, and a line taken out is forgotten.
+struct MemoryPageEditor: View {
+    var app: String?
+    @Environment(MemoryLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var locked = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("One thing to remember on each line", text: $text, axis: .vertical)
+                        .lineLimit(6...30)
+                        .focused($focused)
+                        .accessibilityIdentifier("memory.pageEditor")
+                } footer: {
+                    Text("Each line is one memory. Remove a line to forget it.")
+                }
+                Section {
+                    Toggle("Locked", isOn: $locked)
+                } footer: {
+                    if locked {
+                        Text("Poki won’t change this page while it is locked.")
+                    } else {
+                        Text("Poki can rewrite this page as it learns, but never a line you locked.")
+                    }
+                }
+            }
+            .navigationTitle(app.map { Text(verbatim: MemoryFormat.appName($0)) } ?? Text("About You"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        library.writePage(app, text: text, locked: locked)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .accessibilityIdentifier("memory.pageEditor.save")
+                }
+            }
+        }
+        .onAppear {
+            text = library.pageLines(app).map(\.text).joined(separator: "\n")
+            locked = library.pageLocked(app)
+            focused = true
+        }
+    }
+}
+
+/// Edit Page at the end of a page.
+struct MemoryPageEditRow: View {
+    var app: String?
+    @State private var editing = false
+    @Environment(MemoryLibrary.self) private var library
+
+    var body: some View {
+        Button { editing = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.text").font(.system(size: 16, weight: .semibold))
+                Text("Edit Page").font(.body)
+            }
+            .foregroundStyle(Tint.blueText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("memory.editPage")
+        .sheet(isPresented: $editing) {
+            MemoryPageEditor(app: app).environment(library).presentationDetents([.large])
+        }
+    }
+}
+
 /// Changing memory by telling Poki: opens the chat with the start of a message ("Remember that"), so
 /// the owner can add, correct or drop a memory in their own words, the way the big assistants take
 /// "remember that" and "forget that". Poki's memory tool keeps or forgets the note, and Recent Updates

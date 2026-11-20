@@ -172,6 +172,32 @@ final class MemoryLibrary {
         return latest.keys.sorted { latest[$0]! != latest[$1]! ? latest[$0]! > latest[$1]! : $0 < $1 }
     }
 
+    /// A page's memories in the page's own order (About You: nil).
+    func pageLines(_ app: String?) -> [MemoryItem] {
+        items.filter { $0.kind == .memory && $0.app?.lowercased() == app?.lowercased() }
+    }
+
+    /// The page's one line for the index, and whether the owner locked it whole.
+    func pageSummary(_ app: String?) -> String? { store?.page(app)?.summary }
+    func pageLocked(_ app: String?) -> Bool { store?.page(app)?.isLocked == true }
+
+    /// The owner's write of a whole page: a line already there keeps its id and where it came from,
+    /// a new one is the owner's and locked; a line left out is forgotten. `locked` locks the page whole.
+    func writePage(_ app: String?, text: String, locked: Bool) {
+        guard let store else {
+            // The sample: the page's lines become the text's.
+            let words = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            items.removeAll { $0.kind == .memory && $0.app == app && !words.contains($0.text) }
+            for w in words where !items.contains(where: { $0.kind == .memory && $0.app == app && $0.text == w }) {
+                items.append(MemoryItem(id: UUID().uuidString, kind: .memory, text: w, app: app, source: .wrote, updated: Date(), locked: true))
+            }
+            return
+        }
+        if text != store.page(app)?.text { store.writePage(app: app, text: text, by: RoutineStore.owner) }
+        if locked != (store.page(app)?.isLocked == true) { store.setPageLocked(app, locked) }
+        reload()
+    }
+
     /// Skills with no app, for the Other row.
     var other: [MemoryItem] { items(in: nil, .skill) }
 
@@ -380,7 +406,14 @@ final class MemoryLibrary {
         default: return nil
         }
         let item: MemoryItem
-        if let note = record.note {
+        if let page = record.page ?? record.pageBefore {
+            // A whole page written at once: the line names the page and shows its first words.
+            item = MemoryItem(id: "page:" + (page.app ?? ""), kind: .memory,
+                              text: record.page?.summary ?? record.page?.lines.first?.text ?? page.summary ?? "",
+                              app: page.app, source: source(record.by, heard: false), updated: record.at)
+            return MemoryChange(id: record.id, at: record.at, action: action, actor: actor(record.by), item: item,
+                                previous: record.pageBefore?.lines.first?.text, undone: record.undone == true)
+        } else if let note = record.note {
             item = Self.item(note)
         } else if let name = record.routineName {
             item = routines.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map(Self.item)
