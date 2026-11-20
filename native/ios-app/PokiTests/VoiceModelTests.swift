@@ -464,7 +464,9 @@ final class VoiceModelTests: XCTestCase {
             self.time = time
             var made: (() -> FakeConnection)!
             var held: ((Bool) -> Void)!
-            voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: phoneTool, holdMicrophone: { held($0) },
+            voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: { name, arguments, cancellation in
+                await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
+            }, holdMicrophone: { held($0) },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link }, time: time.clock)
             made = { [unowned self] in let link = FakeConnection(); self.links.append(link); return link }
             held = { [unowned self] in self.microphone.append($0) }

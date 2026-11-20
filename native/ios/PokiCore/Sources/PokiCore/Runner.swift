@@ -30,6 +30,16 @@ public struct RunnerError: Error, CustomStringConvertible, Sendable {
     public var description: String { message }
 }
 
+/// Carries a stop request through all runner requests belonging to one voice tool.
+public final class PhoneOperationCancellation: Sendable {
+    @TaskLocal public static var current: PhoneOperationCancellation?
+
+    private let cancelled = LockedBox(false)
+    public init() {}
+    public var isCancelled: Bool { cancelled.value }
+    public func cancel() { cancelled.value = true }
+}
+
 /// One HTTP exchange. URLSession on the phone; a fake in tests.
 public protocol HTTPTransport: Sendable {
     /// In-process reads may change their coordinate space as the owner moves or resizes a window.
@@ -326,8 +336,13 @@ public final class Runner: @unchecked Sendable {
         let result: (status: Int, body: Data)
         do {
             result = try await withDeadline(timeout + 0.5, "the runner's answer to \(method) \(Self.short(path))") { [transport] in
-                try await transport.send(method: method, url: target, body: body?.data(), timeout: timeout)
+                guard PhoneOperationCancellation.current?.isCancelled != true else {
+                    throw RunnerError(message: "The user cancelled the task. This request was not sent.", delivery: .notSent)
+                }
+                return try await transport.send(method: method, url: target, body: body?.data(), timeout: timeout)
             }
+        } catch let error as RunnerError {
+            throw error
         } catch TransportError.refused {
             // A refused connection is a runner process that is gone: what it was finishing went with it.
             stall.value = nil

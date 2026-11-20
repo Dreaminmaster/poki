@@ -355,19 +355,21 @@ final class AppModel {
         self.core = core
         // Voice taps get the same rules and approval card as an agent's `do`.
         voice = VoiceModel(clearTap: { text, bundle, name in await core.clearTap(on: text, inApp: bundle, named: name, waiting: VoiceModel.approvalWait) },
-                           phoneTool: { name, arguments in
+                           phoneTool: { name, arguments, cancellation in
                                #if DEBUG && targetEnvironment(simulator)
                                if TalkRehearsal.asked { return await TalkRehearsal.step() }
                                #endif
-                               let tool = { (name: String, arguments: String) async -> PhoneAnswer in
-                                   let result = await core.tool(name, arguments: arguments)
-                                   return (result.text, result.isError, result.jpeg)
+                               return await PhoneOperationCancellation.$current.withValue(cancellation) {
+                                   let tool = { (name: String, arguments: String) async -> PhoneAnswer in
+                                       let result = await core.tool(name, arguments: arguments)
+                                       return (result.text, result.isError, result.jpeg)
+                                   }
+                                   guard name == "open_app" else { return await tool(name, arguments) }
+                                   return await VoiceApps.open(arguments, tool: tool, openLink: { url in
+                                       guard cancellation?.isCancelled != true, UIApplication.shared.applicationState == .active else { return false }
+                                       return await UIApplication.shared.open(url)
+                                   })
                                }
-                               guard name == "open_app" else { return await tool(name, arguments) }
-                               return await VoiceApps.open(arguments, tool: tool, openLink: { url in
-                                   guard UIApplication.shared.applicationState == .active else { return false }
-                                   return await UIApplication.shared.open(url)
-                               })
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
                            connection: VoiceModel.connection)

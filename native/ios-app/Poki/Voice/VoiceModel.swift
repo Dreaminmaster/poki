@@ -314,6 +314,9 @@ final class VoiceModel {
     private enum LiveDelegationState { case active, cancelled }
     private var liveDelegations: [String: LiveDelegationState] = [:]
     private var liveHasCancellation = false
+    private var liveCallerSpeech = ""
+    private var liveSpeechThroughDelegation = 0
+    private var livePhoneOperations: [String: PhoneOperationCancellation] = [:]
     private var liveScreenDescription: ((String) async throws -> String)?
     private var liveResultReceipts: [String: String] = [:]
     private var liveContinuationAfter: String?
@@ -367,7 +370,7 @@ final class VoiceModel {
     static let approvalWait: Double = 115
 
     /// look, do and open_app, run by PokiCore on this phone (the relay's tools): name, JSON arguments.
-    private let phoneTool: @MainActor (String, String) async -> PhoneAnswer
+    private let phoneTool: @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer
 
     /// true while a conversation with the microphone is on: Poki's silent keep-alive audio steps aside
     /// (its .playback session cannot record), and the voice-chat session keeps Poki running instead.
@@ -378,7 +381,7 @@ final class VoiceModel {
     private let time: VoiceClock
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
-         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer,
+         phoneTool: @escaping @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer,
          holdMicrophone: @escaping @MainActor (Bool) -> Void = { _ in },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
          time: VoiceClock = VoiceClock()) {
@@ -662,6 +665,8 @@ final class VoiceModel {
         liveSpeechStopped = false
         liveDelegations.removeAll()
         liveHasCancellation = false
+        liveCallerSpeech = ""
+        liveSpeechThroughDelegation = 0
         liveScreenDescription = nil
         liveResultReceipts.removeAll()
         liveContinuationAfter = nil
@@ -961,8 +966,13 @@ final class VoiceModel {
             appendLiveCaption(text, role: role, start: start, end: end)
             if role == .you {
                 resumeLiveAudio(link)
+                if end == 0 || end > liveSpeechThroughDelegation {
+                    liveCallerSpeech += text
+                    let parts = Self.liveSpeechParts(liveCallerSpeech)
+                    if !parts.isEmpty, parts.allSatisfy(Self.liveStopPhrases.contains) { cancelLiveTask() }
+                }
                 let words = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
-                if !["", "嗯", "哦", "uh-huh", "mm-hmm"].contains(words) {
+                if !words.isEmpty, !Self.liveBackchannels.contains(words) {
                     if !answerDue, phase != .thinking { clock = TurnClock(said: time.now()) }
                     else if clock.call == nil { clock.said = time.now() }
                 }
@@ -972,7 +982,12 @@ final class VoiceModel {
             endIfDone()
         case "session.delegation.created":
             if let id = (event["delegation"] as? [String: Any])?["id"] as? String, liveDelegations[id] == nil {
-                liveDelegations[id] = .active
+                let newRequest = Self.liveSpeechParts(liveCallerSpeech).contains { part in
+                    !Self.liveStopPhrases.contains(where: { $0.hasPrefix(part) })
+                }
+                liveDelegations[id] = liveHasCancellation && !newRequest ? .cancelled : .active
+                liveCallerSpeech = ""
+                liveSpeechThroughDelegation = max(liveCaptions[.you]?.end ?? 0, event["offset_ms"] as? Int ?? 0)
             }
             link.send(["type": "session.thinking.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": ""])
         case "session.commentary.appended":
@@ -1092,6 +1107,27 @@ final class VoiceModel {
         return state == .cancelled
     }
 
+    private static let liveStopPhrases: Set<String> = ["停", "停止", "停一下", "别动", "别做了", "stop", "cancel"]
+    private static let liveBackchannels: Set<String> = ["嗯", "哦", "uh-huh", "mm-hmm"]
+
+    /// Match whole clauses of the caller's speech since delegation, independent of subtitle grouping.
+    private static func liveSpeechParts(_ text: String) -> [String] {
+        text.lowercased().split { ",，。.!！?？;；".contains($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !liveBackchannels.contains($0) }
+    }
+
+    private func cancelLiveTask() {
+        liveDelegations = liveDelegations.mapValues { _ in .cancelled }
+        liveHasCancellation = true
+        for operation in livePhoneOperations.values { operation.cancel() }
+        wantsResponse = false
+        awaitingAnswer = false
+        requestedAnswer = nil
+        liveContinuationAfter = nil
+        liveAwaitingPlayback = false
+    }
+
     private func completeLiveControl(_ call: VoiceCall, state: VoiceCall.State, output: String) {
         var result = call
         result.state = state
@@ -1118,13 +1154,7 @@ final class VoiceModel {
     private func run(_ call: VoiceCall) {
         guard !calls.contains(where: { $0.id == call.id }) else { return }
         if usesLive, call.name == VoiceDirect.cancelCurrentTask {
-            liveDelegations = liveDelegations.mapValues { _ in .cancelled }
-            liveHasCancellation = true
-            wantsResponse = false
-            awaitingAnswer = false
-            requestedAnswer = nil
-            liveContinuationAfter = nil
-            liveAwaitingPlayback = false
+            if call.delegation.flatMap({ liveDelegations[$0] }) != .cancelled { cancelLiveTask() }
             completeLiveControl(call, state: .done, output: "Cancelled further steps. A phone action already running may finish.")
             return
         }
@@ -1151,7 +1181,10 @@ final class VoiceModel {
             var output: String
             var screen: Data?
             if local, Self.phoneTools.contains(call.name) {
-                let answer = await phoneTool(call.name, call.arguments)
+                let operation = live ? PhoneOperationCancellation() : nil
+                livePhoneOperations[call.id] = operation
+                let answer = await phoneTool(call.name, call.arguments, operation)
+                livePhoneOperations.removeValue(forKey: call.id)
                 output = answer.text.count > 6000 ? String(answer.text.prefix(6000)) + "…" : answer.text
                 screen = answer.screen
                 if answer.failed { state = .failed }
